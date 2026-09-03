@@ -1,0 +1,44 @@
+# Line endings, pinned explicitly.
+#
+# Without this file, behaviour depends on each clone's core.autocrlf setting,
+# which differs between Windows and everything else. That produces phantom
+# whole-file diffs where nothing actually changed. Declaring it here makes the
+# result identical on every machine.
+#
+# Rule: LF in the repository always; CRLF in the working tree only for the
+# Windows-native scripts that are most likely to be opened by Windows tooling.
+#
+# NOTE: this is about line endings only. It has nothing to do with the ENCODING
+# problem that broke run_paper.ps1 -- a UTF-8 em dash in a BOM-less .ps1, which
+# PowerShell 5.1 decoded as a curly quote and treated as a string delimiter.
+# The cure for that is keeping .ps1 files pure ASCII, and .gitattributes cannot
+# enforce it.
+
+* text=auto
+
+# Windows-native scripts: CRLF in the working tree.
+*.ps1   text eol=crlf
+*.psm1  text eol=crlf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# Everything else: LF in the working tree too.
+*.py    text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.json  text eol=lf
+*.csv   text eol=lf
+*.xml   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+.gitignore     text eol=lf
+.gitattributes text eol=lf
+
+# Never touch these.
+*.dbn   binary
+*.zst   binary
+*.xlsx  binary
+*.pptx  binary
+*.docx  binary
+*.png   binary
+*.pdf   binary
