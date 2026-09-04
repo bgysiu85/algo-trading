@@ -5,7 +5,7 @@ MCL (Momentum Confluence Long) — IBKR pre-market paper execution layer
 
 IB-specific execution: order placement, fill logging, position/watchlist
 state, the tradability probe. Strategy logic — indicators, entry/exit signal
-evaluation, position sizing — lives in mcl_strategy.py and is not duplicated
+evaluation, position sizing — lives in strategy/mcl/mcl.py and is not duplicated
 here; see claude/repo_reorg_and_github_plan.md STEP 2 for why this file was
 split out of the old mcl_paper_trader.py.
 
@@ -31,7 +31,7 @@ This refuses to run against a live account. It checks both:
   2. the managed account id starts with "DU" (IBKR paper accounts).
 Either check failing aborts before any market data or order is requested.
 
-Strategy (must stay in sync with mcl_strategy.py and the Pine V7 script)
+Strategy (must stay in sync with strategy/mcl/mcl.py and the Pine V7 script)
 -------------------------------------------------------------------------
 Session : 04:00-09:30 ET, flat at 09:30
 Entry   : MACD > signal AND MACD > 0
@@ -94,7 +94,7 @@ PAPER_PORTS = {7497: "TWS paper", 4002: "IB Gateway paper"}
 LIVE_PORTS = {7496: "TWS LIVE", 4001: "IB Gateway LIVE"}
 
 # Signal parameters (MACD/MFI/RSI lengths, trail %, sizing caps, the session
-# window) now live in mcl_strategy.py as the single source of truth — see
+# window) now live in strategy/mcl/mcl.py as the single source of truth — see
 # S.TRAIL_PCT, S.SESSION_START/S.SESSION_END, S.size_for() below. What stays
 # here is execution-only configuration: order placement, IB pacing, and the
 # tradability probe, none of which the backtest needs.
@@ -104,7 +104,7 @@ LIMIT_CROSS_BPS = 20        # how far through the touch to price the limit (20bp
 ORDER_TIMEOUT_S = 20        # cancel and record a no-fill after this long
 
 # NOTE: this is a flat $2.00 round-trip commission, independent of share
-# count. mcl_strategy.py's backtest model is COMMISSION_PER_SHARE ($0.005)
+# count. strategy/mcl/mcl.py's backtest model is COMMISSION_PER_SHARE ($0.005)
 # doubled for the round trip, which scales with quantity instead. That is a
 # pre-existing inconsistency between the two P/L calculations, not something
 # introduced by this refactor — flagged in
@@ -214,7 +214,7 @@ class SymbolState:
 def parse_watchlist(path: Path) -> list[str]:
     """One ticker per line. Blank lines and # comments ignored, including
     trailing comments — `UPC  # added 05:55, rank 1` yields `UPC`, so the file
-    can carry provenance for each pick (mcl_scanner.py writes it that way)."""
+    can carry provenance for each pick (the scanner writes it that way)."""
     if not path.exists():
         return []
     out, seen = [], set()
@@ -925,7 +925,7 @@ class MCLPaperTrader:
                         self._empty_warned_at = time.monotonic()
                         LOG.warning("still watching nothing — %s is empty. Add "
                                     "tickers (picked up within 5s) or start "
-                                    "mcl_scanner.py.", self.watchlist.name)
+                                    "main.py --mode scan.", self.watchlist.name)
                 if live > MAX_SYMBOLS_SAFE and not self._paced_warned:
                     self._paced_warned = True
                     LOG.warning("%d active symbols — above %d, IB's 60-requests"
@@ -998,7 +998,7 @@ async def main_async(args):
         # rather than a refusal. The loop keeps repeating it while nothing is
         # being watched, so a genuine oversight still gets noticed.
         LOG.warning("watchlist is empty — watching nothing. Add tickers to %s "
-                    "(re-read every 5s) or start mcl_scanner.py.", wl)
+                    "(re-read every 5s) or start main.py --mode scan.", wl)
 
     ib = IB()
     await ib.connectAsync(args.host, args.port, clientId=args.client_id)

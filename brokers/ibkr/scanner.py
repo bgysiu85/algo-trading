@@ -2,8 +2,8 @@
 """
 MCL scanner -- feeds watchlist.txt from IB's market scanner.
 
-    .\\.venv\\Scripts\\python.exe mcl_scanner.py --preview   # show, write nothing
-    .\\.venv\\Scripts\\python.exe mcl_scanner.py             # run and keep it fresh
+    python main.py --mode scan --preview   # show, write nothing
+    python main.py --mode scan             # run and keep it fresh
 
 Runs alongside a live session on its own client id. Places no orders, and
 deliberately does NOT take the session lock for that reason.
@@ -93,7 +93,7 @@ MAX_WATCHLIST = 6
 LOG = logging.getLogger("scanner")
 
 HEADER = """\
-# MCL watchlist -- WRITTEN BY mcl_scanner.py. Hand edits will be overwritten.
+# MCL watchlist -- WRITTEN BY brokers/ibkr/scanner.py. Hand edits will be overwritten.
 # Pin names that must always be included in watchlist_pinned.txt instead.
 #
 # Screen: ${PRICE_MIN}-${PRICE_MAX} price, top-{TOP_N} gainer, scan {SCAN_CODE}
@@ -118,7 +118,7 @@ def read_pinned(path: Path) -> list[str]:
 def render(selected: dict[str, str], pinned: list[str], top_n: int = TOP_N) -> str:
     """selected: symbol -> the ET timestamp and reason it was added."""
     lines = [
-        "# MCL watchlist -- WRITTEN BY mcl_scanner.py.",
+        "# MCL watchlist -- WRITTEN BY brokers/ibkr/scanner.py.",
         "# Hand edits are overwritten; pin names in watchlist_pinned.txt instead.",
         "#",
         f"# Screen: ${PRICE_MIN:.0f}-${PRICE_MAX:.0f}, top-{top_n} by {SCAN_CODE}",

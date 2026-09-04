@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Pair-list and bar-cache I/O shared between data_ib.py (writes the cache, and
-needs ib_async) and vw9_setup_counts.py (only ever reads it, and must not
+needs ib_async) and strategy/vw9/setup_counts.py (only reads it, and must not
 need ib_async -- it's pure offline analysis over whatever data_ib.py already
 pulled). Splitting this out keeps the analysis script runnable anywhere
 pandas is, including for testing this module itself with synthetic bars.

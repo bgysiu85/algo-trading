@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Unit tests for indicators.py -- verify against independent reference
-calculations, matching the project convention set by mcl_paper_trader.py's
+calculations, matching the project convention set by common/indicators.py's
 RSI/MFI/MACD verification (agreement to <3e-14 against loop implementations).
 
 Run:  pytest test_indicators.py -v

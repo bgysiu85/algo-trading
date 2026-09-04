@@ -2,7 +2,7 @@
 """
 TradeZero API connection check -- PAPER ONLY.
 
-    .\\.venv\\Scripts\\python.exe tz_check.py
+    .\\.venv\\Scripts\\python.exe -m brokers.tradezero.client
 
 CREDENTIALS - resolved by secrets_util.py, shared with the Databento tooling
 ----------------------------------------------------------------------------

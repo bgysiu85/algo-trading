@@ -46,7 +46,7 @@ $tickers = Get-Content .\var\watchlist.txt |
 # the warning while nothing is being watched.
 if ($tickers.Count -eq 0) {
     Write-Host "watchlist.txt is empty - starting with nothing to watch." -ForegroundColor Yellow
-    Write-Host "Add tickers (picked up within 5s) or run mcl_scanner.py alongside." -ForegroundColor Yellow
+    Write-Host "Add tickers (picked up within 5s) or run main.py --mode scan alongside." -ForegroundColor Yellow
     Write-Host ""
 }
 

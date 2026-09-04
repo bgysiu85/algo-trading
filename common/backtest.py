@@ -2,8 +2,8 @@
 """
 MCL offline backtest over the symbol/date pairs actually traded.
 
-    .\\.venv\\Scripts\\python.exe mcl_backtest.py --probe     # coverage only
-    .\\.venv\\Scripts\\python.exe mcl_backtest.py             # full backtest
+    python main.py --mode backtest --strategy mcl --probe   # coverage only
+    python main.py --mode backtest --strategy mcl           # full backtest
 
 Reads traded_pairs.json (symbol + date), pulls 1-minute bars for each from IB,
 and runs the V7 strategy offline. TradingView cannot do this: its 1-minute chart

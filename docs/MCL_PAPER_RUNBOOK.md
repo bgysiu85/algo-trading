@@ -1,6 +1,6 @@
 # MCL pre-market paper trading — runbook
 
-Companion to `mcl_paper_trader.py`. Everything here runs on **your machine**, not in
+Companion to `brokers/ibkr/trader.py`, which is launched through `main.py`. Everything here runs on **your machine**, not in
 the Claude session — the IB API is a local socket only.
 
 ---
@@ -39,14 +39,14 @@ least once and are happy with what it reports.
 
 ## One-time setup
 
-Files live in `D:\Trading\MCL Strategy`. You are using **IB Gateway**, so the paper port
+Files live in `D:\Trading`. You are using **IB Gateway**, so the paper port
 is **4002** — this is now the script's default, and `run_dry.ps1` passes it explicitly.
 (TWS paper would be 7497; both are in the safety allowlist.)
 
 Easiest path — just run the helper, which creates the venv and installs deps on first use:
 
 ```powershell
-cd "D:\Trading\MCL Strategy"
+cd "D:\Trading"
 .\run_dry.ps1
 ```
 
@@ -54,11 +54,11 @@ If PowerShell blocks the script, either run it once with
 `powershell -ExecutionPolicy Bypass -File .\run_dry.ps1`, or do it by hand:
 
 ```powershell
-cd "D:\Trading\MCL Strategy"
+cd "D:\Trading"
 python -m venv .venv
 .venv\Scripts\activate
-pip install ib_async pandas
-python mcl_paper_trader.py --watchlist watchlist.txt --port 4002 --dry-run
+pip install -r requirements.txt
+python main.py --mode dry --strategy mcl --port 4002
 ```
 
 In **IB Gateway, logged into the PAPER account** — Configure → Settings → API → Settings:
@@ -120,7 +120,7 @@ the countdown cancels it**.
 
 ### 1. Build the watchlist (you, ~03:45 ET)
 
-Run your scanner and write today's qualifying names into `watchlist.txt`, one per line:
+Run your scanner and write today's qualifying names into `var/watchlist.txt`, one per line:
 
 ```
 # 2026-09-02 — $2-20, RVOL>=5x, float<20m, top-2 premarket gainer
@@ -145,7 +145,7 @@ Every add/remove is announced in the console log.
 To start before you have any names at all:
 
 ```powershell
-.venv\Scripts\python.exe mcl_paper_trader.py --watchlist watchlist.txt --port 4002 --dry-run --allow-empty
+.venv\Scripts\python.exe main.py --mode dry --strategy mcl --port 4002 --allow-empty
 ```
 
 Without `--allow-empty` an empty watchlist is treated as a mistake and the script exits.
@@ -187,12 +187,12 @@ Confirm the first BUY line reads `filled` and not `REJECTED`.
 
 ## End of session: the watchlist archives itself
 
-When the session finishes, `watchlist.txt` and `watchlist_blocked.txt` are copied
-into `archive/` with the date appended, then cleared:
+When the session finishes, `var/watchlist.txt` and `var/watchlist_blocked.txt`
+are copied into `var/archive/` with the date appended, then cleared:
 
 ```
-archive/watchlist_20260902.txt
-archive/watchlist_blocked_20260902.txt
+var/archive/watchlist_20260902.txt
+var/archive/watchlist_blocked_20260902.txt
 ```
 
 So the next morning starts from an empty list and cannot accidentally trade
@@ -228,7 +228,7 @@ After the first dry run:
 
 1. Open the same ticker and date on the TradingView chart with the V7 script attached.
 2. Compare the buy/sell markers on the chart against the `entry_signal` rows in
-   `mcl_fills_YYYYMMDD.csv`.
+   `var/fills/mcl_fills_YYYYMMDD.csv`.
 3. Send me the CSV plus the chart's trade list and I'll reconcile them.
 
 Signals that appear in one and not the other are the thing to chase. Expect some
@@ -293,8 +293,8 @@ setx TZ_API_SECRET_KEY "op://Private/TradeZero Paper/secret"
 ### 6. Check
 
 ```powershell
-.\.venv\Scripts\python.exe tz_check.py              # read-only
-.\.venv\Scripts\python.exe tz_check.py --probe JLHL # can TradeZero open it?
+.\.venv\Scripts\python.exe -m brokers.tradezero.client              # read-only
+.\.venv\Scripts\python.exe -m brokers.tradezero.client --probe JLHL # can TradeZero open it?
 ```
 
 Expect `PAPER ACCOUNT CONFIRMED`. The probe places one BUY 1 @ $0.01 — far below
@@ -317,7 +317,7 @@ repository and off shared drives.
 IBKR could be made safe by port: 4002 physically cannot reach the live account.
 **TradeZero serves live and paper from one base URL and the key pair alone selects
 the environment** — live keys in these variables would place live orders. So
-`tz_check.py` refuses to do anything beyond reading until every account reports
+`brokers/tradezero/client.py` refuses to do anything beyond reading until every account reports
 `accountType == "Paper"`.
 
 ---
@@ -346,7 +346,7 @@ is the designated master. To make the trader's fills visible in `show_trades`:
 Balances and positions are account-wide and show up either way — so even without that
 setting you can see the position appear and disappear.
 
-**The authoritative record is still `mcl_fills_YYYYMMDD.csv`**, written by the trader
+**The authoritative record is still `var/fills/mcl_fills_YYYYMMDD.csv`**, written by the trader
 itself. It has more than IB will tell you: the bid/ask at signal time, the limit sent,
 and the slippage against what the backtest assumed. IB's own trade log has none of that.
 
@@ -388,7 +388,7 @@ paper P/L **is** the fill risk, quantified.
 
 ## Reading the fill log
 
-`mcl_fills_YYYYMMDD.csv`, one row per signal:
+`var/fills/mcl_fills_YYYYMMDD.csv`, one row per signal:
 
 | Column | What it tells you |
 |---|---|
@@ -421,7 +421,7 @@ Three questions to answer from one session:
 ## On syncing from a TradingView watchlist
 
 Claude can read the **currently selected** TradingView watchlist and write its contents
-into `watchlist.txt`. What it cannot do:
+into `var/watchlist.txt`. What it cannot do:
 
 - **Create or switch watchlists.** The connector's `watchlist_add` / `watchlist_get` only
   act on whichever list is active in the UI. Create `MCL Today` yourself and select it.
@@ -429,7 +429,7 @@ into `watchlist.txt`. What it cannot do:
   fresh session with no context and are hourly at minimum, so a 30-second sync is not
   possible from Claude's side.
 
-This is why the script hot-reloads the file instead. `watchlist.txt` is the source of
+This is why the script hot-reloads the file instead. `var/watchlist.txt` is the source of
 truth and it works whether or not Claude is in the conversation. Ask for a sync when it
 suits; edit the file directly the rest of the time.
 

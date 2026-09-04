@@ -50,6 +50,9 @@ bar_cache/
 *.dbn.zst
 *.dbn
 
+# Bundles used to move commits between the sandbox and this machine.
+*.bundle
+
 # --- editor / OS -----------------------------------------------------------
 .vscode/
 .idea/

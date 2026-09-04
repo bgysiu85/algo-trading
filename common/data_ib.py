@@ -19,7 +19,7 @@ CACHING
 -------
 Every pair's bars are written once to bars_cache/<SYMBOL>_<DATE>.csv and never
 refetched (a checkpoint entry in data_pull_state.json marks it done). This
-matters more here than it did for mcl_backtest.py, because vw9_setup_counts.py
+matters more here than it did for common/backtest.py, because setup_counts.py
 needs to run repeatedly while parameters are tuned (§8.3, then §8.4, then
 calibration) -- re-pulling 407 pairs from IB every time a threshold changes
 would be both slow (IB's ~60-requests-per-10-minutes cap) and pointless, since
@@ -53,7 +53,7 @@ ET = ZoneInfo("America/New_York")
 PAPER_PORTS = {4002: "IB Gateway paper", 7497: "TWS paper"}
 LIVE_PORTS = {4001: "IB Gateway LIVE", 7496: "TWS LIVE"}
 
-# Same pacing as mcl_backtest.py -- IB's cap is account-wide, so running this
+# Same pacing as common/backtest.py -- IB's cap is account-wide, so running this
 # alongside the live trader or the V7 backtest will contend for the same
 # budget. Don't.
 REQUEST_INTERVAL_S = 12.5
@@ -176,7 +176,7 @@ class BarSource:
         section because its faster EMA9 + VWAP don't need one). So '1 D' is
         enough, and pulling less means less IB request budget spent per pair.
 
-        Retries once on an empty response, exactly as mcl_backtest.py does --
+        Retries once on an empty response, exactly as common/backtest.py does --
         IB returns an empty list on throttling, not an error, so one empty
         result is not proof the data doesn't exist.
         """
