@@ -40,7 +40,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from common.cache_io import load_cached_bars, load_pairs
+from common.cache_io import load_cached_bars, load_pairs, window_dir
 from common.indicators import resample_bars
 from strategy.vw9.vw9 import find_setups
 
@@ -81,7 +81,8 @@ def count_for_pair(bars_1m: pd.DataFrame, date_str: str) -> dict[int, list]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="VW9 §8.3 setup-count pre-flight measurement")
     ap.add_argument("--pairs", default="var/state/traded_pairs.json")
-    ap.add_argument("--bars-cache", default="bars_cache")
+    ap.add_argument("--bars-cache", default="bar_cache",
+                    help="cache ROOT; the 1d_to_2000 window is read from it")
     ap.add_argument("--out", default="setup_counts_trades.csv")
     ap.add_argument("--limit", type=int, help="only the first N pairs (quick trial)")
     args = ap.parse_args()
@@ -95,7 +96,9 @@ def main() -> int:
     if args.limit:
         pairs = pairs[: args.limit]
 
-    bars_cache = Path(args.bars_cache)
+    # Must match data_ib.py's window, or this reads an empty directory and
+    # reports "no cached bars" for data that is actually present.
+    bars_cache = window_dir(Path(args.bars_cache), "1 D", "2000")
     rows: list[dict] = []
     n_total = len(pairs)
     n_cached = n_missing = 0

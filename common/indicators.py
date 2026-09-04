@@ -152,11 +152,21 @@ def macd(close: pd.Series, fast: int = 12, slow: int = 26,
 
 
 def rsi(close: pd.Series, length: int = 14) -> pd.Series:
-    """Pine ta.rsi -- RMA of gains / RMA of losses."""
+    """Pine ta.rsi -- RMA of gains / RMA of losses. Returns float64.
+
+    The zero-denominator guard is `.where(down != 0.0)`, not
+    `.replace(0.0, pd.NA)`. Both put a missing value where there are no
+    losses, and both produce identical numbers -- but pd.NA forces the
+    Series to OBJECT dtype, and every subsequent operation inherits it. That
+    silently produced an object-dtype RSI column in signals(), which works
+    for pandas comparisons but raises on numpy ufuncs, so np.allclose() on
+    the output fails with a type error rather than a sensible answer.
+    np.nan keeps it float64 throughout.
+    """
     delta = close.diff()
     up = rma(delta.clip(lower=0.0), length)
     down = rma((-delta).clip(lower=0.0), length)
-    rs = up / down.replace(0.0, pd.NA)
+    rs = up / down.where(down != 0.0)
     out = 100.0 - (100.0 / (1.0 + rs))
     return out.fillna(100.0).where(down != 0.0, 100.0)
 

@@ -56,10 +56,9 @@ bar_cache/
 Thumbs.db
 desktop.ini
 
-# EMA Crossover Strategy's separate bar cache. The two caches unify into one
-# shared bar_cache/ later -- see section 5 of
-# claude/repo_reorg_and_github_plan.md -- but until then this one exists under
-# its own name and is equally machine-local.
+# Superseded: both pulls now share bar_cache/, split into window
+# subdirectories (2d_to_0930, 1d_to_2000). Kept so an older checkout or a
+# stale working copy cannot commit one.
 bars_cache/
 data_pull_state*.json
 

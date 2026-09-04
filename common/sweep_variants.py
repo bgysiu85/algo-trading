@@ -6,7 +6,8 @@ Compare strategy variants offline, over cached bars. No IB, no pacing, seconds.
     python sweep_variants.py --detail           # per-variant exit breakdown
     python sweep_variants.py --csv out.csv      # write every trade
 
-Requires a populated bar_cache/ -- run mcl_backtest.py once to build it. After
+Requires a populated bar_cache/2d_to_0930/ -- run main.py --mode backtest once
+to build it. After
 that this runs as often as you like at no cost, which is the whole point: the
 questions queued up (apex on/off, MACD > 0 on/off, and their interaction) each
 needed a separate 85-minute paced IB pass before.
@@ -26,6 +27,8 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+
+from common.cache_io import window_dir
 import collections
 import sys
 from datetime import datetime
@@ -50,7 +53,8 @@ def load_cache(cache_dir: Path):
     """Yield (symbol, date, frame) for every cached session."""
     files = sorted(cache_dir.glob("*.csv.gz"))
     if not files:
-        sys.exit(f"{cache_dir}/ is empty. Run mcl_backtest.py once to build it.")
+        sys.exit(f"{cache_dir}/ is empty. Run "
+                 f"main.py --mode backtest --strategy mcl once to build it.")
     for f in files:
         stem = f.name[: -len(".csv.gz")]
         symbol, _, date_str = stem.rpartition("_")
@@ -102,12 +106,14 @@ def summarise(name: str, trades: list) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Offline strategy variant sweep")
-    ap.add_argument("--cache-dir", default="bar_cache")
+    ap.add_argument("--cache-dir", default="bar_cache",
+                    help="cache ROOT; the 2d_to_0930 window is read from it")
     ap.add_argument("--detail", action="store_true")
     ap.add_argument("--csv")
     a = ap.parse_args()
 
-    sessions = list(load_cache(Path(a.cache_dir)))
+    # Same window backtest.py writes; reading the root would find nothing.
+    sessions = list(load_cache(window_dir(Path(a.cache_dir), "2 D", "0930")))
     print(f"{len(sessions)} cached sessions\n")
 
     rows, all_trades = [], {}

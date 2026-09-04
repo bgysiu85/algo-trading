@@ -49,6 +49,7 @@ except ImportError:
 import importlib
 
 from common import session_lock
+from common.cache_io import cache_path as _cache_path, window_dir
 
 # Both expose backtest_session(df, session_date, tz) and accept the same
 # 1-minute frame -- MC5 resamples internally, so the engine does not need to
@@ -95,7 +96,15 @@ PRIMARIES = ["NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"]
 #
 # csv.gz rather than parquet on purpose: pandas reads and writes it with no
 # extra dependency, so nothing new has to be installed in the venv.
-CACHE_DIR = Path("bar_cache")
+CACHE_ROOT = Path("bar_cache")
+
+# The window this engine pulls, in ONE place: the same two values build the IB
+# request and the cache directory name, so the cache cannot claim to hold bars
+# it does not hold. "2 D" gives the session plus the prior day, which covers
+# the 60-bar warm-up the volume average and MACD both need.
+HIST_DURATION = "2 D"
+HIST_END_HOUR, HIST_END_MINUTE = 9, 30
+HIST_END_HHMM = f"{HIST_END_HOUR:02d}{HIST_END_MINUTE:02d}"
 
 LOG = logging.getLogger("bt")
 
@@ -135,7 +144,9 @@ class Runner:
         self._last_req = 0.0
         self._last_qual = 0.0
         self._qual_fails = 0
-        self.cache_dir = cache_dir or CACHE_DIR
+        # Always a window subdirectory, never the cache root.
+        self.cache_dir = window_dir(cache_dir or CACHE_ROOT,
+                                    HIST_DURATION, HIST_END_HHMM)
         self.cache_hits = 0
         self.cache_misses = 0
 
@@ -218,7 +229,7 @@ class Runner:
         return None
 
     def _cache_path(self, symbol: str, date_str: str) -> Path:
-        return self.cache_dir / f"{symbol}_{date_str}.csv.gz"
+        return _cache_path(self.cache_dir, symbol, date_str)
 
     def _cache_read(self, symbol: str, date_str: str):
         path = self._cache_path(symbol, date_str)
@@ -263,13 +274,13 @@ class Runner:
             return cached, None
 
         end = datetime.strptime(date_str, "%Y-%m-%d").replace(
-            hour=9, minute=30, tzinfo=ET)
+            hour=HIST_END_HOUR, minute=HIST_END_MINUTE, tzinfo=ET)
         last_err = "no data returned"
         for attempt in (1, 2):
             await self._pace()
             try:
                 data = await self.ib.reqHistoricalDataAsync(
-                    contract, endDateTime=end, durationStr="2 D",
+                    contract, endDateTime=end, durationStr=HIST_DURATION,
                     barSizeSetting="1 min", whatToShow="TRADES",
                     useRTH=False, formatDate=2)
             except Exception as e:  # noqa: BLE001
@@ -463,7 +474,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="where backtest_trades_<strategy>.csv is written")
     p.add_argument("--state-dir", default="var/state",
                    help="where the resumable backtest_state_<strategy>.json checkpoint lives")
-    p.add_argument("--cache-dir", default="bar_cache",
+    p.add_argument("--cache-dir", default=str(CACHE_ROOT),
                    help="where fetched bars are stored. A cache hit costs "
                         "no IB request, so variant sweeps run offline.")
     p.add_argument("--port", type=int, default=4002)

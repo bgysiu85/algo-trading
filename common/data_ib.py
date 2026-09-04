@@ -45,7 +45,7 @@ try:
 except ImportError:
     sys.exit("ib_async not installed.  pip install ib_async pandas")
 
-from common.cache_io import cache_path, load_cached_bars, load_pairs
+from common.cache_io import cache_path, load_cached_bars, load_pairs, window_dir
 
 ET = ZoneInfo("America/New_York")
 PAPER_PORTS = {4002: "IB Gateway paper", 7497: "TWS paper"}
@@ -63,6 +63,9 @@ QUALIFY_FAIL_STREAK = 5
 PRIMARIES = ["NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"]
 
 SESSION_END_HOUR, SESSION_END_MINUTE = 20, 0  # 20:00 ET -- the full VW9/E15 session
+HIST_DURATION = "1 D"
+HIST_END_HHMM = f"{SESSION_END_HOUR:02d}{SESSION_END_MINUTE:02d}"
+CACHE_ROOT = "bar_cache"
 
 LOG = logging.getLogger("data_ib")
 
@@ -70,7 +73,9 @@ LOG = logging.getLogger("data_ib")
 class BarSource:
     def __init__(self, ib: IB, cache_dir: Path):
         self.ib = ib
-        self.cache_dir = cache_dir
+        # Window subdirectory of the shared cache root, so this pull cannot
+        # be confused with backtest.py's 09:30-ending one.
+        self.cache_dir = window_dir(cache_dir, HIST_DURATION, HIST_END_HHMM)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.contracts: dict[str, object] = {}
         self.unqualified: set[str] = set()
@@ -174,7 +179,7 @@ class BarSource:
             await self._pace()
             try:
                 data = await self.ib.reqHistoricalDataAsync(
-                    contract, endDateTime=end, durationStr="1 D",
+                    contract, endDateTime=end, durationStr=HIST_DURATION,
                     barSizeSetting="1 min", whatToShow="TRADES",
                     useRTH=False, formatDate=2)
             except Exception as e:  # noqa: BLE001
@@ -275,7 +280,8 @@ def main() -> int:
     p = argparse.ArgumentParser(description="Pull full-session 1-minute bars for E15/VW9")
     p.add_argument("--pairs", default="var/state/traded_pairs.json",
                    help="reuse the same 407 pairs as MCL, per both specs' §1")
-    p.add_argument("--out-dir", default="bars_cache")
+    p.add_argument("--out-dir", default=CACHE_ROOT,
+                   help="cache ROOT; bars land in a window subdirectory of it")
     p.add_argument("--port", type=int, default=4002)
     p.add_argument("--client-id", type=int, default=34)
     p.add_argument("--probe", action="store_true",
