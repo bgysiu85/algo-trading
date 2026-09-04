@@ -1,0 +1,10 @@
+# Runtime
+ib_async
+pandas
+numpy
+databento
+
+# Tests. The two strategy families use different conventions:
+# strategy/mcl and strategy/mc5 tests are standalone scripts run with -m,
+# common/ and strategy/vw9 tests are pytest. run_tests.ps1 runs both.
+pytest
