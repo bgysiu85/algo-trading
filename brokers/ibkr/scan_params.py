@@ -29,7 +29,7 @@ PAPER_PORTS = {4002: "IB Gateway paper", 7497: "TWS paper"}
 LIVE_PORTS = {4001: "IB Gateway LIVE", 7496: "TWS LIVE"}
 HOST, CLIENT_ID = "127.0.0.1", 88
 
-OUT = Path("scanner_parameters.xml")
+OUT = Path("var/scanner_parameters.xml")
 
 # What we care about for this strategy
 CODE_HINTS = ("GAIN", "LOSE", "VOLUME", "ACTIVE", "HOT", "PREMARKET", "PRE_MARKET",
@@ -57,6 +57,7 @@ def main() -> int:
 
     print("requesting scanner parameters (this can take ~10s and is several MB)...")
     xml = ib.reqScannerParameters()
+    OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(xml, encoding="utf-8")
     print(f"saved {len(xml):,} bytes to {OUT.resolve()}\n")
 

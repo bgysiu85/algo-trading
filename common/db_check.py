@@ -152,6 +152,7 @@ def pull(client, dataset: str, symbol: str, date_str: str, schema: str,
             print("  cancelled.")
             return 1
 
+    out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"db_{dataset.replace('.', '')}_{symbol}_{date_str}_{schema}.dbn.zst"
     client.timeseries.get_range(
         dataset=dataset, start=start, end=end, symbols=[symbol],
@@ -169,7 +170,7 @@ def main() -> int:
                     help="actually download (asks first)")
     ap.add_argument("--dataset", default="EQUS.MINI", help="dataset for --pull")
     ap.add_argument("--schema", default="trades", help="schema for --pull")
-    ap.add_argument("--out-dir", default=".")
+    ap.add_argument("--out-dir", default="var/databento")
     ap.add_argument("--yes", action="store_true", help="skip the cost confirmation")
     a = ap.parse_args()
 

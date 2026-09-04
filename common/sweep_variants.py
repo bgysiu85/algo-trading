@@ -25,6 +25,7 @@ So all four cells get measured on identical bars.
 from __future__ import annotations
 
 import argparse
+import pathlib
 import collections
 import sys
 from datetime import datetime
@@ -150,6 +151,7 @@ def main() -> int:
                 d = t.__dict__.copy()
                 d["variant"] = name
                 recs.append(d)
+        pathlib.Path(a.csv).parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(recs).to_csv(a.csv, index=False)
         print(f"\n  {len(recs)} trades written to {a.csv}")
     return 0

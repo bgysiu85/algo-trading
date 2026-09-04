@@ -273,7 +273,7 @@ async def main_async(args) -> int:
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Feed watchlist.txt from IB's scanner")
-    p.add_argument("--watchlist", default="watchlist.txt")
+    p.add_argument("--watchlist", default="var/watchlist.txt")
     p.add_argument("--port", type=int, default=4002)
     p.add_argument("--interval", type=int, default=60,
                    help="seconds between scans (default 60)")

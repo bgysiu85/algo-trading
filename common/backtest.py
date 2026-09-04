@@ -103,12 +103,20 @@ def load_pairs(path: Path) -> list[dict]:
 
 
 class Runner:
-    def __init__(self, ib: IB, out_dir: Path, cache_dir: Path | None = None):
+    def __init__(self, ib: IB, out_dir: Path, cache_dir: Path | None = None,
+                 state_dir: Path | None = None):
         self.ib = ib
         self.out_dir = out_dir
+        # The resumable checkpoint and the trade report are different kinds
+        # of thing and now live in different var/ subdirectories, so they no
+        # longer share one --out-dir. Both are gitignored and therefore
+        # absent on a fresh clone; create them rather than assume.
+        self.state_dir = state_dir or out_dir
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.state_dir.mkdir(parents=True, exist_ok=True)
         self.contracts: dict[str, object] = {}
         self.unqualified: set[str] = set()
-        self.state_path = out_dir / "backtest_state.json"
+        self.state_path = self.state_dir / "backtest_state.json"
         self.state = self._load_state()
         self._last_req = 0.0
         self._last_qual = 0.0
@@ -395,7 +403,8 @@ async def main_async(args) -> int:
         return 1
     LOG.info("connected, accounts %s", ib.managedAccounts())
 
-    runner = Runner(ib, Path(args.out_dir), Path(args.cache_dir))
+    runner = Runner(ib, Path(args.out_dir), Path(args.cache_dir),
+                    Path(args.state_dir))
     if args.retry_failed:
         # NOT_QUALIFIED is included deliberately. On 2026-09-03 it was the
         # dominant failure (337 of 407) and it was caused by throttling, not
@@ -420,8 +429,11 @@ async def main_async(args) -> int:
 
 def main() -> int:
     p = argparse.ArgumentParser(description="MCL offline backtest over traded pairs")
-    p.add_argument("--pairs", default="traded_pairs.json")
-    p.add_argument("--out-dir", default=".")
+    p.add_argument("--pairs", default="var/state/traded_pairs.json")
+    p.add_argument("--out-dir", default="var/reports",
+                   help="where backtest_trades.csv is written")
+    p.add_argument("--state-dir", default="var/state",
+                   help="where the resumable backtest_state.json checkpoint lives")
     p.add_argument("--cache-dir", default="bar_cache",
                    help="where fetched bars are stored. A cache hit costs "
                         "no IB request, so variant sweeps run offline.")

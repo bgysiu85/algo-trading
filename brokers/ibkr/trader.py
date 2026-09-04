@@ -49,8 +49,8 @@ Size    : min(100 shares, 40% of equity / price)
 
 Usage
 -----
-    python mcl_paper_trader.py --watchlist watchlist.txt
-    python mcl_paper_trader.py --watchlist watchlist.txt --dry-run
+    python mcl_paper_trader.py --watchlist var\\watchlist.txt
+    python mcl_paper_trader.py --watchlist var\\watchlist.txt --dry-run
 
 --dry-run logs signals and computes intended orders but places none. Run this
 first, every time, before letting it place anything.
@@ -252,6 +252,9 @@ FIELDS = [
 class FillLog:
     def __init__(self, path: Path):
         self.path = path
+        # var/fills/ is gitignored, so it does not exist on a fresh clone and
+        # opening the log for append would fail before a single order is placed.
+        path.parent.mkdir(parents=True, exist_ok=True)
         new = not path.exists()
 
         # If a log from an earlier run of an OLDER version is sitting here, its
@@ -1100,13 +1103,13 @@ def suspend_machine(delay_min: int, flat: bool) -> None:
 
 def main():
     p = argparse.ArgumentParser(description="MCL pre-market paper trader (IBKR)")
-    p.add_argument("--watchlist", default="watchlist.txt",
+    p.add_argument("--watchlist", default="var/watchlist.txt",
                    help="file with today's qualifying tickers, one per line")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=4002,
                    help="4002 IB Gateway paper (default) or 7497 TWS paper")
     p.add_argument("--client-id", type=int, default=17)
-    p.add_argument("--out", default=f"mcl_fills_{datetime.now(ET):%Y%m%d}.csv")
+    p.add_argument("--out", default=f"var/fills/mcl_fills_{datetime.now(ET):%Y%m%d}.csv")
     p.add_argument("--dry-run", action="store_true",
                    help="evaluate and log signals but place no orders")
     p.add_argument("--allow-empty", action="store_true",

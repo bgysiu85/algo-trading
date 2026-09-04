@@ -47,13 +47,13 @@ if (-not (Test-Path $py)) {
 }
 
 # ---- watchlist ------------------------------------------------------------
-if (-not (Test-Path ".\watchlist.txt")) {
-    Write-Host "watchlist.txt not found in $PSScriptRoot" -ForegroundColor Red
+if (-not (Test-Path ".\var\watchlist.txt")) {
+    Write-Host "var\watchlist.txt not found under $PSScriptRoot" -ForegroundColor Red
     exit 1
 }
 
 # Strip trailing comments too - the scanner annotates picks as "UPC  # rank 1".
-$tickers = Get-Content .\watchlist.txt |
+$tickers = Get-Content .\var\watchlist.txt |
     ForEach-Object { ($_ -split "#")[0].Trim() } |
     Where-Object { $_ -ne "" }
 
@@ -66,7 +66,7 @@ if ($tickers.Count -eq 0) {
 }
 
 # ---- build args and go ----------------------------------------------------
-$argsList = @(".\mcl_paper_trader.py", "--watchlist", ".\watchlist.txt", "--port", "$Port")
+$argsList = @(".\mcl_paper_trader.py", "--watchlist", ".\var\watchlist.txt", "--port", "$Port")
 if (-not $Live)    { $argsList += "--dry-run" }
 if ($AllowEmpty)   { $argsList += "--allow-empty" }
 

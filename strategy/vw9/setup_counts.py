@@ -80,7 +80,7 @@ def count_for_pair(bars_1m: pd.DataFrame, date_str: str) -> dict[int, list]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="VW9 §8.3 setup-count pre-flight measurement")
-    ap.add_argument("--pairs", default="traded_pairs.json")
+    ap.add_argument("--pairs", default="var/state/traded_pairs.json")
     ap.add_argument("--bars-cache", default="bars_cache")
     ap.add_argument("--out", default="setup_counts_trades.csv")
     ap.add_argument("--limit", type=int, help="only the first N pairs (quick trial)")

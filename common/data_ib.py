@@ -273,7 +273,7 @@ async def main_async(args) -> int:
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Pull full-session 1-minute bars for E15/VW9")
-    p.add_argument("--pairs", default="traded_pairs.json",
+    p.add_argument("--pairs", default="var/state/traded_pairs.json",
                    help="reuse the same 407 pairs as MCL, per both specs' §1")
     p.add_argument("--out-dir", default="bars_cache")
     p.add_argument("--port", type=int, default=4002)

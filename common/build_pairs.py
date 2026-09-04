@@ -66,7 +66,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ibkr", type=Path)
     ap.add_argument("--tradezero", type=Path)
-    ap.add_argument("--out", type=Path, default=Path("traded_pairs.json"))
+    ap.add_argument("--out", type=Path, default=Path("var/state/traded_pairs.json"))
     ap.add_argument("--ibkr-tz", default="Australia/Sydney",
                     help="timezone IBKR wrote its DateTime in (default Sydney)")
     a = ap.parse_args()
@@ -85,6 +85,7 @@ def main() -> int:
     clean = sorted(x for x in pairs if x[0].isalpha() and "." not in x[0])
     print(f"dropped {len(pairs) - len(clean)} non-equity symbols")
 
+    a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(
         [{"symbol": s, "date": d} for s, d in clean], indent=0))
     print(f"\nwrote {len(clean)} pairs to {a.out}")

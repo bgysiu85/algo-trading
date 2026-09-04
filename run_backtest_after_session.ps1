@@ -32,8 +32,8 @@ if (-not (Test-Path $py)) {
     Write-Host "No .venv found. Run .\run_dry.ps1 once first." -ForegroundColor Red
     exit 1
 }
-if (-not (Test-Path (Join-Path $PSScriptRoot "traded_pairs.json"))) {
-    Write-Host "traded_pairs.json not found - nothing to backtest." -ForegroundColor Red
+if (-not (Test-Path (Join-Path $PSScriptRoot "var\state\traded_pairs.json"))) {
+    Write-Host "var\state\traded_pairs.json not found - nothing to backtest." -ForegroundColor Red
     exit 1
 }
 
@@ -51,7 +51,9 @@ function Test-TraderRunning {
     return $false
 }
 
-$log = Join-Path $PSScriptRoot ("backtest_run_{0:yyyyMMdd}.log" -f (Get-ETNow))
+$logDir = Join-Path $PSScriptRoot "var\logs"
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$log = Join-Path $logDir ("backtest_run_{0:yyyyMMdd}.log" -f (Get-ETNow))
 
 Write-Host ""
 Write-Host "MCL historical backtest - unattended runner" -ForegroundColor Green
