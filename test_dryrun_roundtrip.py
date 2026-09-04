@@ -3,8 +3,14 @@
 
 Stubs out IB entirely: feeds synthetic bars through step_symbol and asserts the
 CSV contains a BUY followed by a SELL carrying trade_pnl.
+
+Temp paths come from tempfile.gettempdir(), NOT a hardcoded "/tmp". On Windows
+Path("/tmp/x") resolves to a "tmp" folder at the root of the current DRIVE --
+which does not exist -- so this failed with FileNotFoundError on Windows while
+passing on POSIX.
+gettempdir() gives %TEMP% on Windows and /tmp elsewhere.
 """
-import asyncio, csv, sys, types
+import asyncio, csv, sys, tempfile, types
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -67,11 +73,12 @@ def find_firing_series(n=140):
 
 
 async def run_case(tag, bars_seq):
-    out = Path(f"/tmp/test_{tag}.csv")
+    out = Path(tempfile.gettempdir()) / f"test_{tag}.csv"
     if out.exists():
         out.unlink()
     log = M.FillLog(out)
-    tr = M.MCLPaperTrader(FakeIB(), Path("/tmp/wl.txt"), log, dry_run=True)
+    tr = M.MCLPaperTrader(FakeIB(), Path(tempfile.gettempdir()) / "wl.txt",
+                          log, dry_run=True)
     tr.equity = 22290.96
 
     st = M.SymbolState(symbol="TEST")
@@ -113,11 +120,11 @@ async def main():
     ok = True
 
     if not buys:
-        print("FAIL  no entry signal fired — cannot test the exit path")
+        print("FAIL  no entry signal fired -- cannot test the exit path")
         return 1
 
     if not sells:
-        print("FAIL  entry logged but NO EXIT — dry run is entry-only")
+        print("FAIL  entry logged but NO EXIT -- dry run is entry-only")
         ok = False
     else:
         print("PASS  dry run produced a completed round trip")
@@ -137,7 +144,7 @@ async def main():
             ok = False
 
     if len(buys) > 1 and len(sells) < len(buys):
-        print(f"FAIL  {len(buys)} entries but only {len(sells)} exits — "
+        print(f"FAIL  {len(buys)} entries but only {len(sells)} exits -- "
               f"re-entry while already positioned")
         ok = False
     else:

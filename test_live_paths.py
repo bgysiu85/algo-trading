@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Offline checks for the LIVE order paths — the ones dry run never exercises.
+"""Offline checks for the LIVE order paths -- the ones dry run never exercises.
 
 Covers: outright rejection, partial fill, and a failed exit that must retry
 instead of silently leaving the position held.
+
+Temp paths come from tempfile.gettempdir(), NOT a hardcoded "/tmp". On Windows
+Path("/tmp/x") resolves to a "tmp" folder at the root of the current DRIVE --
+which does not exist -- so this failed with FileNotFoundError on Windows while
+passing on POSIX.
+gettempdir() gives %TEMP% on Windows and /tmp elsewhere.
 """
-import asyncio, csv, sys, types
+import asyncio, csv, sys, tempfile, types
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -44,12 +50,13 @@ class FakeIB:
 
 
 def build(tag, outcomes):
-    out = Path(f"/tmp/live_{tag}.csv")
+    out = Path(tempfile.gettempdir()) / f"live_{tag}.csv"
     if out.exists():
         out.unlink()
     log = M.FillLog(out)
     ib = FakeIB(outcomes)
-    tr = M.MCLPaperTrader(ib, Path("/tmp/wl.txt"), log, dry_run=False)
+    tr = M.MCLPaperTrader(ib, Path(tempfile.gettempdir()) / "wl.txt",
+                          log, dry_run=False)
     tr.equity = 22290.96
     st = M.SymbolState(symbol="TEST")
     st.contract = object()
@@ -134,7 +141,7 @@ async def main():
     if len(sells) >= 3:
         print(f"PASS  exit retried after no-fill ({len(sells)} sell attempts)")
     else:
-        print(f"FAIL  exit not retried — only {len(sells)} sell attempt(s); "
+        print(f"FAIL  exit not retried -- only {len(sells)} sell attempt(s); "
               f"position would have been silently held")
         ok = False
     if st.position is None:
