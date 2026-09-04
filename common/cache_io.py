@@ -106,6 +106,24 @@ def load_cached_bars(cache_dir: Path, symbol: str, date_str: str) -> pd.DataFram
 
 SHARED_DURATION = "3 D"
 SHARED_END_HHMM = "2000"
+SHARED_SESSIONS = 3
+
+
+def check_sessions(df, end, want: int, tz="America/New_York") -> int:
+    """Distinct trading sessions in `df` at or before `end`.
+
+    Callers slice a superset down to their own window, and the one way that
+    can go wrong is the superset not reaching back far enough -- a short IB
+    response, or a symbol that simply has no history that far back. That
+    would hand a strategy less warm-up than it asked for, changing its
+    EMA-seeded indicators silently. Counting is cheap; raise rather than
+    guess.
+    """
+    if df is None or df.empty:
+        return 0
+    local = df.index.tz_convert(tz)
+    end_local = end.astimezone(local.tz) if hasattr(end, "astimezone") else end
+    return len({d for d in local.date if d <= end_local.date()})
 
 
 def slice_sessions(df: pd.DataFrame, end, n_sessions: int,

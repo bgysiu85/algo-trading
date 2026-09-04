@@ -30,16 +30,23 @@ def test_the_two_windows_never_collide():
     assert window_dir(root, "2 D", "0930") != window_dir(root, "1 D", "2000")
 
 
-def test_writer_window_is_derived_from_the_request_it_makes():
-    """The directory name and the IB request are built from the same values.
+def test_both_consumers_fetch_the_same_shared_window():
+    """One pull serves both, which is the point -- it halves the IB budget.
 
-    If these drifted apart the directory would claim to hold bars it does not
-    hold, which is the whole failure mode being prevented.
+    Validated against the live API on 2026-09-04 (common/probe_window.py):
+    all four probed pairs matched bar-for-bar in both windows.
     """
-    assert window_key(B.HIST_DURATION, B.HIST_END_HHMM) == "2d_to_0930"
-    assert B.HIST_END_HOUR == 9 and B.HIST_END_MINUTE == 30
-    assert window_key(D.HIST_DURATION, D.HIST_END_HHMM) == "1d_to_2000"
-    assert D.SESSION_END_HOUR == 20 and D.SESSION_END_MINUTE == 0
+    from common.cache_io import SHARED_DURATION, SHARED_END_HHMM
+    assert B.HIST_DURATION == SHARED_DURATION == "3 D"
+    assert D.HIST_DURATION == SHARED_DURATION
+    assert window_key(SHARED_DURATION, SHARED_END_HHMM) == "3d_to_2000"
+
+
+def test_each_consumer_still_slices_to_the_window_it_needs():
+    """Fetching a superset is only safe because nothing consumes it whole."""
+    assert B.HIST_SESSIONS == 2 and (B.HIST_END_HOUR, B.HIST_END_MINUTE) == (9, 30)
+    assert D.HIST_SESSIONS == 1
+    assert (D.SESSION_END_HOUR, D.SESSION_END_MINUTE) == (20, 0)
 
 
 def test_backtest_runner_writes_into_its_window(tmp_path):
@@ -47,17 +54,39 @@ def test_backtest_runner_writes_into_its_window(tmp_path):
         pass
     r = B.Runner(_IB(), tmp_path / "reports", tmp_path / "cache",
                  tmp_path / "state", "mcl")
-    assert r.cache_dir.name == "2d_to_0930"
+    assert r.cache_dir.name == "3d_to_2000"
     assert r._cache_path("ABOS", "2026-09-02").name == "ABOS_2026-09-02.csv.gz"
 
 
 def test_readers_point_at_the_window_their_writer_populates():
-    """setup_counts reads data_ib's window; sweep_variants reads backtest's."""
-    root = Path("bar_cache")
-    assert window_dir(root, "1 D", "2000") == window_dir(
-        root, D.HIST_DURATION, D.HIST_END_HHMM)
-    assert window_dir(root, "2 D", "0930") == window_dir(
-        root, B.HIST_DURATION, B.HIST_END_HHMM)
+    """Every reader and writer now agrees on one directory.
+
+    A mismatch here is silent in both directions: an empty directory reports
+    "no cached bars" for data that is present, a populated wrong one returns
+    the wrong bars.
+    """
+    from common.cache_io import SHARED_DURATION, SHARED_END_HHMM
+    shared = window_dir(Path("bar_cache"), SHARED_DURATION, SHARED_END_HHMM)
+    assert window_dir(Path("bar_cache"), B.HIST_DURATION, SHARED_END_HHMM) == shared
+    assert window_dir(Path("bar_cache"), D.HIST_DURATION, D.HIST_END_HHMM) == shared
+
+
+def test_under_seeded_frame_is_refused_rather_than_used():
+    """The one way a superset can still go wrong: not reaching back far enough.
+
+    That would hand a strategy less warm-up than it asked for and move its
+    EMA-seeded indicators silently, so it is counted and refused.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from common.cache_io import check_sessions, slice_sessions
+    et = ZoneInfo("America/New_York")
+    df = _sessions_frame(["2026-03-13", "2026-03-16"])
+
+    end = datetime(2026, 3, 16, 9, 30, tzinfo=et)
+    assert check_sessions(df, end, 2) == 2
+    only_one = slice_sessions(df, datetime(2026, 3, 16, 20, 0, tzinfo=et), 1)
+    assert check_sessions(only_one, end, 2) == 1 < B.HIST_SESSIONS
 
 
 def test_cache_files_are_gzipped():

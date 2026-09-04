@@ -45,7 +45,9 @@ try:
 except ImportError:
     sys.exit("ib_async not installed.  pip install ib_async pandas")
 
-from common.cache_io import cache_path, load_cached_bars, load_pairs, window_dir
+from common.cache_io import (cache_path, check_sessions, load_cached_bars,
+                             load_pairs, slice_sessions, window_dir,
+                             SHARED_DURATION, SHARED_END_HHMM)
 
 ET = ZoneInfo("America/New_York")
 PAPER_PORTS = {4002: "IB Gateway paper", 7497: "TWS paper"}
@@ -63,8 +65,14 @@ QUALIFY_FAIL_STREAK = 5
 PRIMARIES = ["NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"]
 
 SESSION_END_HOUR, SESSION_END_MINUTE = 20, 0  # 20:00 ET -- the full VW9/E15 session
-HIST_DURATION = "1 D"
+# What this puller NEEDS: one full session ending 20:00.
+HIST_SESSIONS = 1
 HIST_END_HHMM = f"{SESSION_END_HOUR:02d}{SESSION_END_MINUTE:02d}"
+
+# What it FETCHES: the shared superset, so this and common/backtest.py make
+# one pull between them rather than two. Bars are sliced back to
+# HIST_SESSIONS before use.
+HIST_DURATION = SHARED_DURATION
 CACHE_ROOT = "bar_cache"
 
 LOG = logging.getLogger("data_ib")
@@ -75,7 +83,7 @@ class BarSource:
         self.ib = ib
         # Window subdirectory of the shared cache root, so this pull cannot
         # be confused with backtest.py's 09:30-ending one.
-        self.cache_dir = window_dir(cache_dir, HIST_DURATION, HIST_END_HHMM)
+        self.cache_dir = window_dir(cache_dir, SHARED_DURATION, SHARED_END_HHMM)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.contracts: dict[str, object] = {}
         self.unqualified: set[str] = set()
@@ -172,8 +180,12 @@ class BarSource:
         IB returns an empty list on throttling, not an error, so one empty
         result is not proof the data doesn't exist.
         """
-        end = datetime.strptime(date_str, "%Y-%m-%d").replace(
+        # Fetch the superset; slice back to this puller's single session.
+        want_end = datetime.strptime(date_str, "%Y-%m-%d").replace(
             hour=SESSION_END_HOUR, minute=SESSION_END_MINUTE, tzinfo=ET)
+        end = datetime.strptime(date_str, "%Y-%m-%d").replace(
+            hour=int(SHARED_END_HHMM[:2]), minute=int(SHARED_END_HHMM[2:]),
+            tzinfo=ET)
         last_err = "no data returned"
         for attempt in (1, 2):
             await self._pace()
@@ -190,7 +202,11 @@ class BarSource:
                 if df is not None and not df.empty:
                     df = df.rename(columns=str.lower)
                     df["date"] = pd.to_datetime(df["date"], utc=True)
-                    return df.set_index("date").sort_index(), None
+                    out = df.set_index("date").sort_index()
+                    have = check_sessions(out, want_end, HIST_SESSIONS)
+                    if have < HIST_SESSIONS:
+                        return None, f"superset holds {have} session(s), need {HIST_SESSIONS}"
+                    return out, None
                 last_err = "empty frame"
             if attempt == 1:
                 LOG.debug("  %s %s empty, backing off then retrying",
@@ -230,6 +246,12 @@ class BarSource:
             self.state["done"][key] = {"status": "OK", "bars": len(df)}
             LOG.info("[%d/%d] %-6s %s  bars=%d", n, total, p["symbol"], p["date"], len(df))
             self._save_state()
+
+    def slice_for_use(self, frame, date_str: str):
+        """Cut a superset frame down to this puller's own session."""
+        want_end = datetime.strptime(date_str, "%Y-%m-%d").replace(
+            hour=SESSION_END_HOUR, minute=SESSION_END_MINUTE, tzinfo=ET)
+        return slice_sessions(frame, want_end, HIST_SESSIONS)
 
     def load_cached(self, symbol: str, date_str: str) -> pd.DataFrame | None:
         """Read back a previously-fetched pair's 1-minute bars. Returns None

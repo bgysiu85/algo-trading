@@ -49,7 +49,9 @@ except ImportError:
 import importlib
 
 from common import session_lock
-from common.cache_io import cache_path as _cache_path, window_dir
+from common.cache_io import (cache_path as _cache_path, check_sessions,
+                             slice_sessions, window_dir,
+                             SHARED_DURATION, SHARED_END_HHMM, SHARED_SESSIONS)
 
 # Both expose backtest_session(df, session_date, tz) and accept the same
 # 1-minute frame -- MC5 resamples internally, so the engine does not need to
@@ -102,9 +104,18 @@ CACHE_ROOT = Path("bar_cache")
 # request and the cache directory name, so the cache cannot claim to hold bars
 # it does not hold. "2 D" gives the session plus the prior day, which covers
 # the 60-bar warm-up the volume average and MACD both need.
-HIST_DURATION = "2 D"
+# What this engine NEEDS: two trading sessions ending 09:30 -- the session
+# plus the prior day, covering the 60-bar warm-up the volume average and MACD
+# both need.
+HIST_SESSIONS = 2
 HIST_END_HOUR, HIST_END_MINUTE = 9, 30
-HIST_END_HHMM = f"{HIST_END_HOUR:02d}{HIST_END_MINUTE:02d}"
+
+# What it FETCHES: the shared superset, so one pull serves this engine and
+# data_ib.py's full-session window instead of two. Validated against the live
+# API on 2026-09-04 -- see common/probe_window.py. Bars are sliced back to
+# HIST_SESSIONS before any strategy sees them, because a longer frame changes
+# EMA-seeded indicators on identical bars.
+HIST_DURATION = SHARED_DURATION
 
 LOG = logging.getLogger("bt")
 
@@ -144,9 +155,9 @@ class Runner:
         self._last_req = 0.0
         self._last_qual = 0.0
         self._qual_fails = 0
-        # Always a window subdirectory, never the cache root.
+        # The SHARED superset window, so data_ib.py reads the same files.
         self.cache_dir = window_dir(cache_dir or CACHE_ROOT,
-                                    HIST_DURATION, HIST_END_HHMM)
+                                    SHARED_DURATION, SHARED_END_HHMM)
         self.cache_hits = 0
         self.cache_misses = 0
 
@@ -256,11 +267,26 @@ class Runner:
         except Exception as e:  # noqa: BLE001
             LOG.warning("could not cache %s %s: %s", symbol, date_str, e)
 
-    async def bars_for(self, contract, date_str: str):
-        """1-minute bars ending at 09:30 ET on the target date.
+    def _slice(self, frame, want_end, symbol: str, date_str: str):
+        """Cut the superset down to this engine's window, loudly.
 
-        '2 D' gives the session plus the prior day, which covers the 60-bar
-        warm-up the volume average and MACD both need.
+        A superset that does not reach back far enough would quietly hand the
+        strategy less warm-up than it asked for. Counting sessions turns that
+        into a visible warning and a NO_DATA rather than a wrong backtest.
+        """
+        have = check_sessions(frame, want_end, HIST_SESSIONS)
+        if have < HIST_SESSIONS:
+            LOG.warning("%s %s cached frame holds %d session(s), need %d -- "
+                        "treating as missing rather than under-seeding the "
+                        "strategy", symbol, date_str, have, HIST_SESSIONS)
+            return None
+        return slice_sessions(frame, want_end, HIST_SESSIONS)
+
+    async def bars_for(self, contract, date_str: str):
+        """1-minute bars for the two sessions ending 09:30 ET on the target date.
+
+        Fetches the shared superset window and slices it, so this engine and
+        data_ib.py share one pull instead of making two.
 
         Retries once on an empty response. IB returns an empty list rather than
         an error when it throttles, so a single empty result is NOT evidence
@@ -268,13 +294,20 @@ class Runner:
         succeeding on one date and returning nothing on the adjacent one, which
         is the signature of pacing rather than missing history.
         """
+        # The cache holds the SHARED superset; slice it to this engine's own
+        # window before returning, or the strategy gets extra warm-up and its
+        # indicators move on identical bars.
+        want_end = datetime.strptime(date_str, "%Y-%m-%d").replace(
+            hour=HIST_END_HOUR, minute=HIST_END_MINUTE, tzinfo=ET)
         cached = self._cache_read(contract.symbol, date_str)
         if cached is not None:
-            self.cache_hits += 1
-            return cached, None
+            sliced = self._slice(cached, want_end, contract.symbol, date_str)
+            if sliced is not None:
+                self.cache_hits += 1
+                return sliced, None
 
         end = datetime.strptime(date_str, "%Y-%m-%d").replace(
-            hour=HIST_END_HOUR, minute=HIST_END_MINUTE, tzinfo=ET)
+            hour=int(SHARED_END_HHMM[:2]), minute=int(SHARED_END_HHMM[2:]), tzinfo=ET)
         last_err = "no data returned"
         for attempt in (1, 2):
             await self._pace()
@@ -294,7 +327,8 @@ class Runner:
                     out = df.set_index("date").sort_index()
                     self._cache_write(contract.symbol, date_str, out)
                     self.cache_misses += 1
-                    return out, None
+                    return self._slice(out, want_end, contract.symbol,
+                                       date_str), None
                 last_err = "empty frame"
             if attempt == 1:
                 LOG.debug("  %s %s empty, backing off then retrying",

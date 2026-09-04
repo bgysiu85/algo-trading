@@ -40,7 +40,8 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from common.cache_io import load_cached_bars, load_pairs, window_dir
+from common.cache_io import (load_cached_bars, load_pairs, slice_sessions,
+                             window_dir, SHARED_DURATION, SHARED_END_HHMM)
 from common.indicators import resample_bars
 from strategy.vw9.vw9 import find_setups
 
@@ -96,9 +97,10 @@ def main() -> int:
     if args.limit:
         pairs = pairs[: args.limit]
 
-    # Must match data_ib.py's window, or this reads an empty directory and
-    # reports "no cached bars" for data that is actually present.
-    bars_cache = window_dir(Path(args.bars_cache), "1 D", "2000")
+    # The shared superset directory. Frames are sliced to the single
+    # 04:00-20:00 session below -- reading the superset unsliced would give
+    # VW9 two extra sessions of warm-up and move every indicator.
+    bars_cache = window_dir(Path(args.bars_cache), SHARED_DURATION, SHARED_END_HHMM)
     rows: list[dict] = []
     n_total = len(pairs)
     n_cached = n_missing = 0
@@ -106,6 +108,11 @@ def main() -> int:
     for p in pairs:
         sym, date_str = p["symbol"], p["date"]
         bars_1m = load_cached_bars(bars_cache, sym, date_str)
+        if bars_1m is not None:
+            from datetime import datetime as _dt
+            _end = _dt.strptime(date_str, "%Y-%m-%d").replace(
+                hour=20, minute=0, tzinfo=ET)
+            bars_1m = slice_sessions(bars_1m, _end, 1)
         if bars_1m is None or bars_1m.empty:
             n_missing += 1
             continue
