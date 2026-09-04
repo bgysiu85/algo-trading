@@ -14,7 +14,7 @@ import asyncio, csv, sys, tempfile, types
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import mcl_paper_trader as M
+import trader as M
 from test_dryrun_roundtrip import FakeTicker, find_firing_series
 
 

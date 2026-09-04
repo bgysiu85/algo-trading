@@ -10,7 +10,7 @@ import asyncio, sys, types
 from datetime import datetime
 from pathlib import Path
 
-import mcl_paper_trader as M
+import trader as M
 from test_dryrun_roundtrip import find_firing_series
 from test_live_paths import build, FakeTrade
 

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-import mcl_paper_trader as M
+import trader as M
 
 
 class FakeTicker:

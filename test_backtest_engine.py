@@ -112,21 +112,31 @@ def main():
           f"no trades outside 04:00-09:30 ({len(trades)} found)")
     ok &= not trades
 
-    # --- 5. indicators agree with the live trader's implementation ---------
-    try:
-        import mcl_paper_trader as T
-        df = frame([3.0 + (i % 7) * 0.05 for i in range(120)])
-        a_ml, a_ms = S.macd(df["close"]); b_ml, b_ms = T.macd(df["close"])
-        d1 = float((a_ml - b_ml).abs().max())
-        d2 = float((S.rsi(df["close"]) - T.rsi(df["close"])).abs().max())
-        d3 = float((S.mfi(df["high"], df["low"], df["close"], df["volume"])
-                    - T.mfi(df["high"], df["low"], df["close"], df["volume"])).abs().max())
-        good = max(d1, d2, d3) < 1e-12
-        print(("PASS" if good else "FAIL"),
-              f"indicators match the live trader (max diff {max(d1,d2,d3):.2e})")
-        ok &= good
-    except ImportError:
-        print("SKIP  mcl_paper_trader not importable here")
+    # --- 5. evaluate_last_bar() agrees with signals() on the same frame ----
+    # There is only one indicator implementation now (see STEP 2 of
+    # claude/repo_reorg_and_github_plan.md) -- evaluate_last_bar() is built
+    # by calling signals() and reading off the last row, so this is a
+    # regression test of that wiring rather than a cross-file duplication
+    # check. The old version of this test compared mcl_strategy's indicators
+    # against mcl_paper_trader's separate copy of the same math; that copy no
+    # longer exists, trader.py imports evaluate_last_bar from here directly.
+    df = frame([3.0 + (i % 7) * 0.05 for i in range(120)])
+    sig_row = S.signals(df).iloc[-1]
+    live = S.evaluate_last_bar(df)
+    good = (live is not None
+            and abs(live.close - float(sig_row["close"])) < 1e-9
+            and live.long_entry == bool(sig_row["entry"])
+            and live.exit_signal == bool(sig_row["exit_sig"])
+            and abs(live.detail["macd"] - round(float(sig_row["macd"]), 5)) < 1e-9)
+    print(("PASS" if good else "FAIL"),
+          "evaluate_last_bar() agrees with signals() on the last row")
+    ok &= good
+
+    short = frame([3.0] * 10)   # fewer than MIN_BARS_REQUIRED
+    good = S.evaluate_last_bar(short) is None
+    print(("PASS" if good else "FAIL"),
+          "evaluate_last_bar() returns None below MIN_BARS_REQUIRED")
+    ok &= good
 
     print()
     print("ALL ENGINE CHECKS PASSED" if ok else "FAILURES ABOVE")

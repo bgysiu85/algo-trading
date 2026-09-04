@@ -172,6 +172,7 @@ def signals(df: pd.DataFrame, require_macd_pos: bool | None = None) -> pd.DataFr
     trail_avg = v.rolling(FLOOR_AVG_LEN).mean().shift(1)
 
     out["macd"], out["macd_sig"], out["mfi"], out["rsi"] = ml, ms, m, r
+    out["prev_vol"], out["trail_avg"] = prev_vol, trail_avg
     out["c_macd"] = (ml > ms) & (ml > 0) if require_macd_pos else (ml > ms)
     out["c_mfi"] = rising(m)
     out["c_rsi"] = rising(r)
@@ -181,6 +182,66 @@ def signals(df: pd.DataFrame, require_macd_pos: bool | None = None) -> pd.DataFr
                     & out["c_vol"] & out["c_floor"])
     out["exit_sig"] = past_apex(ml) | past_apex(m) | past_apex(r)
     return out
+
+
+# --- live / streaming evaluation -------------------------------------------
+#
+# The paper trader used to carry its own separate copy of every indicator
+# function plus its own re-implementation of the entry/exit condition logic
+# (evaluate() in the old mcl_paper_trader.py), evaluated on the last bar of a
+# rolling window instead of vectorised over a whole session. That is exactly
+# the kind of duplication claude/repo_reorg_and_github_plan.md's indicator
+# consolidation section warns about -- and it was not merely a style issue.
+# The old live copy hardcoded `macd_line > 0` unconditionally, so it never
+# actually respected REQUIRE_MACD_POSITIVE the way the backtest did: flipping
+# that flag changed backtest results but silently did nothing live. This
+# function replaces both copies by calling signals() -- the same vectorised
+# path the backtest uses -- and reading off the last row, so live and
+# backtest cannot silently diverge again.
+
+MIN_BARS_REQUIRED = MACD_SLOW + MACD_SIGNAL + 5
+
+
+@dataclass
+class Signals:
+    long_entry: bool
+    exit_signal: bool
+    close: float
+    detail: dict
+
+
+def evaluate_last_bar(df: pd.DataFrame,
+                      require_macd_pos: bool | None = None) -> "Signals | None":
+    """Evaluate the strategy on the LAST CLOSED bar of df.
+
+    df must have columns open/high/low/close/volume, 1-minute bars in
+    chronological order, already restricted to the bars indicators should be
+    built from (i.e. including pre-market). require_macd_pos overrides
+    REQUIRE_MACD_POSITIVE for this call only, same as signals().
+    """
+    if len(df) < MIN_BARS_REQUIRED:
+        return None
+    sig = signals(df, require_macd_pos=require_macd_pos)
+    row = sig.iloc[-1]
+    return Signals(
+        long_entry=bool(row["entry"]),
+        exit_signal=bool(row["exit_sig"]),
+        close=float(row["close"]),
+        detail={
+            "macd": round(float(row["macd"]), 5),
+            "macd_sig": round(float(row["macd_sig"]), 5),
+            "mfi": round(float(row["mfi"]), 2),
+            "rsi": round(float(row["rsi"]), 2),
+            "vol": int(row["volume"]),
+            "prev_vol": int(row["prev_vol"]) if pd.notna(row["prev_vol"]) else 0,
+            "trail_avg": round(float(row["trail_avg"]), 1) if pd.notna(row["trail_avg"]) else 0.0,
+            "c_macd": bool(row["c_macd"]),
+            "c_mfi": bool(row["c_mfi"]),
+            "c_rsi": bool(row["c_rsi"]),
+            "c_vol_mult": bool(row["c_vol"]),
+            "c_floor": bool(row["c_floor"]),
+        },
+    )
 
 
 # --- backtest -------------------------------------------------------------
