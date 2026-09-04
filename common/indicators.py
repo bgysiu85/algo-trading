@@ -127,3 +127,99 @@ def resample_bars(df: pd.DataFrame, bar_minutes: int) -> pd.DataFrame:
         "volume": g["volume"].sum(),
     }).dropna(subset=["open", "close"])
     return out
+
+
+# --- momentum oscillators --------------------------------------------------
+#
+# Merged here from strategy/mcl/mcl.py and strategy/mc5/mc5.py, which each
+# carried their own copy (ema/rma existed in THREE places). The copies were
+# verified structurally identical before the merge, and every caller's output
+# was pinned numerically across the change.
+#
+# These take their periods as ARGUMENTS rather than reading module constants,
+# which is the substantive change. The old copies closed over their own
+# module's MACD_FAST/RSI_LEN/etc., so two strategies sharing one function
+# would silently have shared one set of tuning parameters. MCL and MC5 happen
+# to use identical values today (12/26/9, RSI 14) -- that coincidence is
+# exactly what would have made the coupling invisible until someone retuned
+# one strategy and moved the other.
+
+def macd(close: pd.Series, fast: int = 12, slow: int = 26,
+         signal: int = 9) -> tuple[pd.Series, pd.Series]:
+    """Pine ta.macd -- returns (line, signal)."""
+    line = ema(close, fast) - ema(close, slow)
+    return line, ema(line, signal)
+
+
+def rsi(close: pd.Series, length: int = 14) -> pd.Series:
+    """Pine ta.rsi -- RMA of gains / RMA of losses."""
+    delta = close.diff()
+    up = rma(delta.clip(lower=0.0), length)
+    down = rma((-delta).clip(lower=0.0), length)
+    rs = up / down.replace(0.0, pd.NA)
+    out = 100.0 - (100.0 / (1.0 + rs))
+    return out.fillna(100.0).where(down != 0.0, 100.0)
+
+
+def mfi(high, low, close, volume, length: int = 14) -> pd.Series:
+    """Pine ta.mfi(hlc3, length)."""
+    tp = (high + low + close) / 3.0
+    raw = tp * volume
+    diff = tp.diff()
+    pos = raw.where(diff > 0, 0.0).rolling(length).sum()
+    neg = raw.where(diff < 0, 0.0).rolling(length).sum()
+    ratio = pos / neg.replace(0.0, pd.NA)
+    return (100.0 - 100.0 / (1.0 + ratio)).fillna(50.0)
+
+
+def rising(s: pd.Series, n: int = 3) -> pd.Series:
+    return s > s.shift(n)
+
+
+def falling(s: pd.Series, n: int = 3) -> pd.Series:
+    return s < s.shift(n)
+
+
+def past_apex(s: pd.Series, lookback: int = 20, n: int = 3) -> pd.Series:
+    """Falling, and the rolling high is at least one bar behind.
+
+    Mirrors Pine:  f_falling(src) and -ta.highestbars(src, lookback) >= 1
+    """
+    roll_max = s.rolling(lookback).max()
+    return falling(s, n) & ~(s >= roll_max)
+
+
+# --- gradients -------------------------------------------------------------
+
+def ols_slope(s: pd.Series, n: int = 3) -> pd.Series:
+    """Least-squares slope over a trailing window, in units per bar.
+
+    Closed form rather than rolling.apply: with x = 0..n-1 the slope is
+    sum((x_i - xbar) * y_i) / sum((x_i - xbar)^2), and the y_i are just shifts.
+    For n = 3 this reduces to (y[t] - y[t-2]) / 2.
+    """
+    if n < 2:
+        raise ValueError("slope needs at least 2 bars")
+    xbar = (n - 1) / 2.0
+    denom = sum((i - xbar) ** 2 for i in range(n))
+    num = None
+    for i in range(n):
+        term = (i - xbar) * s.shift(n - 1 - i)
+        num = term if num is None else num + term
+    return num / denom
+
+
+def roc_pct(s: pd.Series, n: int = 3, min_base: float = 5.0) -> pd.Series:
+    """Percent change across the fitted line over a trailing window.
+
+    Uses the FITTED endpoints, so the numerator (the slope) is immune to a
+    spike in an interior bar. The denominator is the fitted start, floored at
+    `min_base` -- an unfloored percentage of a near-zero base is unbounded.
+
+    Only valid for a strictly positive series. Never use it on MACD.
+    """
+    slope = ols_slope(s, n)
+    mean = s.rolling(n).mean()
+    span = slope * (n - 1)
+    start = (mean - span / 2.0).clip(lower=min_base)
+    return (span / start) * 100.0

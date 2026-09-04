@@ -106,51 +106,43 @@ TICK = 0.01
 
 # --- indicators -----------------------------------------------------------
 
-def ema(s: pd.Series, length: int) -> pd.Series:
-    return s.ewm(span=length, adjust=False).mean()
+# --- indicators -----------------------------------------------------------
+#
+# The maths lives in common/indicators.py; these bind V7's own periods to it.
+# Keeping the wrappers preserves every existing call signature (mcl.macd(c),
+# mcl.rsi(c), ...) while leaving exactly one implementation of each formula
+# in the repo. Change a constant above and every call here follows.
 
-
-def rma(s: pd.Series, length: int) -> pd.Series:
-    return s.ewm(alpha=1.0 / length, adjust=False).mean()
+from common.indicators import (  # noqa: E402
+    ema, rma,
+    macd as _macd, rsi as _rsi, mfi as _mfi,
+    rising as _rising, falling as _falling, past_apex as _past_apex,
+)
 
 
 def macd(close: pd.Series) -> tuple[pd.Series, pd.Series]:
-    line = ema(close, MACD_FAST) - ema(close, MACD_SLOW)
-    return line, ema(line, MACD_SIGNAL)
+    return _macd(close, MACD_FAST, MACD_SLOW, MACD_SIGNAL)
 
 
 def rsi(close: pd.Series, length: int = RSI_LEN) -> pd.Series:
-    delta = close.diff()
-    up = rma(delta.clip(lower=0.0), length)
-    down = rma((-delta).clip(lower=0.0), length)
-    rs = up / down.replace(0.0, pd.NA)
-    out = 100.0 - (100.0 / (1.0 + rs))
-    return out.fillna(100.0).where(down != 0.0, 100.0)
+    return _rsi(close, length)
 
 
 def mfi(high, low, close, volume, length: int = MFI_LEN) -> pd.Series:
-    tp = (high + low + close) / 3.0
-    raw = tp * volume
-    diff = tp.diff()
-    pos = raw.where(diff > 0, 0.0).rolling(length).sum()
-    neg = raw.where(diff < 0, 0.0).rolling(length).sum()
-    ratio = pos / neg.replace(0.0, pd.NA)
-    return (100.0 - 100.0 / (1.0 + ratio)).fillna(50.0)
+    return _mfi(high, low, close, volume, length)
 
 
 def rising(s: pd.Series, n: int = TREND_LOOKBACK) -> pd.Series:
-    return s > s.shift(n)
+    return _rising(s, n)
 
 
 def falling(s: pd.Series, n: int = TREND_LOOKBACK) -> pd.Series:
-    return s < s.shift(n)
+    return _falling(s, n)
 
 
 def past_apex(s: pd.Series, lookback: int = APEX_LOOKBACK,
               n: int = TREND_LOOKBACK) -> pd.Series:
-    """Falling, and the rolling high is at least one bar behind."""
-    roll_max = s.rolling(lookback).max()
-    return falling(s, n) & ~(s >= roll_max)
+    return _past_apex(s, lookback, n)
 
 
 # --- signals --------------------------------------------------------------

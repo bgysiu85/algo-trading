@@ -102,60 +102,34 @@ MIN_WARMUP_BARS = MACD_SLOW + MACD_SIGNAL
 
 # --- indicators -----------------------------------------------------------
 
-def ema(s: pd.Series, length: int) -> pd.Series:
-    return s.ewm(span=length, adjust=False).mean()
+# --- indicators -----------------------------------------------------------
+#
+# Shared maths from common/indicators.py, bound to MC5's own periods. Note
+# roc_pct's floor is MC5's ROC_MIN_BASE rather than the shared default -- see
+# that constant for why an unfloored percentage of RSI is meaningless.
 
-
-def rma(s: pd.Series, length: int) -> pd.Series:
-    return s.ewm(alpha=1.0 / length, adjust=False).mean()
+from common.indicators import (  # noqa: E402
+    ema, rma,
+    macd as _macd, rsi as _rsi,
+    ols_slope as _ols_slope, roc_pct as _roc_pct,
+    resample_bars,
+)
 
 
 def macd(close: pd.Series) -> tuple[pd.Series, pd.Series]:
-    line = ema(close, MACD_FAST) - ema(close, MACD_SLOW)
-    return line, ema(line, MACD_SIGNAL)
+    return _macd(close, MACD_FAST, MACD_SLOW, MACD_SIGNAL)
 
 
 def rsi(close: pd.Series, length: int = RSI_LEN) -> pd.Series:
-    delta = close.diff()
-    up = rma(delta.clip(lower=0.0), length)
-    down = rma((-delta).clip(lower=0.0), length)
-    rs = up / down.replace(0.0, pd.NA)
-    out = 100.0 - (100.0 / (1.0 + rs))
-    return out.fillna(100.0).where(down != 0.0, 100.0)
+    return _rsi(close, length)
 
 
 def ols_slope(s: pd.Series, n: int = SLOPE_BARS) -> pd.Series:
-    """Least-squares slope over a trailing window, in units per bar.
-
-    Closed form rather than rolling.apply: with x = 0..n-1 the slope is
-    sum((x_i - xbar) * y_i) / sum((x_i - xbar)^2), and the y_i are just shifts.
-    For n = 3 this reduces to (y[t] - y[t-2]) / 2.
-    """
-    if n < 2:
-        raise ValueError("slope needs at least 2 bars")
-    xbar = (n - 1) / 2.0
-    denom = sum((i - xbar) ** 2 for i in range(n))
-    num = None
-    for i in range(n):
-        term = (i - xbar) * s.shift(n - 1 - i)
-        num = term if num is None else num + term
-    return num / denom
+    return _ols_slope(s, n)
 
 
 def roc_pct(s: pd.Series, n: int = SLOPE_BARS) -> pd.Series:
-    """Percent change across the fitted line over a trailing window.
-
-    Uses the FITTED endpoints, so the numerator (the slope) is immune to a
-    spike in an interior bar. The denominator is the fitted start, floored at
-    ROC_MIN_BASE -- see that constant for why.
-
-    Only valid for a strictly positive series. Never use it on MACD.
-    """
-    slope = ols_slope(s, n)
-    mean = s.rolling(n).mean()
-    span = slope * (n - 1)
-    start = (mean - span / 2.0).clip(lower=ROC_MIN_BASE)
-    return (span / start) * 100.0
+    return _roc_pct(s, n, ROC_MIN_BASE)
 
 
 # --- bar construction ------------------------------------------------------
@@ -163,23 +137,12 @@ def roc_pct(s: pd.Series, n: int = SLOPE_BARS) -> pd.Series:
 def to_5m(df: pd.DataFrame) -> pd.DataFrame:
     """Resample 1-minute bars to 5-minute, labelled at the interval START.
 
-    Left-labelled and left-closed to match the convention IB, TradingView and
-    Databento all use. Getting this wrong shifts every signal by one bar, which
-    is the classic way a backtest quietly acquires lookahead.
+    Delegates to common.indicators.resample_bars, which was verified to
+    produce identical output to the copy that used to live here -- including
+    on gapped input, where both drop an empty bucket rather than synthesising
+    a flat bar.
     """
-    if not isinstance(df.index, pd.DatetimeIndex):
-        raise TypeError("index must be a DatetimeIndex")
-    if df.index.tz is None:
-        raise ValueError("index must be timezone-aware")
-    g = df.resample(f"{BAR_MINUTES}min", label="left", closed="left")
-    out = pd.DataFrame({
-        "open": g["open"].first(),
-        "high": g["high"].max(),
-        "low": g["low"].min(),
-        "close": g["close"].last(),
-        "volume": g["volume"].sum(),
-    }).dropna(subset=["open", "close"])
-    return out
+    return resample_bars(df, BAR_MINUTES)
 
 
 def _looks_5m(df: pd.DataFrame) -> bool:
