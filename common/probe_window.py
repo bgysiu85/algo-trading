@@ -38,14 +38,14 @@ except ImportError:  # pragma: no cover
     sys.exit("ib_async not installed.  pip install -r requirements.txt")
 
 from common import session_lock
-from common.cache_io import load_pairs, slice_window
+from common.cache_io import load_pairs, slice_sessions
 
 ET = ZoneInfo("America/New_York")
 PAPER_PORTS = {4002: "IB Gateway paper", 7497: "TWS paper"}
 LIVE_PORTS = {4001: "IB Gateway LIVE", 7496: "TWS LIVE"}
 REQUEST_INTERVAL_S = 12.5
 
-# (label, durationStr, end hour, end minute, duration_days for slicing)
+# (label, durationStr, end hour, end minute, sessions for slicing)
 WINDOWS = [
     ("backtest", "2 D", 9, 30, 2),
     ("data_ib", "1 D", 20, 0, 1),
@@ -135,7 +135,7 @@ async def main_async(args) -> int:
                 direct = await _fetch(ib, contract, date_str, duration, eh, em)
                 end = datetime.strptime(date_str, "%Y-%m-%d").replace(
                     hour=eh, minute=em, tzinfo=ET)
-                all_ok &= _compare(label, direct, slice_window(sup, end, days))
+                all_ok &= _compare(label, direct, slice_sessions(sup, end, days))
     finally:
         ib.disconnect()
 

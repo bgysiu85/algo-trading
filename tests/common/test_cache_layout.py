@@ -67,46 +67,77 @@ def test_cache_files_are_gzipped():
 
 # --- shared superset window ------------------------------------------------
 
-def test_the_obvious_superset_guess_is_wrong():
-    """'2 D' ending 20:00 does NOT cover backtest.py's window.
-
-    It starts 10.5h after backtest's does, losing the prior-day warm-up. This
-    is pinned because it is the guess anyone would make first, and getting it
-    wrong silently truncates every MCL backtest's indicator seeding.
-    """
-    from datetime import datetime, timedelta
-    from zoneinfo import ZoneInfo
-    et = ZoneInfo("America/New_York")
-    d = datetime(2026, 9, 2, tzinfo=et)
-
-    bt_start = d.replace(hour=9, minute=30) - timedelta(days=2)
-    guess_start = d.replace(hour=20) - timedelta(days=2)
-    assert guess_start > bt_start, "the naive guess would have covered it"
-
-    shared_start = d.replace(hour=20) - timedelta(days=3)
-    assert shared_start <= bt_start
-
-
-def test_slicing_a_superset_reproduces_each_window_exactly(tmp_path):
-    """A superset cache is only safe if consumers slice back to their own
-    window: a longer frame changes EMA-seeded indicators on identical bars."""
+def _sessions_frame(days):
+    """Extended-hours bars for the given dates only -- non-trading days simply
+    have no bars, which is how the real cache looks."""
     import numpy as np
     import pandas as pd
+    from zoneinfo import ZoneInfo
+    et = ZoneInfo("America/New_York")
+    idx = None
+    for d in days:
+        day = pd.date_range(f"{d} 04:00", f"{d} 19:59", freq="1min", tz=et)
+        idx = day if idx is None else idx.append(day)
+    return pd.DataFrame({"close": np.arange(len(idx), dtype=float)},
+                        index=idx.tz_convert("UTC"))
+
+
+def test_ib_duration_counts_trading_sessions_not_calendar_days():
+    """Pinned against a live probe on 2026-09-04.
+
+    A "2 D" request ending 09:30 returned 1290 bars = 960 (a full 04:00-20:00
+    session) + 330 (04:00 to 09:30 exclusive). The earlier calendar-based
+    slice dropped a whole 960-bar session when starting from a Monday, and
+    added 630 bars when starting from a Friday. Weekends are where it broke.
+    """
     from datetime import datetime
     from zoneinfo import ZoneInfo
-    from common.cache_io import slice_window
-
+    from common.cache_io import slice_sessions
     et = ZoneInfo("America/New_York")
-    idx = pd.date_range("2026-08-29 04:00", "2026-09-02 20:00", freq="1min", tz="UTC")
-    px = 5.0 + np.arange(len(idx)) * 0.0001
-    df = pd.DataFrame({"open": px, "high": px, "low": px, "close": px,
-                       "volume": np.ones(len(idx))}, index=idx)
-    d = datetime(2026, 9, 2, tzinfo=et)
+    # Wed Thu Fri Mon -- the weekend is absent, as it is in real data
+    df = _sessions_frame(["2026-03-11", "2026-03-12", "2026-03-13", "2026-03-16"])
 
-    superset = slice_window(df, d.replace(hour=20), 3)
-    for end_h, end_m, days in [(9, 30, 2), (20, 0, 1)]:
-        end = d.replace(hour=end_h, minute=end_m)
-        assert slice_window(df, end, days).equals(slice_window(superset, end, days))
+    mon0930 = datetime(2026, 3, 16, 9, 30, tzinfo=et)
+    assert len(slice_sessions(df, mon0930, 2)) == 960 + 330
+    fri0930 = datetime(2026, 3, 13, 9, 30, tzinfo=et)
+    assert len(slice_sessions(df, fri0930, 2)) == 960 + 330
+    assert len(slice_sessions(df, datetime(2026, 3, 16, 20, 0, tzinfo=et), 1)) == 960
+
+
+def test_two_sessions_from_a_monday_reach_back_over_the_weekend():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from common.cache_io import slice_sessions
+    et = ZoneInfo("America/New_York")
+    df = _sessions_frame(["2026-03-12", "2026-03-13", "2026-03-16"])
+    got = slice_sessions(df, datetime(2026, 3, 16, 9, 30, tzinfo=et), 2)
+    dates = sorted({str(d) for d in got.index.tz_convert(et).date})
+    assert dates == ["2026-03-13", "2026-03-16"], dates
+
+
+def test_the_endpoint_bar_is_excluded():
+    """The probe reported exactly one 'extra' bar per pair: the endpoint."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from common.cache_io import slice_sessions
+    et = ZoneInfo("America/New_York")
+    df = _sessions_frame(["2026-03-16"])
+    got = slice_sessions(df, datetime(2026, 3, 16, 9, 30, tzinfo=et), 1)
+    times = {t.strftime("%H:%M") for t in got.index.tz_convert(et).time}
+    assert "09:29" in times and "09:30" not in times
+
+
+def test_slicing_a_superset_reproduces_each_window_exactly():
+    """The property the shared cache depends on."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from common.cache_io import slice_sessions
+    et = ZoneInfo("America/New_York")
+    df = _sessions_frame(["2026-03-11", "2026-03-12", "2026-03-13", "2026-03-16"])
+    superset = slice_sessions(df, datetime(2026, 3, 16, 20, 0, tzinfo=et), 3)
+    for end, n in [(datetime(2026, 3, 16, 9, 30, tzinfo=et), 2),
+                   (datetime(2026, 3, 16, 20, 0, tzinfo=et), 1)]:
+        assert slice_sessions(df, end, n).equals(slice_sessions(superset, end, n))
 
 
 def test_longer_warmup_moves_the_indicators():

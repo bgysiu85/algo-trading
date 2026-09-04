@@ -108,13 +108,42 @@ SHARED_DURATION = "3 D"
 SHARED_END_HHMM = "2000"
 
 
-def slice_window(df: pd.DataFrame, end, duration_days: int) -> pd.DataFrame:
-    """The bars a `{duration_days} D` request ending at `end` would return.
+def slice_sessions(df: pd.DataFrame, end, n_sessions: int,
+                   tz="America/New_York") -> pd.DataFrame:
+    """The bars an IB `{n_sessions} D` request ending at `end` would return.
 
-    Bounds are (end - duration, end] -- exclusive start, inclusive end, which
-    is what IB's endDateTime semantics imply. probe_window.py checks that
-    against the real API rather than trusting it.
+    IB counts TRADING SESSIONS, not calendar time. A probe against the live
+    API on 2026-09-04 pinned the rule exactly:
+
+        "N D" ending T on date D = the N-1 preceding trading sessions IN
+        FULL, plus D's own session up to but EXCLUDING T.
+
+    The arithmetic matched to the bar: a "2 D" request ending 09:30 returned
+    1290 bars = 960 (a full 04:00-20:00 session) + 330 (04:00 to 09:30
+    exclusive).
+
+    The earlier calendar-based version of this function was wrong in both
+    directions and silently so. From a Monday it subtracted three calendar
+    days, landing on Friday 20:00 and dropping the entire Friday session --
+    960 bars IB would have returned. From a Friday it reached back to
+    Wednesday and added 630 bars IB would not have. Weekends and holidays are
+    exactly where it broke.
+
+    Sessions are taken from the dates PRESENT IN THE DATA rather than from a
+    calendar, so market holidays and half-days need no special handling: a day
+    the market was shut simply has no bars and is not a session.
     """
-    from datetime import timedelta
-    start = end - timedelta(days=duration_days)
-    return df[(df.index > start) & (df.index <= end)]
+    if df.empty:
+        return df
+    local = df.index.tz_convert(tz)
+    end_local = end.astimezone(local.tz) if hasattr(end, "astimezone") else end
+    end_date, end_time = end_local.date(), end_local.time()
+
+    dates = sorted({d for d in local.date if d <= end_date})
+    if not dates:
+        return df.iloc[:0]
+    keep = set(dates[-n_sessions:])
+
+    mask = [(d in keep) and not (d == end_date and tm >= end_time)
+            for d, tm in zip(local.date, local.time)]
+    return df[mask]
