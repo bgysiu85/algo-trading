@@ -55,10 +55,37 @@ LIVE_PORTS = {4001: "IB Gateway LIVE", 7496: "TWS LIVE"}
 # IB allows ~60 historical requests per 10 minutes. Contract qualification also
 # consumes requests, and an unknown symbol costs up to 5 (one per exchange
 # tried), so leave headroom rather than sitting on the cap.
-REQUEST_INTERVAL_S = 12.5     # ~48 requests / 10 min
+REQUEST_INTERVAL_S = 12.5     # ~48 historical requests / 10 min
 RETRY_BACKOFF_S = 20.0        # extra pause before retrying an empty response
-EXCHANGES = ["SMART"]
+
+# Contract qualification is ALSO a paced IB request, and the 2026-09-03 run
+# proved it the expensive way: qualify() ran unthrottled, so 302 symbols x up
+# to 5 exchanges was up to ~1500 requests fired as fast as the loop could go.
+# IB started refusing after roughly 47 symbols -- alphabetically ABOS..CAMP --
+# and every symbol after that was recorded NOT_QUALIFIED. 337 of 407 pairs
+# were lost to this, not to missing data.
+#
+# IB answers a refused qualification with an empty list, exactly as it does
+# for a genuinely unknown symbol, so the two are indistinguishable per call.
+# The only defences are to pace, and to treat a STREAK of failures as evidence.
+QUALIFY_INTERVAL_S = 2.0      # ~30 qualification requests / minute
+QUALIFY_COOLDOWN_S = 60.0     # pause after a suspicious run of failures
+QUALIFY_FAIL_STREAK = 5       # consecutive failures that trigger the cooldown
+
 PRIMARIES = ["NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"]
+
+# Bars are cached to disk after the first fetch, and a cache hit costs no IB
+# request and no pacing wait.
+#
+# The reason this matters: every strategy variant we want to compare needs the
+# SAME bars -- apex on/off, MACD > 0 on/off, intrabar vs bar-close entry, MC5
+# against MCL. Without a cache each of those is another ~85-minute paced pass
+# that also cannot overlap a live session. With one, the first pass pays for
+# the data and every comparison afterwards runs offline in seconds.
+#
+# csv.gz rather than parquet on purpose: pandas reads and writes it with no
+# extra dependency, so nothing new has to be installed in the venv.
+CACHE_DIR = Path("bar_cache")
 
 LOG = logging.getLogger("bt")
 
@@ -76,7 +103,7 @@ def load_pairs(path: Path) -> list[dict]:
 
 
 class Runner:
-    def __init__(self, ib: IB, out_dir: Path):
+    def __init__(self, ib: IB, out_dir: Path, cache_dir: Path | None = None):
         self.ib = ib
         self.out_dir = out_dir
         self.contracts: dict[str, object] = {}
@@ -84,13 +111,18 @@ class Runner:
         self.state_path = out_dir / "backtest_state.json"
         self.state = self._load_state()
         self._last_req = 0.0
+        self._last_qual = 0.0
+        self._qual_fails = 0
+        self.cache_dir = cache_dir or CACHE_DIR
+        self.cache_hits = 0
+        self.cache_misses = 0
 
     def _load_state(self) -> dict:
         if self.state_path.exists():
             try:
                 return json.loads(self.state_path.read_text())
             except json.JSONDecodeError:
-                LOG.warning("state file unreadable — starting fresh")
+                LOG.warning("state file unreadable -- starting fresh")
         return {"done": {}, "trades": []}
 
     def _save_state(self) -> None:
@@ -104,22 +136,92 @@ class Runner:
             await asyncio.sleep(wait)
         self._last_req = time.monotonic()
 
+    async def _pace_qualify(self) -> None:
+        wait = QUALIFY_INTERVAL_S - (time.monotonic() - self._last_qual)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        self._last_qual = time.monotonic()
+
+    async def _try_qualify(self, contract):
+        await self._pace_qualify()
+        try:
+            got = await self.ib.qualifyContractsAsync(contract)
+        except Exception:
+            return None
+        return got[0] if got else None
+
     async def qualify(self, symbol: str):
+        """Resolve a symbol to a contract, paced, with throttle detection.
+
+        Plain SMART is tried FIRST and resolves most US equities in a single
+        request. The per-exchange fallbacks run only when that fails, so a
+        typical symbol now costs 1 request instead of up to 5.
+        """
         if symbol in self.contracts:
             return self.contracts[symbol]
         if symbol in self.unqualified:
             return None
-        for primary in PRIMARIES:
-            c = Stock(symbol, "SMART", "USD", primaryExchange=primary)
-            try:
-                got = await self.ib.qualifyContractsAsync(c)
-            except Exception:
-                got = None
-            if got:
-                self.contracts[symbol] = got[0]
-                return got[0]
+
+        got = await self._try_qualify(Stock(symbol, "SMART", "USD"))
+        if got is None:
+            for primary in PRIMARIES:
+                got = await self._try_qualify(
+                    Stock(symbol, "SMART", "USD", primaryExchange=primary))
+                if got is not None:
+                    break
+
+        if got is not None:
+            self.contracts[symbol] = got
+            self._qual_fails = 0
+            return got
+
+        # A delisted symbol looks identical to a throttled one, so treat a
+        # STREAK as evidence of throttling: cool off, then give this symbol
+        # one more chance before condemning it.
+        self._qual_fails += 1
+        if self._qual_fails >= QUALIFY_FAIL_STREAK:
+            LOG.warning("%d consecutive qualification failures -- likely IB "
+                        "throttling, not missing symbols. Cooling off %.0fs.",
+                        self._qual_fails, QUALIFY_COOLDOWN_S)
+            await asyncio.sleep(QUALIFY_COOLDOWN_S)
+            self._qual_fails = 0
+            got = await self._try_qualify(Stock(symbol, "SMART", "USD"))
+            if got is not None:
+                self.contracts[symbol] = got
+                LOG.info("  %s qualified after cooldown -- it WAS throttling",
+                         symbol)
+                return got
+
         self.unqualified.add(symbol)
         return None
+
+    def _cache_path(self, symbol: str, date_str: str) -> Path:
+        return self.cache_dir / f"{symbol}_{date_str}.csv.gz"
+
+    def _cache_read(self, symbol: str, date_str: str):
+        path = self._cache_path(symbol, date_str)
+        if not path.exists():
+            return None
+        try:
+            df = pd.read_csv(path, index_col=0, parse_dates=[0])
+        except Exception as e:  # noqa: BLE001
+            LOG.warning("cache unreadable for %s %s (%s) -- refetching",
+                        symbol, date_str, type(e).__name__)
+            return None
+        if df.empty:
+            return None
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+        else:
+            df.index = df.index.tz_convert("UTC")
+        return df.sort_index()
+
+    def _cache_write(self, symbol: str, date_str: str, df) -> None:
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            df.to_csv(self._cache_path(symbol, date_str))
+        except Exception as e:  # noqa: BLE001
+            LOG.warning("could not cache %s %s: %s", symbol, date_str, e)
 
     async def bars_for(self, contract, date_str: str):
         """1-minute bars ending at 09:30 ET on the target date.
@@ -129,10 +231,15 @@ class Runner:
 
         Retries once on an empty response. IB returns an empty list rather than
         an error when it throttles, so a single empty result is NOT evidence
-        that the data does not exist — and the probe showed the same symbol
+        that the data does not exist -- and the probe showed the same symbol
         succeeding on one date and returning nothing on the adjacent one, which
         is the signature of pacing rather than missing history.
         """
+        cached = self._cache_read(contract.symbol, date_str)
+        if cached is not None:
+            self.cache_hits += 1
+            return cached, None
+
         end = datetime.strptime(date_str, "%Y-%m-%d").replace(
             hour=9, minute=30, tzinfo=ET)
         last_err = "no data returned"
@@ -151,7 +258,10 @@ class Runner:
                 if df is not None and not df.empty:
                     df = df.rename(columns=str.lower)
                     df["date"] = pd.to_datetime(df["date"], utc=True)
-                    return df.set_index("date").sort_index(), None
+                    out = df.set_index("date").sort_index()
+                    self._cache_write(contract.symbol, date_str, out)
+                    self.cache_misses += 1
+                    return out, None
                 last_err = "empty frame"
             if attempt == 1:
                 LOG.debug("  %s %s empty, backing off then retrying",
@@ -214,12 +324,18 @@ class Runner:
         with_sess = [v for v in ok if v["session_bars"] > 0]
         print("\n" + "=" * 66)
         print(f"  pairs attempted        {len(done)}")
-        print(f"  contract not qualified {sum(1 for v in done.values() if v['status']=='NOT_QUALIFIED')}")
+        nq = sum(1 for v in done.values() if v["status"] == "NOT_QUALIFIED")
+        print(f"  contract not qualified {nq}")
+        if done and nq / len(done) > 0.25:
+            print(f"    ^^ {nq / len(done) * 100:.0f}% failed to qualify -- that is")
+            print("       almost certainly IB throttling, not delisted symbols.")
+            print("       Rerun with --retry-failed.")
         print(f"  no bars returned       {sum(1 for v in done.values() if v['status']=='NO_DATA')}")
         print(f"  bars OK                {len(ok)}")
+        print(f"  bars from cache        {self.cache_hits}  (fetched {self.cache_misses})")
         print(f"  with pre-market bars   {len(with_sess)}")
         if probe_only:
-            print("\n  (probe only — no backtest run)")
+            print("\n  (probe only -- no backtest run)")
             print("=" * 66)
             return
 
@@ -274,23 +390,28 @@ async def main_async(args) -> int:
         await ib.connectAsync("127.0.0.1", args.port, clientId=args.client_id,
                               timeout=15)
     except Exception as e:  # noqa: BLE001
-        print(f"could not connect to 127.0.0.1:{args.port} — {e}")
+        print(f"could not connect to 127.0.0.1:{args.port} -- {e}")
         print("Is IB Gateway running and logged in?")
         return 1
     LOG.info("connected, accounts %s", ib.managedAccounts())
 
-    runner = Runner(ib, Path(args.out_dir))
+    runner = Runner(ib, Path(args.out_dir), Path(args.cache_dir))
     if args.retry_failed:
+        # NOT_QUALIFIED is included deliberately. On 2026-09-03 it was the
+        # dominant failure (337 of 407) and it was caused by throttling, not
+        # by delisted symbols -- so it is exactly what needs re-attempting.
+        retry_statuses = ("NO_DATA", "NOT_QUALIFIED")
         stale = [k for k, v in runner.state["done"].items()
-                 if v["status"] == "NO_DATA"]
+                 if v["status"] in retry_statuses]
         for k in stale:
             del runner.state["done"][k]
-        print(f"cleared {len(stale)} NO_DATA entries for retry\n")
+        print("cleared %d failed entries (%s) for retry\n"
+              % (len(stale), " + ".join(retry_statuses)))
         runner._save_state()
     try:
         await runner.run(pairs, args.probe)
     except (KeyboardInterrupt, asyncio.CancelledError):
-        print("\ninterrupted — progress saved, rerun to resume")
+        print("\ninterrupted -- progress saved, rerun to resume")
     finally:
         runner.report(args.probe)
         ib.disconnect()
@@ -301,6 +422,9 @@ def main() -> int:
     p = argparse.ArgumentParser(description="MCL offline backtest over traded pairs")
     p.add_argument("--pairs", default="traded_pairs.json")
     p.add_argument("--out-dir", default=".")
+    p.add_argument("--cache-dir", default="bar_cache",
+                   help="where fetched bars are stored. A cache hit costs "
+                        "no IB request, so variant sweeps run offline.")
     p.add_argument("--port", type=int, default=4002)
     p.add_argument("--client-id", type=int, default=33)
     p.add_argument("--probe", action="store_true",
