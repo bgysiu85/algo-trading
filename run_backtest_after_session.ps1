@@ -43,12 +43,28 @@ function Get-ETNow {
 }
 
 function Test-TraderRunning {
-    # Any python process whose command line mentions the live trader.
-    $procs = Get-CimInstance Win32_Process -Filter "Name like '%python%'" -ErrorAction SilentlyContinue
-    foreach ($p in $procs) {
-        if ($p.CommandLine -and $p.CommandLine -match "mcl_paper_trader") { return $true }
+    # Reads the lock a live session holds. This used to grep python command
+    # lines for "mcl_paper_trader", which stopped meaning anything once every
+    # mode launched through main.py -- and silently disabled itself if the
+    # trader was ever renamed. common/session_lock.py owns the format and
+    # clears the file when the owning process is gone.
+    $lock = Join-Path $PSScriptRoot "var\state\session.lock"
+    if (-not (Test-Path $lock)) { return $false }
+    try {
+        $info = Get-Content $lock -Raw | ConvertFrom-Json
+    } catch {
+        Write-Host "session.lock is unreadable - treating as no session." -ForegroundColor Yellow
+        return $false
     }
-    return $false
+    # The Python side is authoritative on staleness; this is a cheap echo of it
+    # so the scheduled run reports something useful rather than just refusing.
+    $proc = Get-Process -Id $info.pid -ErrorAction SilentlyContinue
+    if (-not $proc) {
+        Write-Host "session.lock is stale (pid $($info.pid) gone) - proceeding." -ForegroundColor Yellow
+        return $false
+    }
+    Write-Host "$($info.mode) session for $($info.strategy) is running (pid $($info.pid))." -ForegroundColor Yellow
+    return $true
 }
 
 $logDir = Join-Path $PSScriptRoot "var\logs"
@@ -102,7 +118,7 @@ Write-Host ""
 # a native command's stderr into the pipeline turns every log line into a
 # terminating error, so drop back to Continue for the duration of the run.
 $ErrorActionPreference = "Continue"
-& $py -m common.backtest --retry-failed 2>&1 | Tee-Object -FilePath $log
+& $py main.py --mode backtest --strategy mcl --retry-failed 2>&1 | Tee-Object -FilePath $log
 $code = $LASTEXITCODE
 $ErrorActionPreference = "Stop"
 

@@ -20,7 +20,7 @@ if (-not (Test-Path $py)) {
     exit 1
 }
 
-$argsList = @("-m", "common.report_trades", "--port", "$Port")
+$argsList = @("main.py", "--mode", "report", "--port", "$Port")
 if ($Watch) { $argsList += "--watch" }
 
 & $py @argsList

@@ -67,7 +67,8 @@ if ($confirm -ne "PAPER") {
     exit 0
 }
 
-$argsList = @(".\mcl_paper_trader.py", "--watchlist", ".\var\watchlist.txt", "--port", "$Port")
+$argsList = @("main.py", "--mode", "paper", "--strategy", "mcl",
+              "--watchlist", ".\var\watchlist.txt", "--port", "$Port")
 if ($NoArchive)      { $argsList += "--no-archive" }
 if ($SleepWhenDone)  {
     $argsList += @("--sleep-on-exit", "--sleep-delay-min", "$SleepDelayMin")

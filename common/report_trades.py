@@ -10,7 +10,7 @@ client id and prints what the account currently looks like.
     .\\.venv\\Scripts\\python.exe report_trades.py            # once
     .\\.venv\\Scripts\\python.exe report_trades.py --watch    # refresh every 30s
 
-Places no orders.  Safe to run while mcl_paper_trader.py is trading.
+Places no orders.  Safe to run while a live session is trading.
 
 NOTE ON EXECUTIONS
 ------------------
@@ -151,12 +151,12 @@ async def main_async(port: int, watch: bool) -> int:
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Read-only IBKR paper account view")
     ap.add_argument("--port", type=int, default=4002)
     ap.add_argument("--watch", action="store_true",
                     help="refresh every 30 seconds until Ctrl-C")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     try:
         return asyncio.run(main_async(a.port, a.watch))
     except KeyboardInterrupt:

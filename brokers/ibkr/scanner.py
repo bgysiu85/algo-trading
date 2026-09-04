@@ -5,7 +5,8 @@ MCL scanner -- feeds watchlist.txt from IB's market scanner.
     .\\.venv\\Scripts\\python.exe mcl_scanner.py --preview   # show, write nothing
     .\\.venv\\Scripts\\python.exe mcl_scanner.py             # run and keep it fresh
 
-Runs alongside mcl_paper_trader.py on its own client id. Places no orders.
+Runs alongside a live session on its own client id. Places no orders, and
+deliberately does NOT take the session lock for that reason.
 The trader re-reads watchlist.txt every 5 seconds, so anything written here is
 picked up without a restart.
 
@@ -271,7 +272,7 @@ async def main_async(args) -> int:
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Feed watchlist.txt from IB's scanner")
     p.add_argument("--watchlist", default="var/watchlist.txt")
     p.add_argument("--port", type=int, default=4002)
@@ -288,7 +289,7 @@ def main() -> int:
     p.add_argument("--no-sticky", dest="sticky", action="store_false",
                    help="let names drop off when they leave the top N "
                         "(default is to keep them for the session)")
-    args = p.parse_args()
+    args = p.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)-7s %(message)s",

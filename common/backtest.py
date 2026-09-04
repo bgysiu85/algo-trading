@@ -46,7 +46,17 @@ try:
 except ImportError:
     sys.exit("ib_async not installed.  pip install ib_async pandas")
 
-from strategy.mcl import mcl as S
+import importlib
+
+from common import session_lock
+
+# Both expose backtest_session(df, session_date, tz) and accept the same
+# 1-minute frame -- MC5 resamples internally, so the engine does not need to
+# know the bar size a strategy trades on.
+STRATEGY_MODULES = {
+    "mcl": "strategy.mcl.mcl",
+    "mc5": "strategy.mc5.mc5",
+}
 
 ET = ZoneInfo("America/New_York")
 PAPER_PORTS = {4002: "IB Gateway paper", 7497: "TWS paper"}
@@ -104,8 +114,12 @@ def load_pairs(path: Path) -> list[dict]:
 
 class Runner:
     def __init__(self, ib: IB, out_dir: Path, cache_dir: Path | None = None,
-                 state_dir: Path | None = None):
+                 state_dir: Path | None = None, strategy: str = "mcl"):
         self.ib = ib
+        self.strategy = strategy
+        # The strategy module supplies SESSION_START/SESSION_END and
+        # backtest_session(); nothing else about it is known here.
+        self.S = importlib.import_module(STRATEGY_MODULES[strategy])
         self.out_dir = out_dir
         # The resumable checkpoint and the trade report are different kinds
         # of thing and now live in different var/ subdirectories, so they no
@@ -116,7 +130,7 @@ class Runner:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.contracts: dict[str, object] = {}
         self.unqualified: set[str] = set()
-        self.state_path = self.state_dir / "backtest_state.json"
+        self.state_path = self.state_dir / f"backtest_state_{strategy}.json"
         self.state = self._load_state()
         self._last_req = 0.0
         self._last_qual = 0.0
@@ -305,14 +319,14 @@ class Runner:
             local = df.index.tz_convert(ET)
             target = datetime.strptime(p["date"], "%Y-%m-%d").date()
             sess = int(((local.date == target)
-                        & (local.time >= S.SESSION_START)
-                        & (local.time < S.SESSION_END)).sum())
+                        & (local.time >= self.S.SESSION_START)
+                        & (local.time < self.S.SESSION_END)).sum())
 
             rec = {"status": "OK", "bars": len(df), "session_bars": sess,
                    "trades": 0, "net": 0.0}
 
             if not probe_only and sess > 0:
-                trades = S.backtest_session(df, target, ET)
+                trades = self.S.backtest_session(df, target, ET)
                 for t in trades:
                     d = asdict(t)
                     d["symbol"] = p["symbol"]
@@ -374,12 +388,21 @@ class Runner:
             print(f"    {s:6} {v:+9.2f}")
         print("=" * 66)
 
-        out = self.out_dir / "backtest_trades.csv"
+        out = self.out_dir / f"backtest_trades_{self.strategy}.csv"
         pd.DataFrame(tr).to_csv(out, index=False)
         print(f"\n  trades written to {out}")
 
 
 async def main_async(args) -> int:
+    live = None if args.force else session_lock.active()
+    if live:
+        print("REFUSING: " + session_lock.describe(live))
+        print("  IB's ~60-requests-per-10-minutes cap is account-wide, so this")
+        print("  backtest would throttle that session -- and IB signals")
+        print("  throttling with empty results, not errors, so both sides")
+        print("  would fail silently. Wait for it to finish, or pass --force.")
+        return 1
+
     if args.port in LIVE_PORTS:
         print(f"REFUSING: port {args.port} is {LIVE_PORTS[args.port]}.")
         return 1
@@ -404,7 +427,7 @@ async def main_async(args) -> int:
     LOG.info("connected, accounts %s", ib.managedAccounts())
 
     runner = Runner(ib, Path(args.out_dir), Path(args.cache_dir),
-                    Path(args.state_dir))
+                    Path(args.state_dir), args.strategy)
     if args.retry_failed:
         # NOT_QUALIFIED is included deliberately. On 2026-09-03 it was the
         # dominant failure (337 of 407) and it was caused by throttling, not
@@ -427,13 +450,19 @@ async def main_async(args) -> int:
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="MCL offline backtest over traded pairs")
+    p.add_argument("--strategy", default="mcl", choices=sorted(STRATEGY_MODULES),
+                   help="which strategy to backtest")
+    p.add_argument("--force", action="store_true",
+                   help="run even while a live session holds the lock. IB's "
+                        "request cap is account-wide, so this WILL contend "
+                        "with that session.")
     p.add_argument("--pairs", default="var/state/traded_pairs.json")
     p.add_argument("--out-dir", default="var/reports",
-                   help="where backtest_trades.csv is written")
+                   help="where backtest_trades_<strategy>.csv is written")
     p.add_argument("--state-dir", default="var/state",
-                   help="where the resumable backtest_state.json checkpoint lives")
+                   help="where the resumable backtest_state_<strategy>.json checkpoint lives")
     p.add_argument("--cache-dir", default="bar_cache",
                    help="where fetched bars are stored. A cache hit costs "
                         "no IB request, so variant sweeps run offline.")
@@ -446,7 +475,7 @@ def main() -> int:
     p.add_argument("--retry-failed", action="store_true",
                    help="re-attempt pairs previously recorded as NO_DATA "
                         "(they are usually throttling, not missing history)")
-    args = p.parse_args()
+    args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)-7s %(message)s",
                         datefmt="%H:%M:%S")

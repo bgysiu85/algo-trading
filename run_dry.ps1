@@ -66,8 +66,9 @@ if ($tickers.Count -eq 0) {
 }
 
 # ---- build args and go ----------------------------------------------------
-$argsList = @(".\mcl_paper_trader.py", "--watchlist", ".\var\watchlist.txt", "--port", "$Port")
-if (-not $Live)    { $argsList += "--dry-run" }
+$argsList = @("main.py", "--mode", "dry", "--strategy", "mcl",
+              "--watchlist", ".\var\watchlist.txt", "--port", "$Port")
+if ($Live)         { $argsList[2] = "paper" }   # -Live promotes dry -> paper
 if ($AllowEmpty)   { $argsList += "--allow-empty" }
 
 if ($Live) {

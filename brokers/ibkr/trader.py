@@ -9,13 +9,11 @@ evaluation, position sizing — lives in mcl_strategy.py and is not duplicated
 here; see claude/repo_reorg_and_github_plan.md STEP 2 for why this file was
 split out of the old mcl_paper_trader.py.
 
-Still invoked via `mcl_paper_trader.py`, which is now a thin entry point
-that imports main() from here — kept at that path/name deliberately, since
-run_dry.ps1 / run_paper.ps1 invoke it directly and
-run_backtest_after_session.ps1 detects a live session by matching the
-literal string "mcl_paper_trader" in the process command line. Both move to
-`main.py` in Step 3/4 of the reorg plan; until then, renaming this file would
-silently defeat that guard.
+Invoked through `main.py --mode paper|dry --strategy mcl`, which also takes
+the session lock (common/session_lock.py) for the duration. Running this
+module directly still works but bypasses that lock, so a scheduled backtest
+would not know a session was live and would contend with it for IB's
+account-wide request budget.
 
 Mirrors the V7 Pine strategy and executes it against an IBKR **PAPER**
 account using marketable limit orders, which is the only order type IBKR
@@ -49,8 +47,8 @@ Size    : min(100 shares, 40% of equity / price)
 
 Usage
 -----
-    python mcl_paper_trader.py --watchlist var\\watchlist.txt
-    python mcl_paper_trader.py --watchlist var\\watchlist.txt --dry-run
+    python main.py --mode paper --strategy mcl
+    python main.py --mode dry   --strategy mcl
 
 --dry-run logs signals and computes intended orders but places none. Run this
 first, every time, before letting it place anything.
@@ -1101,7 +1099,7 @@ def suspend_machine(delay_min: int, flat: bool) -> None:
                    check=False)
 
 
-def main():
+def main(argv: list[str] | None = None):
     p = argparse.ArgumentParser(description="MCL pre-market paper trader (IBKR)")
     p.add_argument("--watchlist", default="var/watchlist.txt",
                    help="file with today's qualifying tickers, one per line")
@@ -1126,7 +1124,7 @@ def main():
     p.add_argument("--sleep-delay-min", type=int, default=20,
                    help="minutes to wait after the session before sleeping (default 20, "
                         "which leaves time to read the log or for Claude to review it)")
-    args = p.parse_args()
+    args = p.parse_args(argv)
 
     logging.basicConfig(
         level=logging.INFO,
