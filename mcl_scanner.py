@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MCL scanner — feeds watchlist.txt from IB's market scanner.
+MCL scanner -- feeds watchlist.txt from IB's market scanner.
 
     .\\.venv\\Scripts\\python.exe mcl_scanner.py --preview   # show, write nothing
     .\\.venv\\Scripts\\python.exe mcl_scanner.py             # run and keep it fresh
@@ -12,7 +12,7 @@ picked up without a restart.
 SELECTION IS STICKY
 -------------------
 Once a symbol qualifies it stays on the list for the rest of the session. The
-strategy's premise is "today's movers", not "this minute's movers" — a name that
+strategy's premise is "today's movers", not "this minute's movers" -- a name that
 qualifies at 04:05 and would trigger an entry at 04:20 must not vanish at 04:10
 because it slipped to third place. --no-sticky turns this off.
 
@@ -25,9 +25,22 @@ SCAN_CODE and the filters below are a best guess until scan_params.py has been
 run against your Gateway. IB's available scan codes and filter tags depend on
 your own market-data subscriptions. Run scan_params.py first and adjust.
 
-Known gap: IB has no FLOAT filter. Market cap is not float. If float < 20m is a
-hard criterion you will still be applying it yourself — the scanner narrows the
-field, it does not finish the job.
+FLOAT FILTERING - CORRECTED 2026-09-04
+--------------------------------------
+An earlier version of this file claimed IB has no float filter. That was wrong.
+scanner_parameters.xml declares floatSharesAbove and floatSharesBelow, so the
+float < 20m criterion CAN be pushed into the scan itself rather than applied by
+hand afterwards. Both are wired below.
+
+Also confirmed present: changePercAbove/Below, volumeAbove, avgVolumeAbove,
+marketCapAbove1e6/Below1e6, haltedIs. 527 scan codes in total, and
+STK.US.MAJOR, STK.US.MINOR, STK.NASDAQ.SCM (Nasdaq Small Cap Market) are all
+valid locations.
+
+STILL UNVERIFIED: whether TOP_PERC_GAIN computes anything before 09:30. IB's
+percent-gain scans are defined against the previous close, which should work in
+the pre-market, but this has never actually been run against a live Gateway.
+--preview is how to find out, and it writes nothing.
 """
 
 from __future__ import annotations
@@ -53,23 +66,33 @@ HOST = "127.0.0.1"
 CLIENT_ID = 55                      # trader uses 17, viewer 77, params dump 88
 
 # ---- the screen ----------------------------------------------------------
-SCAN_CODE = "TOP_PERC_GAIN"         # confirm against scan_params.py output
+SCAN_CODE = "TOP_PERC_GAIN"         # verified present in scanner_parameters.xml
+# STK.US.MAJOR excludes OTC/pink. STK.NASDAQ.SCM (Nasdaq Small Cap Market) is
+# narrower and closer to the strategy's universe -- worth comparing with
+# --preview before committing to either.
 LOCATION = "STK.US.MAJOR"
 PRICE_MIN, PRICE_MAX = 2.0, 20.0
 MIN_VOLUME = 100_000                # previous-day volume floor, a coarse cut
+
+# Pushed into the scan as TagValues. All three tag names verified against
+# scanner_parameters.xml -- an unknown tag makes IB reject the WHOLE scan
+# rather than ignore that one filter, so they are not guesses.
+FLOAT_MAX = 20_000_000              # floatSharesBelow -- the < 20m criterion
+CHANGE_PERC_MIN = 5.0               # floor on the move; the scan ranks, this cuts
+USE_FLOAT_FILTER = True             # set False if your data subscription lacks it
 TOP_N = 3                           # how many of the scan's top names to take
 MAX_ROWS = 50                       # IB's hard cap per scan
 
 # Sticky selection accumulates all session, so the list only grows. The trader
 # fetches bars once per minute per symbol and IB refuses beyond 60 history
-# requests per 10 minutes ACROSS ALL CONTRACTS — so the watchlist has to be
+# requests per 10 minutes ACROSS ALL CONTRACTS -- so the watchlist has to be
 # capped or it will quietly break the strategy it is feeding.
 MAX_WATCHLIST = 6
 
 LOG = logging.getLogger("scanner")
 
 HEADER = """\
-# MCL watchlist — WRITTEN BY mcl_scanner.py. Hand edits will be overwritten.
+# MCL watchlist -- WRITTEN BY mcl_scanner.py. Hand edits will be overwritten.
 # Pin names that must always be included in watchlist_pinned.txt instead.
 #
 # Screen: ${PRICE_MIN}-${PRICE_MAX} price, top-{TOP_N} gainer, scan {SCAN_CODE}
@@ -79,7 +102,7 @@ HEADER = """\
 
 def read_pinned(path: Path) -> list[str]:
     """One symbol per line; blank lines and comments ignored, INCLUDING trailing
-    ones — watchlist_blocked.txt stores `JLHL  # reason`, so a parser that keeps
+    ones -- watchlist_blocked.txt stores `JLHL  # reason`, so a parser that keeps
     the comment silently fails to match the symbol."""
     if not path.exists():
         return []
@@ -94,7 +117,7 @@ def read_pinned(path: Path) -> list[str]:
 def render(selected: dict[str, str], pinned: list[str], top_n: int = TOP_N) -> str:
     """selected: symbol -> the ET timestamp and reason it was added."""
     lines = [
-        "# MCL watchlist — WRITTEN BY mcl_scanner.py.",
+        "# MCL watchlist -- WRITTEN BY mcl_scanner.py.",
         "# Hand edits are overwritten; pin names in watchlist_pinned.txt instead.",
         "#",
         f"# Screen: ${PRICE_MIN:.0f}-${PRICE_MAX:.0f}, top-{top_n} by {SCAN_CODE}",
@@ -127,15 +150,34 @@ async def scan_once(ib: IB) -> list[str]:
         numberOfRows=MAX_ROWS,
     )
     # Filters IB cannot express in the subscription fields go here as tags.
-    # Confirm every tag name against scan_params.py before relying on it — an
-    # unknown tag makes IB reject the whole scan rather than ignore the filter.
-    tags = []
+    # Every name below appears in scanner_parameters.xml. An unknown tag makes
+    # IB reject the WHOLE scan rather than ignore that filter, which is why
+    # the float filter is behind a switch: if your market-data subscription
+    # does not carry float data the scan fails outright, and turning it off is
+    # the difference between a working scan and no watchlist at all.
+    tags = [TagValue("changePercAbove", str(CHANGE_PERC_MIN))]
+    if USE_FLOAT_FILTER:
+        tags.append(TagValue("floatSharesBelow", str(FLOAT_MAX)))
+    LOG.info("scan %s @ %s  price %.2f-%.2f  vol>%s  tags=%s",
+             SCAN_CODE, LOCATION, PRICE_MIN, PRICE_MAX, f"{MIN_VOLUME:,}",
+             {t.tag: t.value for t in tags})
     try:
         rows = await ib.reqScannerDataAsync(sub, [], tags)
     except Exception as e:  # noqa: BLE001
         LOG.error("scan failed: %s", e)
         LOG.error("  >> If this mentions an unknown tag or scan code, run "
                   "scan_params.py and correct SCAN_CODE / tags.")
+        if USE_FLOAT_FILTER and tags:
+            LOG.warning("  >> retrying once WITHOUT the float filter, in case "
+                        "your data subscription does not carry float data")
+            try:
+                rows = await ib.reqScannerDataAsync(
+                    sub, [], [TagValue("changePercAbove", str(CHANGE_PERC_MIN))])
+                LOG.warning("  >> that worked. Set USE_FLOAT_FILTER = False and "
+                            "apply the float cut yourself.")
+                return [r.contractDetails.contract.symbol for r in rows]
+            except Exception as e2:  # noqa: BLE001
+                LOG.error("  >> still failed without it: %s", e2)
         return []
 
     syms = []
@@ -162,7 +204,7 @@ async def main_async(args) -> int:
     try:
         await ib.connectAsync(HOST, args.port, clientId=CLIENT_ID, timeout=10)
     except Exception as e:  # noqa: BLE001
-        print(f"Could not connect to {HOST}:{args.port} — {type(e).__name__}: {e}")
+        print(f"Could not connect to {HOST}:{args.port} -- {type(e).__name__}: {e}")
         return 1
     LOG.info("connected on %d (%s), accounts %s",
              args.port, PAPER_PORTS[args.port], ib.managedAccounts())
@@ -178,7 +220,7 @@ async def main_async(args) -> int:
                 selected = {}
 
             pinned = read_pinned(pinned_path)
-            # Names IB refuses to open a position in — the trader writes these
+            # Names IB refuses to open a position in -- the trader writes these
             # after a rejection. Re-adding one just burns signals again.
             blocked = set(read_pinned(wl.with_name("watchlist_blocked.txt")))
             budget = max(0, args.max_symbols - len(pinned))
@@ -188,7 +230,7 @@ async def main_async(args) -> int:
                 if sym in selected or sym in pinned:
                     continue
                 if sym in blocked:
-                    LOG.info("skipping %s — on watchlist_blocked.txt", sym)
+                    LOG.info("skipping %s -- on watchlist_blocked.txt", sym)
                     continue
                 if len(selected) >= budget:
                     skipped.append(sym)
@@ -197,7 +239,7 @@ async def main_async(args) -> int:
                 added.append(sym)
 
             if skipped:
-                LOG.warning("watchlist full at %d (%d pinned) — not adding %s. "
+                LOG.warning("watchlist full at %d (%d pinned) -- not adding %s. "
                             "Raise --max-symbols only if you accept the risk of "
                             "IB throttling bar requests.",
                             args.max_symbols, len(pinned), ", ".join(skipped))
@@ -207,7 +249,7 @@ async def main_async(args) -> int:
                          ", ".join(top) or "(none)",
                          f"  NEW: {', '.join(added)}" if added else "")
             else:
-                LOG.warning("scan returned nothing — check SCAN_CODE and whether "
+                LOG.warning("scan returned nothing -- check SCAN_CODE and whether "
                             "this scan works pre-market")
 
             text = render(selected, pinned, args.top)
@@ -215,7 +257,7 @@ async def main_async(args) -> int:
                 print("\n" + "-" * 60)
                 print(text.rstrip())
                 print("-" * 60)
-                print("(preview — nothing written)")
+                print("(preview -- nothing written)")
                 break
             if not wl.exists() or wl.read_text() != text:
                 wl.write_text(text)
