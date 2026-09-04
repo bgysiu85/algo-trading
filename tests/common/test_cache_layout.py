@@ -63,3 +63,72 @@ def test_readers_point_at_the_window_their_writer_populates():
 def test_cache_files_are_gzipped():
     """Section 5 standardised on gzip; the EMA side used to write plain CSV."""
     assert cache_path(Path("x"), "ABOS", "2026-09-02").suffixes[-2:] == [".csv", ".gz"]
+
+
+# --- shared superset window ------------------------------------------------
+
+def test_the_obvious_superset_guess_is_wrong():
+    """'2 D' ending 20:00 does NOT cover backtest.py's window.
+
+    It starts 10.5h after backtest's does, losing the prior-day warm-up. This
+    is pinned because it is the guess anyone would make first, and getting it
+    wrong silently truncates every MCL backtest's indicator seeding.
+    """
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    et = ZoneInfo("America/New_York")
+    d = datetime(2026, 9, 2, tzinfo=et)
+
+    bt_start = d.replace(hour=9, minute=30) - timedelta(days=2)
+    guess_start = d.replace(hour=20) - timedelta(days=2)
+    assert guess_start > bt_start, "the naive guess would have covered it"
+
+    shared_start = d.replace(hour=20) - timedelta(days=3)
+    assert shared_start <= bt_start
+
+
+def test_slicing_a_superset_reproduces_each_window_exactly(tmp_path):
+    """A superset cache is only safe if consumers slice back to their own
+    window: a longer frame changes EMA-seeded indicators on identical bars."""
+    import numpy as np
+    import pandas as pd
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from common.cache_io import slice_window
+
+    et = ZoneInfo("America/New_York")
+    idx = pd.date_range("2026-08-29 04:00", "2026-09-02 20:00", freq="1min", tz="UTC")
+    px = 5.0 + np.arange(len(idx)) * 0.0001
+    df = pd.DataFrame({"open": px, "high": px, "low": px, "close": px,
+                       "volume": np.ones(len(idx))}, index=idx)
+    d = datetime(2026, 9, 2, tzinfo=et)
+
+    superset = slice_window(df, d.replace(hour=20), 3)
+    for end_h, end_m, days in [(9, 30, 2), (20, 0, 1)]:
+        end = d.replace(hour=end_h, minute=end_m)
+        assert slice_window(df, end, days).equals(slice_window(superset, end, days))
+
+
+def test_longer_warmup_moves_the_indicators():
+    """The reason slicing is mandatory rather than tidy.
+
+    If this ever stops being true the strategies have lost their EMA memory,
+    which would be a far bigger problem than the cache layout.
+    """
+    import numpy as np
+    import pandas as pd
+    from strategy.mcl import mcl as S
+
+    rng = np.random.default_rng(3)
+    n = 2000
+    px = 4.0 * np.cumprod(1 + rng.uniform(-0.006, 0.007, n))
+    idx = pd.date_range("2026-08-30 04:00", periods=n, freq="1min", tz="UTC")
+    full = pd.DataFrame({"open": px, "high": px * 1.003, "low": px * 0.997,
+                         "close": px,
+                         "volume": rng.integers(2000, 9000, n).astype(float)},
+                        index=idx)
+    short = full.iloc[-800:]
+    a = S.signals(short)["rsi"].astype(float)
+    b = S.signals(full)["rsi"].astype(float).loc[short.index]
+    assert float((a - b).abs().max()) > 1.0, \
+        "a longer warm-up must change RSI, or slicing would be unnecessary"

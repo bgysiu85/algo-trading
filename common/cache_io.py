@@ -80,3 +80,41 @@ def load_cached_bars(cache_dir: Path, symbol: str, date_str: str) -> pd.DataFram
     if df.index.tz is None:
         df.index = df.index.tz_localize("UTC")
     return df
+
+
+# --- shared superset window ------------------------------------------------
+#
+# The two consumers can be served from ONE fetch, halving the IB request
+# budget when both need the same symbol/date. Two things make that safe, and
+# neither is optional.
+#
+# 1. THE SUPERSET MUST ACTUALLY CONTAIN BOTH. "2 D" ending 20:00 is the
+#    obvious guess and it is WRONG: it starts 10.5h after backtest.py's
+#    window begins, losing the prior-day warm-up. "3 D" ending 20:00 is the
+#    smallest that covers both.
+#
+# 2. EACH CONSUMER MUST SLICE BACK TO ITS OWN WINDOW. Handing a strategy a
+#    longer frame changes its indicators ON THE IDENTICAL BARS, because EMA
+#    has infinite memory -- measured at up to 58 RSI points on a 3000-bar
+#    synthetic series. Caching a superset and passing it through unsliced
+#    would silently revalue every backtest.
+#
+# Whether IB's "3 D" response really contains the same bars its "2 D"
+# response would, including boundary handling, is an EMPIRICAL question about
+# IB rather than arithmetic. common/probe_window.py answers it against the
+# live API; until it has, leave SHARED_WINDOW off.
+
+SHARED_DURATION = "3 D"
+SHARED_END_HHMM = "2000"
+
+
+def slice_window(df: pd.DataFrame, end, duration_days: int) -> pd.DataFrame:
+    """The bars a `{duration_days} D` request ending at `end` would return.
+
+    Bounds are (end - duration, end] -- exclusive start, inclusive end, which
+    is what IB's endDateTime semantics imply. probe_window.py checks that
+    against the real API rather than trusting it.
+    """
+    from datetime import timedelta
+    start = end - timedelta(days=duration_days)
+    return df[(df.index > start) & (df.index <= end)]

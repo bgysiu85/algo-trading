@@ -63,7 +63,8 @@ def run(argv: list[str] | None = None) -> int:
         description="Entry point for the trading, backtest and scanner modes",
         epilog="Unrecognised arguments are forwarded to the selected mode.")
     p.add_argument("--mode", required=True,
-                   choices=["paper", "dry", "backtest", "scan", "report"])
+                   choices=["paper", "dry", "backtest", "scan", "report",
+                            "probe-window"])
     p.add_argument("--strategy", default="mcl",
                    help="strategy to run (default: mcl)")
     args, passthrough = p.parse_known_args(argv)
@@ -96,6 +97,10 @@ def run(argv: list[str] | None = None) -> int:
     if args.mode == "scan":
         from brokers.ibkr import scanner
         return scanner.main(passthrough) or 0
+
+    if args.mode == "probe-window":
+        from common import probe_window
+        return probe_window.main(passthrough) or 0
 
     if args.mode == "report":
         from common import report_trades
