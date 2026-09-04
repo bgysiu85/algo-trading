@@ -116,37 +116,67 @@ async def main_async(args) -> int:
         return 1
 
     all_ok = True
+    skipped: list[str] = []
+    probed = 0
     try:
         for p in pairs:
             sym, date_str = p["symbol"], p["date"]
-            got = await ib.qualifyContractsAsync(Stock(sym, "SMART", "USD"))
-            if not got:
+            # qualifyContractsAsync returns a list that can CONTAIN None for
+            # a symbol IB does not recognise -- [None] is truthy, so testing
+            # the list alone is not enough. The production paths in
+            # backtest.py and data_ib.py get this right with
+            # `got[0] if got else None`; this probe originally did not, and
+            # crashed on the first delisted symbol.
+            try:
+                got = await ib.qualifyContractsAsync(Stock(sym, "SMART", "USD"))
+            except Exception as e:  # noqa: BLE001
+                got, qualify_err = None, f"{type(e).__name__}: {str(e)[:60]}"
+            else:
+                qualify_err = None
+            contract = got[0] if got else None
+            if contract is None:
+                skipped.append(f"{sym} {date_str}"
+                               + (f" ({qualify_err})" if qualify_err else ""))
                 print(f"  {sym} {date_str}: could not qualify -- skipped")
                 continue
-            contract = got[0]
             print(f"  {sym} {date_str}")
 
-            sup = await _fetch(ib, contract, date_str, *SUPERSET[:1], SUPERSET[1], SUPERSET[2])
-            if sup is None:
-                print("    superset returned nothing -- inconclusive")
-                continue
+            try:
+                sup = await _fetch(ib, contract, date_str,
+                                   SUPERSET[0], SUPERSET[1], SUPERSET[2])
+                if sup is None:
+                    print("    superset returned nothing -- inconclusive")
+                    continue
 
-            for label, duration, eh, em, days in WINDOWS:
-                direct = await _fetch(ib, contract, date_str, duration, eh, em)
-                end = datetime.strptime(date_str, "%Y-%m-%d").replace(
-                    hour=eh, minute=em, tzinfo=ET)
-                all_ok &= _compare(label, direct, slice_sessions(sup, end, days))
+                for label, duration, eh, em, days in WINDOWS:
+                    direct = await _fetch(ib, contract, date_str, duration, eh, em)
+                    end = datetime.strptime(date_str, "%Y-%m-%d").replace(
+                        hour=eh, minute=em, tzinfo=ET)
+                    all_ok &= _compare(label, direct, slice_sessions(sup, end, days))
+                probed += 1
+            except Exception as e:  # noqa: BLE001
+                # A probe that dies on pair 12 throws away the evidence from
+                # pairs 1-11. Record and carry on.
+                print(f"    ERROR: {type(e).__name__}: {str(e)[:90]}")
+                skipped.append(f"{sym} {date_str} ({type(e).__name__})")
     finally:
         ib.disconnect()
 
     print()
-    if all_ok:
+    print(f"probed {probed} pair(s); skipped {len(skipped)}")
+    for s in skipped:
+        print(f"  skipped: {s}")
+    print()
+    if all_ok and probed:
         print("SUPERSET IS SAFE for the pairs probed. Set SHARED_WINDOW to halve")
         print("the pull. Note this is evidence, not proof -- holidays and")
         print("half-days are the cases most likely to differ.")
+    elif not probed:
+        print("NOTHING PROBED -- every pair was skipped, so this says nothing.")
+        return 1
     else:
         print("SUPERSET IS NOT SAFE as configured -- see the mismatches above.")
-        print("Do NOT enable SHARED_WINDOW. The two windows stay separate.")
+        print("The shared window should be reverted to two separate ones.")
     return 0 if all_ok else 1
 
 
