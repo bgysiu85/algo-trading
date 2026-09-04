@@ -62,3 +62,10 @@ desktop.ini
 # its own name and is equally machine-local.
 bars_cache/
 data_pull_state*.json
+
+# Local backup copies. A backup made INSIDE the repo that contains its own
+# .git directory is recorded by `git add -A` as a gitlink (a submodule
+# pointer) rather than as files -- it clones as an empty directory and has no
+# .gitmodules entry. Keep backups outside the repo; this catches the mistake.
+_backup*/
+*_backup_*/
