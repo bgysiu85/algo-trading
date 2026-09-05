@@ -70,6 +70,32 @@ TARGET_R = 2.0
 TRAIL_ATR = 2.0
 EXIT_MODES = ("fixed_2r", "ride_ema9", "trail_atr")
 
+# --- universe band -----------------------------------------------------------
+# §1: the universe is "$2-20, RVOL(1D) >= 5x, float < 20m, top-2 pre-market
+# gainer". Price is the only one of those four this engine can enforce, and
+# until 2026-09-05 it enforced none of them -- MCL has had ENFORCE_PRICE_BAND
+# since the apex sweep, VW9 never did, and nobody noticed because the two
+# strategies' reports were never read side by side.
+#
+# It is not a cosmetic filter. IB returns SPLIT-ADJUSTED history, so a small
+# cap that later reverse-split comes back with inflated prices -- up to $32,104
+# observed on this very pair set. Without the band VW9 traded entries from
+# $0.30 to $4,152.11 and took positions in PFSA at $4,152/share and ZNB at
+# $1,976/share. Those are not prices anyone could have traded; they are the
+# adjustment factor.
+#
+# Measured effect on VW9-5 EMA9 trail_atr over 374 sessions:
+#     all trades        643 tr   -$31,296.17   -$48.67/tr
+#     inside $2-20      436 tr    +$3,941.88    +$9.04/tr
+#     outside the band  207 tr   -$35,238.05  -$170.23/tr
+#
+# The band carries the same residual UPWARD bias it does for MCL, and for the
+# same reason: filtering on adjusted price preferentially drops names that
+# later reverse-split, and reverse splits follow collapses. It removes an
+# artifact; it does not make the sample clean.
+PRICE_MIN, PRICE_MAX = 2.0, 20.0
+ENFORCE_PRICE_BAND = True
+
 # --- sizing / costs, unchanged from MCL so results are comparable (§9) ------
 EQUITY = 100_000.0
 MAX_SHARES = 100
@@ -149,7 +175,10 @@ def _passes_entry_gates(setup: Setup, bar_minutes: int, ext_atr: float | None,
 
 def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
                     exit_mode: str, stop_buffer_atr: float, target_r: float,
-                    trail_atr: float) -> dict | None:
+                    trail_atr: float, *,
+                    enforce_price_band: bool = ENFORCE_PRICE_BAND,
+                    use_vwap_exit: bool = True,
+                    vwap_exit_grace_bars: int = 0) -> dict | None:
     """Fill next-bar-open (§9 -- extended hours takes Day Limit orders only,
     so the trigger bar's close can never be the fill), then manage to
     whichever of the §5.3 hard exits or the exit_mode's target comes first.
@@ -175,6 +204,13 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
     times = sig.index
 
     entry_price = opens[fill_i] + SLIPPAGE_TICKS * TICK
+
+    # §1 universe band, applied to the price actually paid. MCL applies the
+    # same test at the same point (mcl.py's entry branch), so the two agree on
+    # what is in the universe.
+    if enforce_price_band and not (PRICE_MIN <= entry_price <= PRICE_MAX):
+        return None
+
     atr_at_entry = atrs[entry_bar_index] or 0.0
     stop = setup.structure_low - stop_buffer_atr * atr_at_entry
     r = entry_price - stop
@@ -204,9 +240,22 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
         # Checking the stop first is what makes "stop wins" on intrabar
         # stop/target ambiguity fall out automatically: a bar whose range
         # spans both is never evaluated for the target below.
+        # vwap_exit_grace_bars exists because of what the measurement showed:
+        # 189 of 386 vwap_lost exits fired on the FILL BAR ITSELF (bars_held=0),
+        # for -$27,191.79. The mechanism is structural, not bad luck. Setup A
+        # enters because a bar CLOSED back above VWAP; §9 fills at the NEXT
+        # bar's open; if that bar closes back below VWAP the position is shut
+        # the instant it is opened. Price sitting on VWAP is exactly when it
+        # oscillates across it, so the rule fires hardest precisely where it is
+        # least informative -- and each round trip still pays two ticks and
+        # commission both ways.
+        #
+        # A grace period lets the trade prove itself over N bars before the
+        # hard rule applies. 0 restores the spec's literal §5.3 behaviour.
         if l <= stop:
             exit_px, exit_reason = stop - SLIPPAGE_TICKS * TICK, "stop"
-        elif c <= vwap[i]:
+        elif (use_vwap_exit and (i - fill_i) >= vwap_exit_grace_bars
+              and c <= vwap[i]):
             exit_px, exit_reason = c - SLIPPAGE_TICKS * TICK, "vwap_lost"
         elif last_of_session:
             exit_px, exit_reason = c - SLIPPAGE_TICKS * TICK, "session_close"
@@ -247,7 +296,10 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
                         max_entries_per_session: int = MAX_ENTRIES_PER_SESSION,
                         stop_buffer_atr: float = STOP_BUFFER_ATR,
                         target_r: float = TARGET_R,
-                        trail_atr: float = TRAIL_ATR) -> list[Trade]:
+                        trail_atr: float = TRAIL_ATR,
+                        enforce_price_band: bool = ENFORCE_PRICE_BAND,
+                        use_vwap_exit: bool = True,
+                        vwap_exit_grace_bars: int = 0) -> list[Trade]:
     """One session, one timeframe, one exit mode.
 
     bars_1m must be 1-minute bars covering at least 04:00-20:00 ET on
@@ -306,7 +358,10 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
             continue
 
         res = _simulate_trade(sig, t, setup, exit_mode, stop_buffer_atr,
-                              target_r, trail_atr)
+                              target_r, trail_atr,
+                              enforce_price_band=enforce_price_band,
+                              use_vwap_exit=use_vwap_exit,
+                              vwap_exit_grace_bars=vwap_exit_grace_bars)
         if res is None:
             continue
 
