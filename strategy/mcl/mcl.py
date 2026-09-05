@@ -272,6 +272,12 @@ class Trade:
     gross: float
     commission: float
     net: float
+    # Scale-out bookkeeping. cycles counts completed sell-then-buy-back
+    # round trips inside the trade; shares_traded is every share transacted,
+    # entry included. Both are 0 / initial size when scaling is off, so the
+    # default output is unchanged apart from two extra columns.
+    cycles: int = 0
+    shares_traded: int = 0
 
 
 def size_for(price: float, equity: float = EQUITY) -> int:
@@ -283,7 +289,12 @@ def size_for(price: float, equity: float = EQUITY) -> int:
 
 def backtest_session(df: pd.DataFrame, session_date, tz,
                      use_apex: bool | None = None,
-                     require_macd_pos: bool | None = None) -> list[Trade]:
+                     require_macd_pos: bool | None = None,
+                     scale_out_pct: float | None = None,
+                     partial_trail_pct: float = 2.5,
+                     rebuy_qty: int | None = None,
+                     max_position_shares: int | None = None,
+                     rebuy_slip_bps: float = 0.0) -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -294,6 +305,45 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     rather than mutating the module constant keeps a variant sweep honest: two
     configurations can be evaluated over the same frame with no shared state
     between them.
+
+    SCALE-OUT / SCALE-BACK-IN (Ben, 2026-09-05, after Ross Cameron's method)
+    -----------------------------------------------------------------------
+    `scale_out_pct` is None by default and the mechanic is then entirely inert:
+    this function reproduces its previous output bit-for-bit. When set, a
+    SECOND trailing level is inserted above the existing one:
+
+        partial level = peak * (1 - partial_trail_pct/100)     e.g. 2.5%
+        full level    = peak * (1 - TRAIL_PCT/100)             e.g. 5%
+
+    On a pullback to the partial level, `scale_out_pct` of the position is
+    sold. If price then reaches the full level the remainder goes too and the
+    trade is over. If instead it recovers and TOUCHES the previous bar's high,
+    shares are bought back and the cycle repeats, without limit, until the full
+    level is finally hit. Only the full level ever closes the position.
+
+    `rebuy_qty` is the buy-back size. None restores exactly what was sold, so
+    position size is constant across cycles. An integer buys that many shares
+    regardless of what was sold, which lets the position GROW -- sell 50 of
+    100, buy 100 back, hold 150. That converges rather than exploding (towards
+    ~200 shares at a 50% scale-out, ~133 at 75%) but it roughly doubles risk
+    per trade, so `max_position_shares` caps it.
+
+    WHERE THE UPSIDE ACTUALLY COMES FROM, because it is not where it looks:
+    with `rebuy_qty=None` this mechanic CANNOT earn more on a runner than
+    simply holding. A stock that never pulls back 2.5% behaves identically; one
+    that does pull back has had a piece sold cheap and bought back dearer. What
+    it buys is a better exit on trades that end at the stop -- part of the
+    position leaves 2.5% higher. So restore-mode trades runner profit for
+    stop-out profit, and is a risk-shaping change, not a return change.
+    The extra RETURN only appears when `rebuy_qty` exceeds what was sold: that
+    is adding size into strength, and it is a different bet with different risk.
+    Both are worth running; they should not be read as the same idea.
+
+    Intrabar ordering follows the project convention -- the pessimistic branch
+    first. The full stop is tested before the partial (a bar low reaching the
+    full level has necessarily passed the partial one), and both before any
+    buy-back, so a bar that could plausibly have done several things is
+    resolved against the position.
     """
     if use_apex is None:
         use_apex = USE_APEX_EXIT
@@ -310,6 +360,9 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     pos = None
     rows = sig.reset_index()
     tcol = rows.columns[0]
+    # High of the PREVIOUS in-session bar -- the buy-back trigger. None on the
+    # first bar, which correctly blocks a re-entry before there is a prior bar.
+    prev_high = None
 
     for k, i in enumerate(idx):
         row = rows.iloc[i]
@@ -322,9 +375,17 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                     continue
                 q = size_for(px)
                 if q >= 1:
-                    pos = dict(entry_i=i, entry_px=px, qty=q,
+                    pos = dict(entry_i=i, entry_px=px, qty=q, init_qty=q,
                                peak=max(px, float(row["high"])),
-                               entry_t=rows.iloc[i][tcol])
+                               entry_t=rows.iloc[i][tcol],
+                               # Scaling bookkeeping. avg_px is the running
+                               # average cost of the shares still held; realised
+                               # accumulates P/L already banked by partial
+                               # sells; shares_traded drives commission, which
+                               # must be charged per share actually transacted
+                               # rather than assuming one round trip.
+                               avg_px=px, realised=0.0, shares_traded=q,
+                               scaled_out=False, cycles=0)
             continue
 
         # --- managing a position -------------------------------------------
@@ -342,17 +403,63 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
 
         if exit_px is not None:
             q = pos["qty"]
-            gross = (exit_px - pos["entry_px"]) * q
-            comm = COMMISSION_PER_SHARE * q * 2
+            gross = pos["realised"] + (exit_px - pos["avg_px"]) * q
+            comm = COMMISSION_PER_SHARE * (pos["shares_traded"] + q)
             trades.append(Trade(
                 symbol="", date=str(session_date),
                 entry_time=str(pos["entry_t"]), exit_time=str(rows.iloc[i][tcol]),
                 entry_price=round(pos["entry_px"], 4), exit_price=round(exit_px, 4),
-                qty=q, reason=exit_reason, bars_held=i - pos["entry_i"],
+                qty=pos["init_qty"], reason=exit_reason,
+                bars_held=i - pos["entry_i"],
                 gross=round(gross, 2), commission=round(comm, 2),
-                net=round(gross - comm, 2)))
+                net=round(gross - comm, 2),
+                cycles=pos["cycles"],
+                shares_traded=pos["shares_traded"] + q))
             pos = None
         else:
+            # --- scale out / scale back in, only when enabled ---------------
+            # Ordering is deliberate: the full stop above has already been
+            # ruled out for this bar, so a partial sell here cannot be masking
+            # a full exit. Selling is checked before buying back, so a bar that
+            # both dips to the partial level and tags the previous high is
+            # resolved as a sell -- against the position, per convention.
+            if scale_out_pct:
+                partial = pos["peak"] * (1.0 - partial_trail_pct / 100.0)
+                if not pos["scaled_out"] and float(row["low"]) <= partial:
+                    sell_q = int(pos["qty"] * scale_out_pct / 100.0)
+                    if 1 <= sell_q < pos["qty"]:
+                        px_out = partial - SLIPPAGE_TICKS * TICK
+                        pos["realised"] += (px_out - pos["avg_px"]) * sell_q
+                        pos["qty"] -= sell_q
+                        pos["shares_traded"] += sell_q
+                        pos["scaled_out"] = True
+                        pos["sold_qty"] = sell_q
+                elif pos["scaled_out"] and prev_high is not None \
+                        and float(row["high"]) >= prev_high:
+                    add = rebuy_qty if rebuy_qty is not None else pos["sold_qty"]
+                    if max_position_shares is not None:
+                        add = min(add, max_position_shares - pos["qty"])
+                    if add >= 1:
+                        # A break ABOVE the prior high is a stop-buy, and
+                        # IBKR does not accept stop orders outside RTH. Live
+                        # this is a marketable limit sent after the break is
+                        # seen, so the fill is above the trigger, not at it --
+                        # trader.py already crosses by LIMIT_CROSS_BPS = 20.
+                        # Charging 0 bps here models a fill nobody can get.
+                        px_in = (prev_high * (1.0 + rebuy_slip_bps / 10_000.0)
+                                 + SLIPPAGE_TICKS * TICK)
+                        # Weighted average cost of the shares now held. The
+                        # buy-back is normally ABOVE the price the partial was
+                        # sold at, which is exactly the cost this mechanic pays
+                        # on a pullback that recovers.
+                        pos["avg_px"] = ((pos["avg_px"] * pos["qty"]
+                                          + px_in * add) / (pos["qty"] + add))
+                        pos["qty"] += add
+                        pos["shares_traded"] += add
+                        pos["cycles"] += 1
+                    pos["scaled_out"] = False
             pos["peak"] = max(pos["peak"], float(row["high"]))
+
+        prev_high = float(row["high"])
 
     return trades
