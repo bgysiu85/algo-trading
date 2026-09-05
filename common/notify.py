@@ -315,6 +315,13 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
 
+    problems = S.check()
+    if problems:
+        print("credential setup problems:")
+        for pr in problems:
+            print(f"  * {pr}")
+        print()
+
     n = Notifier.from_env()
     if not n.enabled:
         print(f"Not configured. Set {TOKEN_VAR} and {CHAT_VAR} "

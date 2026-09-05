@@ -183,6 +183,59 @@ def get(env_var: str) -> str:
     return _cache[env_var]
 
 
+def check() -> list[str]:
+    """Diagnose the credential setup WITHOUT resolving anything sensitive.
+
+    Exists because the two failure modes below produce 1Password CLI errors
+    that name neither cause, and both have now cost real debugging time:
+
+      * OP_SERVICE_ACCOUNT_TOKEN holding an `op://` reference instead of the
+        literal `ops_...` token. A reference cannot resolve itself -- expanding
+        one requires an authenticated `op`, and that variable is what
+        authenticates it. Every `op` command then fails with
+        "failed to parseToken, format is invalid", including ones that have
+        nothing to do with the vault you were reaching for.
+      * a service account pointed at Private / Personal / Employee / the
+        default Shared vault, which it is structurally unable to read no
+        matter how the token is scoped.
+
+    Returns a list of problems, empty when the setup looks sound. Prints no
+    secret values.
+    """
+    problems = []
+    tok = os.environ.get("OP_SERVICE_ACCOUNT_TOKEN", "").strip()
+    if tok:
+        if tok.startswith("op://"):
+            problems.append(
+                "OP_SERVICE_ACCOUNT_TOKEN holds an op:// REFERENCE. It must "
+                "hold the literal token (starts 'ops_'). A reference cannot "
+                "resolve itself -- this is what causes "
+                "'failed to parseToken, format is invalid' on every op "
+                "command.")
+        elif not tok.startswith("ops_"):
+            problems.append(
+                f"OP_SERVICE_ACCOUNT_TOKEN does not look like a service "
+                f"account token: {len(tok)} chars, starts "
+                f"{tok[:4]!r}, expected 'ops_'.")
+
+    for env_var, value in sorted(os.environ.items()):
+        v = (value or "").strip()
+        if not v.startswith("op://"):
+            continue
+        parts = v[len("op://"):].split("/")
+        vault = parts[0].lower() if parts else ""
+        if tok and vault in SERVICE_ACCOUNT_BLIND_VAULTS:
+            problems.append(
+                f"{env_var} points at vault {parts[0]!r}, which a 1Password "
+                f"SERVICE ACCOUNT cannot read at all. Move the item to a "
+                f"purpose-made vault.")
+        if len(parts) < 3:
+            problems.append(
+                f"{env_var} is not a complete reference: expected "
+                f"op://vault/item/field, got {len(parts)} segment(s).")
+    return problems
+
+
 def report() -> str:
     """A line per credential, safe to print or log."""
     mode = ("service account (non-interactive)" if using_service_account()
