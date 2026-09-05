@@ -58,6 +58,7 @@ import argparse
 import json
 import logging
 import queue
+import re
 import threading
 import time
 import urllib.error
@@ -75,6 +76,12 @@ TOKEN_VAR = "TELEGRAM_BOT_TOKEN"
 CHAT_VAR = "TELEGRAM_CHAT_ID"
 
 API = "https://api.telegram.org/bot{token}/sendMessage"
+
+# A Telegram bot token is "<digits>:<35-ish url-safe chars>". Validating it
+# matters more than it looks: BotFather presents it inside a sentence, so the
+# value people actually paste is often "API: 1234:ABC..." -- label, space and
+# all. That produced an InvalidURL whose message contained the WHOLE TOKEN.
+TOKEN_RE = re.compile(r"^\d{5,}:[A-Za-z0-9_-]{20,}$")
 TIMEOUT_S = 6.0
 QUEUE_MAX = 200
 
@@ -87,9 +94,14 @@ class Notifier:
     """Fire-and-forget Telegram sender. Safe to construct unconfigured."""
 
     def __init__(self, token: str = "", chat_id: str = "", enabled: bool = True):
-        self.token = token
-        self.chat_id = chat_id
-        self.enabled = bool(enabled and token and chat_id)
+        # Strip first. A trailing newline or a stray space from a copy-paste
+        # is otherwise carried into the URL and fails at request time, in an
+        # exception that used to quote the token.
+        self.token = (token or "").strip()
+        self.chat_id = (chat_id or "").strip()
+        self.problems = self._validate()
+        self.enabled = bool(enabled and self.token and self.chat_id
+                            and not self.problems)
         self.sent = 0
         self.failed = 0
         self.dropped = 0
@@ -105,6 +117,47 @@ class Notifier:
                                             name="telegram")
             self._thread.start()
 
+    def _validate(self) -> list[str]:
+        """Catch a malformed token or chat id HERE, where it can be explained,
+        rather than at request time where the failure is an opaque URL error.
+        Refusing to start is deliberate: a notifier that cannot possibly work
+        should say so at setup, not once a session is running."""
+        out = []
+        if self.token and not TOKEN_RE.match(self.token):
+            hint = ""
+            if ":" in self.token and self.token.split(":", 1)[0].strip().isdigit() is False:
+                hint = (" It looks like a label was copied with it — BotFather "
+                        "shows the token inside a sentence, and only the "
+                        "'<digits>:<letters>' part is the token.")
+            out.append(
+                f"{TOKEN_VAR} is not a valid Telegram bot token "
+                f"({len(self.token)} chars).{hint}")
+        if self.chat_id:
+            body = self.chat_id[1:] if self.chat_id.startswith("-") else self.chat_id
+            if not body.isdigit():
+                out.append(f"{CHAT_VAR} must be numeric, got {len(self.chat_id)} "
+                           f"non-numeric chars.")
+            elif self.chat_id.startswith("0"):
+                out.append(
+                    f"{CHAT_VAR} starts with 0, which no Telegram chat id does "
+                    f"— this looks like a phone number. Get the real id by "
+                    f"messaging your bot, then opening "
+                    f"https://api.telegram.org/bot<TOKEN>/getUpdates and "
+                    f"reading result[].message.chat.id")
+        return out
+
+    def _scrub(self, text: str) -> str:
+        """Never let the token reach a log. urllib puts the full URL into its
+        exception message, and the URL contains the token -- which is exactly
+        how a live token ended up pasted into a chat window on 2026-09-05."""
+        if self.token:
+            text = text.replace(self.token, "<TOKEN>")
+            # Also catch a mangled value that merely CONTAINS the real token.
+            for part in self.token.split(":"):
+                if len(part) >= 20:
+                    text = text.replace(part, "<TOKEN>")
+        return text
+
     # -- construction ---------------------------------------------------
 
     @classmethod
@@ -115,8 +168,11 @@ class Notifier:
                                   CHAT_VAR: "Telegram chat id"})
         if {TOKEN_VAR, CHAT_VAR} <= got:
             n = cls(S.get(TOKEN_VAR), S.get(CHAT_VAR))
-            LOG.info("Telegram notifications ON (token %s, chat %s)",
-                     S.mask(n.token), S.mask(n.chat_id))
+            if n.problems:
+                for p in n.problems:
+                    LOG.error("Telegram not started: %s", p)
+                return n
+            LOG.info("Telegram notifications ON (chat %s)", S.mask(n.chat_id))
             return n
         LOG.info("Telegram notifications OFF — set %s and %s to enable",
                  TOKEN_VAR, CHAT_VAR)
@@ -177,7 +233,7 @@ class Notifier:
                 # Ctrl-C or an interpreter shutdown.
                 self.failed += 1
                 LOG.warning("telegram send failed (%s: %s)",
-                            type(e).__name__, e)
+                            type(e).__name__, self._scrub(str(e)))
             finally:
                 self._q.task_done()
 
@@ -323,6 +379,11 @@ def main() -> int:
         print()
 
     n = Notifier.from_env()
+    if n.problems:
+        print("Telegram configuration problems:")
+        for pr in n.problems:
+            print(f"  * {pr}")
+        return 1
     if not n.enabled:
         print(f"Not configured. Set {TOKEN_VAR} and {CHAT_VAR} "
               f"(literal value or op:// reference), then open a new terminal.")
