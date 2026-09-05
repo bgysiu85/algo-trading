@@ -108,7 +108,7 @@ REBUY_SLIP_BPS = 40.0
 
 
 def _simulate(sess, trail_pct, partial_pct, portion, rebuy,
-              rebuy_slip_bps=REBUY_SLIP_BPS):
+              rebuy_slip_bps=REBUY_SLIP_BPS, max_cycles=None):
     """One session. Returns (net, shares_traded, symbol) per trade."""
     _sym, entry, _o, high, low, close, keep = sess
     trades = []
@@ -126,6 +126,8 @@ def _simulate(sess, trail_pct, partial_pct, portion, rebuy,
                 if q >= 1:
                     pos = [q, px, 0.0, q, max(px, high[i]), False, 0,
                            order_cost(q, px, False, S.COMMISSION_PLAN), q]
+                    # pos[6] counts COMPLETED cycles (was sold_qty, which is
+                    # unused now that rebuy is always an explicit quantity).
             continue
         # pos = [qty, avg_px, realised, shares_traded, peak, scaled_out,
         #        sold_qty, commission, init_qty]
@@ -152,8 +154,8 @@ def _simulate(sess, trail_pct, partial_pct, portion, rebuy,
                     pos[0] -= sell_q
                     pos[3] += sell_q
                     pos[5] = True
-                    pos[6] = sell_q
-            elif pos[5] and prev_high is not None and high[i] >= prev_high:
+            elif (pos[5] and prev_high is not None and high[i] >= prev_high
+                  and not (max_cycles is not None and pos[6] >= max_cycles)):
                 add = rebuy
                 if add >= 1:
                     px_in = (prev_high * (1.0 + rebuy_slip_bps / 10_000.0)
@@ -162,6 +164,7 @@ def _simulate(sess, trail_pct, partial_pct, portion, rebuy,
                     pos[7] += order_cost(add, px_in, False, S.COMMISSION_PLAN)
                     pos[0] += add
                     pos[3] += add
+                    pos[6] += 1
                 pos[5] = False
             if pos[4] < high[i]:
                 pos[4] = high[i]
@@ -170,7 +173,7 @@ def _simulate(sess, trail_pct, partial_pct, portion, rebuy,
 
 
 def evaluate(prepared, trail_pct, partial_pct, portion, rebuy,
-             rebuy_slip_bps=REBUY_SLIP_BPS):
+             rebuy_slip_bps=REBUY_SLIP_BPS, max_cycles=None):
     per_sym = {}
     n = 0
     net = 0.0
@@ -178,7 +181,7 @@ def evaluate(prepared, trail_pct, partial_pct, portion, rebuy,
     for sess in prepared:
         sym = sess[0]
         for tnet, shares in _simulate(sess, trail_pct, partial_pct, portion,
-                                      rebuy, rebuy_slip_bps):
+                                      rebuy, rebuy_slip_bps, max_cycles):
             n += 1
             net += tnet
             real += tnet - shares * SLIP_PER_SHARE
