@@ -54,6 +54,16 @@ bar_cache/
 # Bundles used to move commits between the sandbox and this machine.
 *.bundle
 
+# Files delivered from a Claude cloud session and saved into the repo root.
+# The bundle itself is already covered by *.bundle above, but the reports and
+# CSVs alongside it are not, and neither is the folder. Note this is INPUT
+# staged for reading, not repo content -- the same reasoning as _backup*/
+# below: a directory that arrives from outside should never be committed by a
+# reflexive `git add -A`.
+Claude outputs/
+claude outputs/
+Claude Outputs/
+
 # --- editor / OS -----------------------------------------------------------
 .pytest_cache/
 .vscode/
