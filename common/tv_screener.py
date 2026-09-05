@@ -75,6 +75,14 @@ a moving goalpost.
 
 VERIFIED against the live server 2026-09-05.
 
+THIS IS A PRE-MARKET SCREEN ONLY
+--------------------------------
+Every column here is a `premarket_*` one, and common/tv_feed.py stops at 09:30.
+Correct for MCL, which trades 04:00-09:30 and nothing else. An all-day strategy
+needs a different screen per session block -- the mapping is verified and
+recorded in claude/session_aware_screening.md, along with the reason it is a
+specification question rather than a tooling one.
+
 THE GAP WORTH KNOWING ABOUT
 ---------------------------
 The screen has NO UPPER PRICE BOUND -- "Pre-mkt price > 2 USD" and nothing
