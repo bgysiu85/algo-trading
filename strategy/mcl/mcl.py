@@ -330,6 +330,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      scale_up_portion: float = 50.0,
                      rebuy_dip_pct: float = 2.5,
                      rebuy_ref: str = "peak",
+                     gap_fills: bool = True,
+                     seed_peak_with_bar_high: bool = False,
                      trail_on_close: bool = False,
                      trail_confirm_bars: int = 0,
                      max_adds: int | None = None) -> list[Trade]:
@@ -456,7 +458,17 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                 q = size_for(px) if entry_shares is None else entry_shares
                 if q >= 1:
                     pos = dict(entry_i=i, entry_px=px, qty=q, init_qty=q,
-                               peak=max(px, float(row["high"])),
+                               # SEEDING THE PEAK. The default takes the entry
+                               # bar's HIGH -- but that high happened BEFORE
+                               # the close we bought at, so it is a move the
+                               # position never captured. Trailing from it puts
+                               # the stop above the market at the instant of
+                               # entry in a large minority of trades, which the
+                               # optimistic fill model then books as a
+                               # guaranteed profit. False trails from the entry
+                               # price alone, which is the price actually paid.
+                               peak=(max(px, float(row["high"]))
+                                     if seed_peak_with_bar_high else px),
                                entry_t=rows.iloc[i][tcol],
                                # Scaling bookkeeping. avg_px is the running
                                # average cost of the shares still held; realised
@@ -533,7 +545,21 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                 exit_px = float(row["close"]) - SLIPPAGE_TICKS * TICK
                 exit_reason = "trailing_stop"
         elif float(row["low"]) <= trail:
-            exit_px, exit_reason = trail - SLIPPAGE_TICKS * TICK, "trailing_stop"
+            # GAP-THROUGH. Selling AT the trail assumes the market offered that
+            # price. When the bar OPENS below the level it never did: price was
+            # already through the stop when the bar began, and the best
+            # obtainable fill is the open.
+            #
+            # Measured on MC5 (5-minute bars, 688 stop exits): the bar opened
+            # below the trail 48% of the time, and pricing those at `trail`
+            # overstated P/L by $20,394 -- against a headline of $20,156. The
+            # whole apparent edge was this one assumption. It bites hardest on
+            # coarse bars, because a 5-minute gap is bigger than a 1-minute one.
+            #
+            # gap_fills=False restores the optimistic model, purely so old
+            # results stay reproducible.
+            fill = (min(trail, float(row["open"])) if gap_fills else trail)
+            exit_px, exit_reason = fill - SLIPPAGE_TICKS * TICK, "trailing_stop"
 
         if exit_px is None and last_of_session:
             exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "window_close"

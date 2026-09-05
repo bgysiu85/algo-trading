@@ -157,3 +157,72 @@ def test_every_variant_still_closes_the_position_at_the_window(choppy):
     forever = S.backtest_session(choppy, DATE, ET, trail_pct=5.0,
                                  trail_confirm_bars=10_000)
     assert len(forever) == 1 and forever[0].reason == "window_close"
+
+
+# --- the two fill assumptions that were inflating every published result ----
+#
+# Found 2026-09-05 while running MC5 for the first time. MC5 reported +$20,156
+# and passed every robustness test in the project; honest fills took it to
+# -$400. Applied to MCL the same corrections took the published +$1,567 to
+# +$161. Both are modelling, not strategy: the trades are identical, only the
+# price they are booked at changes.
+
+def test_a_gapped_stop_fills_at_the_open_not_the_level():
+    """You cannot sell AT a level the market never offered. When the bar OPENS
+    below the trail, price was already through the stop before the bar began,
+    and the best obtainable fill is the open.
+
+    This is not a modelling nicety for MCL specifically: outside RTH, IBKR
+    takes Day Limit orders only, so the trail is software-managed. A software
+    stop CANNOT fill at a price that never traded."""
+    closes = [5.0] * 40 + [5.5] * 40 + [4.0] * 40
+    highs = [c * 1.02 for c in closes]
+    lows = [c * 0.98 for c in closes]
+    opens = list(closes)
+    rng = np.random.default_rng(0)
+    px, c = 3.0, []
+    for i in range(220):
+        px *= 1.0 + (rng.uniform(-0.002, 0.012) if i < 130 else 0.0)
+        c.append(px)
+    hi = [x * 1.01 for x in c]
+    lo = [x * 0.99 for x in c]
+    op = list(c)
+    # A hard gap down: bar 175 OPENS 15% below, so any stop between the prior
+    # close and that open was jumped, not touched.
+    for j in (175, 176, 177):
+        op[j] = c[j] * 0.85
+        lo[j] = c[j] * 0.84
+        c[j] = c[j] * 0.86
+    v = [int(x) for x in rng.integers(4000, 7000, 220)]
+    v[125] = v[124] * 6
+    df = frame(c, highs=hi, lows=lo, vols=v)
+    df["open"] = op
+
+    honest = S.backtest_session(df, DATE, ET, trail_pct=5.0, gap_fills=True)
+    optimistic = S.backtest_session(df, DATE, ET, trail_pct=5.0, gap_fills=False)
+    if not honest:
+        pytest.skip("synthetic frame produced no entry")
+    assert sum(t.net for t in honest) <= sum(t.net for t in optimistic), (
+        "the honest fill model must never be MORE profitable than the "
+        "optimistic one -- it can only ever fill at or below the level")
+
+
+def test_the_peak_is_not_seeded_from_a_move_the_position_never_had(choppy):
+    """The entry bar's HIGH happened before the close we bought at. Trailing
+    from it prices a move the position never captured, and in a large minority
+    of trades it puts the stop ABOVE the market at the instant of entry -- 53%
+    of MC5's stop exits, which the optimistic fill model then booked as
+    guaranteed profits. Default is now the entry price."""
+    import inspect
+    sig = inspect.signature(S.backtest_session)
+    assert sig.parameters["seed_peak_with_bar_high"].default is False
+    assert sig.parameters["gap_fills"].default is True
+
+    from_high = S.backtest_session(choppy, DATE, ET, trail_pct=5.0,
+                                   seed_peak_with_bar_high=True)
+    from_entry = S.backtest_session(choppy, DATE, ET, trail_pct=5.0,
+                                    seed_peak_with_bar_high=False)
+    assert from_high and from_entry
+    # Seeding from the high can only put the trail higher, so it can only exit
+    # earlier or at the same time -- never later.
+    assert from_high[0].bars_held <= from_entry[0].bars_held

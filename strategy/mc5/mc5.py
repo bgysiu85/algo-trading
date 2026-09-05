@@ -90,6 +90,21 @@ TRAIL_PCT = 5.0
 # cannot end up labelling its fills with the first one's name.
 STRATEGY_NAME = "MC5"
 
+# Price band, the SAME rule MCL and VW9 enforce. MC5 shipped without it and
+# had never been run on real data, so nothing had exposed the gap -- exactly
+# how VW9 reached a full grid before anyone noticed.
+#
+# It is not cosmetic. IB serves SPLIT-ADJUSTED history, so a small cap that
+# later reverse-split comes back at an inflated price. Applied to VW9 the same
+# fix moved its headline from -$31,296 to +$3,942: the loss was entirely the
+# adjustment factor being traded as if it were a price.
+#
+# ENFORCE_PRICE_BAND is a call parameter on backtest_session() as well as a
+# module default, so the cost of NOT having it can be measured rather than
+# asserted -- see claude/mc5_first_results.md.
+PRICE_MIN, PRICE_MAX = 2.0, 20.0
+ENFORCE_PRICE_BAND = True
+
 MAX_SHARES = 100
 MAX_EQUITY_PCT = 40.0
 EQUITY = 100_000.0
@@ -215,13 +230,17 @@ def size_for(price: float, equity: float = EQUITY) -> int:
                       math.floor(equity * MAX_EQUITY_PCT / 100.0 / price)))
 
 
-def backtest_session(df, session_date, tz) -> list[Trade]:
+def backtest_session(df, session_date, tz,
+                     enforce_price_band: bool | None = None,
+                     gap_fills: bool = True,
+                     seed_peak_with_bar_high: bool = False) -> list[Trade]:
     """Run one pre-market session on 5-minute bars.
 
     Accepts 1-minute OR 5-minute bars and resamples if needed, so this can be
     handed exactly the same frame mcl_strategy.backtest_session receives.
     Include pre-session history for warm-up (see the module docstring).
     """
+    band = ENFORCE_PRICE_BAND if enforce_price_band is None else enforce_price_band
     df5 = df if _looks_5m(df) else to_5m(df)
     sig = signals(df5)
     local = sig.index.tz_convert(tz)
@@ -244,10 +263,19 @@ def backtest_session(df, session_date, tz) -> list[Trade]:
         if pos is None:
             if bool(row["entry"]):
                 px = float(row["close"]) + SLIPPAGE_TICKS * TICK
+                if band and not (PRICE_MIN <= px <= PRICE_MAX):
+                    continue
                 q = size_for(px)
                 if q >= 1:
                     pos = dict(entry_i=i, entry_px=px, qty=q,
-                               peak=max(px, float(row["high"])),
+                               # See strategy/mcl/mcl.py: the entry bar's high
+                               # happened BEFORE the close we bought at, so
+                               # trailing from it prices a move the position
+                               # never had. Worse on 5-minute bars than on
+                               # 1-minute ones, because the high is further
+                               # from the close.
+                               peak=(max(px, float(row["high"]))
+                                     if seed_peak_with_bar_high else px),
                                entry_t=rows.iloc[i][tcol])
             continue
 
@@ -255,7 +283,21 @@ def backtest_session(df, session_date, tz) -> list[Trade]:
         exit_px = exit_reason = None
 
         if float(row["low"]) <= trail:
-            exit_px, exit_reason = trail - SLIPPAGE_TICKS * TICK, "trailing_stop"
+            # GAP-THROUGH. Selling AT the trail assumes the market offered that
+            # price. When the bar OPENS below the level it never did: price was
+            # already through the stop when the bar began, and the best
+            # obtainable fill is the open.
+            #
+            # Measured on MC5 (5-minute bars, 688 stop exits): the bar opened
+            # below the trail 48% of the time, and pricing those at `trail`
+            # overstated P/L by $20,394 -- against a headline of $20,156. The
+            # whole apparent edge was this one assumption. It bites hardest on
+            # coarse bars, because a 5-minute gap is bigger than a 1-minute one.
+            #
+            # gap_fills=False restores the optimistic model, purely so old
+            # results stay reproducible.
+            fill = (min(trail, float(row["open"])) if gap_fills else trail)
+            exit_px, exit_reason = fill - SLIPPAGE_TICKS * TICK, "trailing_stop"
         elif last_of_session:
             exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "window_close"
         elif bool(row["exit_sig"]):
@@ -286,6 +328,7 @@ def slope_distribution(df, tz) -> dict:
     ENTRY_RSI_ROC_PCT = 5.0 was chosen before seeing any of these numbers.
     Run this across the watchlist before trusting that threshold.
     """
+    band = ENFORCE_PRICE_BAND if enforce_price_band is None else enforce_price_band
     df5 = df if _looks_5m(df) else to_5m(df)
     sig = signals(df5)
     local = sig.index.tz_convert(tz)
