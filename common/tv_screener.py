@@ -27,13 +27,47 @@ below is the part that took the guessing.
     ----------------    ------------------------------
     Pre-mkt chg %       premarket_change
     Pre-mkt price       premarket_close
-    Rel vol             relative_volume_10d_calc
+    Rel vol (1 day)     volume_change          -- see the note below
     Float               float_shares_outstanding
     (pre-mkt volume)    premarket_volume
 
-VERIFIED against the live server 2026-09-05: the four filters together return
-a single name (AOUT, +27.5% pre-market, rel vol 65, float 10.6m, $12.76),
-which is the right order of magnitude for this screen on one day.
+RELATIVE VOLUME AGAINST YESTERDAY, which needed checking rather than guessing.
+TradingView has no 1-day relative-volume column. What it has:
+
+    relative_volume            volume / average_volume_10d_calc  (whole day)
+    relative_volume_10d_calc   the same, TIME-OF-DAY ADJUSTED over 10 days
+    relative_volume_intraday|5 the same, adjusted, over 5 days
+    volume_change              PERCENT change vs the PREVIOUS DAY's volume
+
+Only the last is a comparison against one day ago, so that is what "rel vol
+compared to 1 day ago" has to mean here. Verified on names where the answer is
+checkable: NVDA +0.50%, AAPL +6.39%, GOOGM -91.2% -- a plain day-over-day
+percent, not a ratio.
+
+THE UNIT TRAP: it is a percent CHANGE, so "5x yesterday" is volume_change
+> 400, not > 500. 500 would be six times.
+
+THE SILENT-FAILURE TRAP, which is worse and nearly cost this file its point:
+**volume_change cannot be used as a FILTER.** The server accepts the clause,
+returns a perfectly plausible result set, and simply does not apply it -- the
+only evidence is an `ignored_filters` key in the response. Sent with the other
+three it returned three rows including one at +266% when the threshold was
++400%, i.e. exactly the rows the other three filters produce on their own.
+
+Checked either way round: `relative_volume` filters normally (19,959 rows ->
+629), `volume_change` does not (19,959 -> 19,959, ignored).
+
+So the day-over-day cut is applied HERE, client-side, by filter_rows(). Always
+read `ignored_filters` on any response before trusting a screen.
+
+THE BEHAVIOURAL DIFFERENCE, which matters for a PRE-MARKET screen: the 10-day
+column is adjusted for time of day, so "5x" means the same thing at 04:30 as
+at 09:00. volume_change is not adjusted -- it compares today's volume SO FAR
+against yesterday's FULL day, so early in the session almost nothing clears
+the bar and the screen loosens as the morning goes on. That is a real change
+in what the screen does, not just a change of yardstick.
+
+VERIFIED against the live server 2026-09-05.
 
 THE GAP WORTH KNOWING ABOUT
 ---------------------------
@@ -55,15 +89,17 @@ MARKET = "america"
 
 # The saved screen, one clause per row of the TradingView filter panel.
 PREMARKET_CHANGE_MIN = 20.0        # Pre-mkt chg  > 20%
-RELATIVE_VOLUME_MIN = 5.0          # Rel vol      > 5
+RELATIVE_VOLUME_X = 5.0            # Rel vol      > 5x YESTERDAY
 PREMARKET_PRICE_MIN = 2.0          # Pre-mkt price > 2 USD
 FLOAT_RANGE = (0, 20_000_000)      # Float        0 to 20M
 
+# volume_change is a percent change, so 5x yesterday is +400%, not +500%.
+VOLUME_CHANGE_MIN = (RELATIVE_VOLUME_X - 1.0) * 100.0
+
+# Server-side. Every one of these is confirmed to actually apply.
 FILTERS = [
     {"left": "premarket_change", "operation": "greater",
      "right": PREMARKET_CHANGE_MIN},
-    {"left": "relative_volume_10d_calc", "operation": "greater",
-     "right": RELATIVE_VOLUME_MIN},
     {"left": "premarket_close", "operation": "greater",
      "right": PREMARKET_PRICE_MIN},
     {"left": "float_shares_outstanding", "operation": "in_range",
@@ -71,7 +107,14 @@ FILTERS = [
 ]
 
 COLUMNS = ["name", "premarket_change", "premarket_close", "premarket_volume",
-           "relative_volume_10d_calc", "float_shares_outstanding", "close"]
+           "volume", "volume_change", "relative_volume_10d_calc",
+           "float_shares_outstanding", "close"]
+
+# Kept so the two yardsticks can be compared on the same rows rather than
+# argued about: relative_volume_10d_calc is still requested as a column even
+# though it no longer filters.
+TEN_DAY_FILTER = {"left": "relative_volume_10d_calc", "operation": "greater",
+                  "right": RELATIVE_VOLUME_X}
 
 
 def payload(limit: int = 50, cap_price: bool = False) -> dict:
@@ -87,6 +130,27 @@ def payload(limit: int = 50, cap_price: bool = False) -> dict:
                         "right": PRICE_MAX})
     return dict(market=MARKET, limit=limit, filters=filters,
                 columns=COLUMNS, sort_by="premarket_change", sort_order="desc")
+
+
+def filter_rows(rows: list[dict]) -> list[dict]:
+    """Apply the day-over-day volume cut the server will not.
+
+    This is not an optimisation, it is the correctness step: without it the
+    screen silently runs on three of its four criteria.
+    """
+    out = []
+    for r in rows:
+        vc = r.get("volume_change")
+        if vc is not None and vc > VOLUME_CHANGE_MIN:
+            out.append(r)
+    return out
+
+
+def check_response(resp: dict) -> list[str]:
+    """Return any filters the server admitted to ignoring. Call this on every
+    screener response before believing it."""
+    data = resp.get("data", resp)
+    return list(data.get("ignored_filters") or [])
 
 
 def out_of_band(rows: list[dict]) -> list[dict]:
@@ -110,6 +174,12 @@ def main() -> int:
 
     if a.json or True:
         print(json.dumps(payload(a.limit, a.capped), indent=2))
+    print()
+    print(f"# Three server-side filters. The fourth -- volume_change > "
+          f"{VOLUME_CHANGE_MIN:.0f}% ({RELATIVE_VOLUME_X:g}x yesterday) --")
+    print("# CANNOT be filtered server-side: it is accepted and silently")
+    print("# ignored. Apply filter_rows() to the results, and check")
+    print("# check_response() for ignored_filters on every call.")
     print()
     print(f"# MCL trades ${PRICE_MIN:.0f}-${PRICE_MAX:.0f}. This screen has no "
           f"upper bound, so rows above ${PRICE_MAX:.0f} are outside")
