@@ -321,6 +321,10 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      entry_shares: int | None = None,
                      pyramid_qty: int | None = None,
                      pyramid_pullback_pct: float = 2.5,
+                     scale_up_pct: float | None = None,
+                     scale_up_portion: float = 50.0,
+                     rebuy_dip_pct: float = 2.5,
+                     rebuy_ref: str = "peak",
                      max_adds: int | None = None) -> list[Trade]:
     """Run one pre-market session.
 
@@ -456,6 +460,11 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                                avg_px=px, realised=0.0, shares_traded=q,
                                scaled_out=False, cycles=0, capped=False,
                                armed=False, arm_level=None, adds=0, max_qty=q,
+                               # Sell-into-strength ladder. up_ref is the price
+                               # the next sell level is measured from: the entry
+                               # first, then each buy-back price in turn.
+                               up_ref=px, scaled_up=False, up_peak=0.0,
+                               up_sold_qty=0, up_sell_px=0.0,
                                # Accumulated per ORDER, not derived at the end,
                                # because the per-order minimum makes cost
                                # non-linear in quantity.
@@ -566,6 +575,86 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                         pos["cycles"] += 1
                         pos["max_qty"] = max(pos["max_qty"], pos["qty"])
                     pos["scaled_out"] = False
+
+            # --- SELL INTO STRENGTH, BUY BACK ON THE DIP --------------------
+            # The MIRROR of the scale_out_pct mechanic above, and the
+            # difference is the whole point rather than a variation.
+            #
+            #   scale_out_pct   sells on a PULLBACK, buys back on the RECOVERY
+            #                   -> sells low, buys high. A structural cost, and
+            #                      measured as one: negative at every setting
+            #                      at the shipped trail.
+            #   scale_up_pct    sells into STRENGTH, buys back on the DIP
+            #                   -> sells high, buys low. A structural credit,
+            #                      paid for in a different currency: the sold
+            #                      shares are not there if price keeps running.
+            #
+            # Execution differs too, in this one's favour. The scale-out's
+            # buy-back is a break above a level, so it is a marketable limit
+            # that pays a ~40 bps chase. BOTH legs here rest: a limit sell
+            # above the market and a limit buy below it. Nothing is chased.
+            # The cost is queue position -- a resting limit at a level that is
+            # only touched need not fill, especially pre-market -- which a bar
+            # model cannot see. See the docstring's caveat.
+            if scale_up_pct and scale_up_portion:
+                if not pos["scaled_up"]:
+                    sell_level = pos["up_ref"] * (1.0 + scale_up_pct / 100.0)
+                    if float(row["high"]) >= sell_level:
+                        sell_q = int(pos["qty"] * scale_up_portion / 100.0)
+                        if 1 <= sell_q < pos["qty"]:
+                            # A resting sell fills AT the limit, not through
+                            # it. One tick against, per project convention.
+                            px_out = sell_level - SLIPPAGE_TICKS * TICK
+                            pos["realised"] += (px_out - pos["avg_px"]) * sell_q
+                            pos["commission"] += order_cost(sell_q, px_out, True,
+                                                            commission_plan)
+                            pos["qty"] -= sell_q
+                            pos["shares_traded"] += sell_q
+                            pos["scaled_up"] = True
+                            pos["up_sold_qty"] = sell_q
+                            # The dip is measured from the peak reached AFTER
+                            # the sell, so a stock that keeps running raises
+                            # the bar for the buy-back rather than lowering it.
+                            pos["up_peak"] = max(pos["peak"], float(row["high"]))
+                            pos["up_sell_px"] = px_out
+                else:
+                    # WHERE THE DIP IS MEASURED FROM decides whether the round
+                    # trip can lose, and it is not a detail:
+                    #   "peak"  dip from the high reached AFTER the sell. If
+                    #           price runs, the buy-back lands ABOVE the sell
+                    #           -- measured, only 45% of these bought back
+                    #           below their own sell price at +2%/-2%.
+                    #   "sell"  a limit resting below the SELL price. The round
+                    #           trip is then profitable by construction; what
+                    #           it gives up is that a stock which never comes
+                    #           back leaves the shares behind for good.
+                    buy_level = ((pos["up_sell_px"] if rebuy_ref == "sell"
+                                  else pos["up_peak"])
+                                 * (1.0 - rebuy_dip_pct / 100.0))
+                    if float(row["low"]) <= buy_level:
+                        capped = (max_cycles is not None
+                                  and pos["cycles"] >= max_cycles)
+                        add = (rebuy_qty if rebuy_qty is not None
+                               else pos["up_sold_qty"])
+                        if max_position_shares is not None:
+                            add = min(add, max_position_shares - pos["qty"])
+                        if not capped and add >= 1:
+                            px_in = buy_level + SLIPPAGE_TICKS * TICK
+                            pos["avg_px"] = ((pos["avg_px"] * pos["qty"]
+                                              + px_in * add) / (pos["qty"] + add))
+                            pos["commission"] += order_cost(add, px_in, False,
+                                                            commission_plan)
+                            pos["qty"] += add
+                            pos["shares_traded"] += add
+                            pos["cycles"] += 1
+                            pos["max_qty"] = max(pos["max_qty"], pos["qty"])
+                            # The ladder resets to where we just bought, so the
+                            # next sell is scale_up_pct above THAT, not above
+                            # the original entry.
+                            pos["up_ref"] = px_in
+                        pos["scaled_up"] = False
+                    elif float(row["high"]) > pos["up_peak"]:
+                        pos["up_peak"] = float(row["high"])
 
             # --- PYRAMID: add on a recovered pullback, never sell -----------
             # Ben's second question, and a genuinely different mechanic from
