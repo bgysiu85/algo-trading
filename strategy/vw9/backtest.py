@@ -423,7 +423,8 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
                         rebuy_slip_bps: float = 0.0,
                         max_cycles: int | None = None,
                         commission_plan: str = COMMISSION_PLAN,
-                        rebuy_trigger: str = "peak") -> list[Trade]:
+                        rebuy_trigger: str = "peak",
+                        only_setup: str | None = None) -> list[Trade]:
     """One session, one timeframe, one exit mode.
 
     bars_1m must be 1-minute bars covering at least 04:00-20:00 ET on
@@ -468,6 +469,18 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
     for setup in setups:
         if entries_taken >= max_entries_per_session:
             break
+        # SETUP FILTER, and where it sits is the whole point.
+        #
+        # Filtering HERE -- before the entry cap and before the no-overlap
+        # block -- is what makes a Setup-B-only run different from slicing
+        # kind == "B" out of a mixed run afterwards. In a mixed run Setup A is
+        # 81% of triggers, so A consumes max_entries_per_session and holds the
+        # position that blocks B from triggering at all. The post-hoc B slice
+        # is therefore not "what B would have done"; it is "what B managed to
+        # do in the gaps A left". Every B-only figure quoted before this
+        # parameter existed is that weaker thing.
+        if only_setup and setup.kind != only_setup:
+            continue
         t = setup.bar_index
         if t <= blocked_until:
             continue
