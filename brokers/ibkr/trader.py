@@ -76,6 +76,7 @@ try:
 except ImportError:  # pragma: no cover
     sys.exit("ib_async not installed.  pip install ib_async pandas")
 
+from common import notify
 from common.commissions import order_cost
 from strategy.mcl import mcl as S
 from strategy.mcl.mcl import (  # re-exported so tests/tools can do trader.evaluate(...)
@@ -327,8 +328,13 @@ class FillLog:
 # --------------------------------------------------------------------------
 
 class MCLPaperTrader:
-    def __init__(self, ib: IB, watchlist: Path, log: FillLog, dry_run: bool):
+    def __init__(self, ib: IB, watchlist: Path, log: FillLog, dry_run: bool,
+                 tg: "notify.Notifier | None" = None):
         self.ib = ib
+        # Default to a DISABLED notifier rather than resolving credentials
+        # here. Constructing one per test, or per dry run, must not touch
+        # 1Password or spawn a thread; main() passes a live one in.
+        self.tg = tg or notify.Notifier()
         self.watchlist = watchlist
         self.log = log
         self.dry_run = dry_run
@@ -722,11 +728,17 @@ class MCLPaperTrader:
 
             LOG.info("%s %s %d filled @ %.4f (ref %.4f, slip %+.4f)",
                      action, st.symbol, filled, avg, ref_close, -slip)
+            rt = round_trip(avg, filled)
             self.log.write(status="FILLED" if filled == qty else "PARTIAL_FILL",
                            fill_price=avg, filled_qty=filled,
                            slippage_vs_ref=round(-slip, 4),
                            seconds_to_fill=round(elapsed, 2),
-                           **round_trip(avg, filled), **row)
+                           **rt, **row)
+            # Notify AFTER the log write, never before: the CSV is the record
+            # of what happened and must not be delayed or skipped because a
+            # third party is slow. The send itself cannot block or raise --
+            # see common/notify.py -- but ordering makes that explicit.
+            self.notify_fill(st.symbol, action, avg, filled, rt)
             return avg, filled
 
         self.ib.cancelOrder(order)
@@ -991,6 +1003,35 @@ class MCLPaperTrader:
             st.position = Position(symbol=st.symbol, qty=filled, entry_price=avg,
                                    entry_time=now_et, peak=max(avg, sig.close))
 
+    def notify_fill(self, symbol: str, action: str, price: float,
+                    filled: int, rt: dict) -> None:
+        """Push a fill to Telegram. Commission is recomputed from the SAME
+        schedule the P/L used (common/commissions.py), per leg, so the message
+        can never quote a different number from the fill log.
+
+        Wrapped whole: this is decoration on a live trading path and must not
+        be able to raise into it, however the notifier is configured.
+        """
+        try:
+            if action == "BUY":
+                comm = order_cost(filled, price, False, COMMISSION_PLAN)
+                self.tg.send(notify.buy_filled(symbol, price, filled, comm),
+                             force=True)
+            else:
+                comm = order_cost(filled, price, True, COMMISSION_PLAN)
+                # rt["trade_pnl"] is the ROUND TRIP net, both legs' commission
+                # already deducted. Absent when this sell is not closing a
+                # tracked position, in which case there is no P/L to claim.
+                pnl = rt.get("trade_pnl")
+                if pnl is None:
+                    return
+                self.tg.send(
+                    notify.sell_filled(symbol, price, filled, comm, pnl),
+                    force=True)
+        except Exception as e:                              # noqa: BLE001
+            LOG.warning("notification failed (%s: %s) — trading unaffected",
+                        type(e).__name__, e)
+
     # -- main loop --------------------------------------------------------
 
     async def run(self):
@@ -1096,7 +1137,11 @@ async def main_async(args):
                  f"paper accounts (expected ids starting 'DU').")
 
     log = FillLog(Path(args.out))
-    trader = MCLPaperTrader(ib, wl, log, args.dry_run)
+    # Resolved once, here, at startup -- the same discipline as every other
+    # credential in this project. A lazy resolve mid-session can block on a
+    # 1Password prompt with a position open.
+    tg = notify.Notifier() if args.no_telegram else notify.Notifier.from_env()
+    trader = MCLPaperTrader(ib, wl, log, args.dry_run, tg=tg)
 
     for s in (_signal.SIGINT, _signal.SIGTERM):
         try:
@@ -1193,6 +1238,8 @@ def main(argv: list[str] | None = None):
                    help="4002 IB Gateway paper (default) or 7497 TWS paper")
     p.add_argument("--client-id", type=int, default=17)
     p.add_argument("--out", default=f"var/fills/mcl_fills_{datetime.now(ET):%Y%m%d}.csv")
+    p.add_argument("--no-telegram", action="store_true",
+                   help="run without notifications even if configured")
     p.add_argument("--dry-run", action="store_true",
                    help="evaluate and log signals but place no orders")
     p.add_argument("--allow-empty", action="store_true",

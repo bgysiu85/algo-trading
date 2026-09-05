@@ -68,6 +68,7 @@ from datetime import datetime, time as dtime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from common import notify
 from common.tv_screener import (COLUMNS, FILTERS, MARKET, PRICE_MAX, PRICE_MIN)
 
 LOG = logging.getLogger("tv_feed")
@@ -206,12 +207,22 @@ def main() -> int:
                     help="never write the file")
     ap.add_argument("--all-hours", action="store_true",
                     help="ignore the 04:00-09:30 ET window")
+    ap.add_argument("--no-telegram", action="store_true",
+                    help="run without notifications even if configured")
+    ap.add_argument("--heartbeat", type=float, default=3600.0,
+                    help="seconds between 'feed alive' messages; 0 disables")
     a = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     rank = Ranking(a.max_symbols)
     backoff = 0.0
+    tg = notify.Notifier() if a.no_telegram else notify.Notifier.from_env()
+    # Previous poll's HOT+WARM set. Changes are reported against what was
+    # SCREENING, not against the file: the file only ever grows, so diffing it
+    # would report an "add" once and never a "remove".
+    prev_screening: set[str] = set()
+    last_beat = time.monotonic()
 
     while True:
         now = datetime.now(ET)
@@ -239,6 +250,11 @@ def main() -> int:
         hot, warm, cold = rank.tiers(rows)
         symbols = rank.update(rows)
 
+        screening = set(hot) | set(warm)
+        added = sorted(screening - prev_screening)
+        removed = sorted(prev_screening - screening)
+        prev_screening = screening
+
         if a.dry_run:
             LOG.info("HOT %s | WARM %s | COLD %s",
                      hot or "-", warm or "-", cold[:5] or "-")
@@ -251,11 +267,29 @@ def main() -> int:
                 LOG.info("watchlist -> %d symbols  HOT %s | WARM %s | COLD %s",
                          len(symbols), hot or "-", warm or "-",
                          cold[:5] or "-")
+
+        # One coalesced message per poll that changed something. Sending per
+        # symbol would be up to 2,000 messages a session and would trip
+        # Telegram's per-chat rate limit long before that.
+        if added or removed:
+            tg.send(notify.watchlist_change(added, removed, hot, warm, cold,
+                                            now=now, rows=rows))
+
+        # A quiet pre-market produces no changes at all, which is exactly when
+        # a crashed feed looks identical to a calm market from the phone.
+        # force=True so the rate limiter cannot swallow the one message whose
+        # whole purpose is to prove the process is alive.
+        if a.heartbeat and time.monotonic() - last_beat >= a.heartbeat:
+            tg.send(notify.heartbeat(len(rows), len(hot), len(warm), len(cold),
+                                     stats=tg.stats(), now=now), force=True)
+            last_beat = time.monotonic()
         if warm:
             LOG.info("outside MCL's $%.0f-%.0f band, deprioritised: %s",
                      PRICE_MIN, PRICE_MAX, ", ".join(warm))
 
         if a.once:
+            tg.flush()
+            LOG.info("%s", tg.stats())
             return 0
         time.sleep(a.interval)
 

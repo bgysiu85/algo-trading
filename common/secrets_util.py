@@ -145,6 +145,34 @@ def preload(names: dict[str, str]) -> None:
         )
 
 
+def preload_optional(names: dict[str, str]) -> set[str]:
+    """Resolve credentials that are allowed to be absent. Returns the names
+    that resolved.
+
+    preload() exits the process on anything missing, which is exactly right
+    for a broker key -- a trader with no credentials should die at startup, in
+    front of you, not at 05:30 with a position open. It is exactly wrong for
+    an optional feature: not having configured Telegram must not stop the
+    session from trading.
+
+    Same resolution order and the same one-shot-at-startup discipline; only
+    the failure behaviour differs.
+    """
+    got = set()
+    for env_var, label in names.items():
+        try:
+            value, source = _resolve_one(env_var, label)
+        except Exception:
+            # An op:// reference that fails to resolve is a configuration
+            # problem, not a reason to refuse to trade.
+            continue
+        if value:
+            _cache[env_var] = value
+            _sources[env_var] = source
+            got.add(env_var)
+    return got
+
+
 def get(env_var: str) -> str:
     if env_var not in _cache:
         raise RuntimeError(
