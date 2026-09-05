@@ -6,11 +6,25 @@ Compare strategy variants offline, over cached bars. No IB, no pacing, seconds.
     python sweep_variants.py --detail           # per-variant exit breakdown
     python sweep_variants.py --csv out.csv      # write every trade
 
-Requires a populated bar_cache/2d_to_0930/ -- run main.py --mode backtest once
-to build it. After
-that this runs as often as you like at no cost, which is the whole point: the
-questions queued up (apex on/off, MACD > 0 on/off, and their interaction) each
-needed a separate 85-minute paced IB pass before.
+Requires a populated shared bar cache -- run main.py --mode backtest once to
+build it. After that this runs as often as you like at no cost, which is the
+whole point: the questions queued up (apex on/off, MACD > 0 on/off, and their
+interaction) each needed a separate 85-minute paced IB pass before.
+
+READS THE SUPERSET, SLICES BEFORE USE
+-------------------------------------
+The cache holds the SHARED "3 D" window ending 20:00 (bar_cache/3d_to_2000/),
+not backtest.py's own "2 D" ending 09:30. An earlier version of this file
+looked for 2d_to_0930/ and reported the cache empty while 375 sessions sat in
+the next directory -- the exact silent failure tests/common/test_cache_layout.py
+exists to catch.
+
+Repointing alone is not enough. A superset must be SLICED back to the engine's
+window before any strategy sees it: a longer frame changes EMA-seeded
+indicators on identical bars, measured at up to 58 RSI points. Passing the
+superset through would have produced four plausible-looking columns that no
+live configuration corresponds to -- worse than the empty-cache error, because
+it returns numbers.
 
 WHY A 2x2 AND NOT TWO SEPARATE TESTS
 ------------------------------------
@@ -28,7 +42,9 @@ from __future__ import annotations
 import argparse
 import pathlib
 
-from common.cache_io import window_dir
+from common.cache_io import (window_dir, check_sessions, slice_sessions,
+                             SHARED_DURATION, SHARED_END_HHMM,
+                             BACKTEST_SESSIONS, BACKTEST_END_HHMM)
 import collections
 import sys
 from datetime import datetime
@@ -50,11 +66,21 @@ VARIANTS = [
 
 
 def load_cache(cache_dir: Path):
-    """Yield (symbol, date, frame) for every cached session."""
+    """Yield (symbol, date, frame) sliced to the backtest engine's window.
+
+    Frames come out of the SHARED superset and are cut to BACKTEST_SESSIONS
+    sessions ending BACKTEST_END_HHMM -- exactly what Runner._slice does, so
+    the sweep and a real backtest see identical bars.
+
+    A frame that does not reach back far enough is SKIPPED and counted, never
+    under-seeded: fewer warm-up sessions would move its indicators silently.
+    """
     files = sorted(cache_dir.glob("*.csv.gz"))
     if not files:
         sys.exit(f"{cache_dir}/ is empty. Run "
                  f"main.py --mode backtest --strategy mcl once to build it.")
+    end_h, end_m = int(BACKTEST_END_HHMM[:2]), int(BACKTEST_END_HHMM[2:])
+    skipped = 0
     for f in files:
         stem = f.name[: -len(".csv.gz")]
         symbol, _, date_str = stem.rpartition("_")
@@ -68,7 +94,21 @@ def load_cache(cache_dir: Path):
             continue
         df.index = (df.index.tz_localize("UTC") if df.index.tz is None
                     else df.index.tz_convert("UTC"))
-        yield symbol, date_str, df.sort_index()
+        df = df.sort_index()
+
+        want_end = datetime.strptime(date_str, "%Y-%m-%d").replace(
+            hour=end_h, minute=end_m, tzinfo=ET)
+        if check_sessions(df, want_end, BACKTEST_SESSIONS) < BACKTEST_SESSIONS:
+            skipped += 1
+            continue
+        sliced = slice_sessions(df, want_end, BACKTEST_SESSIONS)
+        if sliced.empty:
+            skipped += 1
+            continue
+        yield symbol, date_str, sliced
+    if skipped:
+        print(f"  {skipped} session(s) skipped: superset too short to give "
+              f"{BACKTEST_SESSIONS} sessions of warm-up")
 
 
 def run(sessions, opts) -> list:
@@ -107,13 +147,16 @@ def summarise(name: str, trades: list) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Offline strategy variant sweep")
     ap.add_argument("--cache-dir", default="bar_cache",
-                    help="cache ROOT; the 2d_to_0930 window is read from it")
+                    help="cache ROOT; the shared superset window is read from "
+                         "it and sliced to the backtest engine's window")
     ap.add_argument("--detail", action="store_true")
     ap.add_argument("--csv")
     a = ap.parse_args()
 
-    # Same window backtest.py writes; reading the root would find nothing.
-    sessions = list(load_cache(window_dir(Path(a.cache_dir), "2 D", "0930")))
+    # The SHARED superset is what backtest.py actually writes. Reading the
+    # root, or the engine's own 2d_to_0930 window, finds nothing.
+    sessions = list(load_cache(
+        window_dir(Path(a.cache_dir), SHARED_DURATION, SHARED_END_HHMM)))
     print(f"{len(sessions)} cached sessions\n")
 
     rows, all_trades = [], {}

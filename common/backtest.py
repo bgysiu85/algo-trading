@@ -51,7 +51,8 @@ import importlib
 from common import session_lock
 from common.cache_io import (cache_path as _cache_path, check_sessions,
                              slice_sessions, window_dir,
-                             SHARED_DURATION, SHARED_END_HHMM, SHARED_SESSIONS)
+                             SHARED_DURATION, SHARED_END_HHMM, SHARED_SESSIONS,
+                             BACKTEST_SESSIONS, BACKTEST_END_HHMM)
 
 # Both expose backtest_session(df, session_date, tz) and accept the same
 # 1-minute frame -- MC5 resamples internally, so the engine does not need to
@@ -107,8 +108,11 @@ CACHE_ROOT = Path("bar_cache")
 # What this engine NEEDS: two trading sessions ending 09:30 -- the session
 # plus the prior day, covering the 60-bar warm-up the volume average and MACD
 # both need.
-HIST_SESSIONS = 2
-HIST_END_HOUR, HIST_END_MINUTE = 9, 30
+# Sourced from cache_io so an offline consumer slicing the same superset
+# cannot drift from what this engine actually asks for.
+HIST_SESSIONS = BACKTEST_SESSIONS
+HIST_END_HOUR = int(BACKTEST_END_HHMM[:2])
+HIST_END_MINUTE = int(BACKTEST_END_HHMM[2:])
 
 # What it FETCHES: the shared superset, so one pull serves this engine and
 # data_ib.py's full-session window instead of two. Validated against the live

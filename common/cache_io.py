@@ -108,6 +108,18 @@ SHARED_DURATION = "3 D"
 SHARED_END_HHMM = "2000"
 SHARED_SESSIONS = 3
 
+# The window common/backtest.py slices the superset back to, and which any
+# other offline consumer of those bars must slice to as well.
+#
+# These live HERE rather than in backtest.py because backtest.py sys.exit()s
+# at import when ib_async is missing. Offline analysis over already-cached
+# bars must not need the IB library -- that is the whole reason this module
+# was split out. Duplicating the numbers instead would recreate the coupling
+# the indicator merge removed: two copies that agree until someone changes
+# one.
+BACKTEST_SESSIONS = 2
+BACKTEST_END_HHMM = "0930"
+
 
 def check_sessions(df, end, want: int, tz="America/New_York") -> int:
     """Distinct trading sessions in `df` at or before `end`.
