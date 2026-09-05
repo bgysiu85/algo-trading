@@ -115,6 +115,11 @@ ENFORCE_PRICE_BAND = True
 
 # --- sizing / costs, unchanged from MCL so results are comparable (§9) ------
 EQUITY = 100_000.0
+# Shown on alerts so a fill on a phone says which strategy fired it.
+# Lives on the STRATEGY rather than in the trader, so a second trader
+# cannot end up labelling its fills with the first one's name.
+STRATEGY_NAME = "VW9"
+
 MAX_SHARES = 100
 MAX_EQUITY_PCT = 40.0
 # See strategy/mcl/mcl.py and claude/ibkr_commission_structure.md. Same plan

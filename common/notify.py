@@ -275,6 +275,13 @@ def _ts(now: datetime | None = None) -> str:
     return (now or datetime.now(ET)).strftime("%H:%M:%S ET")
 
 
+def _tag(strategy: str) -> str:
+    """Which strategy fired this. Empty when unknown rather than guessing a
+    default -- a fill labelled with the wrong strategy is worse than one
+    labelled with none, and there is more than one trader in this repo."""
+    return f"{strategy} · " if strategy else ""
+
+
 def _money(x: float) -> str:
     return f"${x:,.2f}"
 
@@ -334,10 +341,10 @@ def heartbeat(scanned: int, hot: int, warm: int, cold: int,
 
 
 def buy_filled(ticker: str, price: float, qty: int, commission: float,
-               now: datetime | None = None) -> str:
+               now: datetime | None = None, strategy: str = "") -> str:
     cost = price * qty
     return "\n".join([
-        f"<b>BUY {ticker}</b>  {_ts(now)}",
+        f"<b>{_tag(strategy)}BUY {ticker}</b>  {_ts(now)}",
         f"price      {_money(price)}",
         f"shares     {qty:,}",
         f"cost       {_money(cost)}",
@@ -347,14 +354,15 @@ def buy_filled(ticker: str, price: float, qty: int, commission: float,
 
 
 def sell_filled(ticker: str, price: float, qty: int, commission: float,
-                net_profit: float, now: datetime | None = None) -> str:
+                net_profit: float, now: datetime | None = None,
+                strategy: str = "") -> str:
     """net_profit is the ROUND TRIP net -- both legs' commission already taken
     out -- because that is the number worth seeing on a phone. `commission`
     here is the sell leg only, so the two are not double counted."""
     proceeds = price * qty
     sign = "🟢" if net_profit >= 0 else "🔴"
     return "\n".join([
-        f"<b>SELL {ticker}</b>  {_ts(now)}",
+        f"<b>{_tag(strategy)}SELL {ticker}</b>  {_ts(now)}",
         f"price      {_money(price)}",
         f"shares     {qty:,}",
         f"proceeds   {_money(proceeds)}",
@@ -400,8 +408,9 @@ def main() -> int:
                                             "premarket_close": 12.76,
                                             "relative_volume_10d_calc": 65.46,
                                             "float_shares_outstanding": 10_589_237.0}]),
-                    buy_filled("AOUT", 12.76, 100, 0.35),
-                    sell_filled("AOUT", 13.40, 100, 0.35, 63.30)):
+                    buy_filled("AOUT", 12.76, 100, 0.35, strategy="MCL"),
+                    sell_filled("AOUT", 13.40, 100, 0.35, 63.30,
+                                strategy="MCL")):
             n.send(msg, force=True)
             time.sleep(MIN_INTERVAL_S / 2)
         n.flush()

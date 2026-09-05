@@ -92,6 +92,11 @@ USE_APEX_EXIT = False
 # the missing single-variable test.
 REQUIRE_MACD_POSITIVE = True
 
+# Shown on alerts so a fill on a phone says which strategy fired it.
+# Lives on the STRATEGY rather than in the trader, so a second trader
+# cannot end up labelling its fills with the first one's name.
+STRATEGY_NAME = "MCL"
+
 TRAIL_PCT = 5.0
 MAX_SHARES = 100
 MAX_EQUITY_PCT = 40.0

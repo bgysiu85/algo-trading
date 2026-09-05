@@ -119,6 +119,10 @@ ORDER_TIMEOUT_S = 20        # cancel and record a no-fill after this long
 # into the friction estimate.
 COMMISSION_PLAN = S.COMMISSION_PLAN
 
+# Read from the strategy module rather than written here, so this trader can
+# never label its fills with another strategy's name.
+STRATEGY_NAME = getattr(S, "STRATEGY_NAME", "?")
+
 # Loop cadence.
 #
 # IB paces historical-data requests hard: no identical request inside 15s, and
@@ -1015,8 +1019,10 @@ class MCLPaperTrader:
         try:
             if action == "BUY":
                 comm = order_cost(filled, price, False, COMMISSION_PLAN)
-                self.tg.send(notify.buy_filled(symbol, price, filled, comm),
-                             force=True)
+                self.tg.send(
+                    notify.buy_filled(symbol, price, filled, comm,
+                                      strategy=STRATEGY_NAME),
+                    force=True)
             else:
                 comm = order_cost(filled, price, True, COMMISSION_PLAN)
                 # rt["trade_pnl"] is the ROUND TRIP net, both legs' commission
@@ -1026,7 +1032,8 @@ class MCLPaperTrader:
                 if pnl is None:
                     return
                 self.tg.send(
-                    notify.sell_filled(symbol, price, filled, comm, pnl),
+                    notify.sell_filled(symbol, price, filled, comm, pnl,
+                                       strategy=STRATEGY_NAME),
                     force=True)
         except Exception as e:                              # noqa: BLE001
             LOG.warning("notification failed (%s: %s) — trading unaffected",

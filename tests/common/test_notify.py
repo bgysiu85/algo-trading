@@ -152,6 +152,37 @@ def test_all_three_tiers_are_always_shown_even_when_empty():
     assert "HOT (0)" in msg and "WARM (0)" in msg and "COLD (1)" in msg
 
 
+def test_fill_messages_name_the_strategy():
+    """With MCL, MC5 and VW9 in the repo, a fill on a phone has to say which
+    one fired it."""
+    assert N.buy_filled("AOUT", 12.76, 100, 0.35, now=NOW,
+                        strategy="MCL").startswith("<b>MCL · BUY AOUT</b>")
+    assert N.sell_filled("AOUT", 13.4, 100, 0.35, 63.3, now=NOW,
+                         strategy="VW9").startswith("<b>VW9 · SELL AOUT</b>")
+
+
+def test_an_unknown_strategy_is_left_blank_not_guessed():
+    """A fill labelled with the WRONG strategy is worse than one labelled with
+    none, so there is no default."""
+    assert N.buy_filled("A", 1.0, 1, 0.1, now=NOW).startswith("<b>BUY A</b>")
+
+
+def test_the_trader_reads_the_name_from_its_strategy_module():
+    """Not hard-coded in the trader: a second trader must not inherit the
+    first one's label."""
+    from brokers.ibkr import trader as M
+    from strategy.mcl import mcl as S
+    assert M.STRATEGY_NAME == S.STRATEGY_NAME == "MCL"
+
+
+def test_every_strategy_module_names_itself():
+    from strategy.mcl import mcl
+    from strategy.mc5 import mc5
+    from strategy.vw9 import backtest as vw9
+    names = {mcl.STRATEGY_NAME, mc5.STRATEGY_NAME, vw9.STRATEGY_NAME}
+    assert names == {"MCL", "MC5", "VW9"}, "names must be distinct per strategy"
+
+
 def test_buy_message_totals_add_up():
     msg = N.buy_filled("AOUT", 12.76, 100, 0.35, now=NOW)
     assert "$1,276.00" in msg          # cost

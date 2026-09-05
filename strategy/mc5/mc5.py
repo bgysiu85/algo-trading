@@ -85,6 +85,11 @@ EXIT_RSI_ROC_PCT = 0.0         # exit: any negative gradient. -5.0 to demand mor
 ROC_MIN_BASE = 5.0
 
 TRAIL_PCT = 5.0
+# Shown on alerts so a fill on a phone says which strategy fired it.
+# Lives on the STRATEGY rather than in the trader, so a second trader
+# cannot end up labelling its fills with the first one's name.
+STRATEGY_NAME = "MC5"
+
 MAX_SHARES = 100
 MAX_EQUITY_PCT = 40.0
 EQUITY = 100_000.0
