@@ -325,6 +325,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      scale_up_portion: float = 50.0,
                      rebuy_dip_pct: float = 2.5,
                      rebuy_ref: str = "peak",
+                     trail_on_close: bool = False,
+                     trail_confirm_bars: int = 0,
                      max_adds: int | None = None) -> list[Trade]:
     """Run one pre-market session.
 
@@ -465,6 +467,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                                # first, then each buy-back price in turn.
                                up_ref=px, scaled_up=False, up_peak=0.0,
                                up_sold_qty=0, up_sell_px=0.0,
+                               breached_at=None, breach_level=0.0,
                                # Accumulated per ORDER, not derived at the end,
                                # because the per-order minimum makes cost
                                # non-linear in quantity.
@@ -478,11 +481,58 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         trail = pos["peak"] * (1.0 - trail_pct / 100.0)
         exit_px = exit_reason = None
 
-        if float(row["low"]) <= trail:
+        # HOW THE TRAIL IS TESTED, which is a separate question from how wide
+        # it is. The default is the intrabar low, so a single wick through the
+        # level exits the trade at the level. The two alternatives both exist
+        # to answer "did we sell into noise?" without simply widening:
+        #
+        #   trail_on_close      require the bar to CLOSE below the level. A
+        #                       wick that recovers within the bar is ignored,
+        #                       but the fill is then the close, which can be
+        #                       well below the level -- it buys fewer exits at
+        #                       a worse price on the ones that do happen.
+        #   trail_confirm_bars  the low may breach, but the position is only
+        #                       closed if price is STILL below the level N bars
+        #                       later. Between breach and confirmation the
+        #                       trade is unprotected, which is a real risk and
+        #                       not merely a modelling choice.
+        #
+        # Both are strictly looser than the default, so neither can be judged
+        # against the 5% baseline alone -- they have to beat a WIDER intrabar
+        # trail that gives up the same amount of room. See common/stop_timing.py.
+        # NOTE THE SHAPE OF THIS CHAIN. It used to start with
+        # `if trail_confirm_bars > 0:` -- a test on a PARAMETER, not on price
+        # -- so whenever either variant was enabled the branch was always
+        # taken and the `elif last_of_session` below became unreachable. A
+        # position still open at 09:30 was then never closed and the trade was
+        # silently DROPPED from the results: 450 trades instead of 496, with
+        # the dropped ones' P/L simply missing. The trail test therefore has to
+        # resolve to an exit-or-not first, and the other exits are checked
+        # afterwards on `exit_px is None`.
+        if trail_confirm_bars > 0:
+            if pos["breached_at"] is None:
+                if float(row["low"]) <= trail:
+                    pos["breached_at"] = i
+                    pos["breach_level"] = trail
+            elif i - pos["breached_at"] >= trail_confirm_bars:
+                if float(row["close"]) <= pos["breach_level"]:
+                    exit_px = float(row["close"]) - SLIPPAGE_TICKS * TICK
+                    exit_reason = "trailing_stop"
+                else:
+                    # Back above the level at the check: forget the breach.
+                    # Without this the rule would be a DELAYED stop (one early
+                    # wick arms a certain exit) rather than a CONFIRMED one.
+                    pos["breached_at"] = None
+        elif trail_on_close:
+            if float(row["close"]) <= trail:
+                exit_px = float(row["close"]) - SLIPPAGE_TICKS * TICK
+                exit_reason = "trailing_stop"
+        elif float(row["low"]) <= trail:
             exit_px, exit_reason = trail - SLIPPAGE_TICKS * TICK, "trailing_stop"
-        elif last_of_session:
+
+        if exit_px is None and last_of_session:
             exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "window_close"
-        elif use_apex and bool(row["exit_sig"]):
+        elif exit_px is None and use_apex and bool(row["exit_sig"]):
             exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "apex_reversal"
 
         if exit_px is not None:
