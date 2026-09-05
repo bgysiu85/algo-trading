@@ -22,7 +22,8 @@ $scriptSuites = @(
     "tests.strategy.mc5.test_mc5_strategy",
     "tests.brokers.ibkr.test_dryrun_roundtrip",
     "tests.brokers.ibkr.test_live_paths",
-    "tests.brokers.ibkr.test_pacing_and_trail"
+    "tests.brokers.ibkr.test_pacing_and_trail",
+    "tests.brokers.ibkr.test_concurrency_cap"
 )
 
 $failed = @()

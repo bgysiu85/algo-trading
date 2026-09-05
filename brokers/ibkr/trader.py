@@ -143,6 +143,34 @@ BAR_MIN_INTERVAL_S = 20.0   # hard floor between history requests per symbol
 MAX_SYMBOLS_SAFE = 6        # beyond this, 1 req/min/symbol approaches IB's cap
 EMPTY_WARN_S = 120          # how often to repeat the 'watching nothing' warning
 
+# Most positions that may be open AT ONCE, across all symbols.
+#
+# Until 2026-09-05 there was no such limit anywhere. MAX_SYMBOLS_SAFE above
+# reads like one but is not: it only WARNS about watchlist size, for IB request
+# pacing, and never gates an entry. The entry path checked st.position (this
+# symbol), retired, session, bar-dedupe and size -- never the total across
+# symbols. Nothing bounded portfolio exposure.
+#
+# That matters more than it looks because size_for() bills every position
+# against the FULL account equity (MAX_EQUITY_PCT of it), and self.equity is
+# read once at startup and never decremented as positions open. So N concurrent
+# positions commit N x 40% of equity, not 40% between them.
+#
+# Empirically it has been benign -- over 373 cached sessions the most ever open
+# at once was 4 (once), 3 on three days, and peak simultaneous notional reached
+# 69% of net liq without ever exceeding it. This is closing an unbounded hole,
+# not stopping an observed bleed.
+#
+# 2 is chosen from claude/mcl_robustness_analysis.md: caps of 1/2/3/6 retain
+# 79.0% / 99.0% / 100.4% / 100% of backtest P/L. Cap 2 costs ~1% and removes
+# the tail. Cap 3 scoring above unconstrained is one skipped loser, i.e. noise.
+#
+# Enforced by counting open positions in the entry path. No reservation or lock
+# is needed: run() iterates symbols sequentially and awaits each order to
+# completion before moving to the next, so two entries cannot be in flight at
+# the same time. If that loop is ever made concurrent, this needs a reservation.
+MAX_CONCURRENT_POSITIONS = 2
+
 LOG = logging.getLogger("mcl")
 
 
@@ -891,6 +919,26 @@ class MCLPaperTrader:
         st.last_bar_ts = last_ts
 
         if not sig.long_entry:
+            return
+
+        # Portfolio-level gate. Everything above this point is about THIS
+        # symbol; this is the only check that looks at the account as a whole.
+        # The bar is already marked evaluated above, which is correct: the
+        # signal fired and we declined it, so it should not be reconsidered.
+        open_now = sum(1 for s in self.states.values() if s.position is not None)
+        if open_now >= MAX_CONCURRENT_POSITIONS:
+            LOG.info("%s entry signal declined — %d position(s) already open "
+                     "(cap %d): %s", st.symbol, open_now,
+                     MAX_CONCURRENT_POSITIONS,
+                     ", ".join(sorted(s.symbol for s in self.states.values()
+                                      if s.position is not None)))
+            self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                           symbol=st.symbol, action="BUY",
+                           reason="entry_signal", ref_close=round(sig.close, 4),
+                           status="SKIPPED_CONCURRENCY_CAP",
+                           reject_reason=f"{open_now} open, cap "
+                                         f"{MAX_CONCURRENT_POSITIONS}",
+                           **detail)
             return
 
         qty = self.size_for(sig.close)
