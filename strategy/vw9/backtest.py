@@ -68,7 +68,23 @@ MIN_TRIGGER_DV_PER_MIN = 40_000.0
 STOP_BUFFER_ATR = 0.10
 TARGET_R = 2.0
 TRAIL_ATR = 2.0
-EXIT_MODES = ("fixed_2r", "ride_ema9", "trail_atr")
+
+# MCL's exit, ported so the two strategies can be compared on the same terms.
+#
+# The measurement that prompted it: VW9's ATR trail is far wider than it reads.
+# 2 x ATR14 as a percentage of price, over 67,020 5-minute bars, is median
+# 7.3%, p75 12.7%, p90 21.0%, p99 63.4% -- against MCL's flat 5%. It is widest
+# on exactly the names that move most, which is backwards.
+#
+# MCL's exit is TWO decisions, not one, and both are ported here:
+#   1. the trail is a fixed PERCENTAGE of the peak, not a volatility multiple
+#   2. there is NO fixed stop -- since V4 the trail is the only protection
+# Keeping VW9's structural stop while swapping the trail would test neither,
+# so use_structural_stop exists to turn it off. It is worth turning off: in
+# the best cell those 123 stop exits were -$6,505.99 at a 0% win rate, which
+# they must be, since the stop sits below the entry by construction.
+TRAIL_PCT = 5.0
+EXIT_MODES = ("fixed_2r", "ride_ema9", "trail_atr", "trail_pct")
 
 # --- universe band -----------------------------------------------------------
 # §1: the universe is "$2-20, RVOL(1D) >= 5x, float < 20m, top-2 pre-market
@@ -178,7 +194,9 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
                     trail_atr: float, *,
                     enforce_price_band: bool = ENFORCE_PRICE_BAND,
                     use_vwap_exit: bool = True,
-                    vwap_exit_grace_bars: int = 0) -> dict | None:
+                    vwap_exit_grace_bars: int = 0,
+                    trail_pct: float = TRAIL_PCT,
+                    use_structural_stop: bool = True) -> dict | None:
     """Fill next-bar-open (§9 -- extended hours takes Day Limit orders only,
     so the trigger bar's close can never be the fill), then manage to
     whichever of the §5.3 hard exits or the exit_mode's target comes first.
@@ -252,7 +270,7 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
         #
         # A grace period lets the trade prove itself over N bars before the
         # hard rule applies. 0 restores the spec's literal §5.3 behaviour.
-        if l <= stop:
+        if use_structural_stop and l <= stop:
             exit_px, exit_reason = stop - SLIPPAGE_TICKS * TICK, "stop"
         elif (use_vwap_exit and (i - fill_i) >= vwap_exit_grace_bars
               and c <= vwap[i]):
@@ -267,6 +285,14 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
             trail = peak - trail_atr * (atrs[i] or 0.0)
             if l <= trail:
                 exit_px, exit_reason = trail - SLIPPAGE_TICKS * TICK, "trail_atr"
+        elif exit_mode == "trail_pct":
+            # mcl.py's exact form: trail off the peak as of the PREVIOUS bar
+            # (peak is updated at the bottom of this loop), tested against this
+            # bar's low, filled at the trail level less one tick. No same-bar
+            # lookahead, same as MCL.
+            trail = peak * (1.0 - trail_pct / 100.0)
+            if l <= trail:
+                exit_px, exit_reason = trail - SLIPPAGE_TICKS * TICK, "trail_pct"
 
         if exit_px is not None:
             gross = (exit_px - entry_price) * qty
@@ -299,7 +325,9 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
                         trail_atr: float = TRAIL_ATR,
                         enforce_price_band: bool = ENFORCE_PRICE_BAND,
                         use_vwap_exit: bool = True,
-                        vwap_exit_grace_bars: int = 0) -> list[Trade]:
+                        vwap_exit_grace_bars: int = 0,
+                        trail_pct: float = TRAIL_PCT,
+                        use_structural_stop: bool = True) -> list[Trade]:
     """One session, one timeframe, one exit mode.
 
     bars_1m must be 1-minute bars covering at least 04:00-20:00 ET on
@@ -361,7 +389,9 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
                               target_r, trail_atr,
                               enforce_price_band=enforce_price_band,
                               use_vwap_exit=use_vwap_exit,
-                              vwap_exit_grace_bars=vwap_exit_grace_bars)
+                              vwap_exit_grace_bars=vwap_exit_grace_bars,
+                              trail_pct=trail_pct,
+                              use_structural_stop=use_structural_stop)
         if res is None:
             continue
 
