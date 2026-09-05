@@ -220,7 +220,8 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
                     rebuy_slip_bps: float = 0.0,
                     max_cycles: int | None = None,
                     commission_plan: str = COMMISSION_PLAN,
-                    rebuy_trigger: str = "peak") -> dict | None:
+                    rebuy_trigger: str = "peak",
+                    gap_fills: bool = True) -> dict | None:
     """Fill next-bar-open (§9 -- extended hours takes Day Limit orders only,
     so the trigger bar's close can never be the fill), then manage to
     whichever of the §5.3 hard exits or the exit_mode's target comes first.
@@ -293,7 +294,7 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
     last_i = n - 1
 
     for i in range(fill_i, n):
-        h, l, c = highs[i], lows[i], closes[i]
+        h, l, c, o = highs[i], lows[i], closes[i], opens[i]
         last_of_session = (i == last_i)
 
         exit_px = exit_reason = None
@@ -314,8 +315,19 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
         #
         # A grace period lets the trade prove itself over N bars before the
         # hard rule applies. 0 restores the spec's literal §5.3 behaviour.
+        # GAP-THROUGH FILLS, added 2026-09-05 after MC5's first real run
+        # exposed the same flaw in mcl.py and mc5.py. Selling AT a level
+        # assumes the market offered it; when the bar OPENS below, price was
+        # already through before the bar began and the best obtainable fill is
+        # the open. On MC5 that assumption was 48% of stop exits and the whole
+        # apparent edge. It applies to EVERY level-based exit below -- the
+        # structural stop and both trails -- because all three sell at a
+        # computed price on the strength of the bar's LOW reaching it.
+        def _fill(level: float) -> float:
+            return min(level, o) if gap_fills else level
+
         if use_structural_stop and l <= stop:
-            exit_px, exit_reason = stop - SLIPPAGE_TICKS * TICK, "stop"
+            exit_px, exit_reason = _fill(stop) - SLIPPAGE_TICKS * TICK, "stop"
         elif (use_vwap_exit and (i - fill_i) >= vwap_exit_grace_bars
               and c <= vwap[i]):
             exit_px, exit_reason = c - SLIPPAGE_TICKS * TICK, "vwap_lost"
@@ -328,7 +340,7 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
         elif exit_mode == "trail_atr":
             trail = peak - trail_atr * (atrs[i] or 0.0)
             if l <= trail:
-                exit_px, exit_reason = trail - SLIPPAGE_TICKS * TICK, "trail_atr"
+                exit_px, exit_reason = _fill(trail) - SLIPPAGE_TICKS * TICK, "trail_atr"
         elif exit_mode == "trail_pct":
             # mcl.py's exact form: trail off the peak as of the PREVIOUS bar
             # (peak is updated at the bottom of this loop), tested against this
@@ -336,7 +348,7 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
             # lookahead, same as MCL.
             trail = peak * (1.0 - trail_pct / 100.0)
             if l <= trail:
-                exit_px, exit_reason = trail - SLIPPAGE_TICKS * TICK, "trail_pct"
+                exit_px, exit_reason = _fill(trail) - SLIPPAGE_TICKS * TICK, "trail_pct"
 
         if exit_px is not None:
             gross = realised + (exit_px - avg_px) * qty
@@ -429,7 +441,8 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
                         max_cycles: int | None = None,
                         commission_plan: str = COMMISSION_PLAN,
                         rebuy_trigger: str = "peak",
-                        only_setup: str | None = None) -> list[Trade]:
+                        only_setup: str | None = None,
+                        gap_fills: bool = True) -> list[Trade]:
     """One session, one timeframe, one exit mode.
 
     bars_1m must be 1-minute bars covering at least 04:00-20:00 ET on
@@ -513,7 +526,7 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
                               rebuy_slip_bps=rebuy_slip_bps,
                               max_cycles=max_cycles,
                               commission_plan=commission_plan,
-                              rebuy_trigger=rebuy_trigger)
+                              rebuy_trigger=rebuy_trigger, gap_fills=gap_fills)
         if res is None:
             continue
 
