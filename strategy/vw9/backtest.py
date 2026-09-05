@@ -44,6 +44,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from common.commissions import order_cost
 from common.indicators import resample_bars
 from strategy.vw9.vw9 import Setup, apply_indicators, find_setups
 
@@ -116,7 +117,10 @@ ENFORCE_PRICE_BAND = True
 EQUITY = 100_000.0
 MAX_SHARES = 100
 MAX_EQUITY_PCT = 40.0
-COMMISSION_PER_SHARE = 0.005
+# See strategy/mcl/mcl.py and claude/ibkr_commission_structure.md. Same plan
+# names, same reason for accumulating per order rather than per share.
+COMMISSION_PLAN = "ibkr_tiered"
+COMMISSION_PER_SHARE = 0.005     # legacy plan only
 SLIPPAGE_TICKS = 1
 TICK = 0.01
 
@@ -209,7 +213,8 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
                     rebuy_qty: int | None = None,
                     max_position_shares: int | None = None,
                     rebuy_slip_bps: float = 0.0,
-                    max_cycles: int | None = None) -> dict | None:
+                    max_cycles: int | None = None,
+                    commission_plan: str = COMMISSION_PLAN) -> dict | None:
     """Fill next-bar-open (§9 -- extended hours takes Day Limit orders only,
     so the trigger bar's close can never be the fill), then manage to
     whichever of the §5.3 hard exits or the exit_mode's target comes first.
@@ -265,6 +270,7 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
     avg_px = entry_price
     realised = 0.0
     shares_traded = qty
+    commission = order_cost(qty, entry_price, False, commission_plan)
     scaled_out = False
     sold_qty = 0
     cycles = 0
@@ -326,7 +332,7 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
 
         if exit_px is not None:
             gross = realised + (exit_px - avg_px) * qty
-            comm = COMMISSION_PER_SHARE * (shares_traded + qty)
+            comm = commission + order_cost(qty, exit_px, True, commission_plan)
             return {
                 "entry_time": times[fill_i], "exit_time": times[i],
                 "entry_price": entry_price, "exit_price": exit_px,
@@ -349,6 +355,7 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
                 if 1 <= sell_q < qty:
                     px_out = partial - SLIPPAGE_TICKS * TICK
                     realised += (px_out - avg_px) * sell_q
+                    commission += order_cost(sell_q, px_out, True, commission_plan)
                     qty -= sell_q
                     shares_traded += sell_q
                     scaled_out = True
@@ -368,6 +375,7 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
                     px_in = (prev_high * (1.0 + rebuy_slip_bps / 10_000.0)
                              + SLIPPAGE_TICKS * TICK)
                     avg_px = (avg_px * qty + px_in * add) / (qty + add)
+                    commission += order_cost(add, px_in, False, commission_plan)
                     qty += add
                     shares_traded += add
                     cycles += 1
@@ -401,7 +409,8 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
                         rebuy_qty: int | None = None,
                         max_position_shares: int | None = None,
                         rebuy_slip_bps: float = 0.0,
-                        max_cycles: int | None = None) -> list[Trade]:
+                        max_cycles: int | None = None,
+                        commission_plan: str = COMMISSION_PLAN) -> list[Trade]:
     """One session, one timeframe, one exit mode.
 
     bars_1m must be 1-minute bars covering at least 04:00-20:00 ET on
@@ -471,7 +480,8 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
                               rebuy_qty=rebuy_qty,
                               max_position_shares=max_position_shares,
                               rebuy_slip_bps=rebuy_slip_bps,
-                              max_cycles=max_cycles)
+                              max_cycles=max_cycles,
+                              commission_plan=commission_plan)
         if res is None:
             continue
 

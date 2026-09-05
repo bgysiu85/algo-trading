@@ -92,7 +92,9 @@ EQUITY = 100_000.0
 SESSION_START = dtime(4, 0)
 SESSION_END = dtime(9, 30)
 
-COMMISSION_PER_SHARE = 0.005
+# See strategy/mcl/mcl.py and claude/ibkr_commission_structure.md.
+COMMISSION_PLAN = "ibkr_tiered"
+COMMISSION_PER_SHARE = 0.005     # legacy plan only
 SLIPPAGE_TICKS = 1
 TICK = 0.01
 
@@ -108,6 +110,7 @@ MIN_WARMUP_BARS = MACD_SLOW + MACD_SIGNAL
 # roc_pct's floor is MC5's ROC_MIN_BASE rather than the shared default -- see
 # that constant for why an unfloored percentage of RSI is meaningless.
 
+from common.commissions import order_cost
 from common.indicators import (  # noqa: E402
     ema, rma,
     macd as _macd, rsi as _rsi,
@@ -256,7 +259,8 @@ def backtest_session(df, session_date, tz) -> list[Trade]:
         if exit_px is not None:
             q = pos["qty"]
             gross = (exit_px - pos["entry_px"]) * q
-            comm = COMMISSION_PER_SHARE * q * 2
+            comm = (order_cost(q, pos["entry_px"], False, COMMISSION_PLAN)
+                    + order_cost(q, exit_px, True, COMMISSION_PLAN))
             trades.append(Trade(
                 symbol="", date=str(session_date),
                 entry_time=str(pos["entry_t"]), exit_time=str(rows.iloc[i][tcol]),

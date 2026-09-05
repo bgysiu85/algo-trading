@@ -119,7 +119,18 @@ EQUITY = 100_000.0
 SESSION_START = dtime(4, 0)
 SESSION_END = dtime(9, 30)
 
-COMMISSION_PER_SHARE = 0.005     # matches the Pine backtest
+# Commission. "legacy" is the flat $0.005/share this project charged until
+# 2026-09-05 and what every published P/L in claude/*.md was computed with --
+# keep it available or those results stop being reproducible. The IBKR plans
+# come from the published AU schedule; see claude/ibkr_commission_structure.md.
+#
+# This is NOT a per-share constant any more, because neither real plan is
+# linear in quantity: both have per-ORDER minimums ($0.35 Tiered, $1.00 Fixed),
+# so cost per share falls as the order grows. Charging a flat rate at the end
+# of a trade understates small orders and, with the scale-out mechanic issuing
+# many orders per trade, understates them many times over.
+COMMISSION_PLAN = "ibkr_tiered"
+COMMISSION_PER_SHARE = 0.005     # legacy plan only; matches the Pine backtest
 SLIPPAGE_TICKS = 1               # matches the Pine backtest
 TICK = 0.01
 
@@ -133,6 +144,7 @@ TICK = 0.01
 # mcl.rsi(c), ...) while leaving exactly one implementation of each formula
 # in the repo. Change a constant above and every call here follows.
 
+from common.commissions import order_cost  # noqa: E402
 from common.indicators import (  # noqa: E402
     ema, rma,
     macd as _macd, rsi as _rsi, mfi as _mfi,
@@ -296,7 +308,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      max_position_shares: int | None = None,
                      rebuy_slip_bps: float = 0.0,
                      trail_pct: float | None = None,
-                     max_cycles: int | None = None) -> list[Trade]:
+                     max_cycles: int | None = None,
+                     commission_plan: str | None = None) -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -368,6 +381,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     # standing invitation to leave the constant mutated after an exception.
     if trail_pct is None:
         trail_pct = TRAIL_PCT
+    if commission_plan is None:
+        commission_plan = COMMISSION_PLAN
     sig = signals(df, require_macd_pos=require_macd_pos)
     local = sig.index.tz_convert(tz)
     in_sess = ((local.date == session_date)
@@ -406,7 +421,12 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                                # must be charged per share actually transacted
                                # rather than assuming one round trip.
                                avg_px=px, realised=0.0, shares_traded=q,
-                               scaled_out=False, cycles=0)
+                               scaled_out=False, cycles=0,
+                               # Accumulated per ORDER, not derived at the end,
+                               # because the per-order minimum makes cost
+                               # non-linear in quantity.
+                               commission=order_cost(q, px, False,
+                                                     commission_plan))
             continue
 
         # --- managing a position -------------------------------------------
@@ -425,7 +445,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         if exit_px is not None:
             q = pos["qty"]
             gross = pos["realised"] + (exit_px - pos["avg_px"]) * q
-            comm = COMMISSION_PER_SHARE * (pos["shares_traded"] + q)
+            comm = pos["commission"] + order_cost(q, exit_px, True,
+                                                   commission_plan)
             trades.append(Trade(
                 symbol="", date=str(session_date),
                 entry_time=str(pos["entry_t"]), exit_time=str(rows.iloc[i][tcol]),
@@ -451,6 +472,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                     if 1 <= sell_q < pos["qty"]:
                         px_out = partial - SLIPPAGE_TICKS * TICK
                         pos["realised"] += (px_out - pos["avg_px"]) * sell_q
+                        pos["commission"] += order_cost(sell_q, px_out, True,
+                                                        commission_plan)
                         pos["qty"] -= sell_q
                         pos["shares_traded"] += sell_q
                         pos["scaled_out"] = True
@@ -486,6 +509,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                         # on a pullback that recovers.
                         pos["avg_px"] = ((pos["avg_px"] * pos["qty"]
                                           + px_in * add) / (pos["qty"] + add))
+                        pos["commission"] += order_cost(add, px_in, False,
+                                                        commission_plan)
                         pos["qty"] += add
                         pos["shares_traded"] += add
                         pos["cycles"] += 1

@@ -92,11 +92,18 @@ def main():
                   f"trade well-formed: {t.entry_price} -> {t.exit_price} "
                   f"x{t.qty} {t.reason} net {t.net:+.2f}")
             ok &= good
-            expect = round((t.exit_price - t.entry_price) * t.qty
-                           - S.COMMISSION_PER_SHARE * t.qty * 2, 2)
+            # Assert INTERNAL CONSISTENCY, not a particular fee schedule.
+            # This used to recompute the expected net with
+            # S.COMMISSION_PER_SHARE * qty * 2, which pinned the test to the
+            # flat legacy model -- so it broke the moment commissions became
+            # a real IBKR schedule with a per-ORDER minimum, even though the
+            # engine was correct. net == gross - commission holds under every
+            # plan; the plan itself is checked in tests/common/.
+            expect = round(t.gross - t.commission, 2)
             good = abs(t.net - expect) < 0.01
             print(("PASS" if good else "FAIL"),
-                  f"net arithmetic {t.net:+.2f} == {expect:+.2f}")
+                  f"net == gross - commission  {t.net:+.2f} == {expect:+.2f} "
+                  f"(plan {S.COMMISSION_PLAN}, comm {t.commission:.2f})")
             ok &= good
             good = t.reason in ("trailing_stop", "apex_reversal", "window_close")
             print(("PASS" if good else "FAIL"), f"exit reason valid: {t.reason}")

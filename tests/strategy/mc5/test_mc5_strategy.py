@@ -140,9 +140,12 @@ def main():
     check(bool(trades), f"engine produces round trips ({len(trades)} trades)")
     if trades:
         t = trades[0]
-        expect = round((t.exit_price - t.entry_price) * t.qty
-                       - M.COMMISSION_PER_SHARE * t.qty * 2, 2)
-        check(abs(t.net - expect) < 0.01, f"net arithmetic {t.net:+.2f} == {expect:+.2f}")
+        # Internal consistency, not a particular fee schedule -- see the same
+        # change in tests/strategy/mcl/test_backtest_engine.py.
+        expect = round(t.gross - t.commission, 2)
+        check(abs(t.net - expect) < 0.01,
+              f"net == gross - commission {t.net:+.2f} == {expect:+.2f} "
+              f"(plan {M.COMMISSION_PLAN}, comm {t.commission:.2f})")
         check(t.reason in ("trailing_stop", "gradient_reversal", "window_close"),
               f"exit reason valid: {t.reason}")
         check(all(x.bars_held >= 0 for x in trades), "bars_held never negative")

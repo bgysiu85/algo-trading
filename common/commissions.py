@@ -138,11 +138,106 @@ def tiered_cost(qty: int, price: float, is_sell: bool,
                 regulatory=regulatory(qty, price, is_sell))
 
 
+# Legacy model: what every backtest charged before 2026-09-05 and what every
+# published P/L in claude/*.md was computed with. Kept so those numbers stay
+# reproducible -- a result that cannot be regenerated cannot be checked.
+LEGACY_PER_SHARE = 0.005
+
+# --- TradeZero America, US equities ------------------------------------------
+# Sources fetched 2026-09-05:
+#   https://tradezero.com/pricing-and-fees
+#   https://tradezero.com/documents/bd95224babc94795a60119f543a15ca1bca36b87.pdf
+#
+# TWO SOURCES DISAGREE ON WHAT IS FREE, AND IT IS WORTH REAL MONEY.
+#   the pricing PAGE says "Non-marketable limit orders only", NYSE/NASDAQ/AMEX,
+#     above $1.00
+#   the fee-schedule PDF says "All order types on NYSE, AMEX and NASDAQ stocks
+#     above $1 from 7 AM to 8 PM ET"
+# Those are very different for this project: MCL sends MARKETABLE limits, so
+# under the page's wording nothing it does is ever free. TZ_FREE_REQUIRES_
+# NON_MARKETABLE selects which reading to model. Default is the strict one,
+# because assuming the favourable reading of an ambiguous fee schedule is how
+# a backtest ends up optimistic. CONFIRM WITH TRADEZERO BEFORE RELYING ON IT.
+TZ_FREE_REQUIRES_NON_MARKETABLE = True
+
+TZ_PER_SHARE = 0.005
+TZ_MIN_SUB_DOLLAR = 0.99
+TZ_MAX_SUB_DOLLAR = 7.95
+TZ_FREE_WINDOW = (7 * 60, 20 * 60)      # 07:00-20:00 ET, in minutes
+TZ_FREE_MIN_PRICE = 1.00
+# Charged whether or not the commission is free -- "free" is the commission,
+# not the trade. Removing liquidity costs the ECN fee plus routing.
+TZ_ECN_REMOVE_PER_SHARE = 0.0030
+TZ_ROUTING_PER_SHARE = 0.0002
+TZ_ADD_REBATE_PER_SHARE = 0.0032        # ARCA/NYSE; NASDAQ 0.00325, BATS 0.0016
+TZ_TAF_PER_SHARE_SOLD = 0.000166
+TZ_SEC_FEE_PCT = 0.0                    # $0 since 2025-05-14 per TZ's schedule
+
+PLANS = ("ibkr_tiered", "ibkr_fixed", "tradezero", "legacy")
+
+
+def tradezero_cost(qty: int, price: float, is_sell: bool,
+                   minutes_et: int | None = None, removing: bool = True,
+                   free_requires_non_marketable: bool | None = None) -> Cost:
+    """One order on TradeZero America.
+
+    minutes_et is the order time as minutes past midnight ET. It matters: the
+    free window starts at 07:00, and MCL trades from 04:00, so a large part of
+    what this strategy does falls in the PAID pre-market band regardless of
+    listing venue or price.
+    """
+    if free_requires_non_marketable is None:
+        free_requires_non_marketable = TZ_FREE_REQUIRES_NON_MARKETABLE
+    value = qty * price
+    in_window = (minutes_et is None
+                 or TZ_FREE_WINDOW[0] <= minutes_et < TZ_FREE_WINDOW[1])
+    # A marketable order can never qualify under the strict reading.
+    qualifies = (price >= TZ_FREE_MIN_PRICE and in_window
+                 and not (free_requires_non_marketable and removing))
+    if qualifies:
+        comm = 0.0
+    elif price < TZ_FREE_MIN_PRICE:
+        comm = min(max(TZ_PER_SHARE * qty, TZ_MIN_SUB_DOLLAR), TZ_MAX_SUB_DOLLAR)
+    else:
+        comm = TZ_PER_SHARE * qty
+    exch = ((TZ_ECN_REMOVE_PER_SHARE + TZ_ROUTING_PER_SHARE) * qty if removing
+            else -TZ_ADD_REBATE_PER_SHARE * qty)
+    reg = TZ_TAF_PER_SHARE_SOLD * qty if is_sell else 0.0
+    reg += TZ_SEC_FEE_PCT * value if is_sell else 0.0
+    return Cost(commission=comm, exchange=exch, clearing=0.0,
+                passthrough=0.0, regulatory=reg)
+
+
+def order_cost(qty: int, price: float, is_sell: bool,
+               plan: str = "ibkr_tiered", removing: bool = True,
+               minutes_et: int | None = None) -> float:
+    """Commission for ONE order, in dollars.
+
+    This is the function backtests should call per transaction rather than
+    multiplying a per-share constant at the end. It matters for two reasons:
+    the plans have per-ORDER minimums, so cost is not linear in quantity, and
+    the scale-out mechanic issues many orders per trade, where a per-trade
+    approximation is badly wrong in a direction that flatters the strategy.
+    """
+    if qty <= 0:
+        return 0.0
+    if plan == "legacy":
+        return LEGACY_PER_SHARE * qty
+    if plan == "ibkr_fixed":
+        return fixed_cost(qty, price, is_sell).total
+    if plan == "ibkr_tiered":
+        return tiered_cost(qty, price, is_sell, removing).total
+    if plan == "tradezero":
+        return tradezero_cost(qty, price, is_sell, minutes_et, removing).total
+    raise ValueError(f"unknown commission plan {plan!r}; must be one of {PLANS}")
+
+
 def round_trip(qty: int, price: float, plan: str, removing: bool = True) -> float:
     """Buy then sell the same quantity at the same price. The sell carries the
     SEC and FINRA charges, the buy does not."""
-    f = fixed_cost if plan == "fixed" else lambda q, p, s: tiered_cost(q, p, s, removing)
-    return f(qty, price, False).total + f(qty, price, True).total
+    plan = {"fixed": "ibkr_fixed", "tiered": "ibkr_tiered"}.get(plan, plan)
+    return (order_cost(qty, price, False, plan, removing)
+            + order_cost(qty, price, True, plan, removing))
 
 
 def crossover(price: float, removing: bool = True, hi: int = 2000) -> int | None:
