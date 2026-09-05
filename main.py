@@ -48,9 +48,11 @@ SESSION_MODES = {"paper", "dry"}
 # MC5 and VW9 are backtest/measurement only for now.
 LIVE_STRATEGIES = {"mcl"}
 
-# Strategies the backtest engine can dispatch to. Both expose
-# backtest_session(df, session_date, tz) over the same 1-minute frame.
-BACKTEST_STRATEGIES = {"mcl", "mc5"}
+# Strategies the backtest engine can dispatch to. All four expose
+# backtest_session(df, session_date, tz) over the same 1-minute frame;
+# vw9_5m/vw9_15m additionally accept an optional exit_mode kwarg (forward it
+# with --exit-mode, see common/backtest.py).
+BACKTEST_STRATEGIES = {"mcl", "mc5", "vw9_5m", "vw9_15m"}
 
 
 def _fail(msg: str) -> int:

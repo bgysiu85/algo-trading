@@ -74,6 +74,12 @@ class Setup:
     bar_index: int              # 0-based index into the bars passed to find_setups
     entry_ref: float             # trigger bar's close
     structure_low: float         # lowest low over the qualifying stretch
+    # Setup B only -- feeds the §4.3 pullback-volume gate ("largest down-bar
+    # volume in the pullback must not exceed the largest up-bar volume of the
+    # impulse"). None for Setup A, which has no such gate.
+    pullback_start_idx: int | None = None
+    impulse_max_up_vol: float | None = None
+    pullback_max_down_vol: float | None = None
 
 
 def apply_indicators(bars: pd.DataFrame, *, ema_fast: int = EMA_FAST,
@@ -137,6 +143,7 @@ def find_setups(bars: pd.DataFrame, *,
     lows = sig["low"].tolist()
     closes = sig["close"].tolist()
     atrs = sig["atr14"].tolist()
+    volumes = sig["volume"].tolist()
     regimes = sig["regime"].tolist()
     times = sig.index
 
@@ -152,6 +159,16 @@ def find_setups(bars: pd.DataFrame, *,
     in_pullback = False
     pullback_low = None
     pullback_start_idx = None
+    # Running max up-bar volume during the current STRONG run, feeding the
+    # §4.3 pullback-volume gate ("largest down-bar volume in the pullback
+    # must not exceed the largest up-bar volume of the impulse"). Resets to
+    # 0 the instant regime leaves STRONG, so it has to be frozen into
+    # pullback_impulse_max_up_vol at the moment a pullback opens -- by the
+    # time that bar's own reset runs (below), the value would otherwise be
+    # gone.
+    impulse_max_up_vol = 0.0
+    pullback_impulse_max_up_vol = None
+    pullback_max_down_vol = None
 
     prev_regime = None
     prev_close = None
@@ -159,6 +176,7 @@ def find_setups(bars: pd.DataFrame, *,
     for t in range(n):
         h, l, c, r = highs[t], lows[t], closes[t], regimes[t]
         a = atrs[t]
+        v = volumes[t]
 
         if h >= session_high:
             session_high = h
@@ -187,14 +205,19 @@ def find_setups(bars: pd.DataFrame, *,
             length = t - pullback_start_idx
             drop = (prev_close - c) if prev_close is not None else 0.0
             uncontrolled = bool(a) and drop > pullback_ctrl_atr * a
+            if drop > 0:
+                pullback_max_down_vol = max(pullback_max_down_vol or 0.0, v)
 
             if r == REGIME_BEARISH:
                 in_pullback = False
             elif r == REGIME_STRONG:
                 if length <= max_pullback_bars and not uncontrolled:
-                    setups.append(Setup(kind="B", trigger_time=times[t],
-                                         bar_index=t, entry_ref=c,
-                                         structure_low=pullback_low))
+                    setups.append(Setup(
+                        kind="B", trigger_time=times[t], bar_index=t,
+                        entry_ref=c, structure_low=pullback_low,
+                        pullback_start_idx=pullback_start_idx,
+                        impulse_max_up_vol=pullback_impulse_max_up_vol,
+                        pullback_max_down_vol=pullback_max_down_vol))
                 in_pullback = False
             else:  # still WEAK_BULL
                 if uncontrolled or length > max_pullback_bars:
@@ -208,7 +231,19 @@ def find_setups(bars: pd.DataFrame, *,
                     in_pullback = True
                     pullback_start_idx = t
                     pullback_low = l
+                    # freeze the impulse's up-volume before it resets below
+                    pullback_impulse_max_up_vol = impulse_max_up_vol
+                    pullback_max_down_vol = v if drop > 0 else 0.0
                 # else: fails to arm on bar 1 of the would-be pullback
+
+        # --- impulse up-volume tracking (feeds the gate above): running max
+        # of up-bar volume while STRONG, reset the instant regime leaves
+        # STRONG so each fresh impulse starts from zero.
+        if r == REGIME_STRONG:
+            if prev_close is not None and c > prev_close:
+                impulse_max_up_vol = max(impulse_max_up_vol, v)
+        else:
+            impulse_max_up_vol = 0.0
 
         prev_regime = r
         prev_close = c

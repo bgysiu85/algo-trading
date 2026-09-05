@@ -53,12 +53,17 @@ from common.cache_io import (cache_path as _cache_path, check_sessions,
                              slice_sessions, window_dir,
                              SHARED_DURATION, SHARED_END_HHMM, SHARED_SESSIONS)
 
-# Both expose backtest_session(df, session_date, tz) and accept the same
-# 1-minute frame -- MC5 resamples internally, so the engine does not need to
-# know the bar size a strategy trades on.
+# Every strategy exposes backtest_session(df, session_date, tz) and accepts
+# the same 1-minute frame -- MC5 and VW9 both resample internally, so the
+# engine does not need to know the bar size a strategy trades on. VW9's
+# backtest_session also takes an optional exit_mode kwarg (see --exit-mode
+# below); MCL/MC5 do not, and Runner.run() falls back gracefully when a
+# strategy module does not accept one.
 STRATEGY_MODULES = {
     "mcl": "strategy.mcl.mcl",
     "mc5": "strategy.mc5.mc5",
+    "vw9_5m": "strategy.vw9.vw9_5m",
+    "vw9_15m": "strategy.vw9.vw9_15m",
 }
 
 ET = ZoneInfo("America/New_York")
@@ -100,13 +105,13 @@ PRIMARIES = ["NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"]
 # extra dependency, so nothing new has to be installed in the venv.
 CACHE_ROOT = Path("bar_cache")
 
-# The window this engine pulls, in ONE place: the same two values build the IB
-# request and the cache directory name, so the cache cannot claim to hold bars
-# it does not hold. "2 D" gives the session plus the prior day, which covers
-# the 60-bar warm-up the volume average and MACD both need.
-# What this engine NEEDS: two trading sessions ending 09:30 -- the session
-# plus the prior day, covering the 60-bar warm-up the volume average and MACD
-# both need.
+# The DEFAULT slice window, used only when a strategy module does not say
+# otherwise (see Runner.__init__). "2 D" ending 09:30 is what MCL/MC5 need:
+# the session plus the prior day, covering the 60-bar warm-up the volume
+# average and MACD both need. VW9 needs a different window -- one session
+# ending 20:00, since it trades the full 04:00-20:00 session and has no
+# prior-day warm-up dependency -- and says so via BACKTEST_SESSIONS /
+# BACKTEST_END_HOUR / BACKTEST_END_MINUTE on strategy.vw9.vw9_5m/vw9_15m.
 HIST_SESSIONS = 2
 HIST_END_HOUR, HIST_END_MINUTE = 9, 30
 
@@ -160,6 +165,14 @@ class Runner:
                                     SHARED_DURATION, SHARED_END_HHMM)
         self.cache_hits = 0
         self.cache_misses = 0
+        # Per-strategy slice window (see the HIST_* comment above): read
+        # from the strategy module if it defines these, else fall back to
+        # MCL/MC5's historical defaults. Both windows are sliced from the
+        # SAME fetched superset, so adding a strategy with a different
+        # window costs no extra IB request.
+        self.hist_sessions = getattr(self.S, "BACKTEST_SESSIONS", HIST_SESSIONS)
+        self.hist_end_hour = getattr(self.S, "BACKTEST_END_HOUR", HIST_END_HOUR)
+        self.hist_end_minute = getattr(self.S, "BACKTEST_END_MINUTE", HIST_END_MINUTE)
 
     def _load_state(self) -> dict:
         if self.state_path.exists():
@@ -274,13 +287,13 @@ class Runner:
         strategy less warm-up than it asked for. Counting sessions turns that
         into a visible warning and a NO_DATA rather than a wrong backtest.
         """
-        have = check_sessions(frame, want_end, HIST_SESSIONS)
-        if have < HIST_SESSIONS:
+        have = check_sessions(frame, want_end, self.hist_sessions)
+        if have < self.hist_sessions:
             LOG.warning("%s %s cached frame holds %d session(s), need %d -- "
                         "treating as missing rather than under-seeding the "
-                        "strategy", symbol, date_str, have, HIST_SESSIONS)
+                        "strategy", symbol, date_str, have, self.hist_sessions)
             return None
-        return slice_sessions(frame, want_end, HIST_SESSIONS)
+        return slice_sessions(frame, want_end, self.hist_sessions)
 
     async def bars_for(self, contract, date_str: str):
         """1-minute bars for the two sessions ending 09:30 ET on the target date.
@@ -298,7 +311,7 @@ class Runner:
         # window before returning, or the strategy gets extra warm-up and its
         # indicators move on identical bars.
         want_end = datetime.strptime(date_str, "%Y-%m-%d").replace(
-            hour=HIST_END_HOUR, minute=HIST_END_MINUTE, tzinfo=ET)
+            hour=self.hist_end_hour, minute=self.hist_end_minute, tzinfo=ET)
         cached = self._cache_read(contract.symbol, date_str)
         if cached is not None:
             sliced = self._slice(cached, want_end, contract.symbol, date_str)
@@ -336,7 +349,8 @@ class Runner:
                 await asyncio.sleep(RETRY_BACKOFF_S)
         return None, last_err
 
-    async def run(self, pairs: list[dict], probe_only: bool) -> None:
+    async def run(self, pairs: list[dict], probe_only: bool,
+                 exit_mode: str | None = None) -> None:
         total = len(pairs)
         for n, p in enumerate(pairs, 1):
             key = f"{p['symbol']}|{p['date']}"
@@ -371,7 +385,17 @@ class Runner:
                    "trades": 0, "net": 0.0}
 
             if not probe_only and sess > 0:
-                trades = self.S.backtest_session(df, target, ET)
+                if exit_mode is not None:
+                    try:
+                        trades = self.S.backtest_session(
+                            df, target, ET, exit_mode=exit_mode)
+                    except TypeError:
+                        # This strategy's backtest_session() takes no
+                        # exit_mode kwarg (MCL/MC5) -- run it normally
+                        # rather than refuse the whole pass over one flag.
+                        trades = self.S.backtest_session(df, target, ET)
+                else:
+                    trades = self.S.backtest_session(df, target, ET)
                 for t in trades:
                     d = asdict(t)
                     d["symbol"] = p["symbol"]
@@ -486,7 +510,7 @@ async def main_async(args) -> int:
               % (len(stale), " + ".join(retry_statuses)))
         runner._save_state()
     try:
-        await runner.run(pairs, args.probe)
+        await runner.run(pairs, args.probe, args.exit_mode)
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("\ninterrupted -- progress saved, rerun to resume")
     finally:
@@ -520,6 +544,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--retry-failed", action="store_true",
                    help="re-attempt pairs previously recorded as NO_DATA "
                         "(they are usually throttling, not missing history)")
+    p.add_argument("--exit-mode", default=None,
+                   help="exit mode passthrough for strategies that accept "
+                        "one -- VW9: fixed_2r (default) | ride_ema9 | "
+                        "trail_atr, per vw9_strategy_spec.md §5.2. Ignored "
+                        "by strategies whose backtest_session() takes no "
+                        "exit_mode kwarg (MCL, MC5).")
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)-7s %(message)s",
