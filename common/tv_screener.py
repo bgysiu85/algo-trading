@@ -18,8 +18,9 @@ run_screener takes `filters` as a list of TradingView-native clauses:
 
     {"left": <column>, "operation": <op>, "right": <value>}
 
-Operations confirmed working: "greater", "less", "egreater", "eless",
-"in_range" (with `right` as a two-element [min, max] list). Column names are
+Operations confirmed working: "greater" (>), "egreater" (>=), "less" (<),
+"eless" (<=), and "in_range" (with `right` as a two-element [min, max] list,
+inclusive at both ends). Column names are
 TradingView's internal ones, not the labels shown in the UI -- the mapping
 below is the part that took the guessing.
 
@@ -106,7 +107,12 @@ VOLUME_CHANGE_MIN = (RELATIVE_VOLUME_MIN - 1.0) * 100.0
 FILTERS = [
     {"left": "premarket_change", "operation": "greater",
      "right": PREMARKET_CHANGE_MIN},
-    {"left": "relative_volume_10d_calc", "operation": "greater",
+    # ">= 5", Ben 2026-09-05. "egreater" is confirmed to apply rather than be
+    # ignored (19,959 rows -> 629, same as "greater"). The two return the SAME
+    # 629 today and almost always will: relative volume is a continuous float,
+    # so landing on exactly 5.000000 is vanishingly unlikely. The change is
+    # about the screen saying what is meant, not about the rows it returns.
+    {"left": "relative_volume_10d_calc", "operation": "egreater",
      "right": RELATIVE_VOLUME_MIN},
     {"left": "premarket_close", "operation": "greater",
      "right": PREMARKET_PRICE_MIN},
