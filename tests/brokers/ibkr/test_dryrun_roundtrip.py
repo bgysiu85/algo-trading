@@ -135,7 +135,13 @@ async def main():
     elif sells:
         e, x = float(sells[0]["entry_price"]), float(sells[0]["exit_price"])
         q, pnl = int(sells[0]["filled_qty"]), float(sells[0]["trade_pnl"])
-        expect = (x - e) * q - M.COMMISSION_RT
+        # Same schedule the trader charges, priced per leg. Pinning the
+        # arithmetic rather than a constant is the point: the flat $2.00 this
+        # used to assert disagreed with every backtest in the repo.
+        from common.commissions import order_cost
+        comm = (order_cost(q, e, False, M.COMMISSION_PLAN)
+                + order_cost(q, x, True, M.COMMISSION_PLAN))
+        expect = (x - e) * q - comm
         if abs(pnl - expect) < 0.01:
             print(f"PASS  trade_pnl arithmetic correct "
                   f"({e:.4f} -> {x:.4f} x{q} = {pnl:+.2f})")

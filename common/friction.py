@@ -56,8 +56,12 @@ from pathlib import Path
 
 FILLS_DIR = Path("var/fills")
 
-# What the engine already assumes, per share, so we report the gap not the total.
-MODELLED_COMMISSION_PER_SHARE = 0.005
+# NOTE there is deliberately no commission constant here. This module measures
+# the PRICE gap -- where the order actually filled against the price the engine
+# modelled -- and commission is charged separately, per order, by
+# common/commissions.py in both the backtest and the live trader. A constant
+# here (there used to be one, unused, at the old flat $0.005/share) invites the
+# reader to think commission has been netted out of these figures. It has not.
 
 # The published figure, for comparison. One session, 2026-09-03.
 PUBLISHED_ROUND_TRIP_100 = 4.26

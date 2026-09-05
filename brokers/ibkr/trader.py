@@ -76,6 +76,7 @@ try:
 except ImportError:  # pragma: no cover
     sys.exit("ib_async not installed.  pip install ib_async pandas")
 
+from common.commissions import order_cost
 from strategy.mcl import mcl as S
 from strategy.mcl.mcl import (  # re-exported so tests/tools can do trader.evaluate(...)
     Signals,
@@ -103,14 +104,19 @@ LIVE_PORTS = {7496: "TWS LIVE", 4001: "IB Gateway LIVE"}
 LIMIT_CROSS_BPS = 20        # how far through the touch to price the limit (20bps)
 ORDER_TIMEOUT_S = 20        # cancel and record a no-fill after this long
 
-# NOTE: this is a flat $2.00 round-trip commission, independent of share
-# count. strategy/mcl/mcl.py's backtest model is COMMISSION_PER_SHARE ($0.005)
-# doubled for the round trip, which scales with quantity instead. That is a
-# pre-existing inconsistency between the two P/L calculations, not something
-# introduced by this refactor — flagged in
-# claude/repo_reorg_and_github_plan.md rather than silently changed here,
-# since it affects computed P/L and is a strategy-tuning decision.
-COMMISSION_RT = 2.00
+# Commission for the round-trip P/L recorded in the fill log. This is a
+# REPORTING figure only -- it is not consulted when deciding or pricing an
+# order -- but it is not cosmetic either: common/friction.py derives measured
+# slippage from these rows, and friction is currently the number the whole
+# project turns on.
+#
+# It used to be a flat $2.00 regardless of share count while the backtests
+# charged a per-share rate, so the two P/L calculations disagreed by
+# construction. Both now call common/commissions.py with the same plan, priced
+# per leg at the price that leg actually traded at. On MCL's 100 shares the
+# old constant overstated cost by about $1.30 a round trip, which fed straight
+# into the friction estimate.
+COMMISSION_PLAN = S.COMMISSION_PLAN
 
 # Loop cadence.
 #
@@ -605,7 +611,10 @@ class MCLPaperTrader:
         def round_trip(exit_px: float, filled: int) -> dict:
             if closing is None:
                 return {}
-            pnl = (exit_px - closing.entry_price) * filled - COMMISSION_RT
+            comm = (order_cost(filled, closing.entry_price, False,
+                               COMMISSION_PLAN)
+                    + order_cost(filled, exit_px, True, COMMISSION_PLAN))
+            pnl = (exit_px - closing.entry_price) * filled - comm
             pct = ((exit_px / closing.entry_price) - 1.0) * 100.0
             held = (datetime.now(ET) - closing.entry_time).total_seconds() / 60.0
             return dict(entry_price=round(closing.entry_price, 4),
@@ -860,7 +869,11 @@ class MCLPaperTrader:
             return
 
         exit_px, sold = res
-        pnl = (exit_px - pos.entry_price) * sold - COMMISSION_RT
+        # Same per-leg schedule as the fill-log row above, so the running
+        # session total and the CSV cannot disagree.
+        pnl = (exit_px - pos.entry_price) * sold - (
+            order_cost(sold, pos.entry_price, False, COMMISSION_PLAN)
+            + order_cost(sold, exit_px, True, COMMISSION_PLAN))
         self.session_pnl += pnl
         self.session_trades += 1
         LOG.info("CLOSED %s %s  %d @ %.4f -> %.4f  P/L %+.2f  "

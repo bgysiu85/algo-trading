@@ -14,7 +14,8 @@ Source (fetched 2026-09-05):
 WHY THIS MATTERS MORE THAN IT LOOKS
 -----------------------------------
 The backtest charges COMMISSION_PER_SHARE = 0.005 doubled for a round trip --
-$1.00 on 100 shares. The live trader charges a flat COMMISSION_RT = 2.00. Both
+$1.00 on 100 shares. The live trader used to charge a flat $2.00 per round
+trip regardless of size, and now calls this module too. Both
 are approximations of the Fixed plan and neither is right, and the gap between
 them was already flagged as an unresolved inconsistency in
 claude/repo_reorg_and_github_plan.md. This module replaces both guesses with

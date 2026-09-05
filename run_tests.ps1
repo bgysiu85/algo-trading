@@ -4,7 +4,7 @@
 # bare `pytest`:
 #   * MCL/MC5 suites are standalone scripts with their own main() and PASS/FAIL
 #     output. They run as modules so the repo root is on sys.path.
-#   * common/ and VW9 suites are pytest.
+#   * everything else is pytest, collected from the whole tests/ tree.
 #
 # Run from the repo root:  .\run_tests.ps1
 
@@ -36,8 +36,15 @@ foreach ($m in $scriptSuites) {
 }
 
 Write-Host ""
-Write-Host "=== pytest (common, strategy/vw9) ===" -ForegroundColor Cyan
-& $py -m pytest tests/common tests/strategy/vw9 -q
+Write-Host "=== pytest (all of tests/) ===" -ForegroundColor Cyan
+# `tests`, not a hand-listed set of subdirectories. This line used to name
+# tests/common and tests/strategy/vw9 explicitly, so when pytest suites were
+# added under tests/strategy/mcl/ the script silently skipped 21 of them and
+# still printed ALL SUITES PASSED. Pointing it at the whole tree means a new
+# suite is picked up by existing. The script-style suites above are collected
+# here too but contribute no tests -- they expose main(), not test_* functions
+# -- so nothing is double-counted.
+& $py -m pytest tests -q
 if ($LASTEXITCODE -ne 0) { $failed += "pytest" }
 
 Write-Host ""

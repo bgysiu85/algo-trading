@@ -4,13 +4,13 @@ Two full-session (04:00-20:00 ET) EMA-based strategies, sibling to
 the pre-market (04:00-09:30 ET) momentum work in `strategy/mcl` and `strategy/mc5`. Specs live in
 the Algo Trading Claude project:
 
-- **E15** -- 15-minute, 9/20 EMA crossover + pullback. `claude/ema15_full_day_strategy_spec.md`
-- **VW9** -- VWAP + 9 EMA, 5-minute and 15-minute. `claude/vw9_strategy_spec.md`
+- **E15** -- 15-minute, 9/20 EMA crossover + pullback. `ema15_full_day_strategy_spec.md` (in the Claude project, not this repo)
+- **VW9** -- VWAP + 9 EMA, 5-minute and 15-minute. `vw9_strategy_spec.md` (in the Claude project, not this repo)
 
 **Status as of this folder's creation: neither strategy's production module is
 written yet.** Both specs say so explicitly ("Code not yet written") and both
 end with the same instruction: run the pre-flight measurements in their §7/§8
-*before* writing `strategies/e15.py` / `strategies/vw9.py`, because most of
+*before* writing `strategy/e15/` / `strategy/vw9/`, because most of
 each spec's parameters are uncalibrated guesses (E15: 6 of 13; VW9: 12 of 18)
 and the whole approach is a **go/no-go** on sample size first.
 
@@ -25,11 +25,11 @@ else gets built.
 | File | What |
 |---|---|
 | `indicators.py` | `ema`/`rma`/`macd`/`rsi`/`mfi` (shared by every strategy), `atr`, `session_vwap`, `resample_bars` |
-| `vw9_strategy.py` | Pure logic: the §3 regime gate (STRONG/WEAK_BULL/BEARISH) and §4.1/§4.2 Setup A/B detection, deliberately **without** the §4.3 gates |
+| `strategy/vw9/vw9.py` | Pure logic: the §3 regime gate (STRONG/WEAK_BULL/BEARISH) and §4.1/§4.2 Setup A/B detection, deliberately **without** the §4.3 gates |
 | `data_ib.py` | Pulls full-session 1-minute bars from IB, caches to `bars_cache/`, resumable (needs `ib_async`) |
 | `cache_io.py` | Pair-list and bar-cache reading, shared by `common/data_ib.py` and `strategy/vw9/setup_counts.py` -- kept free of the `ib_async` dependency so the analysis step runs anywhere pandas does |
-| `vw9_setup_counts.py` | The §8.3 report itself: offline, reads the cache, resamples to 5m/15m, counts, flags the noise-trading threshold |
-| `test_indicators.py`, `test_vw9_strategy.py` | Unit tests on hand-built bar sequences, verified before any real data is touched (24 tests, all passing) |
+| `strategy/vw9/setup_counts.py` | The §8.3 report itself: offline, reads the cache, resamples to 5m/15m, counts, flags the noise-trading threshold |
+| `tests/common/test_indicators.py`, `tests/strategy/vw9/test_vw9_strategy.py` | Unit tests on hand-built bar sequences, verified before any real data is touched (24 tests, all passing) |
 
 Not yet built: E15's own crossover-count measurement (its spec's §7 item 3 --
 same idea, different rules), the §4.3 gates, §5 exits, §4.4 context levels, or
@@ -71,7 +71,7 @@ A quick trial against the first 20 pairs, before committing to a full run:
 .\.venv\Scripts\python.exe -m strategy.vw9.setup_counts --limit 20
 ```
 
-`strategy/vw9/setup_counts.py` writes `setup_counts_trades.csv` -- every individual
+`strategy/vw9/setup_counts.py` writes `var/reports/setup_counts_trades.csv` -- every individual
 trigger, with `entry_ref`/`structure_low` already computed. That's also the
 raw material §8.4 (distributions) needs next, so it's kept rather than
 discarded once the count is read.
@@ -93,11 +93,11 @@ stops being practical past a handful of bars.
 
 ## Why the pullback-control check can look strict
 
-`vw9_strategy.py`'s ATR is `ta.rma`-based from bar 1, with no hard warm-up
+`strategy/vw9/vw9.py`'s ATR is `ta.rma`-based from bar 1, with no hard warm-up
 gate (same soft convention `common/indicators.py`'s RSI uses). On
 a synthetic steep trend, EMA9 lags price by more than a realistic ATR would
 allow a "controlled" pullback to cross -- see the comment on `impulse()` in
-`test_vw9_strategy.py` for the concrete numbers. This is a property of the
+`tests/strategy/vw9/test_vw9_strategy.py` for the concrete numbers. This is a property of the
 spec's chosen thresholds interacting with trend steepness, not a bug; it's
 also exactly the kind of thing §8.4's distributions (bars-to-trigger,
 pullback depth in ATR) exist to characterise on real data before the

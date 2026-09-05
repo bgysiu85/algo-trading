@@ -81,7 +81,12 @@ async def main():
     else:
         print("FAIL  trail did not fire — position still open")
         ok = False
-    if tr.session_trades == 1 and abs(tr.session_pnl - ((24.00 - 21.14) * 100 - 2)) < 0.01:
+    # Commission is the real per-leg IBKR schedule now, not a flat $2.00 --
+    # 100 shares at these prices is $0.70 the round trip on Tiered, not $2.00.
+    from common.commissions import order_cost
+    _comm = (order_cost(100, 21.14, False, M.COMMISSION_PLAN)
+             + order_cost(100, 24.00, True, M.COMMISSION_PLAN))
+    if tr.session_trades == 1 and abs(tr.session_pnl - ((24.00 - 21.14) * 100 - _comm)) < 0.01:
         print(f"PASS  exit P/L correct ({tr.session_pnl:+.2f})")
     else:
         print(f"FAIL  exit P/L {tr.session_pnl} / trades {tr.session_trades}")

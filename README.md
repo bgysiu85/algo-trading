@@ -11,9 +11,9 @@ the measurement stage.
 
 | | timeframe | entry | exit | status |
 |---|---|---|---|---|
-| **MCL / V7** | 1-minute | MACD > signal and > 0, MFI and RSI rising, volume >= 3x prior bar, prior bar >= 50% of the 60-bar average | apex reversal on any of MACD/MFI/RSI, 5% trailing stop, or window close | live paper-tested |
+| **MCL / V7** | 1-minute | MACD > signal and > 0, MFI and RSI rising, volume >= 3x prior bar, prior bar >= 50% of the 60-bar average | 5% trailing stop or window close. The apex-reversal exit was **removed 2026-09-05** -- it was net negative | live paper-tested |
 | **MC5** | 5-minute | RSI rate of change >= +5% over 3 bars, EMA9 > EMA21, MACD > signal | RSI and MACD gradients both negative, 5% trailing stop, or window close | tested, **not yet run on real data** |
-| **VW9** | 5/15-minute | VWAP reclaim or 9 EMA retest, confirmed on a candle close | see `claude/vw9_strategy_spec.md` | setup-count measurement only, **no backtest engine yet** |
+| **VW9** | 5/15-minute | VWAP reclaim or 9 EMA retest, confirmed on a candle close | structural stop, VWAP lost, or the exit mode's target | backtested 2026-09-05, **rejected** -- profit is two names and lives entirely pre-market |
 
 Strategy modules are pure: indicators and signals, no broker and no I/O. That
 is what lets the same code run in the live trader and in the offline backtest.
@@ -33,15 +33,31 @@ common/                 shared, broker-agnostic
   session_lock.py         the live-session guard
   sweep_variants.py       offline strategy-variant comparison over cached bars
   probe_window.py         validates the shared cache window against live IB
+  commissions.py          real IBKR Fixed/Tiered and TradeZero schedules
+  friction.py             per-exit-reason slippage from the live fill logs
   secrets_util.py  op_list.py  build_pairs.py  report_trades.py
   db_check.py  db_bars.py       Databento
+
+  studies -- each is a `python -m` entry point that answers ONE question and
+  prints its own evidence. They are kept because the answer is only as good as
+  the test that produced it:
+  trail_study.py          should TRAIL_PCT move?            (no)
+  scale_grid.py           4,900-cell scale-out grid + an equivalence check
+  scale_regimes.py        scale-out with size held constant vs growing
+  scale_verdict.py        scale-out, bootstrapped and held out   (reject)
+  scale_report.py         reads a scale_grid CSV: boundary, holdout, decomposition
+  pyramid_study.py        add-on-a-recovered-dip vs simply starting bigger
+  pyramid_verdict.py      the same, bootstrapped and held out    (reject)
 
 brokers/
   ibkr/                   trader.py, scanner.py, scan_params.py
   tradezero/              client.py
 
 strategy/
-  mcl/  mc5/  vw9/
+  mcl/mcl.py              the live strategy
+  mc5/mc5.py
+  vw9/                    vw9.py (logic), backtest.py (engine), preflight.py,
+                          study.py, setup_counts.py, vw9_5m.py, vw9_15m.py
 
 tests/                  mirrors the source tree
 docs/                   MCL_PAPER_RUNBOOK.md, ema_crossover.md
@@ -129,6 +145,13 @@ run time.
 ```
 
 Two conventions are in play, which is why that script exists rather than a bare
-`pytest`: the MCL and MC5 suites are standalone scripts with their own `main()`
-and PASS/FAIL output, run as modules; `tests/common` and `tests/strategy/vw9`
-are pytest. Neither runner alone covers everything.
+`pytest`: a few suites are standalone scripts with their own `main()` and
+PASS/FAIL output and run as modules; the rest are pytest, collected from the
+whole `tests/` tree. Neither runner alone covers everything.
+
+Point pytest at `tests`, never at a hand-listed set of subdirectories. This
+script named two of them for a while, so suites added elsewhere were skipped
+silently while it still reported ALL SUITES PASSED.
+
+Detailed findings live in the Claude project (`PROGRAM_INDEX.md` first), not
+in this repo.
