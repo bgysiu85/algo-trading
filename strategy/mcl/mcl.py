@@ -13,10 +13,10 @@ V7 rules:
             AND RSI  > RSI[3]
             AND volume >= 3x previous bar
             AND previous bar volume >= 50% of the trailing 60-bar average
-  Exit    : after an apex, ANY of MACD / MFI / RSI turning down
-            (gated by USE_APEX_EXIT -- see that constant)
-            OR price falls 5% below the highest price since entry
+  Exit    : price falls 5% below the highest price since entry
             OR the window closes
+            (the apex-reversal exit is OFF by default since 2026-09-05 --
+             see USE_APEX_EXIT)
   Size    : min(100 shares, 40% of equity / price), price $2-20 only
 
 EXIT MODELLING -- deliberately more conservative than the Pine backtest
@@ -51,17 +51,37 @@ FLOOR_AVG_LEN = 60
 
 # Exit configuration.
 #
-# USE_APEX_EXIT gates the apex-reversal exit. Measured 2026-09-03 across 89
-# backtest trades: trailing stops produced +$1,320.89 over 59 trades
-# (+$22.39 each) while apex exits produced +$53.64 over 30 (+$1.79 each) --
-# indistinguishable from zero, and negative once the ~$2.26/trade of real
-# friction measured in the live log is applied. In the 2026-09-03 live session
-# apex fired on 16 of 19 exits and closed positions while the trail was still
-# intact.
+# USE_APEX_EXIT gates the apex-reversal exit. TURNED OFF 2026-09-05 after the
+# 2x2 sweep over 376 cached sessions / 178 symbols (see
+# claude/mcl_apex_macd_sweep.md). Apex exits were NET NEGATIVE in both cells
+# that used them -- -$543.73 over 213 exits at a 27% win rate -- while every
+# trailing-stop cut was positive. The rule was closing positions while the
+# trail was still intact, and losing money doing it.
+#
+#   apex ON   561 trades  +$2,163.75  +$3.86/trade   drop-top-5  +$316
+#   apex OFF  496 trades  +$3,865.53  +$7.79/trade   drop-top-5  +$1,883
+#
+# Paired by symbol, bootstrapped over the 178 names: +$1,701.78,
+# 95% CI [+$703, +$2,816], P(improvement > 0) = 100%. Concentration IMPROVED,
+# which is the check that rejected V8 and V9.
+#
+# The decisive number is friction. The 2026-09-03 live log measured ~$4.26 per
+# round trip of slippage beyond the tick-each-way modelled here. Apex ON is
+# +$3.86/trade and so does NOT clear it (-$0.40/trade, -$226 overall); apex OFF
+# is +$7.79 and does (+$3.53/trade). That is also why that session lost money
+# while the backtest showed a profit.
+#
+# CONSEQUENCE FOR LIVE, not obvious from the numbers: hold times stretch. The
+# median stays at 2 bars but p90 goes 4 -> 24 and the maximum is 238 bars, so
+# a position open for hours is now normal rather than a hung order. The 5%
+# trailing stop is the ONLY protection during those holds and it lives inside
+# the running process -- a crash with a position open leaves it unprotected,
+# and that is materially more likely now. Worst single trade was unchanged at
+# -$97.10, so longer holds did not deepen losses; the trail caps them either way.
 #
 # Pass use_apex explicitly to backtest_session() to sweep it; this constant is
-# only the default.
-USE_APEX_EXIT = True
+# only the default. Set it back to True to reproduce V7.
+USE_APEX_EXIT = False
 
 # REQUIRE_MACD_POSITIVE gates the `MACD > 0` half of the entry.
 #
