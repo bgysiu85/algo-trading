@@ -954,6 +954,30 @@ class MCLPaperTrader:
                            **detail)
             return
 
+        # PRICE BAND -- live/backtest parity, added 2026-09-05.
+        #
+        # strategy/mcl/mcl.py's backtest refuses any entry outside $2-20
+        # (ENFORCE_PRICE_BAND), and brokers/ibkr/scanner.py screens on the same
+        # band. The LIVE path did neither: it went from evaluate_last_bar()
+        # straight to size_for(), so anything that reached the watchlist by
+        # another route, or drifted out of band between the scan and the
+        # signal, was traded. GELS was bought at $0.935 that way -- a price the
+        # backtest has never modelled and never will, which quietly makes any
+        # live-vs-backtest comparison a comparison of two different universes.
+        #
+        # This is a RESTRICTION on what live may buy, never an expansion.
+        if S.ENFORCE_PRICE_BAND and not (S.PRICE_MIN <= sig.close <= S.PRICE_MAX):
+            LOG.info("%s entry signal declined — %.4f outside the $%.2f-%.2f "
+                     "band", st.symbol, sig.close, S.PRICE_MIN, S.PRICE_MAX)
+            self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                           symbol=st.symbol, action="BUY",
+                           reason="entry_signal", ref_close=round(sig.close, 4),
+                           status="SKIPPED_PRICE_BAND",
+                           reject_reason=f"{sig.close:.4f} outside "
+                                         f"{S.PRICE_MIN:.2f}-{S.PRICE_MAX:.2f}",
+                           **detail)
+            return
+
         qty = self.size_for(sig.close)
         if qty < 1:
             LOG.info("%s signal but size 0 (equity %.2f, price %.2f)",
