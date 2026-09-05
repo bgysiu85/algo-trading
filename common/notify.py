@@ -389,12 +389,26 @@ def main() -> int:
               f"(literal value or op:// reference), then open a new terminal.")
         return 1
     if a.test:
-        n.send(watchlist_change(["AOUT"], [], ["AOUT"], ["EXPENSIVE"],
-                                ["OLDNAME"]))
-        n.send(buy_filled("AOUT", 12.76, 100, 0.35))
-        n.send(sell_filled("AOUT", 13.40, 100, 0.35, 63.30))
+        # force=True and spaced. Without both, the rate limiter does exactly
+        # its job and swallows two of the three -- which is correct behaviour
+        # and a useless test, since the point here is to SEE all three
+        # formats arrive. Live callers already force fills and heartbeats.
+        for msg in (watchlist_change(["AOUT"], ["OLDNAME"], ["AOUT"],
+                                     ["EXPENSIVE"], ["OLDNAME"],
+                                     rows=[{"ticker": "AOUT",
+                                            "premarket_change": 27.47,
+                                            "premarket_close": 12.76,
+                                            "relative_volume_10d_calc": 65.46,
+                                            "float_shares_outstanding": 10_589_237.0}]),
+                    buy_filled("AOUT", 12.76, 100, 0.35),
+                    sell_filled("AOUT", 13.40, 100, 0.35, 63.30)):
+            n.send(msg, force=True)
+            time.sleep(MIN_INTERVAL_S / 2)
         n.flush()
         print(n.stats())
+        if n.suppressed:
+            print(f"NOTE {n.suppressed} suppressed — that should be 0 here; "
+                  f"the rate limiter is only meant to catch runaway callers.")
         return 0 if n.failed == 0 else 1
     print(n.stats())
     return 0
