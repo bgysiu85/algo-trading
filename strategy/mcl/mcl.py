@@ -290,6 +290,13 @@ class Trade:
     # default output is unchanged apart from two extra columns.
     cycles: int = 0
     shares_traded: int = 0
+    # Pyramid bookkeeping: adds is how many times shares were ADDED on a
+    # recovered pullback (nothing sold), max_qty the largest position held.
+    # max_qty is what the account actually has to fund, so it is reported
+    # rather than inferred -- the scale-out grid's winner needed 734 shares
+    # against $4,131.89 net liq and nothing in the backtest noticed.
+    adds: int = 0
+    max_qty: int = 0
 
 
 def size_for(price: float, equity: float = EQUITY) -> int:
@@ -310,7 +317,11 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      trail_pct: float | None = None,
                      max_cycles: int | None = None,
                      commission_plan: str | None = None,
-                     rebuy_trigger: str = "peak") -> list[Trade]:
+                     rebuy_trigger: str = "peak",
+                     entry_shares: int | None = None,
+                     pyramid_qty: int | None = None,
+                     pyramid_pullback_pct: float = 2.5,
+                     max_adds: int | None = None) -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -427,7 +438,11 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                 px = float(row["close"]) + SLIPPAGE_TICKS * TICK
                 if ENFORCE_PRICE_BAND and not (PRICE_MIN <= px <= PRICE_MAX):
                     continue
-                q = size_for(px)
+                # entry_shares bypasses size_for() so a study can hold size
+                # fixed while varying something else -- and, crucially, so a
+                # pyramid can be compared against simply STARTING at the size
+                # it builds to. Without that control, extra size always wins.
+                q = size_for(px) if entry_shares is None else entry_shares
                 if q >= 1:
                     pos = dict(entry_i=i, entry_px=px, qty=q, init_qty=q,
                                peak=max(px, float(row["high"])),
@@ -440,6 +455,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                                # rather than assuming one round trip.
                                avg_px=px, realised=0.0, shares_traded=q,
                                scaled_out=False, cycles=0, capped=False,
+                               armed=False, arm_level=None, adds=0, max_qty=q,
                                # Accumulated per ORDER, not derived at the end,
                                # because the per-order minimum makes cost
                                # non-linear in quantity.
@@ -474,7 +490,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                 gross=round(gross, 2), commission=round(comm, 2),
                 net=round(gross - comm, 2),
                 cycles=pos["cycles"],
-                shares_traded=pos["shares_traded"] + q))
+                shares_traded=pos["shares_traded"] + q,
+                adds=pos["adds"], max_qty=pos["max_qty"]))
             pos = None
         else:
             # --- scale out / scale back in, only when enabled ---------------
@@ -547,7 +564,49 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                         pos["qty"] += add
                         pos["shares_traded"] += add
                         pos["cycles"] += 1
+                        pos["max_qty"] = max(pos["max_qty"], pos["qty"])
                     pos["scaled_out"] = False
+
+            # --- PYRAMID: add on a recovered pullback, never sell -----------
+            # Ben's second question, and a genuinely different mechanic from
+            # the scale-out above: nothing is ever sold early, so there is no
+            # sell-low / buy-back-higher cost. A pullback of
+            # `pyramid_pullback_pct` off the peak ARMS the position; reclaiming
+            # that same peak BUYS `pyramid_qty` more. Only the trail exits.
+            #
+            # The control this has to beat is NOT the 100-share baseline. It
+            # is simply STARTING with the larger size, because on a dataset
+            # with positive average trade P/L any extra size looks good. If
+            # "100 then +100 on a recovered dip" only matches "200 from the
+            # start", the timing is worth nothing and this is just leverage.
+            if pyramid_qty:
+                arm = pos["peak"] * (1.0 - pyramid_pullback_pct / 100.0)
+                if not pos["armed"] and float(row["low"]) <= arm:
+                    pos["armed"] = True
+                    pos["arm_level"] = pos["peak"]
+                elif pos["armed"] and pos["arm_level"] is not None \
+                        and float(row["high"]) >= pos["arm_level"]:
+                    add = pyramid_qty
+                    if max_position_shares is not None:
+                        add = min(add, max_position_shares - pos["qty"])
+                    if max_adds is not None and pos["adds"] >= max_adds:
+                        add = 0
+                    if add >= 1:
+                        # Same marketable-limit chase as the scale-out's
+                        # buy-back: this is a break above a level, which IBKR
+                        # will not take as a stop order pre-market.
+                        px_in = (pos["arm_level"] * (1.0 + rebuy_slip_bps / 10_000.0)
+                                 + SLIPPAGE_TICKS * TICK)
+                        pos["avg_px"] = ((pos["avg_px"] * pos["qty"]
+                                          + px_in * add) / (pos["qty"] + add))
+                        pos["commission"] += order_cost(add, px_in, False,
+                                                        commission_plan)
+                        pos["qty"] += add
+                        pos["shares_traded"] += add
+                        pos["adds"] += 1
+                        pos["max_qty"] = max(pos["max_qty"], pos["qty"])
+                    pos["armed"] = False
+
             pos["peak"] = max(pos["peak"], float(row["high"]))
 
         prev_high = float(row["high"])
