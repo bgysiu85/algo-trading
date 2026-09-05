@@ -27,15 +27,14 @@ Five questions, in the order they matter:
   entry        Bounds the intrabar-entry idea: close - low on the entry bar
                is the most perfect timing could ever have gained.
 
-WHY THIS MONKEYPATCHES TRAIL_PCT
---------------------------------
-`use_apex` and `require_macd_pos` are per-call overrides on
-backtest_session(); TRAIL_PCT is still a module constant. Adding a third
-parameter would be the consistent fix, but strategy/mcl/mcl.py is live
-trading code that changed today, and an exploratory script is a poor reason
-to touch it again before a session. So the sweep sets and restores the
-constant around each run, single-threaded, in a try/finally. If the trail
-becomes a real tunable, give it the parameter treatment and delete this note.
+TRAIL_PCT IS A REAL PARAMETER NOW
+---------------------------------
+This file used to set and restore S.TRAIL_PCT around each run in a
+try/finally, because the trail was a module constant while use_apex and
+require_macd_pos were per-call overrides. It became a real tunable on
+2026-09-05 (Ben asked for all four exit knobs to be parameters), so
+backtest_session(trail_pct=...) is passed through instead and the
+monkeypatch is gone. Nothing here mutates strategy state any more.
 """
 
 from __future__ import annotations
@@ -104,22 +103,22 @@ def load_sessions(cache_root: Path):
     return out
 
 
-def run(sessions, opts, trail_pct: float | None = None):
-    """Every trade across every session, tagged with its symbol and date."""
-    original = S.TRAIL_PCT
-    try:
-        if trail_pct is not None:
-            S.TRAIL_PCT = trail_pct
-        out = []
-        for symbol, date_str, df in sessions:
-            for t in S.backtest_session(df, datetime.strptime(date_str, "%Y-%m-%d").date(),
-                                        ET, **opts):
-                t.symbol = symbol
-                t.date = date_str
-                out.append(t)
-        return out
-    finally:
-        S.TRAIL_PCT = original
+def run(sessions, opts, trail_pct: float | None = None, **kw):
+    """Every trade across every session, tagged with its symbol and date.
+
+    trail_pct and any further keywords go straight through to
+    backtest_session, so a sweep never mutates module state.
+    """
+    if trail_pct is not None:
+        kw["trail_pct"] = trail_pct
+    out = []
+    for symbol, date_str, df in sessions:
+        for t in S.backtest_session(df, datetime.strptime(date_str, "%Y-%m-%d").date(),
+                                    ET, **opts, **kw):
+            t.symbol = symbol
+            t.date = date_str
+            out.append(t)
+    return out
 
 
 def stats(trades, label=""):

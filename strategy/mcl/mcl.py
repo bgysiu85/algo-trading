@@ -294,7 +294,9 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      partial_trail_pct: float = 2.5,
                      rebuy_qty: int | None = None,
                      max_position_shares: int | None = None,
-                     rebuy_slip_bps: float = 0.0) -> list[Trade]:
+                     rebuy_slip_bps: float = 0.0,
+                     trail_pct: float | None = None,
+                     max_cycles: int | None = None) -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -305,6 +307,18 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     rather than mutating the module constant keeps a variant sweep honest: two
     configurations can be evaluated over the same frame with no shared state
     between them.
+
+    THE FOUR EXIT KNOBS, all call parameters with no module state:
+
+        trail_pct          the full trailing stop, % below peak (closes the
+                           trade; defaults to the TRAIL_PCT constant)
+        partial_trail_pct  % below peak at which a portion is sold
+        scale_out_pct      what portion of the CURRENT position that is
+        rebuy_qty          shares bought back on a reclaim (None = restore
+                           exactly what was sold, so size stays constant)
+
+    plus rebuy_slip_bps (how far above the trigger the buy-back actually
+    fills) and max_position_shares (a cap when rebuy_qty grows the position).
 
     SCALE-OUT / SCALE-BACK-IN (Ben, 2026-09-05, after Ross Cameron's method)
     -----------------------------------------------------------------------
@@ -347,6 +361,13 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     """
     if use_apex is None:
         use_apex = USE_APEX_EXIT
+    # A real parameter, not a module constant read at call time. It used to be
+    # the latter, which meant common/analysis.py had to SET AND RESTORE
+    # S.TRAIL_PCT around every run in a try/finally -- fine single-threaded,
+    # a latent bug the moment anything runs two configurations at once, and a
+    # standing invitation to leave the constant mutated after an exception.
+    if trail_pct is None:
+        trail_pct = TRAIL_PCT
     sig = signals(df, require_macd_pos=require_macd_pos)
     local = sig.index.tz_convert(tz)
     in_sess = ((local.date == session_date)
@@ -391,7 +412,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         # --- managing a position -------------------------------------------
         # Trail is derived from the peak as of the PREVIOUS bar, then tested
         # against this bar's low. No same-bar lookahead.
-        trail = pos["peak"] * (1.0 - TRAIL_PCT / 100.0)
+        trail = pos["peak"] * (1.0 - trail_pct / 100.0)
         exit_px = exit_reason = None
 
         if float(row["low"]) <= trail:
@@ -436,6 +457,17 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                         pos["sold_qty"] = sell_q
                 elif pos["scaled_out"] and prev_high is not None \
                         and float(row["high"]) >= prev_high:
+                    # A cap on how many times one trade may cycle. Uncapped,
+                    # a 1% partial on 1-minute bars produced up to 105 cycles
+                    # and 21,200 shares transacted in a SINGLE trade -- 210+
+                    # orders on one pre-market small cap, which IB's ~60
+                    # requests / 10 minutes would refuse outright and which
+                    # exercises the bar-level fill model hundreds of times in
+                    # a way it was never validated for.
+                    if max_cycles is not None and pos["cycles"] >= max_cycles:
+                        pos["scaled_out"] = False
+                        prev_high = float(row["high"])
+                        continue
                     add = rebuy_qty if rebuy_qty is not None else pos["sold_qty"]
                     if max_position_shares is not None:
                         add = min(add, max_position_shares - pos["qty"])

@@ -140,6 +140,13 @@ class Trade:
     net: float
     r_multiple: float
     session_block: str
+    # Scale-out bookkeeping, same meaning as strategy/mcl/mcl.py's. Both are
+    # 0 / initial size when scaling is off, so default output only gains two
+    # columns. shares_traded is what friction must be charged against: a
+    # mechanic that triples the shares transacted per trade cannot be scored
+    # on a one-round-trip cost model.
+    cycles: int = 0
+    shares_traded: int = 0
 
 
 def size_for(price: float, equity: float = EQUITY) -> int:
@@ -196,7 +203,13 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
                     use_vwap_exit: bool = True,
                     vwap_exit_grace_bars: int = 0,
                     trail_pct: float = TRAIL_PCT,
-                    use_structural_stop: bool = True) -> dict | None:
+                    use_structural_stop: bool = True,
+                    scale_out_pct: float | None = None,
+                    partial_trail_pct: float = 2.5,
+                    rebuy_qty: int | None = None,
+                    max_position_shares: int | None = None,
+                    rebuy_slip_bps: float = 0.0,
+                    max_cycles: int | None = None) -> dict | None:
     """Fill next-bar-open (§9 -- extended hours takes Day Limit orders only,
     so the trigger bar's close can never be the fill), then manage to
     whichever of the §5.3 hard exits or the exit_mode's target comes first.
@@ -239,6 +252,23 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
     qty = size_for(entry_price)
     if qty < 1:
         return None
+
+    # Scale-out bookkeeping, mirroring strategy/mcl/mcl.py so the same four
+    # knobs mean the same thing in both strategies: trail_pct / trail_atr is
+    # the full exit, partial_trail_pct is where a portion leaves,
+    # scale_out_pct is how much of the CURRENT position that is, and
+    # rebuy_qty is what comes back on a reclaim (None = restore what was
+    # sold, so size stays constant). avg_px is the running cost of the shares
+    # still held; realised banks the P/L of partial sells; shares_traded
+    # drives commission, which must be per share actually transacted.
+    init_qty = qty
+    avg_px = entry_price
+    realised = 0.0
+    shares_traded = qty
+    scaled_out = False
+    sold_qty = 0
+    cycles = 0
+    prev_high = None
 
     # Trailing peak starts at entry price ONLY -- not the fill bar's own
     # high -- and is updated at the BOTTOM of each iteration, so the trail
@@ -295,18 +325,56 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
                 exit_px, exit_reason = trail - SLIPPAGE_TICKS * TICK, "trail_pct"
 
         if exit_px is not None:
-            gross = (exit_px - entry_price) * qty
-            comm = COMMISSION_PER_SHARE * qty * 2
+            gross = realised + (exit_px - avg_px) * qty
+            comm = COMMISSION_PER_SHARE * (shares_traded + qty)
             return {
                 "entry_time": times[fill_i], "exit_time": times[i],
                 "entry_price": entry_price, "exit_price": exit_px,
-                "qty": qty, "reason": exit_reason, "bars_held": i - fill_i,
+                "qty": init_qty, "reason": exit_reason, "bars_held": i - fill_i,
                 "gross": gross, "commission": comm, "net": gross - comm,
                 "r_multiple": (exit_px - entry_price) / r,
-                "exit_bar_index": i,
+                "exit_bar_index": i, "cycles": cycles,
+                "shares_traded": shares_traded + qty,
             }
 
+        # --- scale out / scale back in, only when enabled ------------------
+        # Every hard exit above has already been ruled out for this bar, so a
+        # partial sell here cannot be masking a full exit. Selling is checked
+        # before buying back, so a bar that both dips to the partial level and
+        # tags the previous high resolves as a sell -- against the position.
+        if scale_out_pct:
+            partial = peak * (1.0 - partial_trail_pct / 100.0)
+            if not scaled_out and l <= partial:
+                sell_q = int(qty * scale_out_pct / 100.0)
+                if 1 <= sell_q < qty:
+                    px_out = partial - SLIPPAGE_TICKS * TICK
+                    realised += (px_out - avg_px) * sell_q
+                    qty -= sell_q
+                    shares_traded += sell_q
+                    scaled_out = True
+                    sold_qty = sell_q
+            elif (scaled_out and prev_high is not None and h >= prev_high
+                  and not (max_cycles is not None and cycles >= max_cycles)):
+                add = rebuy_qty if rebuy_qty is not None else sold_qty
+                if max_position_shares is not None:
+                    add = min(add, max_position_shares - qty)
+                if add >= 1:
+                    # A break above the prior high cannot be bought with a
+                    # resting limit -- a limit placed above the market fills
+                    # immediately at the ask instead of waiting. Live this is
+                    # a marketable limit sent after the break is seen, so the
+                    # fill is above the trigger. 0 bps models a fill nobody
+                    # can get; trader.py crosses by 20.
+                    px_in = (prev_high * (1.0 + rebuy_slip_bps / 10_000.0)
+                             + SLIPPAGE_TICKS * TICK)
+                    avg_px = (avg_px * qty + px_in * add) / (qty + add)
+                    qty += add
+                    shares_traded += add
+                    cycles += 1
+                scaled_out = False
+
         peak = max(peak, h)
+        prev_high = h
 
     # Unreachable in practice -- the last bar of the session always exits
     # via session_close above -- but never leave a position unaccounted for.
@@ -327,7 +395,13 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
                         use_vwap_exit: bool = True,
                         vwap_exit_grace_bars: int = 0,
                         trail_pct: float = TRAIL_PCT,
-                        use_structural_stop: bool = True) -> list[Trade]:
+                        use_structural_stop: bool = True,
+                        scale_out_pct: float | None = None,
+                        partial_trail_pct: float = 2.5,
+                        rebuy_qty: int | None = None,
+                        max_position_shares: int | None = None,
+                        rebuy_slip_bps: float = 0.0,
+                        max_cycles: int | None = None) -> list[Trade]:
     """One session, one timeframe, one exit mode.
 
     bars_1m must be 1-minute bars covering at least 04:00-20:00 ET on
@@ -391,7 +465,13 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
                               use_vwap_exit=use_vwap_exit,
                               vwap_exit_grace_bars=vwap_exit_grace_bars,
                               trail_pct=trail_pct,
-                              use_structural_stop=use_structural_stop)
+                              use_structural_stop=use_structural_stop,
+                              scale_out_pct=scale_out_pct,
+                              partial_trail_pct=partial_trail_pct,
+                              rebuy_qty=rebuy_qty,
+                              max_position_shares=max_position_shares,
+                              rebuy_slip_bps=rebuy_slip_bps,
+                              max_cycles=max_cycles)
         if res is None:
             continue
 
@@ -405,7 +485,9 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
             qty=res["qty"], reason=res["reason"], bars_held=res["bars_held"],
             gross=round(res["gross"], 2), commission=round(res["commission"], 2),
             net=round(res["net"], 2), r_multiple=round(res["r_multiple"], 3),
-            session_block=session_block(entry_time)))
+            session_block=session_block(entry_time),
+            cycles=res.get("cycles", 0),
+            shares_traded=res.get("shares_traded", res["qty"] * 2)))
         entries_taken += 1
         blocked_until = res["exit_bar_index"]
 
