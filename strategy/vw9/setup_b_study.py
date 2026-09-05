@@ -61,13 +61,14 @@ ET = ZoneInfo("America/New_York")
 SLIP_PER_SHARE = (0.0590 - 0.0164) / 2
 
 
-def run(sessions, **kw):
+def run(sessions, exit_mode_override: str | None = None, **kw):
     trades = []
     for symbol, date_str, df in sessions:
         try:
             got = backtest_session_tf(
                 df, datetime.strptime(date_str, "%Y-%m-%d").date(), ET, 5,
-                exit_mode="trail_atr", use_vwap_exit=False, **kw)
+                exit_mode=exit_mode_override or "trail_atr",
+                use_vwap_exit=False, **kw)
         except Exception:
             continue
         for t in got:
