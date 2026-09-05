@@ -31,7 +31,9 @@ Two exact-semantics details that are easy to get wrong when porting:
   * prev_high is updated ONLY on bars where a position was already open. The
     real engine `continue`s out of the no-position branch before reaching the
     update, so a bar with no position does not refresh it. Replicated, not
-    "fixed", because the point is to match.
+    "fixed", because the point is to match. It matters only for the legacy
+    rebuy_trigger="prev_bar_high"; the default "peak" trigger uses the frozen
+    rebuy level instead.
   * The trail and the partial level are both derived from the peak AS OF THE
     PREVIOUS BAR -- peak is updated at the bottom of the loop.
 
@@ -97,8 +99,8 @@ def prepare(sessions):
     return out
 
 
-# Re-entering on a break above the prior bar's high is a STOP-BUY, which IBKR
-# does not accept pre-market. Live it is a marketable limit sent after the
+# Re-entering on a reclaim of the peak is a STOP-BUY, which IBKR does not
+# accept pre-market. Live it is a marketable limit sent after the
 # break is seen, so the fill lands above the trigger. trader.py crosses by
 # LIMIT_CROSS_BPS = 20, and tick rounding on a $2-5 stock roughly doubles that
 # in practice -- the measured effective cross on this universe is 37-43 bps.
@@ -108,8 +110,16 @@ REBUY_SLIP_BPS = 40.0
 
 
 def _simulate(sess, trail_pct, partial_pct, portion, rebuy,
-              rebuy_slip_bps=REBUY_SLIP_BPS, max_cycles=None):
-    """One session. Returns (net, shares_traded, symbol) per trade."""
+              rebuy_slip_bps=REBUY_SLIP_BPS, max_cycles=None,
+              rebuy_trigger="peak", max_position_shares=None):
+    """One session. Returns (net, shares_traded, max_qty_held, cycles) per trade.
+
+    `rebuy` may be None, meaning "restore exactly what was sold", which holds
+    position size constant across cycles. That is the size-NEUTRAL form of the
+    mechanic and the only one that measures the idea rather than measuring
+    leverage; an integer lets the position grow and `max_position_shares` caps
+    how far.
+    """
     _sym, entry, _o, high, low, close, keep = sess
     trades = []
     pos = None
@@ -125,12 +135,12 @@ def _simulate(sess, trail_pct, partial_pct, portion, rebuy,
                 q = S.size_for(px)
                 if q >= 1:
                     pos = [q, px, 0.0, q, max(px, high[i]), False, 0,
-                           order_cost(q, px, False, S.COMMISSION_PLAN), q]
-                    # pos[6] counts COMPLETED cycles (was sold_qty, which is
-                    # unused now that rebuy is always an explicit quantity).
+                           order_cost(q, px, False, S.COMMISSION_PLAN), q,
+                           None, 0, q, False]
             continue
         # pos = [qty, avg_px, realised, shares_traded, peak, scaled_out,
-        #        sold_qty, commission, init_qty]
+        #        cycles, commission, init_qty, rebuy_level, sold_qty, max_qty,
+        #        capped_out]
         trail = pos[4] * (1.0 - trail_pct / 100.0)
         exit_px = None
         if low[i] <= trail:
@@ -141,11 +151,13 @@ def _simulate(sess, trail_pct, partial_pct, portion, rebuy,
         if exit_px is not None:
             gross = pos[2] + (exit_px - pos[1]) * pos[0]
             comm = pos[7] + order_cost(pos[0], exit_px, True, S.COMMISSION_PLAN)
-            trades.append((gross - comm, pos[3] + pos[0]))
+            trades.append((gross - comm, pos[3] + pos[0], pos[11], pos[6]))
             pos = None
         else:
             partial = pos[4] * (1.0 - partial_pct / 100.0)
-            if not pos[5] and low[i] <= partial:
+            if pos[12]:
+                pass                     # mechanic retired by max_cycles
+            elif not pos[5] and low[i] <= partial:
                 sell_q = int(pos[0] * portion / 100.0)
                 if 1 <= sell_q < pos[0]:
                     px_out = partial - S.SLIPPAGE_TICKS * S.TICK
@@ -154,17 +166,28 @@ def _simulate(sess, trail_pct, partial_pct, portion, rebuy,
                     pos[0] -= sell_q
                     pos[3] += sell_q
                     pos[5] = True
-            elif (pos[5] and prev_high is not None and high[i] >= prev_high
-                  and not (max_cycles is not None and pos[6] >= max_cycles)):
-                add = rebuy
-                if add >= 1:
-                    px_in = (prev_high * (1.0 + rebuy_slip_bps / 10_000.0)
+                    pos[9] = pos[4]          # freeze the pullback's peak
+                    pos[10] = sell_q
+            elif pos[5] and (
+                    (trigger := (pos[9] if rebuy_trigger == "peak"
+                                 else prev_high)) is not None) \
+                    and high[i] >= trigger:
+                capped = max_cycles is not None and pos[6] >= max_cycles
+                if capped:
+                    pos[12] = True
+                add = pos[10] if rebuy is None else rebuy
+                if max_position_shares is not None:
+                    add = min(add, max_position_shares - pos[0])
+                if not capped and add >= 1:
+                    px_in = (trigger * (1.0 + rebuy_slip_bps / 10_000.0)
                              + S.SLIPPAGE_TICKS * S.TICK)
                     pos[1] = (pos[1] * pos[0] + px_in * add) / (pos[0] + add)
                     pos[7] += order_cost(add, px_in, False, S.COMMISSION_PLAN)
                     pos[0] += add
                     pos[3] += add
                     pos[6] += 1
+                    if pos[0] > pos[11]:
+                        pos[11] = pos[0]
                 pos[5] = False
             if pos[4] < high[i]:
                 pos[4] = high[i]
@@ -173,25 +196,32 @@ def _simulate(sess, trail_pct, partial_pct, portion, rebuy,
 
 
 def evaluate(prepared, trail_pct, partial_pct, portion, rebuy,
-             rebuy_slip_bps=REBUY_SLIP_BPS, max_cycles=None):
+             rebuy_slip_bps=REBUY_SLIP_BPS, max_cycles=None,
+             rebuy_trigger="peak", max_position_shares=None):
     per_sym = {}
     n = 0
     net = 0.0
     real = 0.0
+    max_q = 0
+    tot_cycles = 0
     for sess in prepared:
         sym = sess[0]
-        for tnet, shares in _simulate(sess, trail_pct, partial_pct, portion,
-                                      rebuy, rebuy_slip_bps, max_cycles):
+        for tnet, shares, mq, cyc in _simulate(
+                sess, trail_pct, partial_pct, portion, rebuy, rebuy_slip_bps,
+                max_cycles, rebuy_trigger, max_position_shares):
             n += 1
             net += tnet
             real += tnet - shares * SLIP_PER_SHARE
             per_sym[sym] = per_sym.get(sym, 0.0) + tnet
+            max_q = max(max_q, mq)
+            tot_cycles += cyc
     if not n:
         return None
     top = sorted(per_sym.values(), reverse=True)
     return dict(trail=trail_pct, partial=partial_pct, portion=portion, rebuy=rebuy,
                 trades=n, net=net, per=net / n, real=real, real_per=real / n,
-                drop5=net - sum(top[:5]), syms=len(per_sym))
+                drop5=net - sum(top[:5]), syms=len(per_sym),
+                max_qty=max_q, cycles=tot_cycles)
 
 
 _PREPARED = None
@@ -207,24 +237,42 @@ def _work(combo):
 
 
 def verify(sessions, prepared, n_check=40):
-    """The fast path must agree with the shipped engine, trade for trade."""
-    cases = [(5.0, 2.5, 50.0, 100), (10.0, 1.0, 75.0, 150), (3.0, 0.5, 20.0, 50)]
-    for trail, partial, portion, rebuy in cases:
+    """The fast path must agree with the shipped engine, trade for trade.
+
+    Both triggers and a capped-cycle case are checked, because the cap and the
+    frozen rebuy level are exactly the kind of state that drifts between two
+    copies of a state machine.
+    """
+    cases = [(5.0, 2.5, 50.0, 100, "peak", None, None),
+             (10.0, 1.0, 75.0, 150, "peak", None, None),
+             (3.0, 0.5, 20.0, 50, "peak", None, None),
+             (5.0, 2.5, 50.0, 100, "peak", 1, None),
+             (5.0, 2.5, 50.0, 100, "peak", 3, None),
+             (5.0, 2.5, 50.0, None, "peak", None, None),   # size-neutral
+             (5.0, 0.5, 20.0, 150, "peak", None, 200),     # capped growth
+             (5.0, 2.5, 50.0, 100, "prev_bar_high", None, None)]
+    for trail, partial, portion, rebuy, trigger, cap, maxpos in cases:
         for (symbol, date_str, df), prep in list(zip(sessions, prepared))[:n_check]:
             real = S.backtest_session(
                 df, datetime.strptime(date_str, "%Y-%m-%d").date(), ET, **LIVE,
                 trail_pct=trail, scale_out_pct=portion,
                 partial_trail_pct=partial, rebuy_qty=rebuy,
-                rebuy_slip_bps=REBUY_SLIP_BPS)
-            fast = _simulate(prep, trail, partial, portion, rebuy)
+                rebuy_slip_bps=REBUY_SLIP_BPS, max_cycles=cap,
+                rebuy_trigger=trigger, max_position_shares=maxpos)
+            fast = _simulate(prep, trail, partial, portion, rebuy,
+                             REBUY_SLIP_BPS, cap, trigger, maxpos)
+            tag = (f"trail={trail} partial={partial} portion={portion} "
+                   f"rebuy={rebuy} trigger={trigger} cap={cap} maxpos={maxpos}")
             if len(real) != len(fast):
                 return (f"trade COUNT differs on {symbol} {date_str} at "
-                        f"trail={trail} partial={partial} portion={portion} "
-                        f"rebuy={rebuy}: engine {len(real)}, fast {len(fast)}")
+                        f"{tag}: engine {len(real)}, fast {len(fast)}")
             for a, b in zip(real, fast):
                 if abs(a.net - b[0]) > 0.005:
-                    return (f"NET differs on {symbol} {date_str}: "
+                    return (f"NET differs on {symbol} {date_str} at {tag}: "
                             f"engine {a.net:.4f}, fast {b[0]:.4f}")
+                if a.shares_traded != b[1]:
+                    return (f"SHARES differ on {symbol} {date_str} at {tag}: "
+                            f"engine {a.shares_traded}, fast {b[1]}")
     return None
 
 

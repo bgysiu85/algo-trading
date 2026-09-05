@@ -309,7 +309,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      rebuy_slip_bps: float = 0.0,
                      trail_pct: float | None = None,
                      max_cycles: int | None = None,
-                     commission_plan: str | None = None) -> list[Trade]:
+                     commission_plan: str | None = None,
+                     rebuy_trigger: str = "peak") -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -329,6 +330,22 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         scale_out_pct      what portion of the CURRENT position that is
         rebuy_qty          shares bought back on a reclaim (None = restore
                            exactly what was sold, so size stays constant)
+        rebuy_trigger      what counts as a reclaim:
+                             "peak"          price regains the high the
+                                             pullback started from (DEFAULT --
+                                             this is the rule as described)
+                             "prev_bar_high" the first bar that fails to make
+                                             a lower high
+
+    The two triggers are not variations on a theme, they are opposite trades,
+    and the difference was found by measuring rather than reasoning. Over 4,359
+    re-entries, "prev_bar_high" bought back BELOW its own sell price 82% of the
+    time, median -2.99%, and below the peak it sold off 88% of the time, median
+    -3.69%. That is not re-entering on strength, it is averaging down into a
+    slide -- which is why it needed a 15% trail to survive, why it earned most
+    on the FLATTEST names, and why it ran away without limit as cycles were
+    allowed to accumulate. "peak" is the rule actually intended and behaves
+    like a normal parameter: capping cycles at 1 IMPROVES it.
 
     plus rebuy_slip_bps (how far above the trigger the buy-back actually
     fills) and max_position_shares (a cap when rebuy_qty grows the position).
@@ -344,9 +361,10 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
 
     On a pullback to the partial level, `scale_out_pct` of the position is
     sold. If price then reaches the full level the remainder goes too and the
-    trade is over. If instead it recovers and TOUCHES the previous bar's high,
-    shares are bought back and the cycle repeats, without limit, until the full
-    level is finally hit. Only the full level ever closes the position.
+    trade is over. If instead it recovers and RECLAIMS THE PEAK the pullback
+    started from (`rebuy_trigger`, above), shares are bought back and the cycle
+    repeats until the full level is finally hit -- capped by `max_cycles` if
+    given. Only the full level ever closes the position.
 
     `rebuy_qty` is the buy-back size. None restores exactly what was sold, so
     position size is constant across cycles. An integer buys that many shares
@@ -421,7 +439,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                                # must be charged per share actually transacted
                                # rather than assuming one round trip.
                                avg_px=px, realised=0.0, shares_traded=q,
-                               scaled_out=False, cycles=0,
+                               scaled_out=False, cycles=0, capped=False,
                                # Accumulated per ORDER, not derived at the end,
                                # because the per-order minimum makes cost
                                # non-linear in quantity.
@@ -465,7 +483,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
             # a full exit. Selling is checked before buying back, so a bar that
             # both dips to the partial level and tags the previous high is
             # resolved as a sell -- against the position, per convention.
-            if scale_out_pct:
+            if scale_out_pct and not pos["capped"]:
                 partial = pos["peak"] * (1.0 - partial_trail_pct / 100.0)
                 if not pos["scaled_out"] and float(row["low"]) <= partial:
                     sell_q = int(pos["qty"] * scale_out_pct / 100.0)
@@ -478,8 +496,15 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                         pos["shares_traded"] += sell_q
                         pos["scaled_out"] = True
                         pos["sold_qty"] = sell_q
-                elif pos["scaled_out"] and prev_high is not None \
-                        and float(row["high"]) >= prev_high:
+                        # Freeze the level the pullback began from. peak keeps
+                        # updating, but it cannot rise while scaled out without
+                        # first crossing this level and triggering the re-entry.
+                        pos["rebuy_level"] = pos["peak"]
+                elif pos["scaled_out"] and (
+                        (trigger_level := (pos["rebuy_level"]
+                                           if rebuy_trigger == "peak"
+                                           else prev_high)) is not None) \
+                        and float(row["high"]) >= trigger_level:
                     # A cap on how many times one trade may cycle. Uncapped,
                     # a 1% partial on 1-minute bars produced up to 105 cycles
                     # and 21,200 shares transacted in a SINGLE trade -- 210+
@@ -487,21 +512,29 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                     # requests / 10 minutes would refuse outright and which
                     # exercises the bar-level fill model hundreds of times in
                     # a way it was never validated for.
-                    if max_cycles is not None and pos["cycles"] >= max_cycles:
-                        pos["scaled_out"] = False
-                        prev_high = float(row["high"])
-                        continue
+                    #
+                    # Hitting the cap does NOT close the trade: it retires the
+                    # mechanic for the rest of it. The shares still held ride
+                    # the full trail from here. Retiring it has to switch off
+                    # SELLING as well as buying -- an earlier version only
+                    # stopped the buy-back, which let the position sell itself
+                    # down 50% on every subsequent pullback and never rebuy,
+                    # bleeding to nothing on a trade that was never stopped out.
+                    capped = (max_cycles is not None
+                              and pos["cycles"] >= max_cycles)
+                    if capped:
+                        pos["capped"] = True
                     add = rebuy_qty if rebuy_qty is not None else pos["sold_qty"]
                     if max_position_shares is not None:
                         add = min(add, max_position_shares - pos["qty"])
-                    if add >= 1:
+                    if not capped and add >= 1:
                         # A break ABOVE the prior high is a stop-buy, and
                         # IBKR does not accept stop orders outside RTH. Live
                         # this is a marketable limit sent after the break is
                         # seen, so the fill is above the trigger, not at it --
                         # trader.py already crosses by LIMIT_CROSS_BPS = 20.
                         # Charging 0 bps here models a fill nobody can get.
-                        px_in = (prev_high * (1.0 + rebuy_slip_bps / 10_000.0)
+                        px_in = (trigger_level * (1.0 + rebuy_slip_bps / 10_000.0)
                                  + SLIPPAGE_TICKS * TICK)
                         # Weighted average cost of the shares now held. The
                         # buy-back is normally ABOVE the price the partial was

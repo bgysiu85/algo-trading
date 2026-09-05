@@ -214,7 +214,8 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
                     max_position_shares: int | None = None,
                     rebuy_slip_bps: float = 0.0,
                     max_cycles: int | None = None,
-                    commission_plan: str = COMMISSION_PLAN) -> dict | None:
+                    commission_plan: str = COMMISSION_PLAN,
+                    rebuy_trigger: str = "peak") -> dict | None:
     """Fill next-bar-open (§9 -- extended hours takes Day Limit orders only,
     so the trigger bar's close can never be the fill), then manage to
     whichever of the §5.3 hard exits or the exit_mode's target comes first.
@@ -275,6 +276,8 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
     sold_qty = 0
     cycles = 0
     prev_high = None
+    rebuy_level = None
+    capped_out = False
 
     # Trailing peak starts at entry price ONLY -- not the fill bar's own
     # high -- and is updated at the BOTTOM of each iteration, so the trail
@@ -348,7 +351,7 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
         # partial sell here cannot be masking a full exit. Selling is checked
         # before buying back, so a bar that both dips to the partial level and
         # tags the previous high resolves as a sell -- against the position.
-        if scale_out_pct:
+        if scale_out_pct and not capped_out:
             partial = peak * (1.0 - partial_trail_pct / 100.0)
             if not scaled_out and l <= partial:
                 sell_q = int(qty * scale_out_pct / 100.0)
@@ -360,19 +363,28 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
                     shares_traded += sell_q
                     scaled_out = True
                     sold_qty = sell_q
-            elif (scaled_out and prev_high is not None and h >= prev_high
-                  and not (max_cycles is not None and cycles >= max_cycles)):
+                    # Freeze the level the pullback began from -- see mcl.py.
+                    rebuy_level = peak
+            elif scaled_out and (
+                    (trigger_level := (rebuy_level if rebuy_trigger == "peak"
+                                       else prev_high)) is not None) \
+                    and h >= trigger_level:
+                # Hitting the cap retires the mechanic -- selling as well as
+                # buying -- for the rest of the trade. See mcl.py.
+                capped = max_cycles is not None and cycles >= max_cycles
+                if capped:
+                    capped_out = True
                 add = rebuy_qty if rebuy_qty is not None else sold_qty
                 if max_position_shares is not None:
                     add = min(add, max_position_shares - qty)
-                if add >= 1:
-                    # A break above the prior high cannot be bought with a
+                if not capped and add >= 1:
+                    # A break above the trigger cannot be bought with a
                     # resting limit -- a limit placed above the market fills
                     # immediately at the ask instead of waiting. Live this is
                     # a marketable limit sent after the break is seen, so the
                     # fill is above the trigger. 0 bps models a fill nobody
                     # can get; trader.py crosses by 20.
-                    px_in = (prev_high * (1.0 + rebuy_slip_bps / 10_000.0)
+                    px_in = (trigger_level * (1.0 + rebuy_slip_bps / 10_000.0)
                              + SLIPPAGE_TICKS * TICK)
                     avg_px = (avg_px * qty + px_in * add) / (qty + add)
                     commission += order_cost(add, px_in, False, commission_plan)
@@ -410,7 +422,8 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
                         max_position_shares: int | None = None,
                         rebuy_slip_bps: float = 0.0,
                         max_cycles: int | None = None,
-                        commission_plan: str = COMMISSION_PLAN) -> list[Trade]:
+                        commission_plan: str = COMMISSION_PLAN,
+                        rebuy_trigger: str = "peak") -> list[Trade]:
     """One session, one timeframe, one exit mode.
 
     bars_1m must be 1-minute bars covering at least 04:00-20:00 ET on
@@ -481,7 +494,8 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
                               max_position_shares=max_position_shares,
                               rebuy_slip_bps=rebuy_slip_bps,
                               max_cycles=max_cycles,
-                              commission_plan=commission_plan)
+                              commission_plan=commission_plan,
+                              rebuy_trigger=rebuy_trigger)
         if res is None:
             continue
 
