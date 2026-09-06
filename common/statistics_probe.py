@@ -128,6 +128,32 @@ def dataset_range(client, dataset: str) -> tuple[str, str]:
     return start, end
 
 
+def estimate_report(dataset: str, schema: str, day: str, symbols,
+                    lo: str, hi: str, est: int, usd: float) -> str:
+    """What the estimate pass found, as a file rather than as scrollback.
+
+    An estimate that decides whether to download is a measurement, and a
+    measurement that exists only in a terminal has to be copied by hand.
+    """
+    per = est / max(len(symbols), 1)
+    return "\n".join([
+        "EQUS.SUMMARY STATISTICS -- SCOPED PROBE (ESTIMATE ONLY)", "",
+        f"  dataset           {dataset} {schema}",
+        f"  dataset covers    {lo} .. {hi}",
+        f"  day chosen        {day}",
+        f"  symbols           {len(symbols)}  ({', '.join(symbols)})",
+        f"  estimated bytes   {est:,}",
+        f"  estimated cost    ${usd:.4f}",
+        "",
+        f"  per symbol-day    {per:,.0f} bytes",
+        f"  x {SCREENED_SYMBOL_DAYS:,} screened  "
+        f"{per * SCREENED_SYMBOL_DAYS / 1e6:,.1f} MB",
+        "",
+        "  Billable size is UNCOMPRESSED and is what a scoped pull would be",
+        "  charged on. Compare against 2,365,013 MB for the universe-wide job.",
+    ])
+
+
 def summarise(df, day: str, symbols, nbytes: int) -> list[str]:
     """Turn a decoded statistics frame into the report.
 
@@ -260,13 +286,22 @@ def main(argv=None) -> int:
     except Exception as e:  # noqa: BLE001
         sys.exit(f"estimate failed: {_scrub(e)}")
 
+    if usd > a.max_cost:
+        emit(estimate_report(a.dataset, a.schema, day, symbols, lo, hi, est, usd)
+             + f"\n\nABORTED: ${usd:.4f} exceeds --max-cost ${a.max_cost:.2f}",
+             a.report, header="common.statistics_probe -- aborted on cost")
+        return 1
+    if not a.confirm:
+        # The estimate IS a finding: it is the number that decides whether to
+        # download at all. The first version printed it and returned, which put
+        # it in scrollback -- the same mistake as the size probe, made again in
+        # the next tool along.
+        emit(estimate_report(a.dataset, a.schema, day, symbols, lo, hi, est, usd)
+             + "\n\nDry run. Re-run with --confirm to download.",
+             a.report, header="common.statistics_probe -- estimate only")
+        return 0
     print(f"{a.dataset} {a.schema}  {day}  {len(symbols)} symbol(s)")
     print(f"  estimated {est:,} bytes, ${usd:.4f}")
-    if usd > a.max_cost:
-        sys.exit(f"ABORTED: ${usd:.4f} exceeds --max-cost ${a.max_cost:.2f}")
-    if not a.confirm:
-        print("\nDry run. Re-run with --confirm to download.")
-        return 0
 
     out = Path(a.out) / f"{a.dataset}_{a.schema}_{day}.dbn.zst"
     out.parent.mkdir(parents=True, exist_ok=True)

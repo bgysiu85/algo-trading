@@ -140,3 +140,25 @@ def test_the_dataset_range_reader_tolerates_both_key_spellings():
             def get_dataset_range(ds):
                 return {"start_date": "2024-07-01T00:00:00", "end_date": "2026-09-05"}
     assert P.dataset_range(C, "EQUS.SUMMARY") == ("2024-07-01", "2026-09-05")
+
+
+# --- the estimate is itself a finding ---------------------------------------
+
+def test_the_estimate_pass_reports_the_deciding_number():
+    """The estimate decides whether to download at all, so it is a measurement
+    and belongs in a file. The first version printed it and returned, putting
+    it in scrollback -- the same mistake as the size probe, made again in the
+    very next tool."""
+    out = P.estimate_report("EQUS.SUMMARY", "statistics", "2026-08-04",
+                            ["AAA", "BBB", "CCC", "DDD", "EEE"],
+                            "2024-07-01", "2026-09-05", 20_000, 0.0)
+    assert "4,000" in out                     # bytes per symbol-day
+    assert "48.5 MB" in out                   # projected over 12,128
+    assert "2024-07-01 .. 2026-09-05" in out
+    assert "$0.0000" in out
+
+
+def test_the_estimate_report_does_not_divide_by_zero_on_no_symbols():
+    out = P.estimate_report("EQUS.SUMMARY", "statistics", "2026-08-04", [],
+                            "2024-07-01", "2026-09-05", 0, 0.0)
+    assert "0 bytes" in out
