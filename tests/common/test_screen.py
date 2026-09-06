@@ -129,3 +129,43 @@ def test_features_are_computed_per_symbol_not_across_the_whole_frame():
     df = S.features(daily(rows), S.Config())
     b0 = df[(df["symbol"] == "BBB")].iloc[0]
     assert pd.isna(b0["prior_close"])
+
+
+# --- the symbology trap -----------------------------------------------------
+
+def test_an_unsymbolised_archive_raises_instead_of_reporting_zeroes(tmp_path):
+    """The failure that produced a clean report full of structural zeroes.
+
+    An ALL_SYMBOLS pull embeds no symbol mapping, so to_df(map_symbols=True)
+    returns symbol=None on every row without failing. Downstream the frame
+    de-duplicated on (symbol, date), collapsed 206,362 rows per month to one
+    per session, and the screen reported "864 symbol-days, 0 distinct symbols"
+    and exited 0. Nothing raised anywhere.
+
+    daily_frame must refuse that frame rather than pass it on.
+    """
+    import pandas as pd
+    from common import dbn_io
+
+    df = pd.DataFrame({
+        "ts_event": pd.to_datetime(["2026-08-03", "2026-08-04"], utc=True),
+        "symbol": [None, None],
+        "open": [1.0, 1.0], "high": [1.0, 1.0], "low": [1.0, 1.0],
+        "close": [1.0, 1.0], "volume": [10, 10],
+    }).set_index("ts_event")
+
+    d = tmp_path / "EQUS.MINI" / "ohlcv-1d"
+    d.mkdir(parents=True)
+    (d / "2026-08.dbn.zst").write_bytes(b"")
+
+    import unittest.mock as mock
+    with mock.patch.object(dbn_io, "read_many", return_value=df):
+        with pytest.raises(ValueError, match="resolved no tickers"):
+            dbn_io.daily_frame(tmp_path, "EQUS.MINI")
+
+
+def test_symbology_sits_next_to_its_data_file():
+    from common.dbn_io import symbology_path
+    from pathlib import Path
+    p = symbology_path(Path("databento/EQUS.MINI/ohlcv-1d/2026-08.dbn.zst"))
+    assert p == Path("databento/EQUS.MINI/ohlcv-1d/2026-08.symbology.json")

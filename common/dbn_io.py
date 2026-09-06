@@ -29,18 +29,54 @@ from pathlib import Path
 import pandas as pd
 
 
-def read_dbn(path: str | Path) -> pd.DataFrame:
+def symbology_path(path: str | Path) -> Path:
+    """The archived instrument_id -> ticker mapping for one data file."""
+    p = Path(path)
+    return p.with_name(p.name.split(".")[0] + ".symbology.json")
+
+
+def read_dbn(path: str | Path, *, require_symbols: bool = True) -> pd.DataFrame:
     """One .dbn / .dbn.zst file as a DataFrame, UTC-indexed on ts_event.
 
-    map_symbols=True resolves instrument_id back to the ticker. Without it every
-    frame is keyed by an integer that is only meaningful inside one dataset and
-    changes across listing events.
+    THE SYMBOLOGY TRAP
+    ------------------
+    A file pulled with symbols="ALL_SYMBOLS" carries NO symbol mapping in its
+    metadata -- there is nothing to embed, because nothing was named in the
+    request. `to_df(map_symbols=True)` on such a file does not fail: it returns
+    every row with symbol=None.
+
+    That is as bad as it gets. The first run of common.screen over 43 chunks and
+    206,362 rows per month reported "864 symbol-days, 0 distinct symbols" and
+    exited 0. The pipeline downstream de-duplicated on (symbol, date), collapsed
+    a million rows to one per session, and produced a clean-looking report
+    saying the screen selected nothing. Every figure in it was structurally
+    zero, and nothing anywhere raised.
+
+    So the mapping is archived beside the data at download time
+    (<label>.symbology.json) and loaded here. If it is absent this raises --
+    require_symbols=False is available for inspecting a raw file, and is not
+    what any analysis should use.
     """
     import databento as db
 
-    df = db.DBNStore.from_file(str(path)).to_df(map_symbols=True)
+    store = db.DBNStore.from_file(str(path))
+    sym = symbology_path(path)
+    if sym.exists():
+        store.insert_symbology_json(sym.read_text(encoding="utf-8"))
+    elif require_symbols:
+        raise FileNotFoundError(
+            f"{sym} is missing, so instrument_id cannot be resolved to tickers "
+            f"and every row of {Path(path).name} would silently carry "
+            "symbol=None. Backfill it with:\n"
+            "  python -m common.databento_universe --resymbolize")
+
+    df = store.to_df(map_symbols=True)
     if df.empty:
         return df
+    if require_symbols and "symbol" in df.columns and df["symbol"].isna().all():
+        raise ValueError(
+            f"{Path(path).name}: every symbol resolved to None even with a "
+            "symbology file. Re-run --resymbolize; do not analyse this.")
     if df.index.name != "ts_event" and "ts_event" in df.columns:
         df = df.set_index("ts_event")
     df.index = (df.index.tz_localize("UTC") if df.index.tz is None
@@ -69,10 +105,15 @@ def daily_frame(archive: str | Path, dataset: str) -> pd.DataFrame:
     d = Path(archive) / dataset / "ohlcv-1d"
     if not d.exists():
         return pd.DataFrame()
-    df = read_many(d.glob("*.dbn*"))
+    df = read_many(d.glob("*.dbn.zst"))
     if df.empty:
         return df
     out = df.reset_index()
+    if "symbol" not in out.columns or out["symbol"].isna().all():
+        raise ValueError(
+            "The daily archive resolved no tickers. Run:\n"
+            "  python -m common.databento_universe --resymbolize")
+    out = out[out["symbol"].notna()]
     out["date"] = out["ts_event"].dt.strftime("%Y-%m-%d")
     keep = ["symbol", "date", "open", "high", "low", "close", "volume"]
     out = out[[c for c in keep if c in out.columns]]

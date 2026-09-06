@@ -42,8 +42,11 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import json
+
 from common.databento_fetch import (_key, _scrub, conditions, write_manifest,
                                     ARCHIVE_DEFAULT)
+from common.dbn_io import symbology_path
 
 # EQUS.MINI reaches back to 2023-03-28 and is a blended tape rather than one
 # venue's book. The 2018 datasets are individual venue feeds and would have to
@@ -69,6 +72,31 @@ def month_chunks(start: str, end: str) -> list[tuple[str, str, str]]:
 
 def chunk_path(root: Path, dataset: str, schema: str, label: str) -> Path:
     return root / dataset / schema / f"{label}.dbn.zst"
+
+
+def save_symbology(client, path: Path) -> bool:
+    """Resolve instrument_id -> ticker for one chunk and archive it beside it.
+
+    An ALL_SYMBOLS pull embeds no symbol mapping -- nothing was named in the
+    request, so there is nothing to embed. Without this the bars are keyed by an
+    integer that means nothing outside one dataset, and to_df(map_symbols=True)
+    hands back symbol=None for every row WITHOUT failing. That produced a
+    screen report reading "864 symbol-days, 0 distinct symbols" and exit 0.
+
+    Resolved once here and written to disk, so every later analysis is offline
+    and reproducible. The mapping is part of the archive, not a runtime lookup:
+    instrument ids are reused over time, and a resolution done next year would
+    not necessarily answer the same question as one done today.
+    """
+    import databento as db
+
+    out = symbology_path(path)
+    if out.exists():
+        return False
+    store = db.DBNStore.from_file(str(path))
+    js = store.request_symbology(client)
+    out.write_text(json.dumps(js), encoding="utf-8")
+    return True
 
 
 def clamp_to_dataset(client, dataset: str, start: str, end: str):
@@ -111,6 +139,9 @@ def main(argv=None) -> int:
     ap.add_argument("--archive", default=str(ARCHIVE_DEFAULT))
     ap.add_argument("--max-cost", type=float, default=5.00)
     ap.add_argument("--confirm", action="store_true")
+    ap.add_argument("--resymbolize", action="store_true",
+                    help="fetch and archive the symbology for chunks already "
+                         "on disk, without re-downloading any bars")
     a = ap.parse_args(argv)
 
     try:
@@ -120,6 +151,25 @@ def main(argv=None) -> int:
 
     root = Path(a.archive)
     client_probe = db.Historical(_key())
+
+    if a.resymbolize:
+        d = root / a.dataset / a.schema
+        files = sorted(d.glob("*.dbn.zst"))
+        if not files:
+            sys.exit(f"no chunks in {d}/")
+        done = skipped = failed = 0
+        for f in files:
+            try:
+                if save_symbology(client_probe, f):
+                    done += 1
+                    print(f"  {f.name}  -> {symbology_path(f).name}")
+                else:
+                    skipped += 1
+            except Exception as e:  # noqa: BLE001
+                failed += 1
+                print(f"  {f.name}  FAILED: {_scrub(e)}")
+        print(f"\nresolved {done}, already present {skipped}, failed {failed}")
+        return 0 if not failed else 1
     a.start, a.end, clamped = clamp_to_dataset(client_probe, a.dataset,
                                                a.start, a.end)
     for line in clamped:
@@ -179,6 +229,11 @@ def main(argv=None) -> int:
             continue
         tmp.replace(out)
         written += 1
+        try:
+            save_symbology(client, out)
+        except Exception as e:  # noqa: BLE001
+            print(f"  {label}  SYMBOLOGY FAILED: {_scrub(e)}  "
+                  "-- run --resymbolize before analysing")
         # Per-day conditions for the whole month, so a degraded session inside
         # an otherwise fine chunk is still recorded.
         cond = conditions(client, a.dataset, [lo, hi])
