@@ -301,9 +301,16 @@ def main(argv=None) -> int:
                     help="run only jobs matching these")
     ap.add_argument("--skip", nargs="+", metavar="DATASET[:SCHEMA]",
                     help="drop jobs matching these, e.g. EQUS.SUMMARY:statistics")
+    # Built from DEEP_JOBS rather than written out, because this flag gated one
+    # job when it was written and gates two now. Help text that names only the
+    # first is how someone opts into terabytes believing they asked for minute
+    # bars -- and prose does not get updated when a list does.
     ap.add_argument("--deep", action="store_true",
-                    help="add eight years of Nasdaq-listed MINUTE bars. Large, "
-                         "narrow, and insurance rather than a requirement")
+                    help="add the jobs that are large out of proportion to "
+                         "their known value ("
+                         + "; ".join(f"{j.dataset}:{j.schema}" for j in DEEP_JOBS)
+                         + "). Plan before confirming -- one of these is "
+                           "measured at ~2.4 TB")
     ap.add_argument("--no-quotes", action="store_true",
                     help="skip the L1 quote jobs")
     ap.add_argument("--skip-disk-check", action="store_true")

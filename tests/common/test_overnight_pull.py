@@ -221,3 +221,18 @@ def test_job_output_streams_rather_than_being_held_to_the_end(capsys):
     assert rc == 0
     assert "2023-03" in out                       # captured for parsing
     assert "2023-03" in capsys.readouterr().out   # and seen by the terminal
+
+
+def test_the_deep_flag_describes_every_job_it_gates():
+    """--deep gated one job when it was written and gates two now. Help text
+    that names only the first is how someone opts into 2.4 TB believing they
+    asked for minute bars."""
+    import argparse, io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        with pytest.raises(SystemExit):
+            O.main(["--help"])
+    help_text = " ".join(buf.getvalue().split())
+    for j in O.DEEP_JOBS:
+        assert f"{j.dataset}:{j.schema}" in help_text, (
+            f"--deep pulls {j.label} but its help text never names it")
