@@ -172,6 +172,90 @@ def pairs(sel: pd.DataFrame) -> list[dict]:
 
 # --------------------------------------------------------------------------
 
+def _q(s: pd.Series) -> str:
+    s = s.dropna()
+    if s.empty:
+        return "no data"
+    return (f"p10 {s.quantile(.10):>12,.2f}   median {s.median():>12,.2f}"
+            f"   p90 {s.quantile(.90):>12,.2f}")
+
+
+def diagnose(df: pd.DataFrame, cfg: Config,
+             known: list[tuple[str, str]] | None, n_sessions: int) -> str:
+    """Which threshold is actually doing the cutting, measured not guessed.
+
+    3.5 candidates a session against a live scanner's 20-60 means a filter is
+    wrong, and four of the five are marked GUESS. Loosening them one at a time
+    until the count looks right would be fitting the screen to an intuition;
+    this instead reports what each threshold rejects and what the known pairs
+    -- names Ben actually traded -- actually looked like on the day.
+
+    The known pairs are the closest thing to ground truth available: whatever
+    generated them, a screen meant to reproduce it should not be rejecting 92%.
+    """
+    out, A = [], None
+    out = []
+    A = out.append
+    A("3b. WHAT EACH THRESHOLD REJECTS")
+
+    band = df["prior_close"].between(cfg.price_min, cfg.price_max)
+    liq = df["prior_avg_dollar_vol"] >= cfg.min_avg_dollar_vol
+    rv = df["rvol"] >= cfg.min_rvol
+    rng = df["range_pct"] >= cfg.min_range_pct
+    n = len(df)
+    for name, m in (("price band", band), ("liquidity floor", liq),
+                    ("RVOL", rv), ("day range", rng)):
+        A(f"  {name:<18} passes {int(m.sum()):>9,}  ({100*m.mean():.1f}% of all rows)")
+
+    A("")
+    A("  candidates/session with ONE threshold relaxed at a time:")
+    base = (band & liq & rv & rng).sum() / max(n_sessions, 1)
+    A(f"    all as configured                {base:>6.1f}")
+    for label, m in (("no price band", liq & rv & rng),
+                     ("no liquidity floor", band & rv & rng),
+                     ("no RVOL rule", band & liq & rng),
+                     ("no range rule", band & liq & rv)):
+        A(f"    {label:<32} {m.sum()/max(n_sessions,1):>6.1f}")
+    for v in (1.5, 2.0, 3.0):
+        m = band & liq & (df["rvol"] >= v) & rng
+        A(f"    RVOL >= {v:<24.1f} {m.sum()/max(n_sessions,1):>6.1f}")
+    for v in (2.0, 5.0):
+        m = band & liq & rv & (df["range_pct"] >= v)
+        A(f"    range >= {str(int(v))+chr(37):<24} {m.sum()/max(n_sessions,1):>6.1f}")
+
+    if not known:
+        return "\n".join(out)
+
+    idx = df.set_index(["symbol", "date"])
+    have = [k for k in known if k in idx.index]
+    if not have:
+        A("")
+        A("  (no known pairs found in the archive)")
+        return "\n".join(out)
+    k = idx.loc[have]
+
+    A("")
+    A(f"3c. THE {len(have)} KNOWN PAIRS, AS THE DAILY BARS SAW THEM")
+    A(f"  prior_close        {_q(k['prior_close'])}")
+    A(f"  prior_avg_$vol     {_q(k['prior_avg_dollar_vol'])}")
+    A(f"  rvol (daily)       {_q(k['rvol'])}")
+    A(f"  range_pct          {_q(k['range_pct'])}")
+    A(f"  gap_pct            {_q(k['gap_pct'])}")
+
+    kb = k["prior_close"].between(cfg.price_min, cfg.price_max)
+    kl = k["prior_avg_dollar_vol"] >= cfg.min_avg_dollar_vol
+    kr = k["rvol"] >= cfg.min_rvol
+    kg = k["range_pct"] >= cfg.min_range_pct
+    A("")
+    A("  rejected by (independently -- a pair can fail several):")
+    for name, m in (("price band", ~kb), ("liquidity floor", ~kl),
+                    ("RVOL", ~kr), ("day range", ~kg)):
+        A(f"    {name:<18} {int(m.sum()):>4} of {len(k)}"
+          f"  ({100*m.mean():.0f}%)")
+    A(f"    passes everything  {int((kb & kl & kr & kg).sum()):>4} of {len(k)}")
+    return "\n".join(out)
+
+
 def report(df: pd.DataFrame, sel: pd.DataFrame, cfg: Config,
            known: list[tuple[str, str]] | None = None) -> str:
     out, A = [], None
@@ -222,6 +306,9 @@ def report(df: pd.DataFrame, sel: pd.DataFrame, cfg: Config,
             A(f"  examples missed: {', '.join(f'{s} {d}' for s, d in miss)}")
     else:
         A("  (no known pair list supplied -- pass --validate)")
+
+    A("")
+    A(diagnose(df, cfg, known, len(dates)))
 
     A("")
     A("4. THE CONTROL THAT HAS NOT BEEN RUN")
