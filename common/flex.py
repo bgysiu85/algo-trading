@@ -129,6 +129,11 @@ class SymbolDay:
     gross_pnl: float = 0.0
     commission: float = 0.0
     prices: list[float] = field(default_factory=list)
+    # Largest long position held during the day, in shares. This is what the
+    # account actually had to fund, and it is the only honest way to size a
+    # strategy against these trades: comparing a flat 100 shares against a day
+    # that ran 2,000 measures position size, not decisions.
+    max_position: int = 0
 
     @property
     def net_pnl(self) -> float:
@@ -341,17 +346,25 @@ def pairs(execs: list[Execution]) -> list[dict]:
 
 
 def symbol_days(execs: list[Execution]) -> dict[tuple[str, str], SymbolDay]:
-    out: dict[tuple[str, str], SymbolDay] = {}
+    grouped: dict[tuple[str, str], list[Execution]] = defaultdict(list)
     for e in execs:
-        k = (e.symbol, e.trade_date)
-        sd = out.get(k)
-        if sd is None:
-            sd = out[k] = SymbolDay(symbol=e.symbol, date=e.trade_date)
-        sd.executions += 1
-        sd.shares += abs(e.qty)
-        sd.gross_pnl += e.fifo_pnl
-        sd.commission += e.commission
-        sd.prices.append(abs(e.price))
+        grouped[(e.symbol, e.trade_date)].append(e)
+
+    out: dict[tuple[str, str], SymbolDay] = {}
+    for k, rows in grouped.items():
+        sd = out[k] = SymbolDay(symbol=k[0], date=k[1])
+        # Walk the fills in time order to find the peak position. Rows with no
+        # stamped time sort first; they are three fills in the whole history and
+        # cannot change a peak by more than their own size.
+        pos = 0.0
+        for e in sorted(rows, key=lambda x: (x.time_known, x.dt_raw)):
+            sd.executions += 1
+            sd.shares += abs(e.qty)
+            sd.gross_pnl += e.fifo_pnl
+            sd.commission += e.commission
+            sd.prices.append(abs(e.price))
+            pos += e.qty
+            sd.max_position = max(sd.max_position, int(round(pos)))
     return out
 
 
