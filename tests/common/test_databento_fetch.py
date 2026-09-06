@@ -273,3 +273,57 @@ def test_an_empty_config_file_falls_through_rather_than_returning_nothing(tmp_pa
     monkeypatch.delenv("DATABENTO_ARCHIVE", raising=False)
     Path(".databento_archive").write_text("   \n", encoding="utf-8")
     assert F.default_archive() == Path("databento")
+
+
+# --- the key, and the 401 that did not mean what it said ---------------------
+
+def test_an_op_reference_is_resolved_not_sent_as_the_key(monkeypatch):
+    """The README says `setx DATABENTO_API_KEY "op://Trading/<item>/<field>"`,
+    and setx is persistent. Reading the variable raw therefore sent the
+    REFERENCE as the key in every shell where a literal had not been exported
+    over the top, and Databento answered 401 auth_authentication_failed --
+    which reads as an expired subscription, the one explanation that is wrong.
+    """
+    from common import databento_fetch as FE
+    from common import secrets_util as S
+
+    monkeypatch.setenv("DATABENTO_API_KEY", "op://Trading/Databento/credential")
+    monkeypatch.setattr(S, "_op_read",
+                        lambda ref, label: "db-RESOLVEDFROM1PASSWORD00000000")
+    assert FE._key() == "db-RESOLVEDFROM1PASSWORD00000000"
+
+
+def test_a_literal_key_is_passed_through_untouched(monkeypatch):
+    from common import databento_fetch as FE
+    monkeypatch.setenv("DATABENTO_API_KEY", "db-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345")
+    assert FE._key() == "db-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+
+
+def test_an_unset_key_names_both_ways_to_set_it(monkeypatch, tmp_path):
+    from common import databento_fetch as FE
+    from common import secrets_util as S
+    monkeypatch.delenv("DATABENTO_API_KEY", raising=False)
+    monkeypatch.setattr(S, "CRED_FILE", tmp_path / "credentials.json")
+    with pytest.raises(SystemExit) as e:
+        FE._key()
+    assert "op://" in str(e.value)
+
+
+def test_a_wrong_shaped_key_warns_without_printing_any_of_it(monkeypatch, capsys):
+    """A key of the wrong shape produces the same opaque 401 as no key at all.
+    Say the likely reason first -- but the value never reaches the terminal,
+    because PROGRAM_INDEX section 1 is that keys do not appear in chat."""
+    from common import databento_fetch as FE
+    monkeypatch.setenv("DATABENTO_API_KEY", "SUPERSECRETVALUE1234567890")
+    assert FE._key() == "SUPERSECRETVALUE1234567890"
+    err = capsys.readouterr().err
+    assert "WARNING" in err and "26 characters" in err
+    assert "SUPERSECRET" not in err
+    assert "SECRET" not in err
+
+
+def test_a_well_shaped_key_warns_about_nothing(monkeypatch, capsys):
+    from common import databento_fetch as FE
+    monkeypatch.setenv("DATABENTO_API_KEY", "db-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345")
+    FE._key()
+    assert capsys.readouterr().err == ""

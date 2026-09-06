@@ -118,6 +118,23 @@ def _resolve_one(env_var: str, label: str) -> tuple[str, str]:
     return raw, source
 
 
+def resolve(env_var: str, label: str) -> str:
+    """Resolve ONE credential now, following an op:// reference if present.
+
+    preload() is the right entry point for the long-running trader: it resolves
+    everything once, at startup, so nothing can block on a 1Password unlock at
+    05:30 with a position open. That discipline buys nothing for a short-lived
+    command-line tool that wants a single key and then exits, and its absence
+    is what let common.databento_fetch grow its own environment-only reader --
+    which sent op:// references to the vendor as though they were keys.
+
+    Returns "" when nothing is configured; the caller decides whether that is
+    fatal.
+    """
+    value, _ = _resolve_one(env_var, label)
+    return value
+
+
 def preload(names: dict[str, str]) -> None:
     """Resolve every credential now, at startup, before any event loop starts.
 

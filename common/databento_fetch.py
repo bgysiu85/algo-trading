@@ -101,10 +101,44 @@ def _scrub(text: str) -> str:
 
 
 def _key() -> str:
-    k = os.environ.get("DATABENTO_API_KEY", "").strip()
+    """Resolve DATABENTO_API_KEY, following an op:// reference if that is what
+    is stored.
+
+    This used to read the environment variable and hand whatever it found
+    straight to the client. But the README and common.op_list both tell you to
+
+        setx DATABENTO_API_KEY "op://Trading/<item>/<field>"
+
+    and `setx` is PERSISTENT. So in any shell where a literal had not been
+    exported over the top -- a new terminal, the morning after -- the op://
+    REFERENCE was sent as the key, and the server answered
+
+        401 auth_authentication_failed
+
+    which reads as an expired subscription or a revoked key. It is neither. It
+    is a 1Password reference that nothing resolved, and the error points at the
+    one explanation that is wrong.
+
+    Every other credential in this project already resolves through
+    secrets_util, which handles op:// and names the service-account vault trap.
+    This one did not, for no reason other than that it was written first.
+    """
+    from common import secrets_util as S
+
+    k = S.resolve("DATABENTO_API_KEY", "Databento API key")
     if not k:
-        sys.exit("DATABENTO_API_KEY is not set. In PowerShell:\n"
-                 '  $env:DATABENTO_API_KEY = "your key"')
+        sys.exit("DATABENTO_API_KEY is not set. In PowerShell, either\n"
+                 '  $env:DATABENTO_API_KEY = "your key"          (this shell only)\n'
+                 '  setx DATABENTO_API_KEY "op://Trading/<item>/<field>"'
+                 "   (persistent, resolved via 1Password)")
+    if not k.startswith("db-"):
+        # Warn, do not block: the shape of a vendor's key is their business to
+        # change. But a wrong-shaped key produces the same opaque 401 as no key
+        # at all, so say the likely reason BEFORE the server does. No part of
+        # the value is printed.
+        print(f"WARNING: DATABENTO_API_KEY resolved to {len(k)} characters not "
+              "beginning 'db-'. If the next call returns 401, that is why.",
+              file=sys.stderr)
     return k
 
 
