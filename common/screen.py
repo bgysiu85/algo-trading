@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -73,6 +74,28 @@ from common.report_io import emit
 
 ARCHIVE_DEFAULT = "databento"
 DATASET_DEFAULT = "EQUS.MINI"
+
+# Exchange TEST symbols. These are not securities -- venues publish them
+# continuously so members can verify connectivity, and they carry real-looking
+# prices and volume on a tape that makes no distinction.
+#
+# ZVZZT was the SECOND most frequent name in the first candidate list: 30 of
+# 864 sessions. It would have been "traded" in the backtest, produced P/L, and
+# appeared in the results as an ordinary symbol -- and because its prints are
+# arbitrary, its contribution would have been noise dressed as a finding. Every
+# venue has its own set; below are the published Nasdaq, NYSE, Cboe and IEX
+# ones plus the shapes they follow.
+TEST_SYMBOLS = frozenset({
+    "ZAZZT", "ZBZZT", "ZCZZT", "ZEXIT", "ZIEXT", "ZJZZT", "ZTEST", "ZVV",
+    "ZVZZC", "ZVZZT", "ZWZZT", "ZXIET", "ZXZZT", "ZZZ", "ZZZZ",
+    "ATEST", "CTEST", "MTEST", "NTEST", "PTEST", "QTEST", "ZTST",
+})
+_TEST_RE = re.compile(r"^(Z[A-Z]ZZ[TC]|[A-Z]?TEST[A-Z]?|.*\.TEST)$")
+
+
+def is_test_symbol(sym: str) -> bool:
+    s = (sym or "").upper()
+    return s in TEST_SYMBOLS or bool(_TEST_RE.match(s))
 
 
 @dataclass
@@ -201,7 +224,7 @@ def select(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     bill; it is a GUESS and it is reported, because a cap that binds often is
     quietly changing the universe.
     """
-    m = stage1(df, cfg) & stage2(df, cfg)
+    m = stage1(df, cfg) & stage2(df, cfg) & ~df["symbol"].map(is_test_symbol)
     out = df[m].copy()
     if out.empty:
         return out
@@ -328,6 +351,9 @@ def report(df: pd.DataFrame, sel: pd.DataFrame, cfg: Config,
     s1 = stage1(df, cfg).sum()
     A(f"  pass stage 1 (tradeable)           {s1:,}"
       f"  ({100*s1/max(len(df),1):.1f}%)")
+    n_test = int(df["symbol"].map(is_test_symbol).sum())
+    A(f"  exchange TEST symbols excluded     {n_test:,}"
+      f"  ({df[df['symbol'].map(is_test_symbol)]['symbol'].nunique()} distinct)")
     A(f"  pass stage 1 AND stage 2           {len(sel):,}")
     if dates:
         per = len(sel) / len(dates)

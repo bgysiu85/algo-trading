@@ -198,3 +198,27 @@ def test_symbology_sits_next_to_its_data_file():
     from pathlib import Path
     p = symbology_path(Path("databento/EQUS.MINI/ohlcv-1d/2026-08.dbn.zst"))
     assert p == Path("databento/EQUS.MINI/ohlcv-1d/2026-08.symbology.json")
+
+
+# --- exchange test symbols --------------------------------------------------
+
+def test_exchange_test_symbols_are_recognised():
+    """ZVZZT was the second most frequent name in the first candidate list --
+    30 of 864 sessions. It is Nasdaq's connectivity test instrument, not a
+    security. Its prints are arbitrary, so any P/L it produced would be noise
+    presented as a symbol-level result."""
+    for s in ("ZVZZT", "ZWZZT", "ZXZZT", "ZBZZT", "ZVZZC", "ATEST", "NTEST",
+              "ZTEST", "zvzzt"):
+        assert S.is_test_symbol(s), s
+    for s in ("HOLO", "VCIG", "WHLR", "MLGO", "AAPL", "ZM", "TSLA", "ZI"):
+        assert not S.is_test_symbol(s), s
+
+
+def test_test_symbols_never_reach_the_candidate_list():
+    rows = []
+    for sym in ("ZVZZT", "REAL"):
+        rows += series(symbol=sym, n=12, close=5.0, vol=500_000)
+        rows.append((sym, "2025-06-13", 5.0, 7.0, 4.9, 6.8, 5_000_000))
+    cfg = S.Config()
+    sel = S.select(S.features(daily(rows), cfg), cfg)
+    assert list(sel["symbol"]) == ["REAL"]
