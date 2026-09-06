@@ -26,6 +26,7 @@ import sys
 from datetime import date, timedelta
 
 from common.databento_fetch import _key, _scrub
+from common.report_io import emit
 
 # The window this project cares about: Ben's trade history plus a fortnight of
 # lookback for the relative-volume denominator.
@@ -54,7 +55,7 @@ def parse_size_args(items) -> list[tuple[str, str]]:
     return out
 
 
-def probe_sizes(client, day: str, pairs) -> int:
+def probe_sizes(client, day: str, pairs, out=None) -> int:
     """Price one day of each dataset/schema, so a plan total can be checked.
 
     A whole-plan estimate is one number per job with nothing to compare it
@@ -62,22 +63,28 @@ def probe_sizes(client, day: str, pairs) -> int:
     of everything -- and there is no way to tell an enormous-but-real schema
     from a bad estimate without a second measurement at a different scale.
     A single day is free to ask about and settles it.
+
+    The result goes to a file as well as the terminal. The first version only
+    printed, which put the figure this decision turns on in scrollback where it
+    had to be copied back by hand -- the exact thing report_io exists to stop.
     """
-    print(f"one day ({day}), whole universe, billable size\n")
-    print(f"{'dataset / schema':<30} {'MB/day':>12} {'USD/day':>10}"
-          f"  {'x21 -> MB/month':>16}")
-    print("-" * 74)
+    lines = [f"ONE-DAY SIZE PROBE  ({day}, whole universe, billable)", "",
+             f"{'dataset / schema':<30} {'MB/day':>12} {'USD/day':>10}"
+             f"  {'x21 -> MB/month':>16}",
+             "-" * 74]
     for dataset, schema in pairs:
         label = f"{dataset} {schema}"
         try:
             mb, usd = size_one_day(client, dataset, schema, day)
         except Exception as e:  # noqa: BLE001
-            print(f"{label:<30} FAILED: {_scrub(e)}")
+            lines.append(f"{label:<30} FAILED: {_scrub(e)}")
             continue
-        print(f"{label:<30} {mb:>12,.1f} {usd:>10.4f} {mb*21:>16,.0f}")
-    print("\nCompare the month column against the same job in the overnight "
-          "plan. A large disagreement means one of the two estimates is wrong, "
-          "and neither should be acted on until that is settled.")
+        lines.append(f"{label:<30} {mb:>12,.1f} {usd:>10.4f} {mb*21:>16,.0f}")
+    lines += ["",
+              "Compare the month column against the same job in the overnight",
+              "plan. A large disagreement means one of the two estimates is",
+              "wrong, and neither should be acted on until that is settled."]
+    emit("\n".join(lines), out, header=f"common.databento_probe --size  day={day}")
     return 0
 
 
@@ -90,6 +97,8 @@ def main(argv=None) -> int:
                     help="instead of listing, price ONE day of each of these")
     ap.add_argument("--day", default="2026-08-04",
                     help="the day --size prices (default: %(default)s)")
+    ap.add_argument("--out", default="var/reports/databento_size_probe.txt",
+                    help="where --size writes its report (default: %(default)s)")
     a = ap.parse_args(argv)
 
     try:
@@ -100,7 +109,7 @@ def main(argv=None) -> int:
     c = db.Historical(_key())
 
     if a.size:
-        return probe_sizes(c, a.day, parse_size_args(a.size))
+        return probe_sizes(c, a.day, parse_size_args(a.size), a.out)
 
     try:
         names = c.metadata.list_datasets()

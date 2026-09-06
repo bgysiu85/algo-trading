@@ -60,3 +60,29 @@ def test_one_dataset_failing_does_not_stop_the_others(capsys):
     out = capsys.readouterr().out
     assert "FAILED" in out
     assert "ohlcv-1d" in out
+
+
+def test_the_probe_writes_its_result_to_a_file(tmp_path):
+    """The figure this decision turns on must not live only in scrollback.
+    The first version printed and nothing else, so the one number worth having
+    had to be copied back by hand -- which is what report_io exists to stop."""
+    out = tmp_path / "size_probe.txt"
+    P.probe_sizes(FakeClient(FakeMeta(4400.0)), "2026-08-04",
+                  [("EQUS.SUMMARY", "statistics")], out)
+    text = out.read_text(encoding="utf-8")
+    assert "4,400.0" in text
+    assert "92,400" in text          # the x21 month column
+    assert "# generated" in text
+
+
+def test_a_failure_still_reaches_the_file(tmp_path):
+    """A probe that failed is itself the finding -- an empty or absent report
+    is indistinguishable from one nobody ran."""
+    class Dead(FakeMeta):
+        def get_billable_size(self, **kw):
+            raise RuntimeError("401 auth_authentication_failed")
+
+    out = tmp_path / "size_probe.txt"
+    P.probe_sizes(FakeClient(Dead(0)), "2026-08-04",
+                  [("EQUS.SUMMARY", "statistics")], out)
+    assert "FAILED" in out.read_text(encoding="utf-8")
