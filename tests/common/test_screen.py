@@ -55,13 +55,42 @@ def test_stage1_uses_no_column_from_todays_bar():
     assert '"prior_close"' in src and '"prior_avg_dollar_vol"' in src
 
 
-def test_price_band_is_judged_on_the_prior_close_not_todays():
-    """A $1.80 stock that closes at $6 today is NOT in the band at 04:00. Using
-    today's close would select it and no live scanner could."""
+def test_the_screen_does_not_apply_mcls_price_band():
+    """A $1.80 stock that gaps to $6 pre-market is a legitimate MCL candidate.
+
+    The live scanner screens on premarket_close -- the price at 04:00 -- so
+    that name passes live. Applying MCL's $2-20 to the PRIOR close rejected 39%
+    of the 587 symbol-days Ben actually traded, whose median prior close was
+    $2.60. MCL enforces the real band at entry, on the price at the time, which
+    is both the right place and not look-ahead. The screen must not do it here
+    and must not do it on the wrong day's price.
+    """
     rows = series(close=1.80, n=12)
     rows.append(("AAA", "2025-06-13", 1.85, 6.5, 1.8, 6.0, 50_000_000))
     df = S.features(daily(rows), S.Config())
-    assert not S.stage1(df, S.Config()).iloc[-1]
+    assert S.stage1(df, S.Config()).iloc[-1], (
+        "a sub-$2 prior close must survive the screen -- the band belongs at entry")
+
+
+def test_the_sanity_band_still_excludes_the_obviously_untradeable():
+    """Dropping MCL's band is not dropping all price sense. A $0.02 shell and a
+    $900 name are not candidates for this strategy at any hour."""
+    cfg = S.Config()
+    for px in (0.02, 900.0):
+        rows = series(close=px, n=12, vol=5_000_000)
+        rows.append(("AAA", "2025-06-13", px, px * 1.5, px, px * 1.4, 50_000_000))
+        df = S.features(daily(rows), cfg)
+        assert not S.stage1(df, cfg).iloc[-1], f"${px} should fail the sanity band"
+
+
+def test_stage1_still_reads_the_prior_close_not_todays():
+    """Whatever the band's width, it must be judged on data known at 03:59."""
+    rows = series(close=0.10, n=12, vol=5_000_000)
+    rows.append(("AAA", "2025-06-13", 0.10, 9.0, 0.10, 8.0, 90_000_000))
+    cfg = S.Config()
+    df = S.features(daily(rows), cfg)
+    # today's close is $8 (inside any band); the prior close is $0.10 (outside)
+    assert not S.stage1(df, cfg).iloc[-1]
 
 
 # --- selection --------------------------------------------------------------

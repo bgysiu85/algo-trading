@@ -24,8 +24,13 @@ strategy, and it would not look wrong: the P/L would simply be large.
 So the rules here are split, and the split is enforced rather than described:
 
   TRADEABLE (stage 1) -- uses only data available before the session opens:
-    previous close for the price band, and the trailing 10-day average dollar
-    volume for the liquidity floor. A live scanner at 03:59 has all of this.
+    a loose sanity range on the previous close, and the trailing 10-day average
+    dollar volume. A live scanner at 03:59 has both.
+
+    Note what is NOT here: MCL's $2-20 band. It is enforced at ENTRY by the
+    strategy, on the price at that moment. Applying it to the prior close
+    rejected 39% of the names Ben actually traded, because the live scanner
+    reads premarket_close and a $1.50 stock that gaps to $4 passes it.
 
   FETCH FILTER (stage 2) -- uses today's daily bar, and is therefore NOT a
     trading rule. Its only job is to decide which symbol-days are worth
@@ -79,26 +84,65 @@ class Config:
     from measurement, and they change only for a stated reason.
     """
     # -- stage 1: tradeable, known before the session --------------------
-    price_min: float = 2.0          # MCL PRICE_MIN, shipped
-    price_max: float = 20.0         # MCL PRICE_MAX, shipped
-    min_avg_dollar_vol: float = 200_000.0   # GUESS -- see report section 2
+    #
+    # These are a SANITY range, not MCL's $2-20 band. Measured 2026-09-06: the
+    # 587 symbol-days Ben actually traded had a median prior close of $2.60 and
+    # a p10 of $0.77, and applying $2-20 to the PRIOR close rejected 39% of
+    # them. That is not a universe disagreement, it is the wrong column: MCL's
+    # live scanner screens on premarket_close, the price at 04:00, so a $1.50
+    # stock that gaps to $4 pre-market passes live and fails here. MCL already
+    # enforces the real band at entry (ENFORCE_PRICE_BAND), which is both the
+    # right place and not look-ahead. The screen must not enforce it twice, and
+    # must not enforce it on a price from the wrong day.
+    price_min: float = 0.50         # sanity floor -- below p10 of the real set
+    price_max: float = 50.0         # sanity ceiling
+    #
+    # Measured: prior_avg_dollar_vol on the traded names is p10 $1,513, median
+    # $53,478. A $200,000 floor rejected 67% of them. It was also asking the
+    # wrong question -- what matters is not what a name traded BEFORE the event
+    # but whether an order can be filled ON the day, and these names do ~24x
+    # their prior average when they run. Liquidity is a SIZING constraint
+    # (max_pct_of_dollar_vol below), not a universe filter. PROGRAM_INDEX
+    # already records the volume-floor study failing this way: eight of 21
+    # names produced zero trades and the excluded ones held ~$872 of winners
+    # against ~$115 of losers.
+    min_avg_dollar_vol: float = 25_000.0    # measured 2026-09-06, see above
     avg_vol_days: int = 10          # matches TradingView's 10-day RVOL basis
 
     # -- stage 2: fetch filter, uses today's bar, NOT a trading rule -----
+    # Left alone deliberately. Measured on the traded names: median daily RVOL
+    # 23.9x against this 5x threshold, and the range rule rejects 1%. Neither
+    # is binding, and both are MCL's own rule rather than a guess of mine --
+    # so there is nothing here to justify changing.
     min_rvol: float = 5.0           # MCL universe rule, RVOL(1D) >= 5x
-    min_range_pct: float = 10.0     # GUESS -- a day MCL could plausibly trade
+    min_range_pct: float = 10.0     # GUESS, but measured non-binding
     max_candidates_per_day: int = 60  # GUESS -- caps a runaway day
+
+    # Sizing, not screening. Carried here so the backtest can cap a position at
+    # a share of the day's actual dollar volume instead of pretending a $53k/day
+    # name can absorb any order. Not applied by this module -- it is the
+    # backtest's job -- but it is the reason the liquidity floor could come
+    # down, so it belongs beside it.
+    max_pct_of_dollar_vol: float = 1.0   # GUESS -- never calibrated
 
     def marked(self) -> str:
         return (
-            f"  price band          ${self.price_min:.0f}-${self.price_max:.0f}"
-            "   [shipped, MCL]\n"
+            f"  prior-close sanity  ${self.price_min:.2f}-${self.price_max:.0f}"
+            "   [NOT MCL's band -- see below]\n"
             f"  avg $ volume >=     ${self.min_avg_dollar_vol:,.0f}"
-            f" over {self.avg_vol_days}d   [GUESS]\n"
+            f" over {self.avg_vol_days}d   [measured 2026-09-06]\n"
             f"  RVOL >=             {self.min_rvol:.1f}x"
-            "   [MCL universe rule]\n"
-            f"  day range >=        {self.min_range_pct:.0f}%   [GUESS]\n"
-            f"  max per day         {self.max_candidates_per_day}   [GUESS]"
+            "   [MCL universe rule, non-binding]\n"
+            f"  day range >=        {self.min_range_pct:.0f}%"
+            "   [GUESS, measured non-binding]\n"
+            f"  max per day         {self.max_candidates_per_day}   [GUESS]\n"
+            f"  size cap            {self.max_pct_of_dollar_vol:.1f}% of the"
+            " day's $ volume   [GUESS, applied downstream]\n"
+            "  NOTE: MCL's $2-20 band is enforced at ENTRY by the strategy, on\n"
+            "  the price at the time, not here on the prior close. Applying it\n"
+            "  here rejected 39% of the names Ben actually traded, because a\n"
+            "  $1.50 stock that gaps to $4 pre-market passes the live scanner\n"
+            "  and fails a prior-close test."
         )
 
 
@@ -203,7 +247,7 @@ def diagnose(df: pd.DataFrame, cfg: Config,
     rv = df["rvol"] >= cfg.min_rvol
     rng = df["range_pct"] >= cfg.min_range_pct
     n = len(df)
-    for name, m in (("price band", band), ("liquidity floor", liq),
+    for name, m in (("prior-close sanity", band), ("liquidity floor", liq),
                     ("RVOL", rv), ("day range", rng)):
         A(f"  {name:<18} passes {int(m.sum()):>9,}  ({100*m.mean():.1f}% of all rows)")
 
@@ -211,7 +255,7 @@ def diagnose(df: pd.DataFrame, cfg: Config,
     A("  candidates/session with ONE threshold relaxed at a time:")
     base = (band & liq & rv & rng).sum() / max(n_sessions, 1)
     A(f"    all as configured                {base:>6.1f}")
-    for label, m in (("no price band", liq & rv & rng),
+    for label, m in (("no prior-close sanity", liq & rv & rng),
                      ("no liquidity floor", band & rv & rng),
                      ("no RVOL rule", band & liq & rng),
                      ("no range rule", band & liq & rv)):
@@ -248,11 +292,20 @@ def diagnose(df: pd.DataFrame, cfg: Config,
     kg = k["range_pct"] >= cfg.min_range_pct
     A("")
     A("  rejected by (independently -- a pair can fail several):")
-    for name, m in (("price band", ~kb), ("liquidity floor", ~kl),
+    for name, m in (("prior-close sanity", ~kb), ("liquidity floor", ~kl),
                     ("RVOL", ~kr), ("day range", ~kg)):
         A(f"    {name:<18} {int(m.sum()):>4} of {len(k)}"
           f"  ({100*m.mean():.0f}%)")
     A(f"    passes everything  {int((kb & kl & kr & kg).sum()):>4} of {len(k)}")
+    # The band MCL actually applies, reported for information only. It is
+    # enforced at entry on the live price, so a prior close outside it does not
+    # mean the trade was outside the universe -- but the gap between the two
+    # numbers is the whole reason the screen stopped applying it.
+    mcl = k["prior_close"].between(2.0, 20.0)
+    A("")
+    A(f"  for information: {int((~mcl).sum())} of {len(k)} had a PRIOR close")
+    A("  outside MCL's $2-20. The strategy still judges them on the entry")
+    A("  price, so this is not by itself a universe mismatch.")
     return "\n".join(out)
 
 
