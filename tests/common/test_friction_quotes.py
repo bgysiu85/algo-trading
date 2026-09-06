@@ -150,3 +150,35 @@ def test_microsecond_and_nanosecond_timestamps_still_merge():
     q = quotes([("AAA", "2026-08-04 12:00:00", 5.00, 5.05)])
     q["ts"] = q["ts"].astype("datetime64[ns, UTC]")
     assert len(F.match(f, q)) == 1
+
+
+# --- the cross-check path ---------------------------------------------------
+
+def test_a_schema_with_unexpected_columns_raises_rather_than_returning_nothing(tmp_path):
+    """XNAS.BASIC has no plain tbbo -- it publishes the consolidated variants,
+    because it carries Nasdaq quotes against trades from Nasdaq, PSX, BX and
+    the TRFs. If a schema's quote columns are named differently, the failure
+    must be loud: silently returning no quotes would report '0% priced' and
+    read as 'the archive is missing', which is a different problem entirely."""
+    import unittest.mock as mock
+    import pandas as pd
+    from common import friction_quotes as FQ
+
+    d = tmp_path / "XNAS.BASIC" / "tcbbo"
+    d.mkdir(parents=True)
+    (d / "2026-08-04.dbn.zst").write_bytes(b"")
+    bad = pd.DataFrame({
+        "ts_recv": pd.to_datetime(["2026-08-04"], utc=True),
+        "symbol": ["AAA"], "price": [5.0],
+    }).set_index("ts_recv")
+
+    with mock.patch.object(FQ, "read_dbn", return_value=bad):
+        with pytest.raises(ValueError, match="is missing"):
+            FQ.quotes_for_date(tmp_path, "XNAS.BASIC", "2026-08-04", "tcbbo")
+
+
+def test_a_missing_archive_file_is_empty_not_an_error(tmp_path):
+    """A date with no archived quotes is normal -- coverage is reported, not
+    enforced."""
+    from common import friction_quotes as FQ
+    assert FQ.quotes_for_date(tmp_path, "XNAS.BASIC", "2026-08-04", "tcbbo").empty

@@ -102,15 +102,22 @@ def fills_frame(execs, zone: str) -> pd.DataFrame:
     return df.sort_values("ts").reset_index(drop=True)
 
 
-def quotes_for_date(archive: Path, dataset: str, date: str) -> pd.DataFrame:
-    """The tbbo records archived under this date's file.
+def quotes_for_date(archive: Path, dataset: str, date: str,
+                    schema: str = "tbbo") -> pd.DataFrame:
+    """The trade-with-quote records archived under this date's file.
+
+    `schema` exists because the cross-check needs a different one. EQUS.MINI
+    serves `tbbo`; XNAS.BASIC does not -- it publishes the CONSOLIDATED
+    variants (cmbp-1, cbbo, tcbbo) and has no plain tbbo, because it carries
+    quotes for Nasdaq only while its trades come from Nasdaq, PSX, BX and the
+    FINRA TRFs. `tcbbo` is its equivalent record.
 
     The file is named for the symbol-day it was fetched for but SPANS the
     lookback window, so it holds several sessions. Nothing here filters by
     date: the asof match on timestamp is what selects, and filtering first
     would throw away the quotes immediately before an early fill.
     """
-    p = archive / dataset / "tbbo" / f"{date}.dbn.zst"
+    p = archive / dataset / schema / f"{date}.dbn.zst"
     if not p.exists():
         return pd.DataFrame()
     df = read_dbn(p)
@@ -121,7 +128,11 @@ def quotes_for_date(archive: Path, dataset: str, date: str) -> pd.DataFrame:
     keep = [tcol, "symbol", "bid_px_00", "ask_px_00", "bid_sz_00", "ask_sz_00"]
     missing = [c for c in keep if c not in out.columns]
     if missing:
-        raise ValueError(f"{p.name}: tbbo is missing {missing}")
+        raise ValueError(
+            f"{p.name}: {schema} is missing {missing}. Columns present: "
+            f"{sorted(out.columns)}. A schema whose quote columns are named "
+            "differently needs mapping here rather than silently yielding no "
+            "quotes.")
     out = out[keep].rename(columns={tcol: "ts", "bid_px_00": "bid",
                                     "ask_px_00": "ask", "bid_sz_00": "bid_sz",
                                     "ask_sz_00": "ask_sz"})
@@ -173,14 +184,15 @@ def match(fills: pd.DataFrame, quotes: pd.DataFrame,
     return m
 
 
-def build(flex_paths, archive: Path, dataset: str, tolerance_s: int):
+def build(flex_paths, archive: Path, dataset: str, tolerance_s: int,
+          schema: str = "tbbo"):
     execs = flex.load_many(flex_paths)
     tz = flex.measure_offsets(execs)
     fills = fills_frame(execs, tz["chosen"])
 
     matched, per_date = [], {}
     for date, grp in fills.groupby("date"):
-        q = quotes_for_date(archive, dataset, date)
+        q = quotes_for_date(archive, dataset, date, schema)
         if q.empty:
             per_date[date] = (len(grp), 0)
             continue
@@ -215,7 +227,7 @@ def report(m: pd.DataFrame, fills: pd.DataFrame, per_date, tz, dataset: str) -> 
     A(f"  executions with a usable timestamp   {len(fills):,}")
     A(f"  priced against a quote               {got:,}  "
       f"({100*got/max(tot,1):.0f}%)")
-    A(f"  dates with no tbbo archived          {len(nodata)}")
+    A(f"  dates with no quotes archived        {len(nodata)}")
     if nodata:
         A(f"    {', '.join(sorted(nodata)[:8])}"
           + (" ..." if len(nodata) > 8 else ""))
@@ -291,18 +303,23 @@ def main(argv=None) -> int:
     ap.add_argument("csv", nargs="+", help="IBKR Flex trade report(s)")
     ap.add_argument("--archive", default=ARCHIVE_DEFAULT)
     ap.add_argument("--dataset", default=DATASET_DEFAULT)
+    ap.add_argument("--schema", default="tbbo",
+                    help="tbbo for EQUS.MINI, tcbbo for XNAS.BASIC")
     ap.add_argument("--tolerance", type=int, default=60,
                     help="max seconds between quote and fill (default 60)")
     ap.add_argument("--csv-out", metavar="OUT.csv",
                     help="write the per-fill table")
-    ap.add_argument("--out", metavar="OUT.txt",
-                    default="var/reports/friction_quotes.txt")
+    ap.add_argument("--out", metavar="OUT.txt", default=None,
+                    help="default: var/reports/friction_<dataset>_<schema>.txt")
     a = ap.parse_args(argv)
 
-    m, fills, per_date, tz = build(a.csv, Path(a.archive), a.dataset, a.tolerance)
-    emit(report(m, fills, per_date, tz, a.dataset), a.out,
+    out = a.out or (f"var/reports/friction_{a.dataset.replace('.', '_')}"
+                    f"_{a.schema}.txt")
+    m, fills, per_date, tz = build(a.csv, Path(a.archive), a.dataset,
+                                   a.tolerance, a.schema)
+    emit(report(m, fills, per_date, tz, a.dataset), out,
          header=f"common.friction_quotes  dataset={a.dataset}"
-                f"  tolerance={a.tolerance}s")
+                f"  schema={a.schema}  tolerance={a.tolerance}s")
 
     if a.csv_out and not m.empty:
         Path(a.csv_out).parent.mkdir(parents=True, exist_ok=True)
