@@ -60,9 +60,17 @@ def read_dbn(path: str | Path, *, require_symbols: bool = True) -> pd.DataFrame:
     import databento as db
 
     store = db.DBNStore.from_file(str(path))
+    # A file pulled with an EXPLICIT symbol list carries its own mapping -- the
+    # request named the symbols, so there was something to embed. Only an
+    # ALL_SYMBOLS pull needs the sidecar. Demanding it unconditionally would
+    # reject every scoped fetch (the tbbo archive, for one) for a problem it
+    # does not have.
+    embedded = bool((store.symbology or {}).get("mappings"))
     sym = symbology_path(path)
     if sym.exists():
         store.insert_symbology_json(sym.read_text(encoding="utf-8"))
+    elif embedded:
+        pass
     elif require_symbols:
         raise FileNotFoundError(
             f"{sym} is missing, so instrument_id cannot be resolved to tickers "
