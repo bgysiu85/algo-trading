@@ -85,6 +85,12 @@ class PairJob:
     pairs: str
     after: str | None
     why: str
+    # databento_fetch defaults to a 5-day lookback, so each request spans six
+    # days rather than one. That is right for quotes, where the surrounding
+    # days are context. It is wrong for a schema whose whole content is one
+    # session's running total: it would multiply the pull sixfold and buy
+    # nothing the daily bars do not already carry.
+    lookback: int | None = None
 
     @property
     def label(self) -> str:
@@ -125,6 +131,17 @@ PAIR_JOBS = [
             "symbol-days to the universe a strategy would actually trade -- "
             "the difference between 'what his fills cost' and 'what the "
             "strategy would pay'."),
+    PairJob("EQUS.SUMMARY", "statistics", "var/state/screen_pairs.json",
+            "2024-07-01",
+            "TRUE consolidated volume, intraday. MEASURED on 2025-04-09: "
+            "EQUS.MINI's daily volume is 4.8%-19.6% of the consolidated "
+            "figure on five screened small caps, and the shortfall varies "
+            "four-fold BETWEEN symbols -- so every absolute volume threshold "
+            "in the screen is wrong by an unknown per-symbol factor. 99.98% of "
+            "records are CLEARED_VOLUME, a cumulative running total published "
+            "04:00-20:00 ET, which is exactly the 'volume so far today' the "
+            "screen needs at its 04:00 decision point. ~9.8 GB scoped.",
+            lookback=0),
 ]
 
 # Jobs that are large out of proportion to what they are known to be worth.
@@ -247,6 +264,8 @@ def _run(job, archive: str, confirm: bool, max_cost: float) -> tuple[int, str]:
                 "--max-cost", str(max_cost)]
         if job.after:
             argv += ["--after", job.after]
+        if job.lookback is not None:
+            argv += ["--lookback", str(job.lookback)]
     else:
         runner = U.main
         argv = ["--dataset", job.dataset, "--schema", job.schema,

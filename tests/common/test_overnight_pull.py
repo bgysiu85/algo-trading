@@ -49,14 +49,31 @@ def test_free_space_is_measured_on_an_ancestor_that_exists(tmp_path):
     assert O._free_gb(missing) > 0
 
 
-def test_pair_jobs_stay_inside_the_free_l1_window():
-    """L1 gets ONE ROLLING YEAR on Standard. A pair job without an --after
-    reaching back past that window silently starts charging, and at 12,128
-    candidate symbol-days a mis-set date is tens of dollars, not cents."""
+L1_SCHEMAS = {"trades", "tbbo", "bbo", "bbo-1s", "bbo-1m", "mbp-1",
+              "cmbp-1", "cbbo", "tcbbo", "mbp-10", "mbo"}
+
+
+def test_every_pair_job_is_bounded_by_a_start_date():
+    """Scoped or not, a pair job with no --after walks back to whatever the
+    pair list holds -- which is 2023-03-28, from EQUS.MINI."""
     for j in O.PAIR_JOBS:
-        assert j.after, f"{j.label} has no --after -- it would buy paid history"
-        assert j.after >= "2025-09-01", (
-            f"{j.label} reaches back past the rolling L1 window")
+        assert j.after, f"{j.label} has no --after -- it is unbounded"
+
+
+def test_l1_pair_jobs_stay_inside_the_free_rolling_window():
+    """L1 gets ONE ROLLING YEAR on Standard. An L1 pair job reaching back past
+    that window silently starts charging, and at 12,128 candidate symbol-days a
+    mis-set date is tens of dollars, not cents.
+
+    Scoped to L1 deliberately. This test once asserted the 2025-09-01 bound on
+    EVERY pair job, which was true only while every pair job happened to be L1.
+    EQUS.SUMMARY statistics is L0 -- free back to the dataset's own start in
+    2024-07-01 -- and holding it to the L1 window would have thrown away
+    fourteen months of free history to satisfy a rule that does not apply."""
+    for j in O.PAIR_JOBS:
+        if j.schema in L1_SCHEMAS:
+            assert j.after >= "2025-09-01", (
+                f"{j.label} is L1 and reaches back past the rolling window")
 
 
 def test_l1_is_never_pulled_universe_wide():
@@ -236,3 +253,41 @@ def test_the_deep_flag_describes_every_job_it_gates():
     for j in O.DEEP_JOBS:
         assert f"{j.dataset}:{j.schema}" in help_text, (
             f"--deep pulls {j.label} but its help text never names it")
+
+
+def test_a_pair_jobs_lookback_reaches_the_fetcher(monkeypatch):
+    """databento_fetch defaults to a 5-day lookback, so each request spans six
+    days. Right for quotes; wrong for a schema whose content is one session's
+    running total, where it multiplies the pull sixfold for nothing."""
+    import common
+    seen = {}
+
+    class Spy:
+        @staticmethod
+        def main(argv):
+            seen["argv"] = argv
+            return 0
+
+    monkeypatch.setattr(common, "databento_fetch", Spy, raising=False)
+    job = O.PairJob("EQUS.SUMMARY", "statistics", "p.json", "2024-07-01",
+                    "x" * 50, lookback=0)
+    O._run(job, "databento", confirm=False, max_cost=5.0)
+    assert "--lookback" in seen["argv"]
+    assert seen["argv"][seen["argv"].index("--lookback") + 1] == "0"
+
+
+def test_a_pair_job_without_a_lookback_leaves_the_fetchers_default_alone():
+    """Only the jobs that need a different window say so. The quote job has
+    been pulled already at the default and must not silently change."""
+    quotes = [j for j in O.PAIR_JOBS if j.schema == "tbbo"]
+    assert quotes and all(j.lookback is None for j in quotes)
+
+
+def test_the_statistics_pair_job_starts_no_earlier_than_its_dataset():
+    """EQUS.SUMMARY begins 2024-07-01. The screened pair list reaches back to
+    2023-03-28 from EQUS.MINI, and every request before the dataset's start
+    would fail -- hundreds of them, overnight, unattended."""
+    for j in O.PAIR_JOBS:
+        if j.dataset == "EQUS.SUMMARY":
+            assert j.after and j.after >= "2024-07-01", (
+                f"{j.label} reaches back before EQUS.SUMMARY exists")
