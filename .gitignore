@@ -83,3 +83,4 @@ data_pull_state*.json
 # .gitmodules entry. Keep backups outside the repo; this catches the mistake.
 _backup*/
 *_backup_*/
+databento/
