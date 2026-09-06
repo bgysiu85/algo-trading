@@ -54,7 +54,7 @@ from contextlib import redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
 
-from common.databento_fetch import ARCHIVE_DEFAULT
+from common.databento_fetch import default_archive
 from common.report_io import emit
 
 
@@ -205,7 +205,8 @@ def _free_gb(path: Path) -> float:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Pull every L0 dataset worth having")
-    ap.add_argument("--archive", default=str(ARCHIVE_DEFAULT))
+    ap.add_argument("--archive", default=str(default_archive()),
+                    help="archive root (default: %(default)s)")
     ap.add_argument("--max-cost", type=float, default=5.00,
                     help="per job; L0 should be $0.00, so this is a tripwire")
     ap.add_argument("--only", nargs="+", metavar="DATASET",

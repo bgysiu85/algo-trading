@@ -53,8 +53,41 @@ from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
 
-ARCHIVE_DEFAULT = Path("databento")
+# Where the bought archive lives. It is deliberately NOT inside the repo:
+# this is expensive, reusable, general-purpose market data, not a project
+# artefact, and a second project should be able to read the same bytes rather
+# than buying them again. Resolution order, first hit wins:
+#
+#   1. --archive on the command line
+#   2. the DATABENTO_ARCHIVE environment variable
+#   3. .databento_archive in the repo root, holding one path
+#   4. ./databento -- the old in-repo location, so nothing breaks if none of
+#      the above is set
+#
+# (3) exists because (2) is session-scoped in PowerShell and would have to be
+# re-set every terminal, which is precisely the kind of step that gets
+# forgotten and then silently re-downloads 60 GB into the wrong place.
+ARCHIVE_CONFIG = Path(".databento_archive")
 CACHE_DEFAULT = Path("bar_cache/3d_to_2000")
+
+
+def default_archive() -> Path:
+    v = os.environ.get("DATABENTO_ARCHIVE", "").strip()
+    if v:
+        return Path(v)
+    try:
+        if ARCHIVE_CONFIG.exists():
+            t = ARCHIVE_CONFIG.read_text(encoding="utf-8").strip()
+            if t:
+                return Path(t)
+    except OSError:
+        pass
+    return Path("databento")
+
+
+# Kept as a name so existing imports still work, but it is now resolved at
+# import time from the rules above rather than being a literal.
+ARCHIVE_DEFAULT = default_archive()
 
 # Warm-up matters: MCL needs two sessions ending 09:30, so a symbol-day cannot
 # be fetched as a single calendar day. Pull a window that comfortably covers
@@ -189,7 +222,8 @@ def main(argv=None) -> int:
     ap.add_argument("--pairs", required=True, help="pair list JSON")
     ap.add_argument("--dataset", default="EQUS.ALL")
     ap.add_argument("--schemas", nargs="+", default=["ohlcv-1m"])
-    ap.add_argument("--archive", default=str(ARCHIVE_DEFAULT))
+    ap.add_argument("--archive", default=str(default_archive()),
+                    help="archive root (default: %(default)s)")
     ap.add_argument("--before", help="only pairs with date < this")
     ap.add_argument("--after", help="only pairs with date >= this")
     ap.add_argument("--missing-from-cache", nargs="?", const=str(CACHE_DEFAULT),

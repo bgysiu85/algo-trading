@@ -72,7 +72,8 @@ import pandas as pd
 from common.dbn_io import daily_frame
 from common.report_io import emit
 
-ARCHIVE_DEFAULT = "databento"
+from common.databento_fetch import default_archive
+
 DATASET_DEFAULT = "EQUS.MINI"
 
 # Exchange TEST symbols. These are not securities -- venues publish them
@@ -401,7 +402,8 @@ def report(df: pd.DataFrame, sel: pd.DataFrame, cfg: Config,
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Rebuild the watchlist from daily bars")
-    ap.add_argument("--archive", default=ARCHIVE_DEFAULT)
+    ap.add_argument("--archive", default=str(default_archive()),
+                    help="archive root (default: %(default)s)")
     ap.add_argument("--dataset", default=DATASET_DEFAULT)
     ap.add_argument("--pairs", metavar="OUT.json", help="write candidate pairs")
     ap.add_argument("--features", metavar="OUT.csv", help="write the feature table")

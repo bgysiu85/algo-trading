@@ -45,7 +45,7 @@ from pathlib import Path
 import json
 
 from common.databento_fetch import (_key, _scrub, conditions, write_manifest,
-                                    ARCHIVE_DEFAULT)
+                                    default_archive)
 from common.dbn_io import symbology_path
 
 # EQUS.MINI reaches back to 2023-03-28 and is a blended tape rather than one
@@ -136,7 +136,8 @@ def main(argv=None) -> int:
     ap.add_argument("--schema", default="ohlcv-1d")
     ap.add_argument("--start", default=DEFAULT_START)
     ap.add_argument("--end", default=date.today().isoformat())
-    ap.add_argument("--archive", default=str(ARCHIVE_DEFAULT))
+    ap.add_argument("--archive", default=str(default_archive()),
+                    help="archive root (default: %(default)s)")
     ap.add_argument("--max-cost", type=float, default=5.00)
     ap.add_argument("--confirm", action="store_true")
     ap.add_argument("--resymbolize", action="store_true",

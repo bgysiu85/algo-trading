@@ -83,7 +83,8 @@ from common import flex
 from common.dbn_io import read_dbn
 from common.report_io import emit
 
-ARCHIVE_DEFAULT = "databento"
+from common.databento_fetch import default_archive
+
 DATASET_DEFAULT = "EQUS.MINI"
 ET = ZoneInfo("America/New_York")
 
@@ -301,7 +302,8 @@ def report(m: pd.DataFrame, fills: pd.DataFrame, per_date, tz, dataset: str) -> 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Price real fills against the quote")
     ap.add_argument("csv", nargs="+", help="IBKR Flex trade report(s)")
-    ap.add_argument("--archive", default=ARCHIVE_DEFAULT)
+    ap.add_argument("--archive", default=str(default_archive()),
+                    help="archive root (default: %(default)s)")
     ap.add_argument("--dataset", default=DATASET_DEFAULT)
     ap.add_argument("--schema", default="tbbo",
                     help="tbbo for EQUS.MINI, tcbbo for XNAS.BASIC")

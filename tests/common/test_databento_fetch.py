@@ -238,3 +238,38 @@ def test_a_failed_range_lookup_leaves_the_dates_alone():
 
     s, e, notes = clamp_to_dataset(C(), "EQUS.MINI", "2023-03-28", "2026-09-06")
     assert (s, e) == ("2023-03-28", "2026-09-06") and notes
+
+
+# --- where the archive lives ------------------------------------------------
+
+def test_archive_resolution_order(tmp_path, monkeypatch):
+    """The archive is expensive, reusable, general-purpose market data -- not a
+    project artefact -- so it lives outside the repo and a second project can
+    read the same bytes rather than buying them again.
+
+    Order matters: the env var must beat the config file, and both must beat
+    the legacy in-repo default. Getting it wrong means a 60 GB pull silently
+    landing somewhere nobody looks.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DATABENTO_ARCHIVE", raising=False)
+
+    # 4. nothing set -> the old in-repo location, so existing setups still work
+    assert F.default_archive() == Path("databento")
+
+    # 3. config file
+    Path(".databento_archive").write_text("D:/Databento\n", encoding="utf-8")
+    assert F.default_archive() == Path("D:/Databento")
+
+    # 2. env var wins over the file
+    monkeypatch.setenv("DATABENTO_ARCHIVE", "E:/Elsewhere")
+    assert F.default_archive() == Path("E:/Elsewhere")
+
+
+def test_an_empty_config_file_falls_through_rather_than_returning_nothing(tmp_path, monkeypatch):
+    """A blank or whitespace-only file must not resolve to Path('') -- which is
+    the current directory, and would scatter the archive through the repo."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DATABENTO_ARCHIVE", raising=False)
+    Path(".databento_archive").write_text("   \n", encoding="utf-8")
+    assert F.default_archive() == Path("databento")
