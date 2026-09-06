@@ -145,8 +145,37 @@ COST_RE = re.compile(r"ESTIMATED COST\s*:\s*\$([\d,\.]+)")
 TODO_RE = re.compile(r"to download\s*:\s*(\d+)")
 
 
+class _Tee(io.StringIO):
+    """Capture a job's output AND let it through to the terminal as it happens.
+
+    The first version captured into a plain StringIO and printed the lot when
+    the job returned. That is fine for a fast job and wrong for this one: the
+    planning pass makes two metadata calls per chunk, and XNAS.ITCH alone is
+    ~100 monthly chunks back to 2018, so a job can sit silent for minutes.
+    On a run designed to be left alone overnight, silence is indistinguishable
+    from a hang -- and the whole point is that someone can glance at it and see
+    it is alive.
+    """
+
+    def __init__(self, target):
+        super().__init__()
+        # The stream as it was BEFORE redirect_stdout replaced it -- not
+        # sys.__stdout__. Using the process's original handle would punch
+        # through any outer redirection: a shell `>`, a log wrapper, or
+        # pytest's capture, none of which would then see this output.
+        self._target = target
+
+    def write(self, text: str) -> int:
+        self._target.write(text)
+        try:
+            self._target.flush()
+        except Exception:  # noqa: BLE001 -- flushing is best effort
+            pass
+        return super().write(text)
+
+
 def _run(job, archive: str, confirm: bool, max_cost: float) -> tuple[int, str]:
-    """Run one job, capturing what it printed. Dispatches on the job type."""
+    """Run one job, streaming and capturing its output. Dispatches on type."""
     from common import databento_fetch as FE
     from common import databento_universe as U
 
@@ -165,7 +194,7 @@ def _run(job, archive: str, confirm: bool, max_cost: float) -> tuple[int, str]:
     if confirm:
         argv.append("--confirm")
 
-    buf = io.StringIO()
+    buf = _Tee(sys.stdout)
     try:
         with redirect_stdout(buf):
             rc = runner(argv)
@@ -184,9 +213,7 @@ def _run(job, archive: str, confirm: bool, max_cost: float) -> tuple[int, str]:
     except Exception as e:             # noqa: BLE001 -- one job must not end the night
         buf.write(f"\nJOB FAILED: {type(e).__name__}: {e}\n")
         rc = 1
-    out = buf.getvalue()
-    print(out, end="")
-    return rc, out
+    return rc, buf.getvalue()
 
 
 def _parse(out: str) -> tuple[float, float, int]:

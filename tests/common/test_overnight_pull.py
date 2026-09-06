@@ -131,3 +131,30 @@ def test_a_max_cost_abort_is_caught_as_a_failed_job_not_a_crash(monkeypatch):
     monkeypatch.setattr(common, "databento_universe", Abort, raising=False)
     rc, _ = O._run(O.JOBS[0], "databento", confirm=False, max_cost=5.0)
     assert rc != 0
+
+
+def test_job_output_streams_rather_than_being_held_to_the_end(capsys):
+    """A job that makes ~500 metadata calls must show progress while it runs.
+
+    Buffering to a StringIO and printing on return meant a job sat silent for
+    minutes, which on an unattended overnight run is indistinguishable from a
+    hang. The tee writes through as each line is produced.
+    """
+    import common
+
+    class Chatty:
+        @staticmethod
+        def main(argv):
+            print("  2023-03      2.0 MB   $ 0.0000")
+            return 0
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(common, "databento_universe", Chatty, raising=False)
+    try:
+        rc, out = O._run(O.JOBS[0], "databento", confirm=False, max_cost=5.0)
+    finally:
+        monkeypatch.undo()
+
+    assert rc == 0
+    assert "2023-03" in out                       # captured for parsing
+    assert "2023-03" in capsys.readouterr().out   # and seen by the terminal
