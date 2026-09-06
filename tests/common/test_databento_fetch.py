@@ -194,3 +194,47 @@ def test_a_corrupt_manifest_is_replaced_not_fatal(tmp_path):
     p.write_text("{ not json")
     F.write_manifest(root, "EQUS.MINI", {"tbbo/2025-06-04": {"condition": "ok"}})
     assert json.load(open(p))["tbbo/2025-06-04"]["condition"] == "ok"
+
+
+# --- universe chunking ------------------------------------------------------
+
+def test_month_chunks_are_contiguous_and_never_overlap():
+    """Overlapping chunks double-count volume in the daily archive, and
+    dbn_io.daily_frame() can only warn about it after the fact. Non-overlap is
+    the property that keeps every relative-volume figure downstream honest."""
+    from common.databento_universe import month_chunks
+    ch = month_chunks("2023-03-28", "2026-09-05")
+    assert ch[0][1] == "2023-03-28"          # honours the real start
+    assert ch[-1][2] == "2026-09-05"         # and the real end
+    for a, b in zip(ch, ch[1:]):
+        assert a[2] == b[1], f"gap or overlap between {a} and {b}"
+
+
+def test_end_is_clamped_to_what_the_dataset_actually_holds():
+    """The default --end is today, historical lands T+1, so an unclamped run
+    fails its LAST chunk every single time -- 42 of 43 written, exit 0, and a
+    month missing. The clamp is reported, never silent."""
+    from common.databento_universe import clamp_to_dataset
+
+    class C:
+        class metadata:
+            @staticmethod
+            def get_dataset_range(dataset):
+                return {"start": "2023-03-28", "end": "2026-09-05"}
+
+    s, e, notes = clamp_to_dataset(C(), "EQUS.MINI", "2020-01-01", "2026-09-06")
+    assert (s, e) == ("2023-03-28", "2026-09-05")
+    assert len(notes) == 2 and all(isinstance(n, str) for n in notes)
+
+
+def test_a_failed_range_lookup_leaves_the_dates_alone():
+    from common.databento_universe import clamp_to_dataset
+
+    class C:
+        class metadata:
+            @staticmethod
+            def get_dataset_range(dataset):
+                raise RuntimeError("503")
+
+    s, e, notes = clamp_to_dataset(C(), "EQUS.MINI", "2023-03-28", "2026-09-06")
+    assert (s, e) == ("2023-03-28", "2026-09-06") and notes

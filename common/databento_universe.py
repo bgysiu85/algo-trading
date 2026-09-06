@@ -71,6 +71,37 @@ def chunk_path(root: Path, dataset: str, schema: str, label: str) -> Path:
     return root / dataset / schema / f"{label}.dbn.zst"
 
 
+def clamp_to_dataset(client, dataset: str, start: str, end: str):
+    """Trim the requested window to what the dataset actually holds.
+
+    Without this the default --end (today) fails on EVERY run: historical data
+    lands T+1, so "today" is always past the available end and the final chunk
+    dies with 422 data_end_after_available_end. That is a whole month silently
+    missing from an otherwise successful pull -- the run reports 42 of 43
+    chunks written and looks fine.
+
+    Clamping is reported, never silent. A window that was quietly shortened is
+    how a backtest ends up with a coverage hole nobody put in the notes.
+    """
+    notes: list[str] = []
+    try:
+        r = client.metadata.get_dataset_range(dataset)
+    except Exception as e:  # noqa: BLE001
+        notes.append(f"dataset range lookup failed, using dates as given: {_scrub(e)}")
+        return start, end, notes
+
+    avail_start = str(r.get("start", r.get("start_date", "")))[:10]
+    avail_end = str(r.get("end", r.get("end_date", "")))[:10]
+
+    if avail_start and start < avail_start:
+        notes.append(f"start {start} is before {dataset} begins -> {avail_start}")
+        start = avail_start
+    if avail_end and end > avail_end:
+        notes.append(f"end {end} is after {dataset} ends -> {avail_end}")
+        end = avail_end
+    return start, end, notes
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Pull the full universe, daily bars")
     ap.add_argument("--dataset", default=DEFAULT_DATASET)
@@ -88,11 +119,19 @@ def main(argv=None) -> int:
         sys.exit("pip install databento")
 
     root = Path(a.archive)
+    client_probe = db.Historical(_key())
+    a.start, a.end, clamped = clamp_to_dataset(client_probe, a.dataset,
+                                               a.start, a.end)
+    for line in clamped:
+        print(f"  {line}")
+    if clamped:
+        print()
+
     chunks = month_chunks(a.start, a.end)
     print(f"{a.dataset}  {a.schema}  {a.start} -> {a.end}   "
           f"{len(chunks)} monthly chunk(s)\narchive {root}/\n")
 
-    client = db.Historical(_key())
+    client = client_probe
     todo, usd, nbytes, skipped = [], 0.0, 0, 0
     for label, lo, hi in chunks:
         out = chunk_path(root, a.dataset, a.schema, label)
