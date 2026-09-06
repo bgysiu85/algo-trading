@@ -96,6 +96,57 @@ def test_the_biggest_job_runs_last():
     assert O.JOBS[-1].dataset == "EQUS.MINI"
 
 
+# --- selecting which jobs run -----------------------------------------------
+
+def test_a_dataset_pattern_takes_every_schema_under_it():
+    picked = O.select(O.JOBS, ["EQUS.SUMMARY"], None)
+    assert {j.schema for j in picked} == {"ohlcv-1d", "statistics"}
+
+
+def test_a_dataset_schema_pattern_separates_jobs_sharing_a_dataset():
+    """EQUS.SUMMARY carries a 362 MB daily job and a statistics job estimated
+    at 2.4 TB. Filtering by dataset alone cannot keep one and drop the other,
+    which is the entire reason the colon form exists."""
+    kept = O.select(O.JOBS, None, ["EQUS.SUMMARY:statistics"])
+    labels = {f"{j.dataset}:{j.schema}" for j in kept}
+    assert "EQUS.SUMMARY:ohlcv-1d" in labels
+    assert "EQUS.SUMMARY:statistics" not in labels
+    assert len(kept) == len(O.JOBS) - 1
+
+
+def test_patterns_are_case_insensitive():
+    assert len(O.select(O.JOBS, None, ["equs.summary:STATISTICS"])) == len(O.JOBS) - 1
+
+
+def test_a_pattern_that_matches_nothing_is_an_error_not_a_no_op():
+    """A --skip is how someone excludes the one job that would otherwise run
+    for days. A typo in it must not read as 'nothing to exclude': that failure
+    is silent, and its cost is the whole night and the whole download."""
+    with pytest.raises(SystemExit, match="matched no job"):
+        O.select(O.JOBS, None, ["EQUS.SUMMARY:statistcs"])   # transposed
+    with pytest.raises(SystemExit, match="matched no job"):
+        O.select(O.JOBS, ["EQUS.SUMARY"], None)
+
+
+def test_a_schema_pattern_does_not_leak_across_datasets():
+    kept = O.select(O.JOBS, None, ["EQUS.MINI:ohlcv-1m"])
+    assert any(j.dataset == "EQUS.SUMMARY" for j in kept)
+    assert not any(j.dataset == "EQUS.MINI" and j.schema == "ohlcv-1m"
+                   for j in kept)
+
+
+def test_only_and_skip_compose():
+    kept = O.select(O.JOBS, ["EQUS.SUMMARY"], ["EQUS.SUMMARY:statistics"])
+    assert [f"{j.dataset}:{j.schema}" for j in kept] == ["EQUS.SUMMARY:ohlcv-1d"]
+
+
+def test_pair_jobs_can_be_selected_the_same_way():
+    """PairJob is a different dataclass to Job. The matcher reads .dataset and
+    .schema off both, so a pattern must reach the quote jobs too."""
+    kept = O.select(list(O.JOBS) + list(O.PAIR_JOBS), None, ["EQUS.MINI:tbbo"])
+    assert not any(j.schema == "tbbo" for j in kept)
+
+
 def test_a_failing_job_does_not_raise_out_of_run(monkeypatch):
     """One dataset being unavailable at 2am must not cost the other five.
 

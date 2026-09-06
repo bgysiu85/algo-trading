@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import date, timedelta
 
 from common.databento_fetch import _key, _scrub
 
@@ -32,11 +33,63 @@ WANT_START = "2025-05-20"
 WANT_END = "2026-09-05"
 
 
+def size_one_day(client, dataset: str, schema: str, day: str) -> tuple[float, float]:
+    """Billable MB and USD for ONE day of a dataset/schema. Metadata only."""
+    end = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
+    kw = dict(dataset=dataset, schema=schema, symbols="ALL_SYMBOLS",
+              stype_in="raw_symbol", start=day, end=end)
+    mb = int(client.metadata.get_billable_size(**kw)) / 1e6
+    usd = float(client.metadata.get_cost(**kw))
+    return mb, usd
+
+
+def parse_size_args(items) -> list[tuple[str, str]]:
+    out = []
+    for s in items:
+        ds, sep, sc = s.partition(":")
+        if not sep or not ds or not sc:
+            sys.exit(f"--size {s!r} needs the form DATASET:SCHEMA, "
+                     "e.g. EQUS.SUMMARY:statistics")
+        out.append((ds.upper(), sc))
+    return out
+
+
+def probe_sizes(client, day: str, pairs) -> int:
+    """Price one day of each dataset/schema, so a plan total can be checked.
+
+    A whole-plan estimate is one number per job with nothing to compare it
+    against. The overnight plan put EQUS.SUMMARY statistics at 2.4 TB -- 97.7%
+    of everything -- and there is no way to tell an enormous-but-real schema
+    from a bad estimate without a second measurement at a different scale.
+    A single day is free to ask about and settles it.
+    """
+    print(f"one day ({day}), whole universe, billable size\n")
+    print(f"{'dataset / schema':<30} {'MB/day':>12} {'USD/day':>10}"
+          f"  {'x21 -> MB/month':>16}")
+    print("-" * 74)
+    for dataset, schema in pairs:
+        label = f"{dataset} {schema}"
+        try:
+            mb, usd = size_one_day(client, dataset, schema, day)
+        except Exception as e:  # noqa: BLE001
+            print(f"{label:<30} FAILED: {_scrub(e)}")
+            continue
+        print(f"{label:<30} {mb:>12,.1f} {usd:>10.4f} {mb*21:>16,.0f}")
+    print("\nCompare the month column against the same job in the overnight "
+          "plan. A large disagreement means one of the two estimates is wrong, "
+          "and neither should be acted on until that is settled.")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="List available Databento datasets")
     ap.add_argument("--schemas", action="store_true",
                     help="also list each dataset's schemas (slower)")
     ap.add_argument("--filter", default="", help="only datasets containing this")
+    ap.add_argument("--size", nargs="+", metavar="DATASET:SCHEMA",
+                    help="instead of listing, price ONE day of each of these")
+    ap.add_argument("--day", default="2026-08-04",
+                    help="the day --size prices (default: %(default)s)")
     a = ap.parse_args(argv)
 
     try:
@@ -45,6 +98,9 @@ def main(argv=None) -> int:
         sys.exit("pip install databento")
 
     c = db.Historical(_key())
+
+    if a.size:
+        return probe_sizes(c, a.day, parse_size_args(a.size))
 
     try:
         names = c.metadata.list_datasets()

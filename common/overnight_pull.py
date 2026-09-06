@@ -140,6 +140,46 @@ DEEP_JOBS = [
         "dwarf every other job."),
 ]
 
+def matches(job, patterns) -> bool:
+    """Does `job` match any of `patterns`?
+
+    A pattern is `DATASET` or `DATASET:SCHEMA`, case-insensitive. The second
+    form exists because a dataset can carry several jobs of wildly different
+    size -- EQUS.SUMMARY holds both a 362 MB daily-bar job and a statistics job
+    estimated at 2.4 TB -- and selecting by dataset alone cannot separate them.
+    """
+    for p in patterns:
+        p = p.upper()
+        ds, sep, sc = p.partition(":")
+        if job.dataset.upper() != ds:
+            continue
+        if not sep or job.schema.upper() == sc:
+            return True
+    return False
+
+
+def select(all_jobs, only, skip) -> list:
+    """Apply --only then --skip, refusing a pattern that matched nothing.
+
+    A pattern is how someone excludes the one job that would otherwise run for
+    days. A typo in it must not read as "nothing to exclude" -- that failure is
+    silent, and its cost is the entire night.
+    """
+    jobs = list(all_jobs)
+    for flag, pats in (("--only", only), ("--skip", skip)):
+        if not pats:
+            continue
+        for p in pats:
+            if not any(matches(j, [p]) for j in all_jobs):
+                sys.exit(f"{flag} {p!r} matched no job. Use DATASET or "
+                         "DATASET:SCHEMA, e.g. EQUS.SUMMARY:statistics. "
+                         "Available: "
+                         + ", ".join(f"{j.dataset}:{j.schema}" for j in all_jobs))
+        jobs = ([j for j in jobs if matches(j, pats)] if flag == "--only"
+                else [j for j in jobs if not matches(j, pats)])
+    return jobs
+
+
 SIZE_RE = re.compile(r"ESTIMATED SIZE\s*:\s*([\d,\.]+)\s*MB")
 COST_RE = re.compile(r"ESTIMATED COST\s*:\s*\$([\d,\.]+)")
 TODO_RE = re.compile(r"to download\s*:\s*(\d+)")
@@ -236,8 +276,10 @@ def main(argv=None) -> int:
                     help="archive root (default: %(default)s)")
     ap.add_argument("--max-cost", type=float, default=5.00,
                     help="per job; L0 should be $0.00, so this is a tripwire")
-    ap.add_argument("--only", nargs="+", metavar="DATASET",
-                    help="run only jobs for these datasets")
+    ap.add_argument("--only", nargs="+", metavar="DATASET[:SCHEMA]",
+                    help="run only jobs matching these")
+    ap.add_argument("--skip", nargs="+", metavar="DATASET[:SCHEMA]",
+                    help="drop jobs matching these, e.g. EQUS.SUMMARY:statistics")
     ap.add_argument("--deep", action="store_true",
                     help="add eight years of Nasdaq-listed MINUTE bars. Large, "
                          "narrow, and insurance rather than a requirement")
@@ -254,10 +296,9 @@ def main(argv=None) -> int:
         all_jobs += PAIR_JOBS
     if a.deep:
         all_jobs += DEEP_JOBS
-    jobs = [j for j in all_jobs
-            if not a.only or j.dataset in {d.upper() for d in a.only}]
+    jobs = select(all_jobs, a.only, a.skip)
     if not jobs:
-        sys.exit("no jobs matched --only")
+        sys.exit("every job was filtered out -- nothing to do")
 
     print("=" * 72)
     print("PLANNING -- nothing downloads in this pass")
