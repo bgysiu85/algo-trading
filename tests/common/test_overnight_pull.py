@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Guards on a job that runs for hours with nobody watching.
+
+Every test here pins something whose failure mode is discovered at 7am rather
+than at 11pm: a job that stops the run, a disk that fills, a total that was
+never checked.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from common import overnight_pull as O
+
+
+SAMPLE = """
+EQUS.MINI  ohlcv-1m  2023-03-28 -> 2026-09-04   43 monthly chunk(s)
+
+already on disk, skipped : 1
+to download              : 42
+ESTIMATED SIZE           : 44,612.9 MB
+ESTIMATED COST           : $0.0000
+"""
+
+
+def test_the_estimate_is_parsed_including_thousands_separators():
+    """The size line is formatted with commas. A parser that chokes on them
+    silently returns 0 MB, the disk check then passes trivially, and the run
+    fills the drive at 3am."""
+    mb, usd, todo = O._parse(SAMPLE)
+    assert mb == pytest.approx(44_612.9)
+    assert usd == 0.0
+    assert todo == 42
+
+
+def test_output_with_no_estimate_lines_yields_zeroes_not_an_exception():
+    """A job that failed to plan must not take the whole run down with an
+    AttributeError on a missing regex match."""
+    assert O._parse("something went wrong") == (0.0, 0.0, 0)
+
+
+def test_free_space_is_measured_on_an_ancestor_that_exists(tmp_path):
+    """The archive directory does not exist before the first run. Calling
+    disk_usage on a missing path raises, and the check would be skipped by
+    exception rather than by decision."""
+    missing = tmp_path / "databento" / "EQUS.MINI" / "ohlcv-1m"
+    assert not missing.exists()
+    assert O._free_gb(missing) > 0
+
+
+def test_every_job_is_l0():
+    """L0 -- ohlcv, definitions, statistics, status -- is the tier Standard
+    grants 8+ years of and charges nothing for. L1 gets one rolling year and
+    L2/L3 one month, so a full-universe pull of either would be enormous, most
+    of it outside the plan, and none of it free. If a non-L0 schema ever
+    appears in this list, the overnight run stops being safe to leave alone."""
+    l0 = {"ohlcv-1s", "ohlcv-1m", "ohlcv-1h", "ohlcv-1d",
+          "definition", "statistics", "status"}
+    for j in O.JOBS:
+        assert j.schema in l0, f"{j.label} is not L0 -- it is not free or bounded"
+
+
+def test_every_job_states_why_it_is_worth_pulling():
+    """A job list nobody can justify is a job list that grows. Each entry
+    carries its reason, and the planning pass prints it."""
+    for j in O.JOBS:
+        assert len(j.why) > 40, f"{j.label} has no real justification"
+
+
+def test_the_biggest_job_runs_last():
+    """Ordered cheapest-and-most-useful first, so a run that dies partway has
+    still delivered what the next step of the plan needs. The full-universe
+    minute pull is the one that could run for hours."""
+    assert O.JOBS[-1].schema == "ohlcv-1m"
+    assert O.JOBS[-1].dataset == "EQUS.MINI"
+
+
+def test_a_failing_job_does_not_raise_out_of_run(monkeypatch):
+    """One dataset being unavailable at 2am must not cost the other five.
+
+    Patched on the PACKAGE, not in sys.modules. `_run` does
+    `from common import databento_universe`, which reads the attribute on the
+    already-imported `common` package -- so a sys.modules patch works only
+    while nothing else has imported that module yet. This test passed alone and
+    failed in the full suite for exactly that reason.
+    """
+    import common
+
+    class Boom:
+        @staticmethod
+        def main(argv):
+            raise RuntimeError("503 upstream")
+
+    monkeypatch.setattr(common, "databento_universe", Boom, raising=False)
+    rc, out = O._run(O.JOBS[0], "databento", confirm=False, max_cost=5.0)
+    assert rc == 1
+    assert "JOB FAILED" in out
+
+
+def test_a_max_cost_abort_is_caught_as_a_failed_job_not_a_crash(monkeypatch):
+    """databento_universe sys.exit()s when the estimate exceeds --max-cost.
+    That is the guard working, and it must fail one job rather than the run."""
+    import common
+
+    class Abort:
+        @staticmethod
+        def main(argv):
+            raise SystemExit("ABORTED: $9.00 exceeds --max-cost $5.00")
+
+    monkeypatch.setattr(common, "databento_universe", Abort, raising=False)
+    rc, _ = O._run(O.JOBS[0], "databento", confirm=False, max_cost=5.0)
+    assert rc != 0

@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""One command that pulls everything worth having, unattended.
+
+    $env:DATABENTO_API_KEY = "..."
+    python -m common.overnight_pull                 # estimate everything, spend nothing
+    python -m common.overnight_pull --confirm       # run it and go to bed
+
+WHY THESE JOBS AND NOT "EVERYTHING"
+------------------------------------
+"All the data available" is not a target. `mbo` for the US equity universe over
+eight years is hundreds of terabytes, Standard grants one MONTH of L2/L3
+anyway, and none of it answers a question this project is asking.
+
+What is worth having is everything at **L0** -- ohlcv, definitions, statistics.
+Standard gives 8+ years of it, it is genuinely free (measured: 443.8 MB of
+daily bars cost $0.0000), and it is the tier every strategy here actually
+reads. So the job list is L0 across the datasets that matter, and nothing else.
+
+The largest job by far is full-universe MINUTE bars. That one deserves its own
+justification: it SUBSUMES every per-pair fetch this project would otherwise
+keep making. The screened candidate list has already changed three times today,
+and each change would mean another scoped download. Pull the whole universe
+once and no future screen, strategy or date range needs a fetch again.
+
+BUILT TO BE LEFT ALONE
+----------------------
+Nobody is watching at 2am, so:
+
+  * every job is ESTIMATED before anything downloads, with a grand total, and
+    nothing runs without --confirm
+  * free disk is checked against the estimate first -- a full disk mid-run is
+    the one failure that wastes the whole night
+  * a failing job does NOT stop the run; the rest continue and the failure is
+    reported at the end
+  * every chunk already skips if present, so a re-run resumes for free
+  * downloads land on .partial and rename only on success, so an interrupted
+    job cannot leave a truncated file that the next run mistakes for complete
+  * a report is written to var/reports/ so the morning does not depend on
+    scrollback
+
+Each job runs through common.databento_universe, so it inherits the range
+clamp, the degraded-day manifest, the symbology archiving and the --max-cost
+abort rather than reimplementing any of them.
+"""
+from __future__ import annotations
+
+import argparse
+import io
+import re
+import shutil
+import sys
+import time
+from contextlib import redirect_stdout
+from dataclasses import dataclass
+from pathlib import Path
+
+from common.databento_fetch import ARCHIVE_DEFAULT
+from common.report_io import emit
+
+
+@dataclass
+class Job:
+    dataset: str
+    schema: str
+    start: str
+    why: str
+
+    @property
+    def label(self) -> str:
+        return f"{self.dataset} {self.schema}"
+
+
+# Ordered cheapest-and-most-useful first, so an overnight run that dies early
+# has still delivered the things the plan actually needs next.
+JOBS = [
+    Job("EQUS.SUMMARY", "ohlcv-1d", "2024-07-01",
+        "consolidated daily volume across ALL exchanges -- the honest RVOL "
+        "denominator. EQUS.MINI is a partial tape and its volume is not."),
+    Job("EQUS.SUMMARY", "statistics", "2024-07-01",
+        "consolidated volume normalised on every trade; the same figure "
+        "intraday rather than end-of-day."),
+    Job("XNAS.BASIC", "ohlcv-1d", "2024-07-01",
+        "Nasdaq venues PLUS the FINRA TRFs, so it includes off-exchange "
+        "prints. Cross-checks how much volume EQUS.MINI is missing."),
+    Job("XNAS.ITCH", "ohlcv-1d", "2018-05-01",
+        "eight years of daily bars. Nasdaq-listed only, but it is the deep "
+        "history the regime test needs -- build the screen on 2023-2025 and "
+        "check it survives a period it was never fitted to."),
+    Job("EQUS.MINI", "definition", "2023-03-28",
+        "instrument reference data. Carries shares outstanding, which is the "
+        "only candidate anywhere for the point-in-time float filter MCL's "
+        "universe rule needs and no tier otherwise provides."),
+    Job("EQUS.MINI", "ohlcv-1m", "2023-03-28",
+        "THE BIG ONE. Minute bars for the whole universe, 3.4 years. Subsumes "
+        "every per-pair fetch: no future screen or strategy needs a download "
+        "again. Expect tens of GB -- see the disk check."),
+]
+
+SIZE_RE = re.compile(r"ESTIMATED SIZE\s*:\s*([\d,\.]+)\s*MB")
+COST_RE = re.compile(r"ESTIMATED COST\s*:\s*\$([\d,\.]+)")
+TODO_RE = re.compile(r"to download\s*:\s*(\d+)")
+
+
+def _run(job: Job, archive: str, confirm: bool, max_cost: float) -> tuple[int, str]:
+    """Run one job through databento_universe, capturing what it printed."""
+    from common import databento_universe as U
+
+    argv = ["--dataset", job.dataset, "--schema", job.schema,
+            "--start", job.start, "--archive", archive,
+            "--max-cost", str(max_cost)]
+    if confirm:
+        argv.append("--confirm")
+
+    buf = io.StringIO()
+    try:
+        with redirect_stdout(buf):
+            rc = U.main(argv)
+    except SystemExit as e:
+        # sys.exit("some message") sets .code to a STRING, not an int -- which
+        # is exactly what databento_universe does when --max-cost trips or a
+        # dataset is empty. int() on that raises, so the guard firing correctly
+        # would itself have taken the whole overnight run down.
+        code = e.code
+        if isinstance(code, int):
+            rc = code
+        else:
+            if code:
+                buf.write(f"\n{code}\n")
+            rc = 1
+    except Exception as e:             # noqa: BLE001 -- one job must not end the night
+        buf.write(f"\nJOB FAILED: {type(e).__name__}: {e}\n")
+        rc = 1
+    out = buf.getvalue()
+    print(out, end="")
+    return rc, out
+
+
+def _parse(out: str) -> tuple[float, float, int]:
+    mb = float(SIZE_RE.search(out).group(1).replace(",", "")) if SIZE_RE.search(out) else 0.0
+    usd = float(COST_RE.search(out).group(1).replace(",", "")) if COST_RE.search(out) else 0.0
+    todo = int(TODO_RE.search(out).group(1)) if TODO_RE.search(out) else 0
+    return mb, usd, todo
+
+
+def _free_gb(path: Path) -> float:
+    p = path
+    while not p.exists() and p.parent != p:
+        p = p.parent
+    return shutil.disk_usage(p).free / 1e9
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="Pull every L0 dataset worth having")
+    ap.add_argument("--archive", default=str(ARCHIVE_DEFAULT))
+    ap.add_argument("--max-cost", type=float, default=5.00,
+                    help="per job; L0 should be $0.00, so this is a tripwire")
+    ap.add_argument("--only", nargs="+", metavar="DATASET",
+                    help="run only jobs for these datasets")
+    ap.add_argument("--skip-disk-check", action="store_true")
+    ap.add_argument("--confirm", action="store_true",
+                    help="actually download; without it this only estimates")
+    ap.add_argument("--out", default="var/reports/overnight_pull.txt")
+    a = ap.parse_args(argv)
+
+    jobs = [j for j in JOBS
+            if not a.only or j.dataset in {d.upper() for d in a.only}]
+    if not jobs:
+        sys.exit("no jobs matched --only")
+
+    print("=" * 72)
+    print("PLANNING -- nothing downloads in this pass")
+    print("=" * 72)
+
+    plan, total_mb, total_usd, total_chunks = [], 0.0, 0.0, 0
+    for j in jobs:
+        print(f"\n--- {j.label} ---")
+        print(f"    {j.why}")
+        rc, out = _run(j, a.archive, confirm=False, max_cost=a.max_cost)
+        mb, usd, todo = _parse(out)
+        total_mb += mb
+        total_usd += usd
+        total_chunks += todo
+        plan.append((j, mb, usd, todo, rc))
+
+    lines = ["OVERNIGHT PULL", ""]
+    lines.append(f"{'dataset / schema':<28} {'chunks':>7} {'MB':>12} {'USD':>10}")
+    lines.append("-" * 60)
+    for j, mb, usd, todo, rc in plan:
+        flag = "" if rc == 0 else "   <-- planning error"
+        lines.append(f"{j.label:<28} {todo:>7} {mb:>12,.1f} {usd:>10.4f}{flag}")
+    lines.append("-" * 60)
+    lines.append(f"{'TOTAL':<28} {total_chunks:>7} {total_mb:>12,.1f} {total_usd:>10.4f}")
+
+    free = _free_gb(Path(a.archive))
+    need = total_mb / 1000.0
+    lines.append("")
+    lines.append(f"uncompressed estimate   {need:,.1f} GB  (billed on this)")
+    lines.append(f"on disk, zstd, roughly  {need/5:,.1f} - {need/3:,.1f} GB")
+    lines.append(f"free space              {free:,.1f} GB")
+    print("\n" + "\n".join(lines))
+
+    if total_usd > 0:
+        print(f"\nNOTE: ${total_usd:.4f} is not zero. L0 should be free on "
+              "Standard; check which job is charging before confirming.")
+
+    # The one failure that wastes a whole night. Compressed is what lands, but
+    # guard on a pessimistic third rather than the optimistic fifth.
+    want = need / 3
+    if not a.skip_disk_check and free < want * 1.3:
+        emit("\n".join(lines) + "\n\nABORTED: insufficient free disk.", a.out,
+             header="common.overnight_pull  PLAN ONLY -- aborted on disk")
+        sys.exit(f"\nABORTED: needs roughly {want:,.1f} GB on disk and {free:,.1f} GB "
+                 "is free. Free some space, or use --only to take the daily "
+                 "jobs tonight and the minute bars another time. "
+                 "--skip-disk-check overrides.")
+
+    if not a.confirm:
+        emit("\n".join(lines), a.out,
+             header="common.overnight_pull  PLAN ONLY -- re-run with --confirm")
+        print("\nDry run. Re-run with --confirm to download.")
+        return 0
+
+    print("\n" + "=" * 72)
+    print("DOWNLOADING -- safe to walk away")
+    print("=" * 72)
+
+    results, t0 = [], time.time()
+    for j, _mb, _usd, todo, _rc in plan:
+        if not todo:
+            results.append((j, 0, "already complete"))
+            continue
+        print(f"\n--- {j.label} ---", flush=True)
+        t = time.time()
+        rc, out = _run(j, a.archive, confirm=True, max_cost=a.max_cost)
+        mins = (time.time() - t) / 60
+        wrote = re.search(r"wrote (\d+) chunk", out)
+        n = int(wrote.group(1)) if wrote else 0
+        results.append((j, n, "ok" if rc == 0 else f"FAILED (rc={rc})"))
+        print(f"    {n} chunk(s) in {mins:.1f} min", flush=True)
+
+    lines += ["", "RESULTS", ""]
+    for j, n, status in results:
+        lines.append(f"  {j.label:<28} {n:>4} chunk(s)   {status}")
+    bad = [r for r in results if r[2].startswith("FAILED")]
+    lines.append("")
+    lines.append(f"total elapsed {(time.time()-t0)/60:.0f} min")
+    if bad:
+        lines.append(f"{len(bad)} job(s) FAILED -- re-running this command "
+                     "skips everything already on disk, so it resumes for free.")
+    else:
+        lines.append("all jobs completed.")
+
+    emit("\n".join(lines), a.out, header="common.overnight_pull")
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
