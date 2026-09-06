@@ -49,6 +49,7 @@ import json
 import os
 import re
 import sys
+import time
 from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
@@ -226,10 +227,33 @@ def write_manifest(root: Path, dataset: str, entries: dict) -> Path:
     return p
 
 
-def plan(client, groups, dataset, schemas, root, lookback):
-    """Estimate every request. Returns (jobs, total_usd, total_bytes)."""
+PLAN_TICK = 25          # progress lines every N dates
+
+
+def plan(client, groups, dataset, schemas, root, lookback, *, tick=PLAN_TICK):
+    """Estimate every request. Returns (jobs, total_usd, total_bytes).
+
+    PROGRESS IS NOT DECORATION HERE.
+    ---------------------------------
+    This makes TWO metadata calls per date per schema and, before this comment
+    existed, printed nothing unless one failed. At the 40-odd dates the quote
+    job covers that is a short pause. At the 548 dates of the screened universe
+    it is over a thousand sequential HTTP round trips of complete silence --
+    which is indistinguishable from a hang, and was duly Ctrl-C'd as one.
+
+    common/overnight_pull.py already carries a long comment about exactly this
+    failure and a _Tee class built to fix it, and the estimate underneath it
+    was still mute. Streaming the job's output does not help when the job has
+    nothing to say.
+
+    So: a line every `tick` dates with a running total and an ETA from the
+    measured rate. The ETA is the part that matters -- "this will take nine
+    more minutes" is a decision, "it is still going" is not.
+    """
     jobs, usd, nbytes = [], 0.0, 0
-    for day, syms in groups.items():
+    total = len(groups)
+    t0 = time.time()
+    for i, (day, syms) in enumerate(groups.items(), start=1):
         start = (date.fromisoformat(day) - timedelta(days=lookback)).isoformat()
         end = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
         for schema in schemas:
@@ -243,11 +267,18 @@ def plan(client, groups, dataset, schemas, root, lookback):
                 c = float(client.metadata.get_cost(**kw))
                 b = int(client.metadata.get_billable_size(**kw))
             except Exception as e:  # noqa: BLE001
-                print(f"  {day} {schema:9} ESTIMATE FAILED: {_scrub(e)}")
+                print(f"  {day} {schema:9} ESTIMATE FAILED: {_scrub(e)}",
+                      flush=True)
                 continue
             usd += c
             nbytes += b
             jobs.append((day, syms, schema, start, end, out, c, b, False))
+        if tick and (i % tick == 0 or i == total):
+            el = time.time() - t0
+            eta = (el / i) * (total - i)
+            print(f"  estimating {i:>5}/{total}  {nbytes/1e6:>10,.0f} MB  "
+                  f"${usd:>8.4f}  {el/60:>5.1f} min elapsed, "
+                  f"~{eta/60:.1f} min left", flush=True)
     return jobs, usd, nbytes
 
 

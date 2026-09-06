@@ -327,3 +327,73 @@ def test_a_well_shaped_key_warns_about_nothing(monkeypatch, capsys):
     monkeypatch.setenv("DATABENTO_API_KEY", "db-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345")
     FE._key()
     assert capsys.readouterr().err == ""
+
+
+# --- progress on a long estimate --------------------------------------------
+
+class _CountingMeta:
+    def __init__(self, mb=1.0):
+        self.mb, self.calls = mb, 0
+
+    def get_cost(self, **kw):
+        self.calls += 1
+        return 0.0
+
+    def get_billable_size(self, **kw):
+        self.calls += 1
+        return int(self.mb * 1e6)
+
+
+class _C:
+    def __init__(self, meta):
+        self.metadata = meta
+
+
+def test_a_long_estimate_reports_progress_and_an_eta(tmp_path, capsys):
+    """plan() makes two metadata calls per date and printed nothing unless one
+    failed. At 548 dates that is over a thousand sequential round trips of
+    silence, which is indistinguishable from a hang -- and was Ctrl-C'd as one.
+
+    The ETA is the part that matters: 'nine more minutes' is a decision,
+    'still going' is not.
+    """
+    from common import databento_fetch as FE
+    groups = {f"2025-01-{d:02d}": ["AAA"] for d in range(1, 21)}
+    FE.plan(_C(_CountingMeta()), groups, "EQUS.SUMMARY", ["statistics"],
+            tmp_path, 0, tick=5)
+    out = capsys.readouterr().out
+    assert out.count("estimating") == 4          # every 5th of 20
+    assert "/20" in out
+    assert "min left" in out
+
+
+def test_the_final_date_always_reports_even_off_the_tick(tmp_path, capsys):
+    """Otherwise a run whose count is not a multiple of the tick ends on
+    silence, which is exactly the state being fixed."""
+    from common import databento_fetch as FE
+    groups = {f"2025-01-{d:02d}": ["AAA"] for d in range(1, 8)}   # 7 dates
+    FE.plan(_C(_CountingMeta()), groups, "EQUS.SUMMARY", ["statistics"],
+            tmp_path, 0, tick=5)
+    assert "7/7" in capsys.readouterr().out
+
+
+def test_progress_can_be_switched_off_for_quiet_callers(tmp_path, capsys):
+    from common import databento_fetch as FE
+    groups = {"2025-01-02": ["AAA"]}
+    FE.plan(_C(_CountingMeta()), groups, "EQUS.SUMMARY", ["statistics"],
+            tmp_path, 0, tick=0)
+    assert "estimating" not in capsys.readouterr().out
+
+
+def test_files_already_on_disk_cost_no_metadata_calls(tmp_path):
+    """Re-running must be free by construction -- including the estimate. A
+    resumed overnight run that re-priced everything already downloaded would
+    spend a thousand round trips proving it has nothing to do."""
+    from common import databento_fetch as FE
+    p = FE.archive_path(tmp_path, "EQUS.SUMMARY", "statistics", "2025-01-02")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"")
+    meta = _CountingMeta()
+    FE.plan(_C(meta), {"2025-01-02": ["AAA"]}, "EQUS.SUMMARY", ["statistics"],
+            tmp_path, 0)
+    assert meta.calls == 0
