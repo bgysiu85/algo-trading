@@ -71,6 +71,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
+from common.report_io import emit
+
 # The session this project trades, in ET. Used only to disambiguate the report
 # timezone -- nothing is filtered by it.
 ET = ZoneInfo("America/New_York")
@@ -471,6 +473,9 @@ def main(argv=None) -> int:
     ap.add_argument("--against", metavar="EXISTING.json",
                     default="var/state/traded_pairs.json",
                     help="report which pairs are new against this file")
+    ap.add_argument("--out", metavar="OUT.txt",
+                    default="var/reports/flex_report.txt",
+                    help="save the report as UTF-8 (default: %(default)s)")
     ap.add_argument("--tz-report", action="store_true",
                     help="print the per-offset evidence and exit")
     ap.add_argument("--tz", default=None, metavar="ZONE",
@@ -485,7 +490,7 @@ def main(argv=None) -> int:
         print(json.dumps(tz, indent=2))
         return 0
 
-    print(report(execs, tz))
+    emit(report(execs, tz), a.out, header="common.flex")
 
     pl = pairs(execs)
     try:

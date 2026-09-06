@@ -59,6 +59,7 @@ from zoneinfo import ZoneInfo
 
 from common import flex
 from common.analysis import load_sessions, LIVE
+from common.report_io import emit
 from strategy.mcl import mcl as S
 
 ET = ZoneInfo("America/New_York")
@@ -278,10 +279,13 @@ def main(argv=None) -> int:
     ap.add_argument("csv", nargs="+", help="IBKR Flex trade report(s)")
     ap.add_argument("--cache", default="bar_cache", help="bar cache root")
     ap.add_argument("--csv-out", metavar="OUT.csv", help="write the per-day table")
+    ap.add_argument("--out", metavar="OUT.txt",
+                    default="var/reports/manual_vs_mcl.txt",
+                    help="save the report as UTF-8 (default: %(default)s)")
     a = ap.parse_args(argv)
 
     rows, cov = build(a.csv, Path(a.cache))
-    print(report(rows, cov))
+    emit(report(rows, cov), a.out, header="common.manual_vs_strategy")
 
     if a.csv_out:
         Path(a.csv_out).parent.mkdir(parents=True, exist_ok=True)

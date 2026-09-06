@@ -64,6 +64,7 @@ from pathlib import Path
 import pandas as pd
 
 from common.dbn_io import daily_frame
+from common.report_io import emit
 
 ARCHIVE_DEFAULT = "databento"
 DATASET_DEFAULT = "EQUS.MINI"
@@ -238,6 +239,9 @@ def main(argv=None) -> int:
     ap.add_argument("--dataset", default=DATASET_DEFAULT)
     ap.add_argument("--pairs", metavar="OUT.json", help="write candidate pairs")
     ap.add_argument("--features", metavar="OUT.csv", help="write the feature table")
+    ap.add_argument("--out", metavar="OUT.txt",
+                    default="var/reports/screen_report.txt",
+                    help="save the report as UTF-8 (default: %(default)s)")
     ap.add_argument("--validate", metavar="KNOWN.json",
                     help="pair list to measure recall against")
     ap.add_argument("--min-rvol", type=float)
@@ -268,7 +272,8 @@ def main(argv=None) -> int:
     if a.validate:
         known = [(p["symbol"], p["date"]) for p in json.load(open(a.validate))]
 
-    print(report(df, sel, cfg, known))
+    emit(report(df, sel, cfg, known), a.out,
+         header=f"common.screen  dataset={a.dataset}  archive={a.archive}")
 
     if a.pairs:
         Path(a.pairs).parent.mkdir(parents=True, exist_ok=True)
