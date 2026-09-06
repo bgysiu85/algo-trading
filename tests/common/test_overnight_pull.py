@@ -99,33 +99,45 @@ def test_the_biggest_job_runs_last():
 # --- selecting which jobs run -----------------------------------------------
 
 def test_a_dataset_pattern_takes_every_schema_under_it():
-    picked = O.select(O.JOBS, ["EQUS.SUMMARY"], None)
-    assert {j.schema for j in picked} == {"ohlcv-1d", "statistics"}
+    picked = O.select(O.JOBS, ["EQUS.MINI"], None)
+    assert {j.schema for j in picked} == {"definition", "ohlcv-1m"}
 
 
 def test_a_dataset_schema_pattern_separates_jobs_sharing_a_dataset():
-    """EQUS.SUMMARY carries a 362 MB daily job and a statistics job estimated
-    at 2.4 TB. Filtering by dataset alone cannot keep one and drop the other,
-    which is the entire reason the colon form exists."""
-    kept = O.select(O.JOBS, None, ["EQUS.SUMMARY:statistics"])
+    """EQUS.MINI carries a 3.6 GB definition job and a 49 GB minute job.
+    Filtering by dataset alone cannot keep one and drop the other, which is the
+    entire reason the colon form exists."""
+    kept = O.select(O.JOBS, None, ["EQUS.MINI:ohlcv-1m"])
     labels = {f"{j.dataset}:{j.schema}" for j in kept}
-    assert "EQUS.SUMMARY:ohlcv-1d" in labels
-    assert "EQUS.SUMMARY:statistics" not in labels
+    assert "EQUS.MINI:definition" in labels
+    assert "EQUS.MINI:ohlcv-1m" not in labels
     assert len(kept) == len(O.JOBS) - 1
 
 
 def test_patterns_are_case_insensitive():
-    assert len(O.select(O.JOBS, None, ["equs.summary:STATISTICS"])) == len(O.JOBS) - 1
+    assert len(O.select(O.JOBS, None, ["equs.mini:OHLCV-1M"])) == len(O.JOBS) - 1
 
 
 def test_a_pattern_that_matches_nothing_is_an_error_not_a_no_op():
-    """A --skip is how someone excludes the one job that would otherwise run
-    for days. A typo in it must not read as 'nothing to exclude': that failure
-    is silent, and its cost is the whole night and the whole download."""
+    """A --skip is how someone excludes a job that would otherwise run for
+    days. A typo in it must not read as 'nothing to exclude': that failure is
+    silent, and its cost is the whole night and the whole download."""
     with pytest.raises(SystemExit, match="matched no job"):
-        O.select(O.JOBS, None, ["EQUS.SUMMARY:statistcs"])   # transposed
+        O.select(O.JOBS, None, ["EQUS.MINI:ohlcv-1min"])
     with pytest.raises(SystemExit, match="matched no job"):
         O.select(O.JOBS, ["EQUS.SUMARY"], None)
+
+
+def test_skipping_a_deep_job_needs_it_to_be_in_scope():
+    """--skip is evaluated against the jobs this run assembled. The statistics
+    job lives in DEEP_JOBS, so skipping it without --deep is a typo as far as
+    this run is concerned -- and saying so is better than silently accepting a
+    flag that excludes nothing."""
+    with pytest.raises(SystemExit, match="matched no job"):
+        O.select(O.JOBS, None, ["EQUS.SUMMARY:statistics"])
+    kept = O.select(list(O.JOBS) + list(O.DEEP_JOBS), None,
+                    ["EQUS.SUMMARY:statistics"])
+    assert not any(j.schema == "statistics" for j in kept)
 
 
 def test_a_schema_pattern_does_not_leak_across_datasets():
@@ -136,8 +148,8 @@ def test_a_schema_pattern_does_not_leak_across_datasets():
 
 
 def test_only_and_skip_compose():
-    kept = O.select(O.JOBS, ["EQUS.SUMMARY"], ["EQUS.SUMMARY:statistics"])
-    assert [f"{j.dataset}:{j.schema}" for j in kept] == ["EQUS.SUMMARY:ohlcv-1d"]
+    kept = O.select(O.JOBS, ["EQUS.MINI"], ["EQUS.MINI:ohlcv-1m"])
+    assert [f"{j.dataset}:{j.schema}" for j in kept] == ["EQUS.MINI:definition"]
 
 
 def test_pair_jobs_can_be_selected_the_same_way():

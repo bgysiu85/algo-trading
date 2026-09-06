@@ -97,9 +97,6 @@ JOBS = [
     Job("EQUS.SUMMARY", "ohlcv-1d", "2024-07-01",
         "consolidated daily volume across ALL exchanges -- the honest RVOL "
         "denominator. EQUS.MINI is a partial tape and its volume is not."),
-    Job("EQUS.SUMMARY", "statistics", "2024-07-01",
-        "consolidated volume normalised on every trade; the same figure "
-        "intraday rather than end-of-day."),
     Job("XNAS.BASIC", "ohlcv-1d", "2024-07-01",
         "Nasdaq venues PLUS the FINRA TRFs, so it includes off-exchange "
         "prints. Cross-checks how much volume EQUS.MINI is missing."),
@@ -130,15 +127,39 @@ PAIR_JOBS = [
             "strategy would pay'."),
 ]
 
-# Deep minute history. Nasdaq-LISTED only, and large. Behind a flag because it
-# is the one job whose size is not obviously worth its narrowness.
+# Jobs that are large out of proportion to what they are known to be worth.
+# Behind --deep, so the default run is one anybody can start and walk away from.
 DEEP_JOBS = [
     Job("XNAS.ITCH", "ohlcv-1m", "2018-05-01",
         "eight years of MINUTE bars, Nasdaq-listed only. The regime test can "
         "run on daily bars for screening and only needs these to backtest the "
         "survivors -- so this is insurance, not a requirement. Expect it to "
         "dwarf every other job."),
+    Job("EQUS.SUMMARY", "statistics", "2024-07-01",
+        "exchange-published statistic messages. MEASURED at 6,388 MB/day "
+        "whole-universe (2026-08-04), i.e. ~2.4 TB uncompressed over the "
+        "dataset -- 9,000x the daily bars beside it and 96x the entire minute "
+        "tape. Nothing in this repo reads the schema, and the RVOL denominator "
+        "comes from EQUS.SUMMARY ohlcv-1d at 15 MB/month. Kept reachable, not "
+        "default: see SCOPED_NOTE below before pulling it universe-wide."),
 ]
+
+# SCOPED_NOTE
+# -----------
+# The size above was measured twice -- the planning pass and a one-day probe
+# agreed -- so it is not an estimate artefact. What has NOT been established is
+# what the schema actually contains: an earlier version of this file asserted it
+# carried "consolidated volume normalised on every trade", which was written
+# from memory rather than from a record, and is probably wrong. DBN statistics
+# are exchange stat messages (official open/close, session high/low, cleared
+# volume, open interest), not a volume tape.
+#
+# So the question "is it worth having before the subscription ends" is still
+# open, and the universe-wide job is the wrong way to answer it. Pull ONE day
+# scoped to a few symbols first -- kilobytes, free -- and look at which
+# stat_types come back. If the useful content turns out to be per-symbol-day,
+# a scoped pull over the screened candidates is a few hundred MB and captures
+# the value without the terabytes.
 
 def matches(job, patterns) -> bool:
     """Does `job` match any of `patterns`?
