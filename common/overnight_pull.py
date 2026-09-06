@@ -60,6 +60,7 @@ from common.report_io import emit
 
 @dataclass
 class Job:
+    """A full-universe pull, run through common.databento_universe."""
     dataset: str
     schema: str
     start: str
@@ -68,6 +69,26 @@ class Job:
     @property
     def label(self) -> str:
         return f"{self.dataset} {self.schema}"
+
+
+@dataclass
+class PairJob:
+    """A pull scoped to a pair list, run through common.databento_fetch.
+
+    L1 schemas cannot be taken universe-wide -- tbbo for one year of all US
+    equities is roughly 4.5 TB. Scoped to the symbol-days a strategy would
+    actually have traded it is a few GB, and it is the only way to have quote
+    data at all once the rolling window has moved past these dates.
+    """
+    dataset: str
+    schema: str
+    pairs: str
+    after: str | None
+    why: str
+
+    @property
+    def label(self) -> str:
+        return f"{self.dataset} {self.schema} (pairs)"
 
 
 # Ordered cheapest-and-most-useful first, so an overnight run that dies early
@@ -96,25 +117,58 @@ JOBS = [
         "again. Expect tens of GB -- see the disk check."),
 ]
 
+# L1, and therefore bounded by the ROLLING one-year window. These dates stop
+# being free as the window moves, so they are the jobs with real regret risk:
+# ohlcv can be re-derived from a cheaper source one day, a historical quote
+# cannot be reconstructed from anything.
+PAIR_JOBS = [
+    PairJob("EQUS.MINI", "tbbo", "var/state/screen_pairs.json", "2025-09-06",
+            "quotes for the screened candidates inside the free L1 window. "
+            "Extends the crossing-cost measurement from Ben's own 587 "
+            "symbol-days to the universe a strategy would actually trade -- "
+            "the difference between 'what his fills cost' and 'what the "
+            "strategy would pay'."),
+]
+
+# Deep minute history. Nasdaq-LISTED only, and large. Behind a flag because it
+# is the one job whose size is not obviously worth its narrowness.
+DEEP_JOBS = [
+    Job("XNAS.ITCH", "ohlcv-1m", "2018-05-01",
+        "eight years of MINUTE bars, Nasdaq-listed only. The regime test can "
+        "run on daily bars for screening and only needs these to backtest the "
+        "survivors -- so this is insurance, not a requirement. Expect it to "
+        "dwarf every other job."),
+]
+
 SIZE_RE = re.compile(r"ESTIMATED SIZE\s*:\s*([\d,\.]+)\s*MB")
 COST_RE = re.compile(r"ESTIMATED COST\s*:\s*\$([\d,\.]+)")
 TODO_RE = re.compile(r"to download\s*:\s*(\d+)")
 
 
-def _run(job: Job, archive: str, confirm: bool, max_cost: float) -> tuple[int, str]:
-    """Run one job through databento_universe, capturing what it printed."""
+def _run(job, archive: str, confirm: bool, max_cost: float) -> tuple[int, str]:
+    """Run one job, capturing what it printed. Dispatches on the job type."""
+    from common import databento_fetch as FE
     from common import databento_universe as U
 
-    argv = ["--dataset", job.dataset, "--schema", job.schema,
-            "--start", job.start, "--archive", archive,
-            "--max-cost", str(max_cost)]
+    if isinstance(job, PairJob):
+        runner = FE.main
+        argv = ["--pairs", job.pairs, "--dataset", job.dataset,
+                "--schemas", job.schema, "--archive", archive,
+                "--max-cost", str(max_cost)]
+        if job.after:
+            argv += ["--after", job.after]
+    else:
+        runner = U.main
+        argv = ["--dataset", job.dataset, "--schema", job.schema,
+                "--start", job.start, "--archive", archive,
+                "--max-cost", str(max_cost)]
     if confirm:
         argv.append("--confirm")
 
     buf = io.StringIO()
     try:
         with redirect_stdout(buf):
-            rc = U.main(argv)
+            rc = runner(argv)
     except SystemExit as e:
         # sys.exit("some message") sets .code to a STRING, not an int -- which
         # is exactly what databento_universe does when --max-cost trips or a
@@ -156,13 +210,23 @@ def main(argv=None) -> int:
                     help="per job; L0 should be $0.00, so this is a tripwire")
     ap.add_argument("--only", nargs="+", metavar="DATASET",
                     help="run only jobs for these datasets")
+    ap.add_argument("--deep", action="store_true",
+                    help="add eight years of Nasdaq-listed MINUTE bars. Large, "
+                         "narrow, and insurance rather than a requirement")
+    ap.add_argument("--no-quotes", action="store_true",
+                    help="skip the L1 quote jobs")
     ap.add_argument("--skip-disk-check", action="store_true")
     ap.add_argument("--confirm", action="store_true",
                     help="actually download; without it this only estimates")
     ap.add_argument("--out", default="var/reports/overnight_pull.txt")
     a = ap.parse_args(argv)
 
-    jobs = [j for j in JOBS
+    all_jobs = list(JOBS)
+    if not a.no_quotes:
+        all_jobs += PAIR_JOBS
+    if a.deep:
+        all_jobs += DEEP_JOBS
+    jobs = [j for j in all_jobs
             if not a.only or j.dataset in {d.upper() for d in a.only}]
     if not jobs:
         sys.exit("no jobs matched --only")

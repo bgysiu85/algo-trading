@@ -49,6 +49,26 @@ def test_free_space_is_measured_on_an_ancestor_that_exists(tmp_path):
     assert O._free_gb(missing) > 0
 
 
+def test_pair_jobs_stay_inside_the_free_l1_window():
+    """L1 gets ONE ROLLING YEAR on Standard. A pair job without an --after
+    reaching back past that window silently starts charging, and at 12,128
+    candidate symbol-days a mis-set date is tens of dollars, not cents."""
+    for j in O.PAIR_JOBS:
+        assert j.after, f"{j.label} has no --after -- it would buy paid history"
+        assert j.after >= "2025-09-01", (
+            f"{j.label} reaches back past the rolling L1 window")
+
+
+def test_l1_is_never_pulled_universe_wide():
+    """tbbo for one year of all US equities is roughly 4.5 TB. L1 is only ever
+    taken scoped to a pair list; if an L1 schema ever appears in JOBS, the
+    overnight run stops being something anyone can leave alone."""
+    l1 = {"trades", "tbbo", "bbo", "bbo-1s", "bbo-1m", "mbp-1",
+          "cmbp-1", "cbbo", "tcbbo", "mbp-10", "mbo"}
+    for j in O.JOBS + O.DEEP_JOBS:
+        assert j.schema not in l1, f"{j.label} takes {j.schema} universe-wide"
+
+
 def test_every_job_is_l0():
     """L0 -- ohlcv, definitions, statistics, status -- is the tier Standard
     grants 8+ years of and charges nothing for. L1 gets one rolling year and
@@ -57,14 +77,14 @@ def test_every_job_is_l0():
     appears in this list, the overnight run stops being safe to leave alone."""
     l0 = {"ohlcv-1s", "ohlcv-1m", "ohlcv-1h", "ohlcv-1d",
           "definition", "statistics", "status"}
-    for j in O.JOBS:
+    for j in O.JOBS + O.DEEP_JOBS:
         assert j.schema in l0, f"{j.label} is not L0 -- it is not free or bounded"
 
 
 def test_every_job_states_why_it_is_worth_pulling():
     """A job list nobody can justify is a job list that grows. Each entry
     carries its reason, and the planning pass prints it."""
-    for j in O.JOBS:
+    for j in O.JOBS + O.PAIR_JOBS + O.DEEP_JOBS:
         assert len(j.why) > 40, f"{j.label} has no real justification"
 
 
