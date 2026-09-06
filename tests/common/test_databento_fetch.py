@@ -124,3 +124,73 @@ def test_plan_pulls_warm_up_days_before_the_session(tmp_path):
     _day, _syms, _schema, start, end, *_ = jobs[0]
     assert start == "2025-06-04"
     assert end == "2025-06-10"             # end is exclusive, so day + 1
+
+
+# --- data quality -----------------------------------------------------------
+
+class FakeMetaCond(FakeMeta):
+    def __init__(self, usd, size, rows):
+        super().__init__(usd, size)
+        self.rows = rows
+
+    def get_dataset_condition(self, **kw):
+        return self.rows
+
+
+class FakeClientCond(FakeClient):
+    def __init__(self, rows):
+        self.metadata = FakeMetaCond(0.01, 100, rows)
+
+
+def test_degraded_days_are_surfaced_not_just_warned_about(tmp_path):
+    """Databento emits a BentoWarning to stderr and hands over the file anyway.
+
+    Two of the first eight days pulled came back 'degraded'. On a 587-day pull
+    those warnings scroll past, and afterwards a degraded file is byte-for-byte
+    indistinguishable from a clean one -- a thin pre-market session and a
+    session that was not properly captured look the same in the bars.
+    """
+    rows = [{"date": "2025-06-04", "condition": "degraded"},
+            {"date": "2025-06-06", "condition": "available"}]
+    got = F.conditions(FakeClientCond(rows), "EQUS.MINI",
+                       ["2025-06-04", "2025-06-06"])
+    assert got == {"2025-06-04": "degraded", "2025-06-06": "available"}
+    assert [d for d, c in got.items() if c != "available"] == ["2025-06-04"]
+
+
+def test_a_condition_lookup_failure_does_not_abort_the_fetch(tmp_path):
+    """Quality metadata is a nice-to-have; losing it must not cost the data."""
+    class Broken(FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.metadata.get_dataset_condition = self._boom
+
+        @staticmethod
+        def _boom(**kw):
+            raise RuntimeError("503")
+
+    assert F.conditions(Broken(), "EQUS.MINI", ["2025-06-04"]) == {}
+
+
+def test_manifest_merges_and_never_drops_earlier_entries(tmp_path):
+    """The archive is built incrementally over months. If a later pull
+    overwrote the manifest, the record of which days were degraded when they
+    were captured would be lost -- and that record is the only thing that makes
+    bought data trustworthy after the plan window has rolled past it."""
+    root = tmp_path / "arch"
+    F.write_manifest(root, "EQUS.MINI",
+                     {"tbbo/2025-06-04": {"condition": "degraded"}})
+    F.write_manifest(root, "EQUS.MINI",
+                     {"tbbo/2025-06-06": {"condition": "available"}})
+    m = json.load(open(F.manifest_path(root, "EQUS.MINI")))
+    assert set(m) == {"tbbo/2025-06-04", "tbbo/2025-06-06"}
+    assert m["tbbo/2025-06-04"]["condition"] == "degraded"
+
+
+def test_a_corrupt_manifest_is_replaced_not_fatal(tmp_path):
+    root = tmp_path / "arch"
+    p = F.manifest_path(root, "EQUS.MINI")
+    p.parent.mkdir(parents=True)
+    p.write_text("{ not json")
+    F.write_manifest(root, "EQUS.MINI", {"tbbo/2025-06-04": {"condition": "ok"}})
+    assert json.load(open(p))["tbbo/2025-06-04"]["condition"] == "ok"

@@ -104,6 +104,61 @@ def archive_path(root: Path, dataset: str, schema: str, day: str) -> Path:
     return root / dataset / schema / f"{day}.dbn.zst"
 
 
+def manifest_path(root: Path, dataset: str) -> Path:
+    return root / dataset / "manifest.json"
+
+
+def conditions(client, dataset: str, days) -> dict[str, str]:
+    """Databento's own per-day quality flag for the dates being fetched.
+
+    'degraded' means the capture had problems that day -- gaps, a venue feed
+    down, a partial session. The client emits a BentoWarning to stderr and then
+    hands over the file anyway, which is the worst possible ergonomics at scale:
+    on a 587-day pull those warnings scroll past, the files look identical to
+    good ones, and six weeks later nothing distinguishes a thin pre-market from
+    a thin pre-market that was not actually captured.
+
+    Two days in the first 8-day pull came back degraded (2025-06-04 and
+    2025-09-03), so this is not a rare edge. The condition is recorded in the
+    archive manifest and reprinted at the end of every run.
+    """
+    if not days:
+        return {}
+    try:
+        rows = client.metadata.get_dataset_condition(
+            dataset=dataset, start_date=min(days), end_date=max(days))
+    except Exception as e:  # noqa: BLE001
+        print(f"  dataset-condition lookup failed: {_scrub(e)}")
+        return {}
+    out = {}
+    for r in rows:
+        d = str(r.get("date", ""))[:10]
+        if d:
+            out[d] = str(r.get("condition", "unknown"))
+    return out
+
+
+def write_manifest(root: Path, dataset: str, entries: dict) -> Path:
+    """Record what was fetched and what Databento said about it.
+
+    The archive is bought data that outlives the plan window, so the thing that
+    makes it trustworthy later is knowing which days were degraded WHEN they
+    were captured. Merged, never overwritten -- an incremental pull must not
+    erase what an earlier one recorded.
+    """
+    p = manifest_path(root, dataset)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    old = {}
+    if p.exists():
+        try:
+            old = json.load(open(p))
+        except Exception:  # noqa: BLE001
+            old = {}
+    old.update(entries)
+    json.dump(dict(sorted(old.items())), open(p, "w"), indent=1)
+    return p
+
+
 def plan(client, groups, dataset, schemas, root, lookback):
     """Estimate every request. Returns (jobs, total_usd, total_bytes)."""
     jobs, usd, nbytes = [], 0.0, 0
@@ -188,8 +243,18 @@ def main(argv=None) -> int:
         print("\nDry run. Re-run with --confirm to download.")
         return 0
 
+    cond = conditions(client, a.dataset, sorted({j[0] for j in todo}))
+    bad = {d: c for d, c in cond.items() if c not in ("available", "")}
+    if bad:
+        print(f"\nDATASET CONDITION: {len(bad)} of {len(cond)} day(s) not 'available'")
+        for d, c in sorted(bad.items()):
+            print(f"  {d}  {c}")
+        print("  Recorded in the manifest. These files are still written --")
+        print("  exclude or flag them downstream, do not assume they are clean.")
+
     print()
     written = 0
+    entries: dict[str, dict] = {}
     for day, syms, schema, start, end, out, _c, _b, _skip in sorted(todo):
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_suffix(".partial")
@@ -205,9 +270,22 @@ def main(argv=None) -> int:
         # file that a later --confirm would skip as "already on disk".
         tmp.replace(out)
         written += 1
-        print(f"  {day}  {schema:9} -> {out}  ({out.stat().st_size/1e6:.2f} MB)")
+        c = cond.get(day, "unknown")
+        entries[f"{schema}/{day}"] = {
+            "date": day, "schema": schema, "symbols": syms,
+            "condition": c, "bytes": out.stat().st_size,
+            "start": start, "end": end,
+        }
+        flag = "" if c in ("available", "") else f"  [{c.upper()}]"
+        print(f"  {day}  {schema:9} -> {out}  "
+              f"({out.stat().st_size/1e6:.2f} MB){flag}")
 
-    print(f"\nwrote {written} file(s) to {root}/")
+    if entries:
+        mp = write_manifest(root, a.dataset, entries)
+        print(f"\nmanifest: {mp}")
+    print(f"wrote {written} file(s) to {root}/")
+    if bad:
+        print(f"REMINDER: {len(bad)} day(s) were not 'available' -- see above.")
     return 0
 
 
