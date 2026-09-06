@@ -235,6 +235,22 @@ def main(argv=None) -> int:
     print(f"ESTIMATED COST           : ${usd:,.4f}")
 
     if not todo:
+        # Nothing to buy, but a manifest backfill may still be worth writing.
+        if have:
+            cond = conditions(client, a.dataset, sorted({j[0] for j in jobs}))
+            ent = {}
+            for day, syms, schema, start, end, out, _c, _b, _s in sorted(have):
+                if out.exists():
+                    ent[f"{schema}/{day}"] = {
+                        "date": day, "schema": schema, "symbols": syms,
+                        "condition": cond.get(day, "unknown"),
+                        "bytes": out.stat().st_size, "start": start,
+                        "end": end, "backfilled": True}
+            if ent and a.confirm:
+                print(f"manifest backfilled: {write_manifest(root, a.dataset, ent)}")
+                nb = {d: c for d, c in cond.items() if c not in ("available", "")}
+                for d, c in sorted(nb.items()):
+                    print(f"  {d}  {c}")
         return 0
     if usd > a.max_cost:
         sys.exit(f"\nABORTED: ${usd:,.2f} exceeds --max-cost ${a.max_cost:,.2f}. "
@@ -243,7 +259,9 @@ def main(argv=None) -> int:
         print("\nDry run. Re-run with --confirm to download.")
         return 0
 
-    cond = conditions(client, a.dataset, sorted({j[0] for j in todo}))
+    # Ask about every date in the plan, not just the ones being downloaded, so
+    # a re-run backfills the manifest for files bought before this existed.
+    cond = conditions(client, a.dataset, sorted({j[0] for j in jobs}))
     bad = {d: c for d, c in cond.items() if c not in ("available", "")}
     if bad:
         print(f"\nDATASET CONDITION: {len(bad)} of {len(cond)} day(s) not 'available'")
@@ -255,6 +273,20 @@ def main(argv=None) -> int:
     print()
     written = 0
     entries: dict[str, dict] = {}
+
+    # Backfill: files already on disk still get a manifest row. Without this,
+    # anything bought before the manifest existed stays permanently unlabelled
+    # and its condition is unrecoverable once the plan window rolls past it.
+    for day, syms, schema, start, end, out, _c, _b, skip in sorted(have):
+        if not out.exists():
+            continue
+        entries[f"{schema}/{day}"] = {
+            "date": day, "schema": schema, "symbols": syms,
+            "condition": cond.get(day, "unknown"),
+            "bytes": out.stat().st_size, "start": start, "end": end,
+            "backfilled": True,
+        }
+
     for day, syms, schema, start, end, out, _c, _b, _skip in sorted(todo):
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_suffix(".partial")
