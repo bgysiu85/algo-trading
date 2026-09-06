@@ -291,3 +291,24 @@ def test_the_statistics_pair_job_starts_no_earlier_than_its_dataset():
         if j.dataset == "EQUS.SUMMARY":
             assert j.after and j.after >= "2024-07-01", (
                 f"{j.label} reaches back before EQUS.SUMMARY exists")
+
+
+# --- counting what was written ----------------------------------------------
+
+def test_both_runners_success_wordings_are_counted():
+    """databento_universe says 'wrote N chunk(s)', databento_fetch says
+    'wrote N file(s)'. The original pattern matched only the first, so both
+    pair jobs reported 0 after writing 548 and 125 files respectively."""
+    assert O._written("wrote 548 file(s) to E:/Databento/") == 548
+    assert O._written("wrote 43 chunk(s)") == 43
+
+
+def test_an_unparsed_count_is_none_and_renders_as_a_question_mark():
+    """None is deliberately not 0. A count that could not be parsed is a
+    MISSING measurement, and printing a missing measurement as a number is how
+    a successful run comes to look like an empty one -- '0 chunk(s) ok' reads
+    as 'ran fine, had nothing to do', which is a conclusion, and it was wrong."""
+    assert O._written("finished, no idea how many") is None
+    assert O._count(None) == "?"
+    assert O._count(0) == "0"
+    assert O._count(1234) == "1,234"

@@ -218,6 +218,33 @@ def select(all_jobs, only, skip) -> list:
     return jobs
 
 
+# The two runners word their success line differently: databento_universe says
+# "wrote N chunk(s)", databento_fetch says "wrote N file(s)". The original
+# pattern matched only the first, so both pair jobs reported
+#
+#     EQUS.SUMMARY statistics (pairs)    0 chunk(s)   ok
+#
+# after successfully writing 548 files. `0 ... ok` is the worst possible shape
+# for that: it reads as "ran fine, had nothing to do", which is a conclusion,
+# and it was wrong.
+WROTE_RE = re.compile(r"wrote (\d+) (?:chunk|file)")
+
+
+def _written(out: str):
+    """How many files a job wrote, or None when the output did not say.
+
+    None is deliberately not 0. A count that could not be parsed is a missing
+    measurement, and printing a missing measurement as a number is how a
+    successful run comes to look like an empty one.
+    """
+    m = WROTE_RE.search(out)
+    return int(m.group(1)) if m else None
+
+
+def _count(n) -> str:
+    return "?" if n is None else f"{n:,}"
+
+
 SIZE_RE = re.compile(r"ESTIMATED SIZE\s*:\s*([\d,\.]+)\s*MB")
 COST_RE = re.compile(r"ESTIMATED COST\s*:\s*\$([\d,\.]+)")
 TODO_RE = re.compile(r"to download\s*:\s*(\d+)")
@@ -413,14 +440,19 @@ def main(argv=None) -> int:
         t = time.time()
         rc, out = _run(j, a.archive, confirm=True, max_cost=a.max_cost)
         mins = (time.time() - t) / 60
-        wrote = re.search(r"wrote (\d+) chunk", out)
-        n = int(wrote.group(1)) if wrote else 0
+        n = _written(out)
         results.append((j, n, "ok" if rc == 0 else f"FAILED (rc={rc})"))
-        print(f"    {n} chunk(s) in {mins:.1f} min", flush=True)
+        print(f"    {_count(n)} written in {mins:.1f} min", flush=True)
 
     lines += ["", "RESULTS", ""]
     for j, n, status in results:
-        lines.append(f"  {j.label:<28} {n:>4} chunk(s)   {status}")
+        lines.append(f"  {j.label:<28} {_count(n):>12}   {status}")
+    if any(n is None for _, n, _ in results):
+        lines.append("")
+        lines.append("  '?' means the count could not be parsed from the job's "
+                     "output, NOT that")
+        lines.append("  nothing was written. Run common.archive_inventory to "
+                     "count off the disk.")
     bad = [r for r in results if r[2].startswith("FAILED")]
     lines.append("")
     lines.append(f"total elapsed {(time.time()-t0)/60:.0f} min")
