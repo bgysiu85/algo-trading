@@ -472,3 +472,27 @@ def test_an_unresolved_time_is_blank_not_midnight():
     assert flex._hhmm(None) == ""
     assert flex._hhmm(4 * 60) == "04:00"
     assert flex._hhmm(9 * 60 + 31) == "09:31"
+
+
+def test_money_keeps_enough_precision_for_two_axes_to_agree(tmp_path):
+    """The same money is summed two ways -- once over day rows, once over
+    position rows -- on two sheets of one workbook. At two decimals those two
+    accumulations differed by up to 7 cents on the real report. Nothing is
+    wrong when that happens, and a reader has no way to know it."""
+    rows = []
+    for i in range(200):
+        rows += [row(qty=100, comm=-1.00175, pnl=0.0,
+                     dt=f"2026-08-04 {14 + i // 60:02d}:{i % 60:02d}:00"),
+                 row(qty=-100, comm=-1.00175, pnl=0.3333, side="SELL",
+                     dt=f"2026-08-04 {14 + i // 60:02d}:{i % 60:02d}:30")]
+    p = write_csv(tmp_path / "f.csv", rows)
+    ex = flex.load(p)
+    flex.measure_offsets(ex)
+    units = [flex._money(r.commission) for r in flex.round_trips(ex)]
+    day = flex._money(flex.symbol_days(ex)[("AAA", "2026-08-04")].commission)
+    assert sum(units) == pytest.approx(day, abs=0.005)
+
+
+def test_money_rounding_is_a_display_concern_not_a_storage_one():
+    assert flex._money(-1.00175) == -1.0018 or flex._money(-1.00175) == -1.0017
+    assert flex._money(100.0) == 100.0

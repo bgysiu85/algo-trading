@@ -380,6 +380,23 @@ def pairs(execs: list[Execution]) -> list[dict]:
     return [{"symbol": s, "date": d} for s, d in seen]
 
 
+def _money(v: float) -> float:
+    """Four decimals, not two.
+
+    These files are summed along two different axes -- 587 day rows on one
+    sheet, 1,658 position rows on another -- and at two decimals the two
+    accumulations of the SAME money disagree by up to seven cents. Nothing is
+    wrong when that happens, but a reader comparing the grand totals of two
+    sheets has no way to know that, and a workbook whose own pages disagree is
+    a workbook nobody trusts the rest of.
+
+    IBKR's own figures carry more precision than two places anyway
+    (IBCommission arrives as -1.00175), so this loses nothing real. Display
+    rounding belongs at display time.
+    """
+    return round(v, 4)
+
+
 def _hhmm(minute: int | None) -> str:
     """ET minutes past midnight as HH:MM, or empty when unresolved.
 
@@ -670,8 +687,8 @@ def main(argv=None) -> int:
                             round(s.buy_shares), round(s.sell_shares),
                             _px(s.avg_buy_price), _px(s.avg_sell_price),
                             s.max_position,
-                            round(s.gross_pnl, 2), round(s.commission, 2),
-                            round(s.net_pnl, 2), int(s.in_band)])
+                            _money(s.gross_pnl), _money(s.commission),
+                            _money(s.net_pnl), int(s.in_band)])
         print(f"wrote {a.summary}  ({len(sd)} symbol-days)")
 
     if a.round_trips:
@@ -685,8 +702,8 @@ def main(argv=None) -> int:
             for r in rt:
                 w.writerow([r.symbol, r.date, _hhmm(r.entry_minute),
                             _hhmm(r.exit_minute), r.fills, round(r.shares),
-                            r.max_position, round(r.gross_pnl, 2),
-                            round(r.commission, 2), round(r.net_pnl, 2),
+                            r.max_position, _money(r.gross_pnl),
+                            _money(r.commission), _money(r.net_pnl),
                             int(r.open_at_end)])
         print(f"wrote {a.round_trips}  ({len(rt)} round trips)")
     return 0
