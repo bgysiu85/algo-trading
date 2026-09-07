@@ -413,7 +413,7 @@ def test_the_seam_between_free_and_paid_dates_is_reported():
     from common import databento_fetch as FE
     jobs = [_job("2025-08-30", 0.42), _job("2025-09-01", 0.11),
             _job("2025-09-08", 0.0), _job("2026-01-05", 0.0)]
-    assert FE.paid_boundary(jobs) == ("2026-01-05", "2025-08-30")
+    assert FE.paid_boundary(jobs) == ("2025-09-01", "2025-09-08")
 
 
 def test_an_entirely_free_plan_reports_no_seam():
@@ -425,7 +425,35 @@ def test_dates_already_on_disk_do_not_create_a_false_seam():
     """A skipped date has cost 0 because it is not being bought, not because
     it is inside the window. Counting it would move the reported boundary."""
     from common import databento_fetch as FE
-    jobs = [_job("2024-01-02", 0.0, skip=True), _job("2025-08-30", 0.42)]
-    last_free, first_paid = FE.paid_boundary(jobs)
-    assert first_paid == "2025-08-30"
-    assert last_free == ""          # nothing free is actually being bought
+    jobs = [_job("2026-01-02", 0.0, skip=True), _job("2025-08-30", 0.42)]
+    last_paid, first_free = FE.paid_boundary(jobs)
+    assert last_paid == "2025-08-30"
+    assert first_free == ""         # nothing free is actually being bought
+
+
+def test_the_seam_points_at_the_free_side_not_the_paid_side():
+    """The first version returned (max free, min paid) and advised
+    --after <earliest PAID date> -- the whole paid range, exactly backwards.
+    On the real plan that was advice to buy $21.02 of history while claiming
+    to stay free. Confident wrong guidance is worse than none: the number
+    looks measured."""
+    from common import databento_fetch as FE
+    jobs = [_job("2025-08-01", 0.82), _job("2025-08-29", 1.10),
+            _job("2025-09-22", 0.0), _job("2026-09-04", 0.0)]
+    last_paid, first_free = FE.paid_boundary(jobs)
+    assert last_paid == "2025-08-29"
+    assert first_free == "2025-09-22"
+
+
+def test_a_plan_that_is_entirely_paid_has_no_free_side_to_point_at():
+    from common import databento_fetch as FE
+    assert FE.paid_boundary([_job("2025-08-01", 0.82)]) == ("2025-08-01", "")
+
+
+def test_a_free_date_BEFORE_the_paid_range_does_not_become_the_seam():
+    """A gap in the middle -- a date already covered, or a holiday priced at
+    zero -- must not be mistaken for the window opening early."""
+    from common import databento_fetch as FE
+    jobs = [_job("2025-07-04", 0.0), _job("2025-08-29", 1.10),
+            _job("2025-09-22", 0.0)]
+    assert FE.paid_boundary(jobs) == ("2025-08-29", "2025-09-22")

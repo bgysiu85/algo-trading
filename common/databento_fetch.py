@@ -283,21 +283,27 @@ def plan(client, groups, dataset, schemas, root, lookback, *, tick=PLAN_TICK):
 
 
 def paid_boundary(jobs) -> tuple[str, str] | None:
-    """(last free date, first paid date) among the dates being downloaded.
+    """(last PAID date, first FREE date after it), or None if nothing is paid.
 
-    L1 on Standard is ONE ROLLING YEAR and the window moves daily, so the date
-    a scoped quote pull stops being free is not a constant and must not be
-    written into a flag from memory. Every date the estimator priced above zero
-    is outside it; this reports the seam so the --after can be set from a
-    measurement.
+    L1 on Standard is ONE ROLLING YEAR, so the paid dates are the OLD ones and
+    the free dates are recent. The seam is therefore the latest paid date and
+    the earliest free date beyond it -- and `--after` must be set to the FREE
+    side of it.
+
+    The first version returned (max(free), min(paid)) and told the reader to
+    re-run with --after set to the earliest PAID date. That is the whole paid
+    range, exactly backwards, and on the real plan it would have advised buying
+    $21.02 of history while claiming to stay free. A guard that gives confident
+    wrong guidance is worse than none: the number it prints looks measured.
     """
     priced = sorted((day, c) for day, _s, _sc, *_r, c, _b, skip in jobs
                     if not skip)
-    free = [d for d, c in priced if c <= 0]
     paid = [d for d, c in priced if c > 0]
     if not paid:
         return None
-    return (max(free) if free else "", min(paid))
+    last_paid = max(paid)
+    later_free = [d for d, c in priced if c <= 0 and d > last_paid]
+    return (last_paid, min(later_free) if later_free else "")
 
 
 def _write_plan_report(a, root, jobs, todo, have, usd, nbytes) -> None:
@@ -314,14 +320,22 @@ def _write_plan_report(a, root, jobs, todo, have, usd, nbytes) -> None:
 
     seam = paid_boundary(jobs)
     if seam:
-        last_free, first_paid = seam
-        lines += ["THE FREE WINDOW ENDS HERE", "",
-                  f"  last date priced at $0.0000   {last_free or '(none)'}",
-                  f"  first date that COSTS money    {first_paid}", "",
-                  "  L1 is one ROLLING year on Standard and the window moves",
-                  "  every day, so this seam is a measurement and not a",
-                  f"  constant. Re-run with --after {first_paid} to stay free,",
-                  "  or raise --max-cost deliberately to buy across it.", ""]
+        last_paid, first_free = seam
+        n_paid = sum(1 for _d, _s, _sc, *_r, c, _b, skip in jobs
+                     if not skip and c > 0)
+        paid_usd = sum(c for _d, _s, _sc, *_r, c, _b, skip in jobs
+                       if not skip and c > 0)
+        lines += ["WHERE THE FREE WINDOW STARTS", "",
+                  f"  {n_paid} date(s) price above zero, ${paid_usd:,.2f} in "
+                  "total.",
+                  f"  last date that COSTS money    {last_paid}",
+                  f"  first FREE date after it      {first_free or '(none)'}",
+                  "",
+                  "  L1 is one ROLLING year on Standard, so the PAID dates are",
+                  "  the old ones and the window moves every day -- this seam",
+                  "  is a measurement, not a constant to write into a flag.",
+                  f"  Re-run with --after {first_free} to stay free, or raise",
+                  "  --max-cost deliberately to buy across it.", ""]
     else:
         lines += ["  Every date in this plan priced at $0.0000 -- the whole",
                   "  request is inside the free window.", ""]
