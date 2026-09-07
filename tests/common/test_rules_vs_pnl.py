@@ -59,28 +59,44 @@ def test_conforming_means_every_rule_not_the_capped_list():
 
 # --- the unmatched must not become non-conforming ---------------------------
 
-def test_a_symbol_day_with_no_daily_bar_is_unmatched_not_rejected():
+def test_a_symbol_day_with_no_daily_bar_is_excluded_not_rejected():
     """'The rules said no' and 'we could not ask' are different claims.
     Folding the second into the first loads every gap in the archive onto the
-    discretion side of the comparison -- and EQUS.SUMMARY starts 2024-07-01,
-    so there are real gaps."""
+    discretion side of the comparison."""
     cfg = Config()
     f = feats([("AAA", "2025-06-04", 5.0, 1e6, 50.0, 50.0)])
     days = {("AAA", "2025-06-04"): Day(100.0),
             ("ZZZ", "2023-01-05"): Day(-500.0)}
-    rows, unmatched = R.join(days, f, cfg)
+    rows, excluded = R.join(days, f, cfg)
     assert len(rows) == 1
-    assert unmatched == [("ZZZ", "2023-01-05", -500.0)]
+    assert [(e["symbol"], e["reason"]) for e in excluded] == [("ZZZ", "ABSENT")]
 
 
-def test_unmatched_pnl_is_reported_and_excluded_from_the_split():
+def test_a_name_too_new_to_score_is_its_own_category():
+    """THE finding this split exists for. All seven exclusions on the real data
+    were PRESENT in the dataset and traded on their first or second session --
+    RVOL needs a prior average and one does not exist yet. Reporting that as
+    'no daily bar, probably before the start date' was simply wrong, and it hid
+    a structural blind spot worth $14,151 of losses."""
     cfg = Config()
-    f = feats([("AAA", "2025-06-04", 5.0, 1e6, 50.0, 50.0)])
-    rows, unmatched = R.join({("AAA", "2025-06-04"): Day(100.0),
-                              ("ZZZ", "2023-01-05"): Day(-9_999.0)}, f, cfg)
-    out = R.render(rows, unmatched, cfg, "EQUS.SUMMARY")
+    f = feats([("NEW", "2026-07-13", 5.0, float("nan"), float("nan"), 50.0)])
+    rows, excluded = R.join({("NEW", "2026-07-13"): Day(-13_241.28)}, f, cfg)
+    assert rows == []
+    assert excluded[0]["reason"] == "TOO NEW"
+    assert excluded[0]["prior"] == 0
+
+
+def test_the_two_exclusion_reasons_are_reported_separately():
+    cfg = Config()
+    f = feats([("NEW", "2026-07-13", 5.0, float("nan"), float("nan"), 50.0),
+               ("AAA", "2025-06-04", 5.0, 1e6, 50.0, 50.0)])
+    rows, excluded = R.join({("NEW", "2026-07-13"): Day(-9_999.0),
+                             ("AAA", "2025-06-04"): Day(100.0),
+                             ("GONE", "2023-01-05"): Day(-42.0)}, f, cfg)
+    out = R.render(rows, excluded, cfg, "EQUS.SUMMARY")
+    assert "TOO NEW" in out and "ABSENT" in out
     assert "-9,999.00" in out
-    assert "UNMATCHED, FOR THE RECORD" in out
+    assert "structural blind" in out
 
 
 # --- the summary ------------------------------------------------------------

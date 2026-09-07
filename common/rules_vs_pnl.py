@@ -66,20 +66,47 @@ def rule_flags(row, cfg: Config) -> dict:
     }
 
 
-def join(days, feats: pd.DataFrame, cfg: Config) -> tuple[list[dict], list[tuple]]:
-    """Attach conformance to each traded symbol-day. Returns (rows, unmatched).
+def join(days, feats: pd.DataFrame, cfg: Config) -> tuple[list[dict], list[dict]]:
+    """Attach conformance to each traded symbol-day. Returns (rows, excluded).
 
-    A traded symbol-day with no daily bar is UNMATCHED, never "non-conforming".
-    Those are different claims: one is "the rules said no", the other is "we
-    could not ask". Folding the second into the first would load every gap in
-    the archive onto the discretion side of the comparison.
+    A traded symbol-day the screen cannot evaluate is EXCLUDED, never
+    "non-conforming". Those are different claims -- "the rules said no" versus
+    "we could not ask" -- and folding the second into the first loads every gap
+    onto the discretion side of the comparison.
+
+    The exclusions are then split by REASON, because the two are not the same
+    finding at all:
+
+      TOO NEW   the symbol has fewer than three prior sessions, so a 10-day
+                average and an RVOL are undefined. The screen is structurally
+                blind to these, by construction, forever.
+      ABSENT    no bar in this dataset at all -- a coverage gap.
+
+    The first version reported both as "no daily bar ... most likely before its
+    start date". On the real data all seven were PRESENT, every one traded on
+    its first or second day of existence, and the stated explanation was simply
+    wrong. A new-listing blind spot and a date-range gap need different
+    responses, and lumping them hid a category worth $14,151 of losses.
     """
     idx = {(r.symbol, r.date): r for r in feats.itertuples(index=False)}
-    rows, unmatched = [], []
+    first_bar: dict[str, str] = {}
+    for r in feats.itertuples(index=False):
+        d = first_bar.get(r.symbol)
+        if d is None or r.date < d:
+            first_bar[r.symbol] = r.date
+
+    rows, excluded = [], []
     for (sym, date), sd in sorted(days.items()):
         r = idx.get((sym, date))
         if r is None:
-            unmatched.append((sym, date, sd.net_pnl))
+            excluded.append({"symbol": sym, "date": date, "net_pnl": sd.net_pnl,
+                             "reason": "ABSENT", "first_bar": "", "prior": None})
+            continue
+        if pd.isna(r.prior_avg_dollar_vol) or pd.isna(r.rvol):
+            prior = sum(1 for (s, d2) in idx if s == sym and d2 < date)
+            excluded.append({"symbol": sym, "date": date, "net_pnl": sd.net_pnl,
+                             "reason": "TOO NEW", "prior": prior,
+                             "first_bar": first_bar.get(sym, "")})
             continue
         flags = rule_flags(r._asdict(), cfg)
         rows.append({
@@ -93,7 +120,7 @@ def join(days, feats: pd.DataFrame, cfg: Config) -> tuple[list[dict], list[tuple
             "conforms": all(flags.values()),
             **{f"pass_{k}": v for k, v in flags.items()},
         })
-    return rows, unmatched
+    return rows, excluded
 
 
 def drop_top(values, n: int) -> float:
@@ -115,7 +142,7 @@ def summarise(vals) -> dict:
     }
 
 
-def render(rows, unmatched, cfg: Config, dataset: str) -> str:
+def render(rows, excluded, cfg: Config, dataset: str) -> str:
     L = [f"RULE-CONFORMING vs NON-CONFORMING TRADES  ({dataset})", "",
          "  Recall is NOT the objective here. This sample is a LOSS, and a",
          "  screen tuned to reproduce all of it would be tuned to reproduce",
@@ -131,8 +158,8 @@ def render(rows, unmatched, cfg: Config, dataset: str) -> str:
     a, b = summarise(conf), summarise(non)
 
     L += [f"  traded symbol-days matched   {len(rows):,}",
-          f"  unmatched (no daily bar)     {len(unmatched):,}"
-          f"   net ${sum(u[2] for u in unmatched):,.2f}", ""]
+          f"  excluded, not evaluable      {len(excluded):,}"
+          f"   net ${sum(e['net_pnl'] for e in excluded):,.2f}", ""]
     L += ["THE SPLIT", "",
           f"  {'':<22} {'CONFORMING':>16} {'NON-CONFORMING':>18}",
           "  " + "-" * 58,
@@ -220,15 +247,33 @@ def render(rows, unmatched, cfg: Config, dataset: str) -> str:
           "  whose rejects lost money is doing its job. Rules are independent",
           "  here, so a symbol-day can appear on several rows."]
 
-    if unmatched:
-        L += ["", "UNMATCHED, FOR THE RECORD", "",
-              "  These traded symbol-days have no daily bar in this dataset --",
-              "  most likely before its start date. They are excluded from",
-              "  every figure above rather than counted as rule-breaking.", ""]
-        for sym, date, pnl in sorted(unmatched)[:15]:
-            L.append(f"    {sym:<8} {date}  ${pnl:>12,.2f}")
-        if len(unmatched) > 15:
-            L.append(f"    ... and {len(unmatched) - 15} more")
+    if excluded:
+        L += ["", "EXCLUDED, AND WHY", ""]
+        for reason, note in (
+            ("TOO NEW", "fewer than 3 prior sessions, so a 10-day average and "
+                        "an RVOL do not exist"),
+            ("ABSENT", "no bar in this dataset at all"),
+        ):
+            grp = [e for e in excluded if e["reason"] == reason]
+            if not grp:
+                continue
+            tot = sum(e["net_pnl"] for e in grp)
+            L += [f"  {reason}  --  {note}",
+                  f"  {len(grp)} symbol-days, net ${tot:,.2f}", ""]
+            for e in sorted(grp, key=lambda x: x["net_pnl"]):
+                pri = "" if e["prior"] is None else f"  {e['prior']} prior session(s)"
+                fb = f"  first bar {e['first_bar']}" if e["first_bar"] else ""
+                L.append(f"    {e['symbol']:<8} {e['date']}  "
+                         f"${e['net_pnl']:>12,.2f}{pri}{fb}")
+            L.append("")
+            if reason == "TOO NEW":
+                L += ["  These are not a coverage gap and not rule-breaking.",
+                      "  The screen CANNOT evaluate a name on its first or",
+                      "  second session -- RVOL needs a prior average, and one",
+                      "  does not exist yet. It is a permanent structural blind",
+                      "  spot, and on this sample it is a LOSING one. A system",
+                      "  built from these rules needs an explicit policy on new",
+                      "  listings rather than an accidental silence.", ""]
     return "\n".join(L)
 
 
@@ -259,17 +304,20 @@ def main(argv=None) -> int:
     if daily.empty:
         sys.exit(f"no daily bars in {a.archive}/{a.dataset}/ohlcv-1d/")
     feats = features(daily, cfg)
-    feats = feats[feats["prior_avg_dollar_vol"].notna()]
-    print(f"{len(feats):,} symbol-days of features")
+    # Deliberately NOT dropping rows whose prior average is NaN. Those are the
+    # names too new to evaluate, and filtering them here is what made them
+    # arrive as an unexplained "no daily bar" instead of a named category.
+    print(f"{len(feats):,} symbol-days of features "
+          f"({feats['prior_avg_dollar_vol'].isna().sum():,} too new to score)")
 
-    rows, unmatched = join(days, feats, cfg)
+    rows, excluded = join(days, feats, cfg)
     if rows:
         out = Path(a.csv)
         out.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(rows).to_csv(out, index=False)
         print(f"per-symbol-day rows written to {out}")
 
-    emit(render(rows, unmatched, cfg, a.dataset), a.report,
+    emit(render(rows, excluded, cfg, a.dataset), a.report,
          header=f"common.rules_vs_pnl  dataset={a.dataset}  "
                 f"min_rvol={cfg.min_rvol}  "
                 f"min_avg_dollar_vol={cfg.min_avg_dollar_vol:,.0f}")
