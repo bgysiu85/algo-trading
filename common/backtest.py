@@ -18,9 +18,9 @@ backtest so far.
 PACING
 ------
 IB allows roughly 60 historical-data requests per 10 minutes. This throttles to
-one request per REQUEST_INTERVAL_S and CHECKPOINTS after every pair, so a run
-can be interrupted and resumed without refetching. Expect ~75 minutes for 431
-pairs. Ctrl-C is safe.
+one request per REQUEST_INTERVAL_S and checkpoints every CHECKPOINT_EVERY pairs,
+so a run can be interrupted and resumed without refetching. Expect ~75 minutes
+for 431 pairs. Ctrl-C is safe.
 
 Read-only: requests history and places no orders. Paper port by default, though
 market data is identical either way.
@@ -135,6 +135,14 @@ HIST_DURATION = SHARED_DURATION
 
 LOG = logging.getLogger("bt")
 
+# How often the resumable checkpoint is written. See Runner._save_state: the
+# state file grows with the run, so writing it per pair costs O(n^2) bytes and
+# gives the Windows rename that many chances to lose a race with a virus
+# scanner. An interrupted run repeats at most this many pairs.
+CHECKPOINT_EVERY = 50
+CHECKPOINT_RETRIES = 5
+CHECKPOINT_BACKOFF_S = 0.2
+
 
 class Runner:
     def __init__(self, ib: IB, out_dir: Path, cache_dir: Path | None = None,
@@ -164,6 +172,10 @@ class Runner:
         self.unqualified: set[str] = set()
         self.state_path = self.state_dir / f"backtest_state_{strategy}.json"
         self.state = self._load_state()
+        self._since_save = 0
+        # How many pairs this run was ASKED for, so report() can say whether
+        # it covered them. Set by run().
+        self.requested = None
         self._last_req = 0.0
         self._last_qual = 0.0
         self._qual_fails = 0
@@ -202,10 +214,51 @@ class Runner:
                 LOG.warning("state file unreadable -- starting fresh")
         return {"done": {}, "trades": []}
 
-    def _save_state(self) -> None:
+    def _save_state(self, force: bool = False) -> None:
+        """Checkpoint, at most every CHECKPOINT_EVERY pairs.
+
+        WHY NOT EVERY PAIR, WHICH IS WHAT IT USED TO DO. The state file holds
+        one record per completed pair, so it GROWS as the run proceeds, and
+        rewriting it once per pair costs O(n^2) bytes. Over the 587 traded days
+        that is invisible. Over the 27,877 screened ones the file reaches
+        several MB and gets rewritten 27,877 times -- tens of gigabytes of
+        writes, and 27,877 chances for the rename below to lose a race.
+
+        The cost of the larger interval is bounded and small: an interrupted
+        run repeats at most CHECKPOINT_EVERY pairs, which come from a local
+        cache offline and are the cheapest part of the run.
+        """
+        self._since_save += 1
+        if not force and self._since_save < CHECKPOINT_EVERY:
+            return
+        self._since_save = 0
         tmp = self.state_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.state))
-        tmp.replace(self.state_path)
+
+        # WINDOWS LOSES THIS RACE. os.replace fails with WinError 5 (access
+        # denied) when anything else holds a handle to either file for an
+        # instant -- Defender scanning the file that was just written, the
+        # search indexer, a sync client. It is transient and it killed a
+        # 27,877-pair run at pair 511. Retry briefly rather than lose the run;
+        # if it is genuinely locked, say which file and why rather than
+        # raising WinError 5 at someone.
+        for attempt in range(CHECKPOINT_RETRIES):
+            try:
+                tmp.replace(self.state_path)
+                return
+            except PermissionError:
+                if attempt == CHECKPOINT_RETRIES - 1:
+                    raise RuntimeError(
+                        f"could not replace {self.state_path} after "
+                        f"{CHECKPOINT_RETRIES} attempts.\n"
+                        "  On Windows this is almost always another process "
+                        "holding the file for a moment:\n"
+                        "  antivirus scanning it, the search indexer, or a "
+                        "sync client (OneDrive/Dropbox).\n"
+                        "  The run's progress up to the last checkpoint is "
+                        "still in that file -- rerun to resume."
+                    ) from None
+                time.sleep(CHECKPOINT_BACKOFF_S * (attempt + 1))
 
     async def _pace(self) -> None:
         wait = REQUEST_INTERVAL_S - (time.monotonic() - self._last_req)
@@ -398,6 +451,7 @@ class Runner:
     async def run(self, pairs: list[dict], probe_only: bool,
                  exit_mode: str | None = None) -> None:
         total = len(pairs)
+        self.requested = total
         for n, p in enumerate(pairs, 1):
             key = f"{p['symbol']}|{p['date']}"
             if key in self.state["done"]:
@@ -467,11 +521,37 @@ class Runner:
                      rec["trades"], rec.get("net", 0.0))
             self._save_state()
 
+    def incomplete(self) -> int:
+        """Pairs asked for that were never reached. 0 when the run finished."""
+        if self.requested is None:
+            return 0
+        return max(0, self.requested - len(self.state["done"]))
+
     def report(self, probe_only: bool) -> None:
         done = self.state["done"]
         ok = [v for v in done.values() if v["status"] == "OK"]
         with_sess = [v for v in ok if v["session_bars"] > 0]
         print("\n" + "=" * 66)
+
+        # SAY SO BEFORE THE NUMBERS, NOT AFTER. report() is called from a
+        # `finally`, so it prints whether the run finished or died -- and on
+        # 2026-09-07 it printed a complete-looking MCL result (+190.54, 61
+        # trades, a concentration table) for 511 of 27,877 pairs, all of them
+        # symbols beginning with A. Nothing in the output said so. A partial
+        # result that does not announce itself is worse than a crash, because
+        # a crash does not get written down.
+        missed = self.incomplete()
+        if missed:
+            pct = len(done) / self.requested * 100
+            print("  *** PARTIAL RUN -- DO NOT QUOTE THESE FIGURES ***")
+            print(f"  {len(done):,} of {self.requested:,} pairs "
+                  f"({pct:.1f}%); {missed:,} never reached.")
+            print("  Pairs are processed in list order, so this is a PREFIX of")
+            print("  the universe, not a sample of it -- alphabetical by")
+            print("  symbol, which is not a property any result should have.")
+            print("  Rerun the same command to resume from the last checkpoint.")
+            print("-" * 66)
+
         print(f"  pairs attempted        {len(done)}")
         nq = sum(1 for v in done.values() if v["status"] == "NOT_QUALIFIED")
         print(f"  contract not qualified {nq}")
@@ -515,9 +595,20 @@ class Runner:
             print(f"    {s:6} {v:+9.2f}")
         print("=" * 66)
 
-        out = self.out_dir / f"backtest_trades_{self.strategy}.csv"
+        # A PARTIAL RUN DOES NOT GET THE REAL FILENAME. Everything downstream
+        # -- day_compare, compound_sim, db_load -- reads
+        # backtest_trades_<strategy>.csv and has no way to know it holds a
+        # prefix of the universe. Writing an incomplete run there replaces a
+        # good result with a bad one under a name that says nothing, and the
+        # loaders would ingest it as the run.
+        suffix = ".partial" if self.incomplete() else ""
+        out = self.out_dir / f"backtest_trades_{self.strategy}{suffix}.csv"
         pd.DataFrame(tr).to_csv(out, index=False)
         print(f"\n  trades written to {out}")
+        if suffix:
+            print("  named .partial because the run did not finish -- nothing")
+            print("  downstream reads that name. Resume, then it is rewritten")
+            print(f"  as backtest_trades_{self.strategy}.csv.")
 
 
 async def main_async(args) -> int:
@@ -591,12 +682,20 @@ async def main_async(args) -> int:
             del runner.state["done"][k]
         print("cleared %d failed entries (%s) for retry\n"
               % (len(stale), " + ".join(retry_statuses)))
-        runner._save_state()
+        runner._save_state(force=True)
     try:
         await runner.run(pairs, args.probe, args.exit_mode)
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("\ninterrupted -- progress saved, rerun to resume")
     finally:
+        # Checkpointing is now periodic, so the last few pairs are only in
+        # memory. Force a write before reporting, whether the run finished,
+        # was interrupted, or died -- otherwise resuming would redo them, and
+        # the report would describe state that was never saved.
+        try:
+            runner._save_state(force=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"\ncould not save final state: {e}")
         runner.report(args.probe)
         if not args.offline:
             ib.disconnect()
