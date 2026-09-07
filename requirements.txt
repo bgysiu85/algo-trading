@@ -13,3 +13,5 @@ pytest
 # Driver 18 installed separately; it does not come with the engine.
 sqlalchemy>=2.0
 pyodbc>=5.0
+# --- the read-only MCP server (common/mcp_sql.py)
+mcp>=1.2
