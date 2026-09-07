@@ -131,6 +131,33 @@ def test_rules_being_the_worse_half_is_stated_just_as_plainly():
     assert "THE RULES LOOK LIKE THE WORSE HALF" in out
 
 
+def test_a_verdict_that_one_trade_reverses_is_refused():
+    """THE defect this report shipped with. On the real data the conforming
+    half led by $11,828 on the total and TRAILED by $26,140 after removing a
+    single symbol-day -- and the verdict was computed from the total alone,
+    while the 'check the drop-top rows' caution was attached only to the
+    UNFAVOURABLE branch. The comfortable answer escaped the scrutiny."""
+    conf = [40_000.0] + [-300.0] * 60      # one huge winner carries the half
+    non = [-200.0] * 60
+    out = R.render(make_rows(conf, non), [], Config(), "X")
+    assert "THE RANKING REVERSES ON ONE TRADE" in out
+    assert "THE RULES LOOK LIKE THE BETTER HALF" not in out
+
+
+def test_a_stable_lead_still_gets_its_verdict():
+    """The guard must not refuse every conclusion -- a lead that survives
+    dropping the top three is a real one."""
+    out = R.render(make_rows([10.0] * 60, [-10.0] * 60), [], Config(), "X")
+    assert "survives dropping" in out
+
+
+def test_both_halves_losing_is_said_out_loud():
+    """'Better half' is a ranking. Without this line a reader takes a verdict
+    about which side won as a case for the rules being profitable."""
+    out = R.render(make_rows([-10.0] * 40, [-50.0] * 40), [], Config(), "X")
+    assert "BOTH halves lost money" in out
+
+
 def test_the_report_says_recall_is_not_the_objective():
     """Guarding the framing, not the arithmetic: this sample is a loss, and a
     screen tuned to reproduce all of it reproduces the loss."""

@@ -146,28 +146,65 @@ def render(rows, unmatched, cfg: Config, dataset: str) -> str:
           f"  {'net, drop top 3':<22} {a['drop3']:>16,.2f} {b['drop3']:>18,.2f}",
           f"  {'net, drop top 5':<22} {a['drop5']:>16,.2f} {b['drop5']:>18,.2f}", ""]
 
-    # The comparison that matters, stated in one line rather than left to the
-    # reader -- and hedged where the sample cannot support a conclusion.
-    if a["n"] < 30 or b["n"] < 30:
+    # The comparison that matters. THE VERDICT MUST CONSULT DROP-TOP, not just
+    # the level: the first version of this report printed "the rules look like
+    # the better half" from the totals alone, while its own drop-top-1 row
+    # showed the ranking reversing on the removal of ONE trade. Worse, the
+    # "check the drop-top rows" caution was attached only to the unfavourable
+    # branch -- so the comfortable answer was the one that escaped scrutiny.
+    # PROGRAM_INDEX section 4 puts drop-top-N first for exactly this reason.
+    thin = a["n"] < 30 or b["n"] < 30
+    if thin:
         L += ["  TOO FEW ON ONE SIDE to compare means. Report the totals and",
-              "  stop; a difference in means on this sample would be noise."]
-    else:
+              "  stop; a difference in means on this sample would be noise.",
+              ""]
+
+    if not thin:
         d = a["mean"] - b["mean"]
+        lead_level = a["total"] - b["total"]
+        lead_drop1 = a["drop1"] - b["drop1"]
+        lead_drop3 = a["drop3"] - b["drop3"]
         L += [f"  Conforming trades averaged ${d:+,.2f} per symbol-day more "
-              f"than", "  non-conforming ones.", ""]
-        if d > 0 and a["total"] > b["total"]:
-            L += ["  THE RULES LOOK LIKE THE BETTER HALF, on both the mean and",
-                  "  the total. That is an argument for enforcing them, not for",
+              "than", "  non-conforming ones.",
+              f"  Conforming lead on the total:  ${lead_level:+,.2f}",
+              f"                    drop top 1:  ${lead_drop1:+,.2f}",
+              f"                    drop top 3:  ${lead_drop3:+,.2f}", ""]
+
+        if (lead_level > 0) != (lead_drop1 > 0):
+            L += ["  THE RANKING REVERSES ON ONE TRADE. Removing the single "
+                  "best", "  symbol-day flips which half looks better, so the "
+                  "level comparison",
+                  "  is a fact about that trade and not about the rules.",
+                  "  Do NOT enforce or relax anything on this evidence.", "",
+                  "  The robust statistics are what is left:",
+                  f"    median      conforming ${a['median']:,.2f} vs "
+                  f"non-conforming ${b['median']:,.2f}",
+                  f"    profitable  {100*a['win_rate']:.1f}% vs "
+                  f"{100*b['win_rate']:.1f}%"]
+        elif lead_level > 0 and lead_drop3 > 0:
+            L += ["  THE RULES LOOK LIKE THE BETTER HALF, and it survives "
+                  "dropping", "  the top 3. That is an argument for enforcing "
+                  "them, not for",
                   "  widening the screen to admit what they reject."]
-        elif d < 0:
-            L += ["  THE RULES LOOK LIKE THE WORSE HALF. Enforcing them in a",
-                  "  backtest would then be selecting the losing subset, and",
-                  "  the rules are not the edge they are assumed to be. Check",
-                  "  the drop-top rows before believing this either way."]
+        elif lead_level < 0 and lead_drop3 < 0:
+            L += ["  THE RULES LOOK LIKE THE WORSE HALF, and it survives "
+                  "dropping", "  the top 3. Enforcing them in a backtest would "
+                  "be selecting the",
+                  "  losing subset, and the rules are not the edge assumed."]
         else:
-            L += ["  NO CLEAR SEPARATION. The rules are not distinguishing",
-                  "  winners from losers on this sample."]
-    L.append("")
+            L += ["  NO STABLE SEPARATION. The direction depends on how many "
+                  "top", "  trades are removed, so the sample cannot answer "
+                  "this."]
+        L.append("")
+
+    # Both halves can lose. A verdict about which is BETTER says nothing about
+    # whether either is worth trading, and the ranking language above invites
+    # exactly that misreading.
+    if a["total"] < 0 and b["total"] < 0:
+        L += [f"  Note that BOTH halves lost money: conforming ${a['total']:,.2f}"
+              f" over {a['n']:,} symbol-days",
+              f"  (${a['mean']:,.2f} each). 'Better half' is a ranking, not a "
+              "case for the rules", "  being profitable.", ""]
 
     L += ["WHICH RULE REJECTS THE MONEY", "",
           f"  {'rule':<22} {'failed':>7} {'their net P/L':>16} "
