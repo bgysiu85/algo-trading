@@ -546,11 +546,19 @@ async def main_async(args) -> int:
         print(f"REFUSING: port {args.port} is {LIVE_PORTS[args.port]}.")
         return 1
 
-    pairs_path = Path(args.pairs)
-    if not pairs_path.exists():
-        print(f"{pairs_path} not found")
+    # SEVERAL LISTS, ONE RUN. The leakage control needs survivors and rejects
+    # scored by the same code in the same pass, and running them as two passes
+    # into one state directory would have the second rewrite the first's trades
+    # CSV. load_pairs already takes a list and de-duplicates; leak_control
+    # re-separates the two populations from the source lists afterwards.
+    paths = [Path(p) for p in
+             ([args.pairs] if isinstance(args.pairs, str) else args.pairs)]
+    missing = [p for p in paths if not p.exists()]
+    if missing:
+        for p in missing:
+            print(f"{p} not found")
         return 1
-    pairs = load_pairs(pairs_path)
+    pairs = load_pairs(paths)
     if args.limit:
         pairs = pairs[: args.limit]
     print(f"{len(pairs)} symbol/date pairs to process\n")
@@ -641,7 +649,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="run even while a live session holds the lock. IB's "
                         "request cap is account-wide, so this WILL contend "
                         "with that session.")
-    p.add_argument("--pairs", default="var/state/traded_pairs.json")
+    p.add_argument("--pairs", nargs="+", default=["var/state/traded_pairs.json"],
+                   help="one or more symbol-date lists; several are unioned, "
+                        "which is how the screened run scores survivors and "
+                        "rejects in a single pass")
     p.add_argument("--out-dir", default="var/reports",
                    help="where backtest_trades_<strategy>.csv is written")
     p.add_argument("--state-dir", default="var/state",
