@@ -258,9 +258,9 @@ def test_the_report_separates_a_cache_hole_from_a_thin_open():
                  orb_minutes=15, status="FEW_BARS", rth_bars=20, range_bars=2),
     ]
     out = "\n".join(P.render(rows))
-    assert "the cache, not the market" in out
-    assert "traded all day, thin at the open" in out
-    assert "thin all day" in out
+    assert "nothing published on this tape" in out
+    assert "visible all day, invisible at the open" in out
+    assert "indistinguishable" in out
 
 
 def test_the_report_shows_what_the_bar_threshold_costs():
@@ -274,3 +274,30 @@ def test_the_report_shows_what_the_bar_threshold_costs():
     assert "MIN_RANGE_BARS is 10 of 15 and was never measured" in out
     for k in (3, 5, 8, 10, 12):
         assert f">= {k:>2} of 15 bars" in out
+
+
+def test_the_report_names_the_tape_before_the_counts():
+    """The first version of 10.1b labelled 12,702 symbol-days "thin all day".
+    They are not known to be thin: bar_cache_db is EQUS.MINI, whose measured
+    capture is a median 4.8% of the consolidated tape, so an ordinarily-traded
+    name appears with about 19 bars of 390. The counts were being read as a
+    fact about liquidity when they are a fact about the tape."""
+    rows = [P.DayRow(symbol="A", date=DAY, population="survivors",
+                     orb_minutes=15, status="FEW_BARS", rth_bars=40,
+                     range_bars=1)]
+    out = "\n".join(P.render(rows))
+    assert "READ THE TAPE CAVEAT BELOW BEFORE THE COUNTS" in out
+    assert "EQUS.MINI" in out and "4.8%" in out
+    assert out.index("EQUS.MINI") < out.index("no RTH bars at all")
+
+
+def test_the_report_says_orb_cannot_be_evaluated_rather_than_rejected():
+    """A measurement that cannot be made is not a negative result, and the
+    difference decides whether ORB is abandoned or the cache is rebuilt."""
+    rows = [P.DayRow(symbol="A", date=DAY, population="survivors",
+                     orb_minutes=15, status="FEW_BARS", rth_bars=40,
+                     range_bars=1)]
+    out = "\n".join(P.render(rows))
+    assert "it does not reject ORB" in out
+    assert "cannot be" in out and "evaluated on these bars" in out
+    assert "XNAS.BASIC" in out

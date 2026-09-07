@@ -325,18 +325,23 @@ def render(rows: list[DayRow]) -> list[str]:
     few = [r for r in base if r.status == "FEW_BARS"]
     if few or base:
         L += ["", "10.1b  WHY THE RANGE IS UNUSABLE (15-minute range)", "",
-              "  A thin OPEN on a name that traded all day is a liquidity fact.",
-              "  A symbol-day with no RTH bars at all is a hole in the cache.",
-              "  They need different fixes, so they are counted separately.", ""]
+              "  READ THE TAPE CAVEAT BELOW BEFORE THE COUNTS. bar_cache_db is",
+              "  built from EQUS.MINI, whose measured capture of the",
+              "  consolidated tape is a MEDIAN 4.8% at 16:00 and 1.5% by 09:30",
+              "  (var/reports/capture_ratio.txt, capture_intraday.txt). A name",
+              "  that traded every minute of the session appears here with",
+              "  roughly 19 bars of 390. So a LOW BAR COUNT IS THE EXPECTED",
+              "  APPEARANCE OF AN ORDINARY NAME ON THIS TAPE, and none of the",
+              "  rows below can be read as a fact about liquidity.", ""]
         empty = [r for r in base if r.rth_bars == 0]
         sparse = [r for r in few if r.rth_bars >= 100]
         thin = [r for r in few if 0 < r.rth_bars < 100]
         L += [f"  no RTH bars at all                {len(empty):>8,}   "
-              "-> the cache, not the market",
+              "-> nothing published on this tape",
               f"  few opening bars, >=100 RTH bars  {len(sparse):>8,}   "
-              "-> traded all day, thin at the open",
+              "-> visible all day, invisible at the open",
               f"  few opening bars, <100 RTH bars   {len(thin):>8,}   "
-              "-> thin all day",
+              "-> indistinguishable: 4.8% of a full day looks like this",
               ""]
         if few:
             rb = [r.range_bars for r in few]
@@ -350,10 +355,20 @@ def render(rows: list[DayRow]) -> list[str]:
             L.append(f"    >= {k:>2} of 15 bars   {n:>8,}  "
                      f"({n/len(base)*100:>5.1f}% of symbol-days)")
         L += ["",
-              "  MIN_RANGE_BARS is 10 of 15 and was never measured. If the",
-              "  curve above is flat, the threshold is not what is excluding",
-              "  these days and the data is. If it is steep, the threshold is",
-              "  a choice about how much of the universe ORB gives up."]
+              "  MIN_RANGE_BARS is 10 of 15 and was never measured. But note",
+              "  that even >= 3 of 15 leaves most symbol-days out, so the",
+              "  threshold is not what is excluding them -- the tape is. No",
+              "  setting of this parameter rescues an opening range built from",
+              "  one print.", "",
+              "  WHAT THIS MEANS FOR ORB, PLAINLY: an opening range is a HIGH",
+              "  and a LOW over fifteen minutes. Computed from a tape that",
+              "  publishes about one print per fifteen minutes at the open, it",
+              "  is not a measurement of anything. This is not a strategy",
+              "  result and it does not reject ORB -- it says ORB cannot be",
+              "  evaluated on these bars. The fix is a fuller tape:",
+              "  XNAS.BASIC carries the FINRA TRF prints, is tier L0 (free to",
+              "  retrieve), and its history begins 2024-07-01, which is exactly",
+              "  where the screened universe begins."]
 
     L += ["", "10.2  THE RTH SCREEN AT THE RANGE END (15-minute range)", ""]
     if ok:
