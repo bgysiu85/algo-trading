@@ -24,6 +24,7 @@ THREE CONVENTIONS THAT SILENTLY CHANGE RESULTS
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -33,6 +34,67 @@ def symbology_path(path: str | Path) -> Path:
     """The archived instrument_id -> ticker mapping for one data file."""
     p = Path(path)
     return p.with_name(p.name.split(".")[0] + ".symbology.json")
+
+
+def symbol_lookup(symbology_text: str, dates_needed) -> dict:
+    """{(instrument_id, 'YYYY-MM-DD'): ticker} from an archived symbology file.
+
+    A sidecar maps ticker -> intervals of {d0, d1, s}, where `s` is the
+    instrument_id and the interval is [d0, d1). The map has to be keyed on the
+    PAIR, not on the id alone: an instrument_id is only unique within its
+    interval and ids are reused, so keying on the id would silently mislabel
+    every row of a reused one -- a wrong ticker rather than a missing one.
+
+    Only the dates actually present are expanded, which bounds a monthly chunk
+    at roughly 11,500 tickers x 21 sessions rather than the whole history.
+    """
+    data = json.loads(symbology_text)
+    result = data.get("result", data)
+    want = sorted({str(d) for d in dates_needed})
+    out: dict[tuple[int, str], str] = {}
+    for ticker, intervals in result.items():
+        if not isinstance(intervals, list):
+            continue
+        for iv in intervals:
+            try:
+                sid = int(iv["s"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            d0, d1 = iv.get("d0", ""), iv.get("d1", "")
+            for day in want:
+                if d0 <= day < d1:
+                    out[(sid, day)] = ticker
+    return out
+
+
+def map_symbols_manually(df: pd.DataFrame, symbology_text: str) -> pd.DataFrame:
+    """Resolve instrument_id -> ticker without databento's vectorised resolver.
+
+    WHY THIS EXISTS
+    ---------------
+    `to_df(map_symbols=True)` dies on the full-universe MONTHLY chunks:
+
+        TypeError: Cannot compare structured arrays unless they have a common
+        dtype
+
+    raised by `np.unique(query_array, axis=0)` inside
+    `InstrumentMap.resolve_many`. That array is built from
+    `np.asarray(dates, dtype='datetime64[D]')` applied to a tz-aware pandas
+    Series, which does not cleanly downcast on this numpy/pandas pair.
+
+    It is a version interaction, not a corrupt file -- the identical call
+    succeeds on the 5 MB daily chunks and fails on the 390 MB minute ones. So
+    the join is done here instead, from the archived sidecar, and is checked
+    against the working path on a file where both run.
+    """
+    idx = df.index
+    dates = (idx.tz_convert("UTC") if getattr(idx, "tz", None) else idx
+             ).strftime("%Y-%m-%d")
+    lut = symbol_lookup(symbology_text, set(dates))
+    ids = df["instrument_id"].astype("int64").to_numpy()
+    df = df.copy()
+    df["symbol"] = [lut.get((int(i), d)) for i, d in zip(ids, dates)]
+    return df
 
 
 def read_dbn(path: str | Path, *, require_symbols: bool = True) -> pd.DataFrame:
@@ -78,7 +140,23 @@ def read_dbn(path: str | Path, *, require_symbols: bool = True) -> pd.DataFrame:
             "symbol=None. Backfill it with:\n"
             "  python -m common.databento_universe --resymbolize")
 
-    df = store.to_df(map_symbols=True)
+    sym_text = sym.read_text(encoding="utf-8") if sym.exists() else ""
+    try:
+        df = store.to_df(map_symbols=True)
+    except TypeError as e:
+        # databento's vectorised resolver fails on the large monthly chunks --
+        # see map_symbols_manually. Narrow to that failure: any OTHER TypeError
+        # is a real problem and must not be swallowed into a silent fallback.
+        if "structured arrays" not in str(e):
+            raise
+        if not sym_text:
+            raise RuntimeError(
+                f"{Path(path).name}: databento's symbol resolver failed and "
+                f"there is no {sym.name} to fall back on. Backfill it with "
+                "python -m common.databento_universe --resymbolize") from e
+        print(f"  {Path(path).name}: resolver failed, mapping symbols from "
+              f"{sym.name}", flush=True)
+        df = map_symbols_manually(store.to_df(map_symbols=False), sym_text)
     if df.empty:
         return df
     if require_symbols and "symbol" in df.columns and df["symbol"].isna().all():
