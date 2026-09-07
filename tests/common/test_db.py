@@ -362,3 +362,149 @@ def test_a_separate_password_is_injected_escaped(monkeypatch):
     got = D._with_password("mssql+pyodbc://u@localhost/Trading", "TRADING_DB")
     assert D._password_of(got) == "aa@bb!cc"
     assert "<redacted>" in D._scrub(got)
+
+
+# --- every table has to have a way in ---------------------------------------
+
+def test_every_table_can_be_filled_from_the_command_line():
+    """Three tables shipped that nothing could ever fill: flex_execution had a
+    loader main() never called, and the two compound tables had no loader at
+    all. Nobody noticed because an empty table looks the same whether the load
+    has not been run or cannot be. This fails the moment a table is added
+    without a way in."""
+    missing = sorted(set(D.TABLES) - set(L.FILLED_BY))
+    assert not missing, (
+        f"no CLI path fills {missing} -- add a loader and list it in "
+        "db_load.FILLED_BY, or the table is a promise the database cannot keep")
+
+
+def test_the_map_names_flags_that_actually_exist():
+    """A map is only as good as its agreement with the parser. A renamed flag
+    would otherwise leave the map confidently pointing at nothing."""
+    flags = {s for act in L.parser()._actions for s in act.option_strings}
+    for table, flag in L.FILLED_BY.items():
+        assert flag in flags, f"{table} claims {flag}, which the CLI does not have"
+
+
+def test_the_map_does_not_name_a_table_that_is_gone():
+    assert not sorted(set(L.FILLED_BY) - set(D.TABLES))
+
+
+# --- the compounding replay -------------------------------------------------
+
+RUN_CSV = ("source,capital,per_trade_pct,total_pct,dv_cap_pct,dv_applied,taken,"
+           "skipped_concurrency,skipped_ruined,skipped_too_small,dv_capped,"
+           "final,multiple,max_drawdown\n"
+           "mc5,10000,60,100,1.0,1,380,4,0,2,0,24464.11,2.446411,0.774\n")
+
+SWEEP_CSV = ("source,per_trade_pct,total_pct,final,multiple,max_drawdown,taken,"
+             "skipped,dv_capped\n"
+             "mc5,60,100,24464.11,2.446411,0.774,380,6,0\n")
+
+
+def test_a_single_run_lands_in_compound_run(eng, tmp_path):
+    p = tmp_path / "compound_run.csv"
+    p.write_text(RUN_CSV)
+    with eng.begin() as c:
+        kind, _, n = L.load_compound(c, p)
+    assert kind == "compound_run" and n == 1
+    assert count(eng, D.compound_run) == 1
+    assert count(eng, D.compound_sweep) == 0
+
+
+def test_a_sweep_lands_in_compound_sweep(eng, tmp_path):
+    p = tmp_path / "compound_sweep.csv"
+    p.write_text(SWEEP_CSV)
+    with eng.begin() as c:
+        kind, _, n = L.load_compound(c, p)
+    assert kind == "compound_sweep" and n == 1
+    assert count(eng, D.compound_sweep) == 1
+    assert count(eng, D.compound_run) == 0
+
+
+def test_the_header_decides_not_the_filename(eng, tmp_path):
+    """The two modes share a --out flag. Dispatching on the name would put a
+    sweep in the run table the first time somebody passed one."""
+    p = tmp_path / "compound_run.csv"          # named like a run
+    p.write_text(SWEEP_CSV)                    # shaped like a sweep
+    with eng.begin() as c:
+        kind, _, _ = L.load_compound(c, p)
+    assert kind == "compound_sweep"
+
+
+def test_an_unrecognised_csv_is_refused_with_its_columns(eng, tmp_path):
+    p = tmp_path / "compound_run.csv"
+    p.write_text("a,b\n1,2\n")
+    with pytest.raises(SystemExit) as e:
+        with eng.begin() as c:
+            L.load_compound(c, p)
+    assert "neither" in str(e.value) and "'a', 'b'" in str(e.value)
+
+
+def test_reloading_a_compound_run_does_not_double_it(eng, tmp_path):
+    p = tmp_path / "compound_run.csv"
+    p.write_text(RUN_CSV)
+    for _ in range(2):
+        with eng.begin() as c:
+            L.load_compound(c, p)
+    assert count(eng, D.compound_run) == 1
+
+
+# --- the fills --------------------------------------------------------------
+
+FLEX_HEADER = ["Symbol", "TradeDate", "DateTime", "Quantity", "TradePrice",
+               "IBCommission", "FifoPnlRealized", "Buy/Sell", "AssetClass",
+               "LevelOfDetail", "TradeID"]
+
+
+def write_flex(path, rows):
+    with open(path, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(FLEX_HEADER)
+        w.writerows(rows)
+    return path
+
+
+def test_executions_load_with_their_et_minute_resolved(eng, tmp_path):
+    """The ET minute comes from common.flex's zone MEASUREMENT, not from a
+    constant offset applied to the stored timestamp -- the true offset moves
+    between 13 and 16 hours across the year because the US and Australia change
+    DST on different dates. A constant would be wrong for part of every year
+    and would look entirely reasonable in the table."""
+    p = write_flex(tmp_path / "flex.csv", [
+        ["CYAB", "2026-08-28", "2026-08-29 00:01:52", 100, 5.0, -1.0, 0.0,
+         "BUY", "STK", "EXECUTION", 1],
+        ["CYAB", "2026-08-28", "2026-08-29 00:31:52", -100, 5.5, -1.0, 49.0,
+         "SELL", "STK", "EXECUTION", 2],
+    ])
+    with eng.begin() as c:
+        n = L.load_flex_executions(c, [p])
+    assert n == 2
+    with eng.connect() as c:
+        rows = c.execute(select(D.flex_execution.c.trade_date,
+                                D.flex_execution.c.et_minute)
+                         .order_by(D.flex_execution.c.trade_id)).all()
+    # Dated to the SESSION, not to the DateTime's calendar day.
+    assert all(str(r[0]) == "2026-08-28" for r in rows)
+    assert rows[0][1] is not None and rows[0][1] < rows[1][1]
+
+
+def test_reloading_the_fills_replaces_rather_than_appends(eng, tmp_path):
+    p = write_flex(tmp_path / "flex.csv", [
+        ["AAA", "2026-08-04", "2026-08-04 23:31:00", 100, 5.0, -1.0, 0.0,
+         "BUY", "STK", "EXECUTION", 1]])
+    for _ in range(2):
+        with eng.begin() as c:
+            L.load_flex_executions(c, [p])
+    assert count(eng, D.flex_execution) == 1
+
+
+def test_loading_the_fills_records_where_they_came_from(eng, tmp_path):
+    p = write_flex(tmp_path / "flex.csv", [
+        ["AAA", "2026-08-04", "2026-08-04 23:31:00", 100, 5.0, -1.0, 0.0,
+         "BUY", "STK", "EXECUTION", 1]])
+    with eng.begin() as c:
+        L.load_flex_executions(c, [p])
+    with eng.connect() as c:
+        kinds = [r[0] for r in c.execute(select(D.load_run.c.kind)).all()]
+    assert "flex_execution" in kinds

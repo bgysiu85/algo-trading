@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Push the file artefacts into the database, idempotently.
 
-    python -m common.db_load --all
     python -m common.db_load --backtests var/reports/screened var/state/screened
     python -m common.db_load --minute-bars bar_cache_db
+    python -m common.db_load --flex-executions var/flex/*.csv
+    python -m common.db_load --compound var/reports/compound_run.csv \
+                                        var/reports/compound_sweep.csv
+
+Every table has exactly one flag that fills it; FILLED_BY says which, and a
+test fails if a table is ever added without one.
 
 WHY IDEMPOTENT IS THE WHOLE DESIGN
 -----------------------------------
@@ -159,7 +164,7 @@ def load_flex(conn, summary: Path | None, round_trips: Path | None,
     return out
 
 
-def load_executions(conn, execs) -> int:
+def load_executions(conn, execs, source: Path | None = None) -> int:
     """From common.flex Execution objects, so the timezone work is not redone."""
     rows = [{
         "trade_id": e.trade_id, "symbol": e.symbol,
@@ -170,7 +175,82 @@ def load_executions(conn, execs) -> int:
     conn.execute(delete(D.flex_execution))
     for i in range(0, len(rows), BATCH):
         conn.execute(insert(D.flex_execution), rows[i:i + BATCH])
+    if source is not None:
+        note_load(conn, run_id("flex", "executions", source), "flex_execution",
+                  source, len(rows))
     return len(rows)
+
+
+def load_flex_executions(conn, paths, tz: str | None = None) -> int:
+    """Parse the Flex reports and load the fills.
+
+    The parse is not repeated here. common.flex resolves the report's timezone
+    by SCORING candidate zones against the fills that cross midnight, and gets a
+    different answer in different parts of the year because the US and Australia
+    change DST on different dates. Re-deriving an ET minute from the stored
+    timestamp with a constant offset would be wrong for part of every year and
+    would look right in the table.
+    """
+    from common import flex as F
+    execs = F.load_many([str(p) for p in paths])
+    F.measure_offsets(execs, force=tz)
+    newest = max(paths, key=lambda p: Path(p).stat().st_mtime)
+    return load_executions(conn, execs, Path(newest))
+
+
+# --- the compounding replay ------------------------------------------------
+
+# The two modes write different columns, and a loader that guessed from the
+# filename would load a sweep into the single-run table the first time somebody
+# passed --out. The header decides, and an unrecognised one is an error rather
+# than a partial load.
+RUN_COLS = {"source", "capital", "per_trade_pct", "total_pct", "taken",
+            "final", "multiple", "max_drawdown"}
+SWEEP_COLS = {"source", "per_trade_pct", "total_pct", "final", "multiple",
+              "max_drawdown", "taken", "skipped"}
+
+
+def load_compound(conn, path: Path) -> tuple[str, str, int]:
+    with open(path, newline="") as fh:
+        rdr = csv.DictReader(fh)
+        head = set(rdr.fieldnames or [])
+        rows = list(rdr)
+    rid = run_id("compound", path.stem, path)
+
+    if "capital" in head and RUN_COLS <= head:
+        kind, table = "compound_run", D.compound_run
+        out = [{"run_id": rid, "source": r["source"],
+                "run_at": datetime.now(), "capital": _f(r["capital"]),
+                "per_trade_pct": _f(r["per_trade_pct"]),
+                "total_pct": _f(r["total_pct"]),
+                "dv_cap_pct": _f(r.get("dv_cap_pct")),
+                "dv_applied": bool(_i(r.get("dv_applied"))),
+                "taken": _i(r["taken"]),
+                "skipped_concurrency": _i(r.get("skipped_concurrency")),
+                "skipped_ruined": _i(r.get("skipped_ruined")),
+                "skipped_too_small": _i(r.get("skipped_too_small")),
+                "dv_capped": _i(r.get("dv_capped")), "final": _f(r["final"]),
+                "multiple": _f(r["multiple"]),
+                "max_drawdown": _f(r["max_drawdown"])} for r in rows]
+    elif SWEEP_COLS <= head:
+        kind, table = "compound_sweep", D.compound_sweep
+        out = [{"run_id": rid, "source": r["source"],
+                "per_trade_pct": _f(r["per_trade_pct"]),
+                "total_pct": _f(r["total_pct"]), "final": _f(r["final"]),
+                "multiple": _f(r["multiple"]),
+                "max_drawdown": _f(r["max_drawdown"]),
+                "taken": _i(r["taken"]), "skipped": _i(r.get("skipped")),
+                "dv_capped": _i(r.get("dv_capped"))} for r in rows]
+    else:
+        raise SystemExit(
+            f"{path} is neither a compound run nor a compound sweep.\n"
+            f"  columns found: {sorted(head)}\n"
+            "  a run needs 'capital'; a sweep needs 'skipped'.\n"
+            "  Produce one with: python -m common.compound_sim [--sweep]")
+
+    n = replace(conn, table, "run_id", rid, out)
+    note_load(conn, rid, kind, path, n)
+    return kind, rid, n
 
 
 # --- backtests -------------------------------------------------------------
@@ -326,18 +406,53 @@ def load_daily_bars(conn, archive: Path, dataset: str) -> int:
     return len(rows)
 
 
-def main(argv=None) -> int:
+# --- which flag fills which table ------------------------------------------
+
+# THE POINT OF THIS MAP IS THE TEST THAT READS IT. Three tables shipped that
+# nothing could ever fill -- flex_execution had a loader no CLI path called,
+# and the two compound tables had no loader at all. They were not empty because
+# nobody had run the load; they were empty because there was no load to run,
+# and an empty table looks identical either way. A table with no way in is a
+# claim the database makes and cannot honour.
+FILLED_BY = {
+    "screen_run": "--screen",
+    "screen_candidate": "--screen",
+    "flex_round_trip": "--flex",
+    "flex_execution": "--flex-executions",
+    "backtest_run": "--backtests",
+    "backtest_trade": "--backtests",
+    "backtest_coverage": "--backtests",
+    "day_dollar_volume": "--dollar-volume",
+    "bar_minute": "--minute-bars",
+    "bar_daily": "--daily-bars",
+    "compound_run": "--compound",
+    "compound_sweep": "--compound",
+    "load_run": "--screen",     # written by note_load on every load
+}
+
+
+def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Load file artefacts into SQL Server")
     ap.add_argument("--url")
     ap.add_argument("--screen", nargs=2, metavar=("SURVIVORS.json", "REJECTS.json"))
     ap.add_argument("--flex", metavar="ROUND_TRIPS.csv")
+    ap.add_argument("--flex-executions", nargs="+", metavar="FLEX.csv",
+                    help="the raw IBKR Flex EXECUTION-level report(s)")
+    ap.add_argument("--tz", default=None,
+                    help="force the Flex report timezone (see common.flex --tz-report)")
+    ap.add_argument("--compound", nargs="+", metavar="CSV",
+                    help="compound_run.csv and/or compound_sweep.csv")
     ap.add_argument("--backtests", nargs=3,
                     metavar=("REPORTS_DIR", "STATES_DIR", "UNIVERSE"))
     ap.add_argument("--strategy", nargs="+", default=["mcl", "mc5", "vw9_5m"])
     ap.add_argument("--dollar-volume", metavar="CSV")
     ap.add_argument("--minute-bars", metavar="CACHE_ROOT")
     ap.add_argument("--daily-bars", nargs=2, metavar=("ARCHIVE", "DATASET"))
-    a = ap.parse_args(argv)
+    return ap
+
+
+def main(argv=None) -> int:
+    a = parser().parse_args(argv)
 
     eng = D.engine(a.url)
     D.create_all(eng)
@@ -348,6 +463,14 @@ def main(argv=None) -> int:
         if a.flex:
             got = load_flex(conn, None, Path(a.flex))
             print(f"round trips   {got.get('round_trips', 0):,}")
+        if a.flex_executions:
+            n = load_flex_executions(conn, [Path(p) for p in a.flex_executions],
+                                     tz=a.tz)
+            print(f"executions    {n:,} fills")
+        if a.compound:
+            for p in a.compound:
+                kind, rid, n = load_compound(conn, Path(p))
+                print(f"{kind:<13} {n:,} rows   {rid}")
         if a.dollar_volume:
             print(f"dollar volume {load_dollar_volume(conn, Path(a.dollar_volume)):,}")
         if a.backtests:

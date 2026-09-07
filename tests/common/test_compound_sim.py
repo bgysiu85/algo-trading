@@ -278,3 +278,13 @@ def test_only_the_wanted_symbol_days_come_back(tmp_path, monkeypatch):
     monkeypatch.setattr("common.dbn_io.daily_frame", lambda *a, **k: frame)
     rows = V.build(tmp_path, "EQUS.SUMMARY", {("AAA", "2026-03-16")})
     assert [r["symbol"] for r in rows] == ["AAA"]
+
+
+def test_the_two_modes_never_write_the_same_file():
+    """One shared --out default meant whichever mode ran last replaced the
+    other's results under a name that still looked correct, and the columns
+    differ completely -- so a loader reading it had no way to know which it
+    got."""
+    from common import compound_sim as C
+    assert C.out_default(True) != C.out_default(False)
+    assert "sweep" in C.out_default(True)

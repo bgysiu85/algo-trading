@@ -365,6 +365,12 @@ def render(results: dict, capital, per_trade_pct, total_pct, capped) -> list[str
     return L
 
 
+def out_default(sweep: bool) -> str:
+    """Named after the table it loads into, and never the same file twice."""
+    return ("var/reports/compound_sweep.csv" if sweep
+            else "var/reports/compound_run.csv")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Compounding-capital replay")
     ap.add_argument("--round-trips", default="var/reports/flex_round_trips.csv")
@@ -379,9 +385,17 @@ def main(argv=None) -> int:
     ap.add_argument("--commission-plan", default=COMMISSION_PLAN)
     ap.add_argument("--sweep", action="store_true",
                     help="grid over both percentages instead of one run")
-    ap.add_argument("--out", default="var/reports/compound_sim.csv")
+    # TWO MODES, TWO FILES. The sweep and the single run write completely
+    # different columns. One shared default meant whichever ran last replaced
+    # the other's results under a name that still looked correct -- and a
+    # loader reading it would have had no way to know which it got. The
+    # defaults are named after the tables they load into.
+    ap.add_argument("--out", default=None,
+                    help="default: var/reports/compound_sweep.csv with --sweep,"
+                         " var/reports/compound_run.csv without")
     ap.add_argument("--report", default="var/reports/compound_sim.txt")
     a = ap.parse_args(argv)
+    a.out = a.out or out_default(a.sweep)
 
     legs = {"mine": my_legs(Path(a.round_trips))}
     for n in a.strategy:
@@ -424,6 +438,31 @@ def main(argv=None) -> int:
                    for src, ls in legs.items()}
         lines = render(results, a.capital, a.per_trade_pct, a.total_pct,
                        bool(dv))
+        # Machine-readable as well as legible. The sweep already wrote a CSV
+        # and the single run did not, so the headline result -- the one an
+        # actual decision gets made on -- was the only figure here that could
+        # not be loaded, queried or compared against a later run.
+        Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+        with open(a.out, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=[
+                "source", "capital", "per_trade_pct", "total_pct",
+                "dv_cap_pct", "dv_applied", "taken", "skipped_concurrency",
+                "skipped_ruined", "skipped_too_small", "dv_capped", "final",
+                "multiple", "max_drawdown"])
+            w.writeheader()
+            for src, r in results.items():
+                w.writerow({
+                    "source": src, "capital": a.capital,
+                    "per_trade_pct": a.per_trade_pct,
+                    "total_pct": a.total_pct, "dv_cap_pct": a.dv_cap_pct,
+                    "dv_applied": int(bool(dv)), "taken": r.taken,
+                    "skipped_concurrency": r.skipped_concurrency,
+                    "skipped_ruined": r.skipped_ruined,
+                    "skipped_too_small": r.skipped_too_small,
+                    "dv_capped": r.dv_capped, "final": round(r.final, 4),
+                    "multiple": round(r.multiple, 6),
+                    "max_drawdown": round(r.max_drawdown, 6)})
+        print(f"wrote {a.out}  ({len(results)} source(s))")
 
     from common.report_io import emit
     emit("\n".join(lines), a.report, header="common.compound_sim")
