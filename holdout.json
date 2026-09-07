@@ -1,0 +1,19 @@
+{
+  "lock_from": "2026-01-12",
+  "train_first": "2024-07-05",
+  "train_last": "2026-01-09",
+  "both_halves_split": "2025-04-08",
+  "n_sessions": 545,
+  "n_train": 381,
+  "n_locked": 164,
+  "n_early": 190,
+  "n_late": 191,
+  "cut_at": "2026-09-07T14:31:34Z",
+  "lock_fraction": 0.3,
+  "sources": [
+    "screen_pairs_consolidated.json",
+    "screen_rejects.json"
+  ],
+  "universe_fingerprint": "8202de418d0a4a52183880800ede27bcea788524ed1106ab256824be66ab34f6",
+  "note": "The locked sessions are OUT OF SAMPLE for anything built after cut_at. They are NOT out of sample for MC5, MCL or VW9, which were scored over the whole period on 2026-09-07."
+}
