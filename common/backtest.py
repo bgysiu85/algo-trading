@@ -46,7 +46,9 @@ try:
 except ImportError:
     sys.exit("ib_async not installed.  pip install ib_async pandas")
 
+import csv
 import importlib
+import inspect
 
 from common import session_lock
 from common.cache_io import (cache_path as _cache_path, check_sessions,
@@ -148,8 +150,16 @@ def load_pairs(path: Path) -> list[dict]:
 
 class Runner:
     def __init__(self, ib: IB, out_dir: Path, cache_dir: Path | None = None,
-                 state_dir: Path | None = None, strategy: str = "mcl"):
+                 state_dir: Path | None = None, strategy: str = "mcl",
+                 sizes: dict | None = None, offline: bool = False):
         self.ib = ib
+        # {"SYM|YYYY-MM-DD": shares} when the run is size-matched to a real
+        # trading day, else None. See --size-from.
+        self.sizes = sizes
+        # Offline means the bar cache is the ONLY source. See --offline: this
+        # is not a convenience flag, it is what stops IB's split-ADJUSTED
+        # history being written into a raw-basis cache on a miss.
+        self.offline = offline
         self.strategy = strategy
         # The strategy module supplies SESSION_START/SESSION_END and
         # backtest_session(); nothing else about it is known here.
@@ -182,6 +192,19 @@ class Runner:
         self.hist_sessions = getattr(self.S, "BACKTEST_SESSIONS", HIST_SESSIONS)
         self.hist_end_hour = getattr(self.S, "BACKTEST_END_HOUR", HIST_END_HOUR)
         self.hist_end_minute = getattr(self.S, "BACKTEST_END_MINUTE", HIST_END_MINUTE)
+        # WHAT THE STRATEGY WILL ACTUALLY ACCEPT, asked once rather than
+        # discovered by catching TypeError at every call.
+        #
+        # The old exit_mode passthrough ran backtest_session(), caught
+        # TypeError, and re-ran without the flag. That catches a TypeError
+        # raised INSIDE the strategy just as happily as a wrong-kwarg one, and
+        # then silently re-runs with different settings than were asked for.
+        # A run that quietly ignores the flag it was given is the same failure
+        # this project keeps meeting: a plausible number from a request that
+        # was not honoured.
+        params = inspect.signature(self.S.backtest_session).parameters
+        self.takes_exit_mode = "exit_mode" in params
+        self.takes_entry_shares = "entry_shares" in params
 
     def _load_state(self) -> dict:
         if self.state_path.exists():
@@ -358,6 +381,25 @@ class Runner:
                 await asyncio.sleep(RETRY_BACKOFF_S)
         return None, last_err
 
+    def _offline_bars(self, symbol: str, date_str: str):
+        """Bars from the cache, or nothing. Never a fetch.
+
+        A miss here MUST NOT fall through to IB. bar_cache_db/ holds Databento
+        bars, which are RAW; IB's history is SPLIT-ADJUSTED. One fetched frame
+        landing in that tree makes the run part raw and part adjusted with
+        nothing on disk saying which trades came from where -- and it would not
+        fail, it would just quietly produce different numbers. common/
+        bar_cache_build.py refuses to write across that boundary for the same
+        reason; this is the read side of the same rule.
+        """
+        df = self._cache_read(symbol, date_str)
+        if df is None:
+            return None, "not in cache"
+        sliced = self._slice(df, date_str)
+        if sliced is None:
+            return None, "cached frame too short for warm-up"
+        return sliced, None
+
     async def run(self, pairs: list[dict], probe_only: bool,
                  exit_mode: str | None = None) -> None:
         total = len(pairs)
@@ -366,16 +408,19 @@ class Runner:
             if key in self.state["done"]:
                 continue
 
-            contract = await self.qualify(p["symbol"])
-            if contract is None:
-                self.state["done"][key] = {"status": "NOT_QUALIFIED", "bars": 0,
-                                           "session_bars": 0, "trades": 0}
-                LOG.warning("[%d/%d] %-6s %s  could not qualify",
-                            n, total, p["symbol"], p["date"])
-                self._save_state()
-                continue
-
-            df, err = await self.bars_for(contract, p["date"])
+            if self.offline:
+                df, err = self._offline_bars(p["symbol"], p["date"])
+            else:
+                contract = await self.qualify(p["symbol"])
+                if contract is None:
+                    self.state["done"][key] = {"status": "NOT_QUALIFIED",
+                                               "bars": 0, "session_bars": 0,
+                                               "trades": 0}
+                    LOG.warning("[%d/%d] %-6s %s  could not qualify",
+                                n, total, p["symbol"], p["date"])
+                    self._save_state()
+                    continue
+                df, err = await self.bars_for(contract, p["date"])
             if df is None:
                 self.state["done"][key] = {"status": "NO_DATA", "reason": err,
                                            "bars": 0, "session_bars": 0, "trades": 0}
@@ -394,17 +439,26 @@ class Runner:
                    "trades": 0, "net": 0.0}
 
             if not probe_only and sess > 0:
-                if exit_mode is not None:
-                    try:
-                        trades = self.S.backtest_session(
-                            df, target, ET, exit_mode=exit_mode)
-                    except TypeError:
-                        # This strategy's backtest_session() takes no
-                        # exit_mode kwarg (MCL/MC5) -- run it normally
-                        # rather than refuse the whole pass over one flag.
-                        trades = self.S.backtest_session(df, target, ET)
-                else:
-                    trades = self.S.backtest_session(df, target, ET)
+                kw = {}
+                if exit_mode is not None and self.takes_exit_mode:
+                    kw["exit_mode"] = exit_mode
+                if self.sizes is not None:
+                    q = self.sizes.get(key)
+                    if not q or int(q) < 1:
+                        # No size means no comparable run. Recording it as a
+                        # named status keeps it out of the totals AND out of
+                        # the zeros: a size-matched backtest that quietly fell
+                        # back to its own 100-share default on some rows would
+                        # be a mixture of two experiments reported as one.
+                        self.state["done"][key] = {
+                            "status": "NO_SIZE", "bars": len(df),
+                            "session_bars": sess, "trades": 0, "net": 0.0}
+                        LOG.warning("[%d/%d] %-6s %s  no size to match",
+                                    n, total, p["symbol"], p["date"])
+                        self._save_state()
+                        continue
+                    kw["entry_shares"] = int(q)
+                trades = self.S.backtest_session(df, target, ET, **kw)
                 for t in trades:
                     d = asdict(t)
                     d["symbol"] = p["symbol"]
@@ -494,18 +548,35 @@ async def main_async(args) -> int:
         pairs = pairs[: args.limit]
     print(f"{len(pairs)} symbol/date pairs to process\n")
 
+    sizes = load_sizes(Path(args.size_from)) if args.size_from else None
+    if sizes is not None:
+        print(f"size-matched from {args.size_from}: {len(sizes):,} symbol-days")
+
     ib = IB()
-    try:
-        await ib.connectAsync("127.0.0.1", args.port, clientId=args.client_id,
-                              timeout=15)
-    except Exception as e:  # noqa: BLE001
-        print(f"could not connect to 127.0.0.1:{args.port} -- {e}")
-        print("Is IB Gateway running and logged in?")
-        return 1
-    LOG.info("connected, accounts %s", ib.managedAccounts())
+    if args.offline:
+        LOG.info("offline: bars come from %s only, IB is never contacted",
+                 args.cache_dir)
+    else:
+        try:
+            await ib.connectAsync("127.0.0.1", args.port,
+                                  clientId=args.client_id, timeout=15)
+        except Exception as e:  # noqa: BLE001
+            print(f"could not connect to 127.0.0.1:{args.port} -- {e}")
+            print("Is IB Gateway running and logged in?")
+            return 1
+        LOG.info("connected, accounts %s", ib.managedAccounts())
 
     runner = Runner(ib, Path(args.out_dir), Path(args.cache_dir),
-                    Path(args.state_dir), args.strategy)
+                    Path(args.state_dir), args.strategy,
+                    sizes=sizes, offline=args.offline)
+    if sizes is not None and not runner.takes_entry_shares:
+        # Refuse rather than run. Silently ignoring the size would produce a
+        # full set of results at the strategy's own 100-share default, labelled
+        # and filed as size-matched, and nothing downstream could tell.
+        sys.exit(f"--size-from was given but {args.strategy}'s "
+                 "backtest_session() takes no entry_shares argument, so the "
+                 "size would be ignored and the run would silently be at the "
+                 "strategy's own default size.")
     if args.retry_failed:
         # NOT_QUALIFIED is included deliberately. On 2026-09-03 it was the
         # dominant failure (337 of 407) and it was caused by throttling, not
@@ -524,8 +595,35 @@ async def main_async(args) -> int:
         print("\ninterrupted -- progress saved, rerun to resume")
     finally:
         runner.report(args.probe)
-        ib.disconnect()
+        if not args.offline:
+            ib.disconnect()
     return 0
+
+
+def load_sizes(path: Path) -> dict[str, int]:
+    """{"SYM|YYYY-MM-DD": max position held that day} from a flex summary.
+
+    max_position, not `shares`. `shares` is every share transacted in both
+    directions -- a day that bought and sold 1,000 shares four times reports
+    8,000 -- and handing that to a strategy as a position size would fund a
+    position eight times larger than the account ever held. max_position is
+    what the account actually had to carry, which is the quantity the
+    comparison is supposed to hold fixed.
+    """
+    out: dict[str, int] = {}
+    with open(path, newline="") as fh:
+        rd = csv.DictReader(fh)
+        if "max_position" not in (rd.fieldnames or []):
+            sys.exit(f"{path} has no max_position column. Regenerate it with "
+                     "`python -m common.flex ... --summary <path>`.")
+        for r in rd:
+            try:
+                q = int(float(r["max_position"]))
+            except (TypeError, ValueError):
+                continue
+            if q > 0:
+                out[f'{r["symbol"]}|{r["date"]}'] = q
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -559,6 +657,16 @@ def main(argv: list[str] | None = None) -> int:
                         "trail_atr, per vw9_strategy_spec.md §5.2. Ignored "
                         "by strategies whose backtest_session() takes no "
                         "exit_mode kwarg (MCL, MC5).")
+    p.add_argument("--size-from", metavar="SUMMARY.csv",
+                   help="size every symbol-day to the max position actually "
+                        "held that day, read from a flex --summary CSV "
+                        "(symbol,date,...,max_position). Without it each "
+                        "strategy uses its own MAX_SHARES.")
+    p.add_argument("--offline", action="store_true",
+                   help="read bars ONLY from --cache-dir; never connect to IB "
+                        "and never fetch. Required when the cache holds "
+                        "Databento (raw) bars, because a fetched frame would "
+                        "be split-ADJUSTED and the run would be half of each.")
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)-7s %(message)s",

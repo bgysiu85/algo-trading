@@ -221,7 +221,8 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
                     max_cycles: int | None = None,
                     commission_plan: str = COMMISSION_PLAN,
                     rebuy_trigger: str = "peak",
-                    gap_fills: bool = True) -> dict | None:
+                    gap_fills: bool = True,
+                    entry_shares: int | None = None) -> dict | None:
     """Fill next-bar-open (§9 -- extended hours takes Day Limit orders only,
     so the trigger bar's close can never be the fill), then manage to
     whichever of the §5.3 hard exits or the exit_mode's target comes first.
@@ -261,7 +262,9 @@ def _simulate_trade(sig: pd.DataFrame, entry_bar_index: int, setup: Setup,
         return None
     target = entry_price + target_r * r if exit_mode == "fixed_2r" else None
 
-    qty = size_for(entry_price)
+    # entry_shares bypasses size_for() so a comparison against a real trading
+    # day holds size fixed -- see strategy/mcl/mcl.py backtest_session.
+    qty = size_for(entry_price) if entry_shares is None else int(entry_shares)
     if qty < 1:
         return None
 
@@ -442,7 +445,8 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
                         commission_plan: str = COMMISSION_PLAN,
                         rebuy_trigger: str = "peak",
                         only_setup: str | None = None,
-                        gap_fills: bool = True) -> list[Trade]:
+                        gap_fills: bool = True,
+                        entry_shares: int | None = None) -> list[Trade]:
     """One session, one timeframe, one exit mode.
 
     bars_1m must be 1-minute bars covering at least 04:00-20:00 ET on
@@ -526,7 +530,8 @@ def backtest_session_tf(bars_1m: pd.DataFrame, session_date, tz,
                               rebuy_slip_bps=rebuy_slip_bps,
                               max_cycles=max_cycles,
                               commission_plan=commission_plan,
-                              rebuy_trigger=rebuy_trigger, gap_fills=gap_fills)
+                              rebuy_trigger=rebuy_trigger, gap_fills=gap_fills,
+                              entry_shares=entry_shares)
         if res is None:
             continue
 

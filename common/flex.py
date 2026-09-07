@@ -561,13 +561,14 @@ def main(argv=None) -> int:
             w = csv.writer(fh)
             w.writerow(["symbol", "date", "executions", "shares",
                         "buy_shares", "sell_shares", "avg_buy_price",
-                        "avg_sell_price", "gross_pnl", "commission",
-                        "net_pnl", "in_band"])
+                        "avg_sell_price", "max_position", "gross_pnl",
+                        "commission", "net_pnl", "in_band"])
             for k in sorted(sd):
                 s = sd[k]
                 w.writerow([s.symbol, s.date, s.executions, round(s.shares),
                             round(s.buy_shares), round(s.sell_shares),
                             _px(s.avg_buy_price), _px(s.avg_sell_price),
+                            s.max_position,
                             round(s.gross_pnl, 2), round(s.commission, 2),
                             round(s.net_pnl, 2), int(s.in_band)])
         print(f"wrote {a.summary}  ({len(sd)} symbol-days)")

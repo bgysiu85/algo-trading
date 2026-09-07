@@ -233,7 +233,8 @@ def size_for(price: float, equity: float = EQUITY) -> int:
 def backtest_session(df, session_date, tz,
                      enforce_price_band: bool | None = None,
                      gap_fills: bool = True,
-                     seed_peak_with_bar_high: bool = False) -> list[Trade]:
+                     seed_peak_with_bar_high: bool = False,
+                     entry_shares: int | None = None) -> list[Trade]:
     """Run one pre-market session on 5-minute bars.
 
     Accepts 1-minute OR 5-minute bars and resamples if needed, so this can be
@@ -265,7 +266,9 @@ def backtest_session(df, session_date, tz,
                 px = float(row["close"]) + SLIPPAGE_TICKS * TICK
                 if band and not (PRICE_MIN <= px <= PRICE_MAX):
                     continue
-                q = size_for(px)
+                # entry_shares bypasses size_for() so a comparison against a
+                # real trading day holds size fixed -- see mcl.backtest_session.
+                q = size_for(px) if entry_shares is None else int(entry_shares)
                 if q >= 1:
                     pos = dict(entry_i=i, entry_px=px, qty=q,
                                # See strategy/mcl/mcl.py: the entry bar's high

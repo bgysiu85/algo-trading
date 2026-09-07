@@ -33,6 +33,7 @@ TIMEFRAME_MINUTES = 5
 DEFAULT_EXIT_MODE = "fixed_2r"
 
 
-def backtest_session(df, session_date, tz, exit_mode: str = DEFAULT_EXIT_MODE):
+def backtest_session(df, session_date, tz, exit_mode: str = DEFAULT_EXIT_MODE,
+                     entry_shares: int | None = None):
     return backtest_session_tf(df, session_date, tz, TIMEFRAME_MINUTES,
-                               exit_mode=exit_mode)
+                               exit_mode=exit_mode, entry_shares=entry_shares)
