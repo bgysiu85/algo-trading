@@ -161,7 +161,13 @@ def _no_databento_message(executable, prefix, base_prefix, cwd,
     osname = os.name if osname is None else osname
     win = osname == "nt"
     in_venv = prefix != base_prefix
-    exe = Path(executable)
+    # str, NOT Path. Path() rewrites separators for the platform it is RUNNING
+    # on, so a POSIX interpreter path came back with backslashes under Windows
+    # -- which is both a wrong path to print and, having just made osname a
+    # parameter so the Windows branch could be tested, a second OS dependency
+    # smuggled into the same function. The interpreter path is echoed exactly
+    # as the interpreter reported it.
+    exe = str(executable)
     lines = ["databento is not importable from THIS interpreter.", "",
              f"  python : {exe}",
              f"  venv   : {prefix if in_venv else 'NOT ACTIVE'}", ""]

@@ -710,3 +710,17 @@ def test_the_windows_activate_path_is_pinned_though_the_tests_run_on_linux():
     # a trailing separator on cwd must not double up
     msg = FE._no_databento_message("py.exe", "a", "a", "D:\\Trading\\", "nt")
     assert "D:\\Trading\\.venv" in msg and "Trading\\\\" not in msg
+
+
+def test_the_interpreter_path_is_echoed_verbatim_on_either_platform():
+    """Path() normalises separators to the platform the code is RUNNING on, so
+    wrapping sys.executable rewrote a POSIX path with backslashes under
+    Windows. The path printed has to be the one the interpreter reported, not a
+    re-spelling of it -- the whole point of the line is that the reader can
+    match it against the shell they are in."""
+    from common import databento_fetch as FE
+    posix = "/repo/.venv/bin/python"
+    win = r"C:\Python313\python.exe"
+    for exe in (posix, win):
+        for osname in ("posix", "nt"):
+            assert exe in FE._no_databento_message(exe, "a", "b", ".", osname)
