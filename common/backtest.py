@@ -52,7 +52,7 @@ import inspect
 
 from common import session_lock
 from common.cache_io import (cache_path as _cache_path, check_sessions,
-                             slice_sessions, window_dir,
+                             load_pairs, slice_sessions, window_dir,
                              SHARED_DURATION, SHARED_END_HHMM, SHARED_SESSIONS,
                              BACKTEST_SESSIONS, BACKTEST_END_HHMM)
 
@@ -134,18 +134,6 @@ HIST_END_MINUTE = int(BACKTEST_END_HHMM[2:])
 HIST_DURATION = SHARED_DURATION
 
 LOG = logging.getLogger("bt")
-
-
-def load_pairs(path: Path) -> list[dict]:
-    pairs = json.loads(path.read_text())
-    out = []
-    for p in pairs:
-        sym = str(p["symbol"]).upper().strip()
-        # forex and anything with a dot is not a US equity
-        if "." in sym or not sym.isalpha():
-            continue
-        out.append({"symbol": sym, "date": p["date"]})
-    return out
 
 
 class Runner:

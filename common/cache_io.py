@@ -15,17 +15,43 @@ from pathlib import Path
 import pandas as pd
 
 
-def load_pairs(path: Path) -> list[dict]:
-    """US equities only -- same filter as common/backtest.py's
-    load_pairs, kept identical so the two projects never quietly diverge on
-    which symbols count as tradeable."""
-    pairs = json.loads(Path(path).read_text())
+def load_pairs(paths) -> list[dict]:
+    """US equities only, from one symbol-date list or the union of several.
+
+    ONE COPY, NOT TWO. common/backtest.py carried a byte-identical duplicate of
+    this function, with a comment saying it was "kept identical so the two
+    never quietly diverge". They diverged the first time either was changed:
+    the list-taking version went into backtest.py, the tests were written
+    against a THIRD same-named function in databento_fetch.py, everything
+    passed, and the real command died on
+
+        AttributeError: 'list' object has no attribute 'read_text'
+
+    A convention is not a mechanism. backtest.py imports this one now.
+
+    The union is what lets the screened run score survivors and rejects in a
+    single pass: two passes into one state directory would have the second
+    rewrite the first's trades CSV, and the leakage control reads both
+    populations out of that one file.
+
+    De-duplicated, because a symbol-day scored twice would double its P/L and
+    nothing about the run would look wrong.
+    """
+    if isinstance(paths, (str, Path)):
+        paths = [paths]
+    seen: set[tuple[str, str]] = set()
     out = []
-    for p in pairs:
-        sym = str(p["symbol"]).upper().strip()
-        if "." in sym or not sym.isalpha():
-            continue
-        out.append({"symbol": sym, "date": p["date"]})
+    for path in paths:
+        for p in json.loads(Path(path).read_text()):
+            sym = str(p["symbol"]).upper().strip()
+            # forex and anything with a dot is not a US equity
+            if "." in sym or not sym.isalpha():
+                continue
+            key = (sym, p["date"])
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"symbol": sym, "date": p["date"]})
     return out
 
 
