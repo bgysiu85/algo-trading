@@ -397,3 +397,35 @@ def test_files_already_on_disk_cost_no_metadata_calls(tmp_path):
     FE.plan(_C(meta), {"2025-01-02": ["AAA"]}, "EQUS.SUMMARY", ["statistics"],
             tmp_path, 0)
     assert meta.calls == 0
+
+
+# --- locating the free L1 window --------------------------------------------
+
+def _job(day, cost, skip=False):
+    """(day, syms, schema, start, end, out, cost, bytes, skip)"""
+    return (day, ["AAA"], "tcbbo", day, day, None, cost, 1000, skip)
+
+
+def test_the_seam_between_free_and_paid_dates_is_reported():
+    """L1 on Standard is ONE ROLLING year and the window moves daily, so the
+    date a scoped pull stops being free is not a constant. Writing it into an
+    --after flag from memory is how a pull silently starts charging."""
+    from common import databento_fetch as FE
+    jobs = [_job("2025-08-30", 0.42), _job("2025-09-01", 0.11),
+            _job("2025-09-08", 0.0), _job("2026-01-05", 0.0)]
+    assert FE.paid_boundary(jobs) == ("2026-01-05", "2025-08-30")
+
+
+def test_an_entirely_free_plan_reports_no_seam():
+    from common import databento_fetch as FE
+    assert FE.paid_boundary([_job("2026-01-05", 0.0)]) is None
+
+
+def test_dates_already_on_disk_do_not_create_a_false_seam():
+    """A skipped date has cost 0 because it is not being bought, not because
+    it is inside the window. Counting it would move the reported boundary."""
+    from common import databento_fetch as FE
+    jobs = [_job("2024-01-02", 0.0, skip=True), _job("2025-08-30", 0.42)]
+    last_free, first_paid = FE.paid_boundary(jobs)
+    assert first_paid == "2025-08-30"
+    assert last_free == ""          # nothing free is actually being bought

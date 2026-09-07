@@ -282,6 +282,62 @@ def plan(client, groups, dataset, schemas, root, lookback, *, tick=PLAN_TICK):
     return jobs, usd, nbytes
 
 
+def paid_boundary(jobs) -> tuple[str, str] | None:
+    """(last free date, first paid date) among the dates being downloaded.
+
+    L1 on Standard is ONE ROLLING YEAR and the window moves daily, so the date
+    a scoped quote pull stops being free is not a constant and must not be
+    written into a flag from memory. Every date the estimator priced above zero
+    is outside it; this reports the seam so the --after can be set from a
+    measurement.
+    """
+    priced = sorted((day, c) for day, _s, _sc, *_r, c, _b, skip in jobs
+                    if not skip)
+    free = [d for d, c in priced if c <= 0]
+    paid = [d for d, c in priced if c > 0]
+    if not paid:
+        return None
+    return (max(free) if free else "", min(paid))
+
+
+def _write_plan_report(a, root, jobs, todo, have, usd, nbytes) -> None:
+    from common.report_io import emit
+
+    lines = [f"SCOPED FETCH PLAN  {a.dataset}  {' '.join(a.schemas)}", "",
+             f"  archive              {root}",
+             f"  pair list            {a.pairs}",
+             f"  lookback             {a.lookback} day(s)",
+             f"  already on disk      {len(have):,}",
+             f"  to download          {len(todo):,}",
+             f"  ESTIMATED SIZE       {nbytes/1e6:,.1f} MB",
+             f"  ESTIMATED COST       ${usd:,.4f}", ""]
+
+    seam = paid_boundary(jobs)
+    if seam:
+        last_free, first_paid = seam
+        lines += ["THE FREE WINDOW ENDS HERE", "",
+                  f"  last date priced at $0.0000   {last_free or '(none)'}",
+                  f"  first date that COSTS money    {first_paid}", "",
+                  "  L1 is one ROLLING year on Standard and the window moves",
+                  "  every day, so this seam is a measurement and not a",
+                  f"  constant. Re-run with --after {first_paid} to stay free,",
+                  "  or raise --max-cost deliberately to buy across it.", ""]
+    else:
+        lines += ["  Every date in this plan priced at $0.0000 -- the whole",
+                  "  request is inside the free window.", ""]
+
+    priced = sorted((day, schema, len(syms), b, c)
+                    for day, syms, schema, *_r, _o, c, b, skip in jobs if not skip)
+    if priced:
+        lines += ["PER DATE", "",
+                  f"  {'date':<12} {'schema':<10} {'syms':>5} {'MB':>9} "
+                  f"{'USD':>9}", "  " + "-" * 50]
+        lines += [f"  {d:<12} {sc:<10} {n:>5} {b/1e6:>9.2f} {c:>9.4f}"
+                  for d, sc, n, b, c in priced]
+    emit("\n".join(lines), a.report,
+         header=f"common.databento_fetch  {a.dataset} {' '.join(a.schemas)}")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Fetch symbol-days into a local archive")
     ap.add_argument("--pairs", required=True, help="pair list JSON")
@@ -299,6 +355,8 @@ def main(argv=None) -> int:
                     help="abort if the estimate exceeds this (USD)")
     ap.add_argument("--confirm", action="store_true",
                     help="actually download; without it this only estimates")
+    ap.add_argument("--report", default="var/reports/databento_fetch.txt",
+                    help="where the plan is written (default: %(default)s)")
     a = ap.parse_args(argv)
 
     try:
@@ -332,6 +390,13 @@ def main(argv=None) -> int:
     print(f"to download              : {len(todo)}")
     print(f"ESTIMATED SIZE           : {nbytes/1e6:,.1f} MB")
     print(f"ESTIMATED COST           : ${usd:,.4f}")
+
+    # The estimate decides whether to buy, so it is a measurement and belongs
+    # in a file. This module printed it and nothing else -- the third tool in
+    # this project to make that mistake, and the one where it matters most:
+    # the per-day costs below are how the free L1 rolling window's boundary is
+    # LOCATED rather than guessed. A date that prices above zero is outside it.
+    _write_plan_report(a, root, jobs, todo, have, usd, nbytes)
 
     if not todo:
         # Nothing to buy, but a manifest backfill may still be worth writing.
