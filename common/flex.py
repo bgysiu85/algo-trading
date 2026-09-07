@@ -481,10 +481,37 @@ class RoundTrip:
     gross_pnl: float = 0.0
     commission: float = 0.0
     open_at_end: bool = False     # never returned to flat -- see below
+    buy_shares: float = 0.0
+    sell_shares: float = 0.0
+    buy_notional: float = 0.0
+    sell_notional: float = 0.0
 
     @property
     def net_pnl(self) -> float:
         return self.gross_pnl + self.commission
+
+    @property
+    def avg_buy_price(self) -> float | None:
+        return self.buy_notional / self.buy_shares if self.buy_shares else None
+
+    @property
+    def avg_sell_price(self) -> float | None:
+        return (self.sell_notional / self.sell_shares
+                if self.sell_shares else None)
+
+    @property
+    def pnl_per_share(self) -> float | None:
+        """Realised P/L per share of PEAK position.
+
+        max_position is what the account had to fund, so it is the quantity a
+        capital rule sizes. Dividing the realised P/L by it gives the figure to
+        scale when re-simulating at a different size.
+
+        This is an approximation wherever the position was scaled in or out:
+        the money was not all earned on the peak quantity. It is the only
+        scaling available from a fill log, and it is stated rather than hidden.
+        """
+        return self.gross_pnl / self.max_position if self.max_position else None
 
 
 def round_trips(execs: list[Execution]) -> list[RoundTrip]:
@@ -516,6 +543,12 @@ def round_trips(execs: list[Execution]) -> list[RoundTrip]:
             cur.shares += abs(e.qty)
             cur.gross_pnl += e.fifo_pnl
             cur.commission += e.commission
+            if e.qty > 0:
+                cur.buy_shares += e.qty
+                cur.buy_notional += e.qty * abs(e.price)
+            elif e.qty < 0:
+                cur.sell_shares += -e.qty
+                cur.sell_notional += -e.qty * abs(e.price)
             was, pos = pos, pos + e.qty
             cur.max_position = max(cur.max_position, int(round(pos)))
             if round(was, 6) != 0.0 and round(pos, 6) == 0.0:
@@ -697,12 +730,14 @@ def main(argv=None) -> int:
         with open(a.round_trips, "w", newline="") as fh:
             w = csv.writer(fh)
             w.writerow(["symbol", "date", "entry_et", "exit_et", "fills",
-                        "shares", "max_position", "gross_pnl", "commission",
+                        "shares", "max_position", "avg_buy_price",
+                        "avg_sell_price", "gross_pnl", "commission",
                         "net_pnl", "open_at_end"])
             for r in rt:
                 w.writerow([r.symbol, r.date, _hhmm(r.entry_minute),
                             _hhmm(r.exit_minute), r.fills, round(r.shares),
-                            r.max_position, _money(r.gross_pnl),
+                            r.max_position, _px(r.avg_buy_price),
+                            _px(r.avg_sell_price), _money(r.gross_pnl),
                             _money(r.commission), _money(r.net_pnl),
                             int(r.open_at_end)])
         print(f"wrote {a.round_trips}  ({len(rt)} round trips)")
