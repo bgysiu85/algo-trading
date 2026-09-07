@@ -122,7 +122,26 @@ def cleared_by_cutoff(stats: pd.DataFrame, cutoff_min: int) -> dict[str, int]:
 
 
 def daily_volume(archive: Path, dataset: str, month: str) -> pd.DataFrame:
-    """EQUS.MINI daily bars for one month, indexed by (symbol, date)."""
+    """EQUS.MINI daily bars for one month, as symbol / date / volume.
+
+    THE DATE LABEL IS UTC, DELIBERATELY, AND THIS IS NOT AN OVERSIGHT.
+    ------------------------------------------------------------------
+    Daily bars are stamped at UTC MIDNIGHT. Converting that to ET gives 20:00
+    on the PREVIOUS day, so an ET date label moves every session back one --
+    and the first version of this function did exactly that, against an
+    explicit warning in dbn_io.daily_frame's docstring saying not to.
+
+    The damage was not an exception. Every symbol-day joined the wrong
+    session's volume, and the result was a full report of plausible numbers:
+    a median capture of 1.2% against the probe's hand-checked 4.8%-19.6%, and
+    a session check reporting the daily bar as 22.8% of the sum of its OWN
+    minute bars -- a figure that is arithmetically impossible for one dataset
+    and was the only reason the join got questioned at all.
+
+    Intraday timestamps ARE converted to ET, because those are real event times
+    within a session. Only the daily bar's synthetic midnight stamp is a label
+    rather than a moment.
+    """
     f = archive / dataset / "ohlcv-1d" / f"{month}.dbn.zst"
     if not f.exists():
         return pd.DataFrame()
@@ -130,7 +149,7 @@ def daily_volume(archive: Path, dataset: str, month: str) -> pd.DataFrame:
     if df.empty:
         return df
     out = df[["symbol", "volume"]].copy()
-    out["date"] = df.index.tz_convert(ET).strftime("%Y-%m-%d")
+    out["date"] = df.index.strftime("%Y-%m-%d")      # UTC. See above.
     return out
 
 

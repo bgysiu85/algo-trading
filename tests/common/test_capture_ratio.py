@@ -200,3 +200,39 @@ def test_the_two_framings_disagree_only_when_they_should():
     assert C.cleared_by_cutoff(f, C.RTH_CLOSE_MIN) == {"AAA": 500}
     assert C.cleared_by_cutoff(f.drop(columns=["ts_event"]),
                                C.RTH_CLOSE_MIN) == {}
+
+
+# --- the date label ---------------------------------------------------------
+
+def test_a_daily_bars_date_label_is_utc_not_et(tmp_path, monkeypatch):
+    """Daily bars are stamped at UTC MIDNIGHT. Converting that to ET gives
+    20:00 on the PREVIOUS day, so an ET label moves every session back one and
+    every symbol-day joins the wrong session's volume.
+
+    The first version did exactly that, against an explicit warning in
+    dbn_io.daily_frame. It raised nothing. It produced a complete report of
+    plausible numbers -- a median capture of 1.2% against the probe's
+    hand-checked 4.8%-19.6%, and a session check reporting the daily bar as
+    22.8% of the sum of its OWN minute bars, which is arithmetically impossible
+    for one dataset and was the only reason the join got questioned.
+    """
+    from common import capture_ratio as CR
+    frame = pd.DataFrame(
+        {"symbol": ["AAA"], "volume": [1_000]},
+        index=pd.DatetimeIndex([pd.Timestamp("2025-04-09 00:00", tz="UTC")]))
+    monkeypatch.setattr(CR, "read_dbn", lambda f: frame)
+    (tmp_path / "EQUS.MINI" / "ohlcv-1d").mkdir(parents=True)
+    (tmp_path / "EQUS.MINI" / "ohlcv-1d" / "2025-04.dbn.zst").write_bytes(b"")
+
+    out = CR.daily_volume(tmp_path, "EQUS.MINI", "2025-04")
+    assert out.iloc[0]["date"] == "2025-04-09"      # not 2025-04-08
+
+
+def test_intraday_timestamps_are_still_converted_to_et():
+    """Only the daily bar's synthetic midnight stamp is a label rather than a
+    moment. An intraday 00:30 UTC print is 20:30 ET the previous evening and
+    genuinely belongs to that session -- so the cutoff logic must keep
+    converting, and this pins that the fix above did not overreach."""
+    f = stats_frame([("AAA", "19:30", 700, 6)])       # 19:30 ET, inside session
+    assert C.cleared_by_cutoff(f, C.SESSION_END_MIN) == {"AAA": 700}
+    assert C.cleared_by_cutoff(f, C.RTH_CLOSE_MIN) == {}
