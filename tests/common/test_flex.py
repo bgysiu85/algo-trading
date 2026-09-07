@@ -248,15 +248,31 @@ def test_new_against_finds_only_genuinely_new_pairs(tmp_path):
 
 # --- the shipped artefact ---------------------------------------------------
 
-def test_the_committed_holdout_list_is_well_formed():
+def test_the_holdout_list_is_well_formed_where_it_exists():
     """The holdout list must stay DISJOINT from the training pairs. If a future
     edit merges them, the project loses its only out-of-sample set and no test
-    anywhere else would notice."""
+    anywhere else would notice.
+
+    IT IS NOT COMMITTED, AND CANNOT BE. This test used to be called
+    ...the_committed_holdout_list..., which was simply untrue: it lives under
+    var/, var/ is gitignored because it holds real fills and real positions,
+    and a list of which symbols were traded on which mornings is exactly that.
+    So the file does not travel with the repo, and on any machine that has not
+    been handed a copy this invariant SKIPS -- silently, in a run that reports
+    all green.
+
+    That is the worst place for it to be absent, because the machine doing the
+    real work is the one most likely to be missing it. The skip therefore names
+    the fix rather than just the condition.
+    """
     root = Path(__file__).resolve().parents[2]
     holdout = root / "var/state/holdout_pairs_2026H2.json"
     train = root / "var/state/traded_pairs.json"
     if not holdout.exists():
-        pytest.skip("holdout list not present")
+        pytest.skip(f"holdout list not at {holdout} -- this machine is NOT "
+                    "checking that the out-of-sample set stays disjoint from "
+                    "the training pairs. var/ is gitignored, so the file has "
+                    "to be copied in rather than pulled.")
 
     h = json.load(open(holdout))
     assert len(h) == 176
