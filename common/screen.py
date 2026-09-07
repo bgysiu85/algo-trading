@@ -67,6 +67,7 @@ import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from common.dbn_io import daily_frame
@@ -231,6 +232,48 @@ def select(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
         return out
     out["rank"] = out.groupby("date")["rvol"].rank(ascending=False, method="first")
     return out[out["rank"] <= cfg.max_candidates_per_day].drop(columns="rank")
+
+
+def rejects(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
+    """Stage-1 passers that stage 2 threw away.
+
+    These are the control sample. Stage 1 is decidable at 03:59 and stage 2 is
+    not, so every row here is a symbol-day a live scanner WOULD have offered
+    and the fetch filter removed using information from after the decision.
+    """
+    m = (stage1(df, cfg) & ~stage2(df, cfg)
+         & ~df["symbol"].map(is_test_symbol))
+    return df[m].copy()
+
+
+def sample_rejects(rej: pd.DataFrame, sel: pd.DataFrame, n: int,
+                   seed: int = 0) -> pd.DataFrame:
+    """A reject sample with the SURVIVORS' date distribution.
+
+    Not a uniform draw. Rejects are far more numerous on quiet sessions, and a
+    uniform sample would therefore be mostly quiet days -- on which any
+    strategy takes few trades for reasons that have nothing to do with stage 2.
+    The control would then "prove" the filter harmless by comparing active
+    days against dull ones.
+
+    So the draw is allocated per session in proportion to that session's
+    SURVIVOR count, which holds the one confound that matters fixed: both
+    samples see the same mix of market days.
+    """
+    if rej.empty or sel.empty or n <= 0:
+        return rej.head(0)
+    want = sel.groupby("date").size()
+    want = (want / want.sum() * n).round().astype(int)
+    rng = np.random.default_rng(seed)
+    out = []
+    for date, k in want.items():
+        pool = rej[rej["date"] == date]
+        if pool.empty or k < 1:
+            continue
+        take = min(int(k), len(pool))
+        idx = rng.choice(len(pool), size=take, replace=False)
+        out.append(pool.iloc[idx])
+    return (pd.concat(out) if out else rej.head(0))
 
 
 def pairs(sel: pd.DataFrame) -> list[dict]:
@@ -406,6 +449,15 @@ def main(argv=None) -> int:
                     help="archive root (default: %(default)s)")
     ap.add_argument("--dataset", default=DATASET_DEFAULT)
     ap.add_argument("--pairs", metavar="OUT.json", help="write candidate pairs")
+    ap.add_argument("--rejects", metavar="OUT.json",
+                    help="write a sample of stage-1 passers that stage 2 threw "
+                         "away -- the leakage control. Same date distribution "
+                         "as the survivors, so both samples see the same mix "
+                         "of market days.")
+    ap.add_argument("--reject-sample", type=int, default=5000,
+                    help="how many rejects to draw (default: %(default)s)")
+    ap.add_argument("--seed", type=int, default=0,
+                    help="draw seed, so the control is reproducible")
     ap.add_argument("--features", metavar="OUT.csv", help="write the feature table")
     ap.add_argument("--out", metavar="OUT.txt",
                     default="var/reports/screen_report.txt",
@@ -448,6 +500,18 @@ def main(argv=None) -> int:
         pl = pairs(sel)
         json.dump(pl, open(a.pairs, "w"), indent=1)
         print(f"\nwrote {a.pairs}  ({len(pl)} candidate symbol-days)")
+    if a.rejects:
+        rej = rejects(df, cfg)
+        smp = sample_rejects(rej, sel, a.reject_sample, a.seed)
+        Path(a.rejects).parent.mkdir(parents=True, exist_ok=True)
+        pl = pairs(smp)
+        json.dump(pl, open(a.rejects, "w"), indent=1)
+        print(f"\nwrote {a.rejects}  ({len(pl):,} of {len(rej):,} rejected "
+              f"symbol-days, seed {a.seed})")
+        print("  These are days a live scanner WOULD have offered and stage 2")
+        print("  removed using the session's own bar. If the strategies take")
+        print("  (almost) no entries here, the leak is small. If they do, the")
+        print("  leak IS the backtest result.")
     if a.features:
         Path(a.features).parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(a.features, index=False)
