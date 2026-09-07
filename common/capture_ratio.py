@@ -265,6 +265,50 @@ def decompose(rows, key="capture_2000") -> dict:
     return out
 
 
+def drift_vs_noise(rows, key="capture_2000", min_obs=5) -> dict:
+    """Is the within-symbol variation slow DRIFT or day-to-day NOISE?
+
+    The two have opposite consequences and the variance decomposition cannot
+    tell them apart. RVOL divides today's volume by a 10-day trailing mean of
+    the same symbol, so:
+
+    * DRIFT -- capture moving slowly -- largely cancels. Today's capture and
+      the trailing window's average capture are close, so the ratio is nearly
+      clean.
+    * NOISE -- capture independent day to day -- does not cancel at all. The
+      numerator carries one full draw while the denominator averages ten, so
+      the noise passes almost undamped into RVOL.
+
+    Lag-1 autocorrelation of each symbol's log-capture series separates them.
+    Near +1 is drift; near 0 is noise. Reported as the median across symbols
+    with at least `min_obs` observations, because a mean is dominated by the
+    few symbols with long series.
+
+    Dates are sorted before differencing: the rows come from a per-month walk
+    and are not guaranteed to arrive in date order, and an unsorted series
+    would report the autocorrelation of an arbitrary permutation -- which is
+    zero, i.e. it would claim "pure noise" no matter what the data did.
+    """
+    by_sym: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for r in rows:
+        v = r.get(key)
+        if v and v > 0:
+            by_sym[r["symbol"]].append((r["date"], math.log(v)))
+
+    acs = []
+    for vs in by_sym.values():
+        if len(vs) < min_obs:
+            continue
+        xs = [v for _, v in sorted(vs)]          # by date. See docstring.
+        m = st.mean(xs)
+        num = sum((xs[i] - m) * (xs[i + 1] - m) for i in range(len(xs) - 1))
+        den = sum((x - m) ** 2 for x in xs)
+        if den > 0:
+            acs.append(num / den)
+    return {"symbols": len(acs), "min_obs": min_obs,
+            "median_ac1": st.median(acs) if acs else None}
+
+
 def quantiles(values, qs=(0.05, 0.25, 0.5, 0.75, 0.95)) -> dict:
     if not values:
         return {q: float("nan") for q in qs}
@@ -369,6 +413,38 @@ def render(rows, checks, impossible, missing, elapsed_min) -> str:
                   "  consolidated volume before relying on it."]
     L.append("")
 
+    dn = drift_vs_noise(rows, primary)
+    L += ["DRIFT OR NOISE?  (lag-1 autocorrelation of a symbol's log capture)",
+          "",
+          f"  symbols with {dn['min_obs']}+ days     {dn['symbols']:,}"]
+    if dn["median_ac1"] is None:
+        L += ["", "  Too few symbols with a long enough series to tell."]
+    else:
+        ac = dn["median_ac1"]
+        L += [f"  median lag-1 autocorr      {ac:+.3f}", ""]
+        if ac >= 0.4:
+            L += ["  DRIFT. Capture moves slowly, so today's value and the "
+                  "10-day trailing",
+                  "  average are close and most of the within-symbol variation "
+                  "CANCELS out",
+                  "  of RVOL. The contamination is smaller than the variance "
+                  "split implies."]
+        elif ac <= 0.15:
+            L += ["  NOISE. Capture is near-independent day to day, so it does "
+                  "NOT cancel:",
+                  "  the numerator carries one full draw while the denominator "
+                  "averages ten.",
+                  "  The within-symbol variation passes almost undamped into "
+                  "RVOL, and the",
+                  "  variance split above is the honest measure of the damage."]
+        else:
+            L += ["  PARTLY BOTH. Some of the within-symbol variation cancels "
+                  "in a 10-day",
+                  "  window and some does not. Neither the optimistic nor the "
+                  "pessimistic",
+                  "  reading of the variance split is safe."]
+    L.append("")
+
     by_date: dict[str, list[float]] = defaultdict(list)
     for r in rows:
         if r.get(primary):
@@ -469,7 +545,28 @@ def main(argv=None) -> int:
                     help="symbol-days for the session check")
     ap.add_argument("--report", default="var/reports/capture_ratio.txt")
     ap.add_argument("--csv", default="var/reports/capture_ratio.csv")
+    ap.add_argument("--from-csv", action="store_true",
+                    help="re-render from the existing CSV instead of re-reading "
+                         "the archive. Seconds rather than minutes -- use it to "
+                         "add an analysis without re-doing the measurement")
     a = ap.parse_args(argv)
+
+    if a.from_csv:
+        # The measurement took 11 minutes over 10 GB. Every later question
+        # asked of the SAME rows should cost seconds, or it will not get asked.
+        p = Path(a.csv)
+        if not p.exists():
+            sys.exit(f"{p} does not exist -- run without --from-csv first.")
+        rows = pd.read_csv(p).to_dict("records")
+        rows = [{k: (None if pd.isna(v) else v) for k, v in r.items()}
+                for r in rows]
+        print(f"{len(rows):,} rows from {p}")
+        # The session check is a property of the archive, not of these rows, so
+        # it cannot be recovered from the CSV. Saying "unknown" is right: the
+        # alternative is a report that silently asserts a verdict it never made.
+        emit(render(rows, [], 0, 0, 0.0), a.report,
+             header=f"common.capture_ratio  re-rendered from {p}")
+        return 0
 
     archive = Path(a.archive)
     by_date = load_pairs(Path(a.pairs))

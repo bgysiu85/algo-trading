@@ -261,3 +261,47 @@ def test_a_thin_repeat_sample_is_flagged_before_the_verdict_is_read():
             for s in "ABCDE" for v in (0.04, 0.06)]
     out = C.render(rows, [], 0, 0, 1.0)
     assert "CAUTION: only 5 symbols" in out
+
+
+# --- drift versus noise ------------------------------------------------------
+
+def test_a_drifting_capture_series_reads_as_drift():
+    """Slow drift largely cancels out of RVOL, because today's capture and the
+    10-day trailing average are close. Noise does not cancel at all."""
+    rows = [{"symbol": "AAA", "date": f"2025-04-{d:02d}",
+             "capture_2000": 0.03 + 0.004 * d} for d in range(1, 16)]
+    d = C.drift_vs_noise(rows, min_obs=5)
+    assert d["median_ac1"] > 0.5
+
+
+def test_an_alternating_series_reads_as_noise():
+    rows = [{"symbol": "AAA", "date": f"2025-04-{d:02d}",
+             "capture_2000": 0.03 if d % 2 else 0.09} for d in range(1, 16)]
+    d = C.drift_vs_noise(rows, min_obs=5)
+    assert d["median_ac1"] < 0
+
+
+def test_the_series_is_sorted_by_date_before_differencing():
+    """Rows come from a per-month walk and are not guaranteed to be in date
+    order. An unsorted series reports the autocorrelation of an arbitrary
+    permutation -- which is about zero, so it would claim 'pure noise'
+    regardless of what the data actually did."""
+    ordered = [{"symbol": "AAA", "date": f"2025-04-{d:02d}",
+                "capture_2000": 0.03 + 0.004 * d} for d in range(1, 16)]
+    shuffled = [ordered[i] for i in (7, 2, 11, 0, 14, 5, 9, 1, 13, 3, 10, 6,
+                                     12, 4, 8)]
+    assert C.drift_vs_noise(ordered, min_obs=5)["median_ac1"] == \
+        pytest.approx(C.drift_vs_noise(shuffled, min_obs=5)["median_ac1"])
+
+
+def test_short_series_are_excluded_rather_than_contributing_noise():
+    rows = [{"symbol": f"S{i}", "date": "2025-04-01", "capture_2000": 0.05}
+            for i in range(50)]
+    assert C.drift_vs_noise(rows, min_obs=5)["median_ac1"] is None
+
+
+def test_the_report_carries_the_drift_verdict():
+    rows = [{"symbol": "AAA", "date": f"2025-04-{d:02d}",
+             "capture_2000": 0.03 + 0.004 * d} for d in range(1, 16)]
+    out = C.render(rows, [], 0, 0, 1.0)
+    assert "DRIFT OR NOISE?" in out and "lag-1 autocorr" in out
