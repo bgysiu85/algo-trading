@@ -230,6 +230,101 @@ def write_manifest(root: Path, dataset: str, entries: dict) -> Path:
 PLAN_TICK = 25          # progress lines every N dates
 
 
+def manifest_symbols(root: Path, dataset: str) -> dict:
+    """{"schema/day": set(symbols)} recorded when each file was fetched."""
+    p = manifest_path(root, dataset)
+    if not p.exists():
+        return {}
+    try:
+        data = json.load(open(p))
+    except Exception:  # noqa: BLE001 -- a broken manifest must not stop a pull
+        return {}
+    out = {}
+    for key, ent in data.items():
+        syms = ent.get("symbols")
+        if isinstance(syms, list):
+            out[key] = set(syms)
+    return out
+
+
+def covered(manifest: dict, schema: str, day: str, syms) -> bool:
+    """Does the file already on disk contain every symbol now being asked for?
+
+    THE ARCHIVE IS KEYED BY DATE, NOT BY (DATE, SYMBOL SET).
+    ---------------------------------------------------------
+    A date fetched for 16 screened symbols writes <day>.dbn.zst. Ask again for
+    83 symbols on that same date and a bare `out.exists()` check skips it --
+    silently, with "already on disk", returning a file that holds a fifth of
+    what was requested. Downstream that is not an error: it is a smaller
+    universe than the one asked for, reported as complete.
+
+    This bites the moment the screen is rebuilt, which is exactly when it
+    happened: the statistics archive was scoped to the OLD EQUS.MINI candidate
+    list, and the consolidated screen selects 45,404 symbol-days where the old
+    one selected 8,636. Every date would have been skipped and the pull would
+    have "succeeded" having downloaded nothing.
+
+    A file with no manifest entry is treated as covered. That is deliberately
+    the conservative direction -- it preserves the old behaviour for anything
+    fetched before manifests existed, rather than silently re-buying an archive
+    -- and the planner reports the count so it is a known unknown.
+    """
+    have = manifest.get(f"{schema}/{day}")
+    if have is None:
+        return True
+    return set(syms) <= have
+
+
+def unverified_skips(manifest: dict, jobs) -> list[tuple[str, str]]:
+    """The skipped (schema, day) pairs whose contents nothing has recorded.
+
+    covered() lets these through on purpose -- see its docstring -- but "we
+    assumed" and "we checked" must not print as the same line. This is the
+    count that makes it a known unknown instead of a silent one.
+    """
+    return sorted({(sc, d) for d, _sy, sc, *_r, skip in jobs
+                   if skip and f"{sc}/{d}" not in manifest})
+
+
+def backfill_entries(manifest: dict, have, cond: dict) -> dict:
+    """Manifest rows for files that were skipped rather than downloaded.
+
+    THE SYMBOL LIST HERE IS NOT THE REQUEST.
+    -----------------------------------------
+    A skipped file was not opened, so this run learned nothing about what is
+    inside it. Writing the REQUESTED symbols as the file's contents -- which
+    the first version did -- turns an assumption into a record, in both
+    directions and both wrong:
+
+      * a file the manifest says holds 83 symbols, re-requested for 16, would
+        be rewritten as holding 16, and the next run would re-BUY it;
+      * a file with no manifest row at all is skipped conservatively by
+        covered(), and stamping the request onto it asserts coverage nothing
+        ever established -- after which covered() believes it.
+
+    So: union with what was already recorded when there is a record (the
+    request is a subset by construction, so this only ever preserves), and
+    record NO symbol list at all when there is not. A row with no list keeps
+    reading as "unknown contents", which is the truth.
+    """
+    ent = {}
+    for day, syms, schema, start, end, out, _c, _b, _s in sorted(have):
+        if not out.exists():
+            continue
+        key = f"{schema}/{day}"
+        prior = manifest.get(key)
+        row = {"date": day, "schema": schema,
+               "condition": cond.get(day, "unknown"),
+               "bytes": out.stat().st_size, "start": start, "end": end,
+               "backfilled": True}
+        if prior is None:
+            row["symbols_unverified"] = True
+        else:
+            row["symbols"] = sorted(prior | set(syms))
+        ent[key] = row
+    return ent
+
+
 def plan(client, groups, dataset, schemas, root, lookback, *, tick=PLAN_TICK):
     """Estimate every request. Returns (jobs, total_usd, total_bytes).
 
@@ -251,6 +346,7 @@ def plan(client, groups, dataset, schemas, root, lookback, *, tick=PLAN_TICK):
     more minutes" is a decision, "it is still going" is not.
     """
     jobs, usd, nbytes = [], 0.0, 0
+    manifest = manifest_symbols(root, dataset)
     total = len(groups)
     t0 = time.time()
     for i, (day, syms) in enumerate(groups.items(), start=1):
@@ -258,7 +354,7 @@ def plan(client, groups, dataset, schemas, root, lookback, *, tick=PLAN_TICK):
         end = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
         for schema in schemas:
             out = archive_path(root, dataset, schema, day)
-            if out.exists():
+            if out.exists() and covered(manifest, schema, day, syms):
                 jobs.append((day, syms, schema, start, end, out, 0.0, 0, True))
                 continue
             kw = dict(dataset=dataset, schema=schema, symbols=syms,
@@ -317,6 +413,21 @@ def _write_plan_report(a, root, jobs, todo, have, usd, nbytes) -> None:
              f"  to download          {len(todo):,}",
              f"  ESTIMATED SIZE       {nbytes/1e6:,.1f} MB",
              f"  ESTIMATED COST       ${usd:,.4f}", ""]
+
+    unknown = unverified_skips(manifest_symbols(root, a.dataset), jobs)
+    if unknown:
+        lines += ["SKIPPED WITHOUT KNOWING WHAT IS IN THEM", "",
+                  f"  {len(unknown)} of the {len(have):,} skipped file(s) have no "
+                  "recorded symbol list,",
+                  "  so 'already on disk' is an assumption for them, not a check.",
+                  "  A file fetched for a NARROWER symbol list than this request",
+                  "  would be skipped anyway and the pull would report success",
+                  "  having downloaded nothing. Delete the file to force a",
+                  "  re-fetch if the scope has changed since it was captured.", ""]
+        lines += [f"    {sc}/{d}" for sc, d in unknown[:20]]
+        if len(unknown) > 20:
+            lines += [f"    ... and {len(unknown) - 20} more"]
+        lines += [""]
 
     seam = paid_boundary(jobs)
     if seam:
@@ -400,7 +511,11 @@ def main(argv=None) -> int:
             continue
         print(f"  {day}  {schema:9} {len(syms):>3} sym  {b/1e6:>8.2f} MB  ${c:>7.4f}")
 
+    unknown = unverified_skips(manifest_symbols(root, a.dataset), jobs)
     print(f"\nalready on disk, skipped : {len(have)}")
+    if unknown:
+        print(f"  of which UNVERIFIED    : {len(unknown)}  (no recorded symbol "
+              "list -- skipped on assumption, see the report)")
     print(f"to download              : {len(todo)}")
     print(f"ESTIMATED SIZE           : {nbytes/1e6:,.1f} MB")
     print(f"ESTIMATED COST           : ${usd:,.4f}")
@@ -416,14 +531,7 @@ def main(argv=None) -> int:
         # Nothing to buy, but a manifest backfill may still be worth writing.
         if have:
             cond = conditions(client, a.dataset, sorted({j[0] for j in jobs}))
-            ent = {}
-            for day, syms, schema, start, end, out, _c, _b, _s in sorted(have):
-                if out.exists():
-                    ent[f"{schema}/{day}"] = {
-                        "date": day, "schema": schema, "symbols": syms,
-                        "condition": cond.get(day, "unknown"),
-                        "bytes": out.stat().st_size, "start": start,
-                        "end": end, "backfilled": True}
+            ent = backfill_entries(manifest_symbols(root, a.dataset), have, cond)
             if ent and a.confirm:
                 print(f"manifest backfilled: {write_manifest(root, a.dataset, ent)}")
                 nb = {d: c for d, c in cond.items() if c not in ("available", "")}
@@ -455,15 +563,7 @@ def main(argv=None) -> int:
     # Backfill: files already on disk still get a manifest row. Without this,
     # anything bought before the manifest existed stays permanently unlabelled
     # and its condition is unrecoverable once the plan window rolls past it.
-    for day, syms, schema, start, end, out, _c, _b, skip in sorted(have):
-        if not out.exists():
-            continue
-        entries[f"{schema}/{day}"] = {
-            "date": day, "schema": schema, "symbols": syms,
-            "condition": cond.get(day, "unknown"),
-            "bytes": out.stat().st_size, "start": start, "end": end,
-            "backfilled": True,
-        }
+    entries.update(backfill_entries(manifest_symbols(root, a.dataset), have, cond))
 
     for day, syms, schema, start, end, out, _c, _b, _skip in sorted(todo):
         out.parent.mkdir(parents=True, exist_ok=True)

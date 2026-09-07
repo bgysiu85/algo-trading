@@ -457,3 +457,147 @@ def test_a_free_date_BEFORE_the_paid_range_does_not_become_the_seam():
     jobs = [_job("2025-07-04", 0.0), _job("2025-08-29", 1.10),
             _job("2025-09-22", 0.0)]
     assert FE.paid_boundary(jobs) == ("2025-08-29", "2025-09-22")
+
+
+# --- "already on disk" is a claim about a DATE, not about a symbol set ------
+
+def _archive_with(tmp_path, dataset, schema, day, recorded):
+    """A file on disk plus the manifest row that says what went into it.
+    recorded=None writes no row, which is the pre-manifest archive."""
+    from common import databento_fetch as FE
+    p = FE.archive_path(tmp_path, dataset, schema, day)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"x")
+    if recorded is not None:
+        FE.write_manifest(tmp_path, dataset, {
+            f"{schema}/{day}": {"date": day, "schema": schema,
+                                "symbols": list(recorded),
+                                "condition": "available", "bytes": 1}})
+    return p
+
+
+def test_a_file_fetched_for_fewer_symbols_is_NOT_skipped(tmp_path):
+    """THE trap this exists for. The statistics archive was captured for the
+    old 8,636-symbol-day EQUS.MINI candidate list; the consolidated screen
+    selects 45,404. Every date was already on disk, so a bare out.exists()
+    check would have skipped all of them and the pull would have reported
+    success having downloaded nothing -- and the analysis underneath would
+    have described a fifth of the universe as the whole of it."""
+    from common import databento_fetch as FE
+    _archive_with(tmp_path, "EQUS.SUMMARY", "statistics", "2025-01-02", ["AAA"])
+    jobs, usd, _b = FE.plan(FakeClient(), {"2025-01-02": ["AAA", "BBB"]},
+                            "EQUS.SUMMARY", ["statistics"], tmp_path, 0)
+    assert [j[8] for j in jobs] == [False]
+    assert usd == pytest.approx(0.01)
+
+
+def test_a_file_that_already_holds_a_superset_is_skipped(tmp_path):
+    """The other half: re-running must stay free. A narrower request against a
+    wider file has nothing to buy."""
+    from common import databento_fetch as FE
+    _archive_with(tmp_path, "EQUS.SUMMARY", "statistics", "2025-01-02",
+                  ["AAA", "BBB", "CCC"])
+    jobs, usd, _b = FE.plan(FakeClient(), {"2025-01-02": ["AAA", "CCC"]},
+                            "EQUS.SUMMARY", ["statistics"], tmp_path, 0)
+    assert [j[8] for j in jobs] == [True]
+    assert usd == 0.0
+
+
+def test_a_file_with_no_manifest_row_is_still_skipped(tmp_path):
+    """Deliberately the conservative direction: an archive captured before
+    manifests existed must not be silently re-bought. It is reported instead
+    -- see the unverified count."""
+    from common import databento_fetch as FE
+    _archive_with(tmp_path, "EQUS.SUMMARY", "statistics", "2025-01-02", None)
+    jobs, usd, _b = FE.plan(FakeClient(), {"2025-01-02": ["AAA", "BBB"]},
+                            "EQUS.SUMMARY", ["statistics"], tmp_path, 0)
+    assert [j[8] for j in jobs] == [True]
+    assert usd == 0.0
+
+
+def test_the_symbol_check_is_per_schema_not_per_date(tmp_path):
+    """Two schemas share a date and are separate files. A manifest row for one
+    must not vouch for the other."""
+    from common import databento_fetch as FE
+    m = {"statistics/2025-01-02": {"AAA", "BBB"}}
+    assert FE.covered(m, "statistics", "2025-01-02", ["AAA"]) is True
+    assert FE.covered(m, "ohlcv-1d", "2025-01-02", ["AAA"]) is True   # unknown
+    assert FE.covered(m, "statistics", "2025-01-03", ["AAA"]) is True # unknown
+    assert FE.covered(m, "statistics", "2025-01-02", ["ZZZ"]) is False
+
+
+def test_a_corrupt_manifest_does_not_stop_a_pull(tmp_path):
+    from common import databento_fetch as FE
+    p = FE.manifest_path(tmp_path, "EQUS.SUMMARY")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("{not json")
+    assert FE.manifest_symbols(tmp_path, "EQUS.SUMMARY") == {}
+
+
+def test_a_row_with_no_symbol_list_reads_as_unknown_not_as_empty(tmp_path):
+    """An entry recorded as unverified must NOT parse as 'contains nothing',
+    which would make every request a non-subset and re-buy the archive."""
+    from common import databento_fetch as FE
+    FE.write_manifest(tmp_path, "EQUS.SUMMARY", {
+        "statistics/2025-01-02": {"date": "2025-01-02", "bytes": 1,
+                                  "symbols_unverified": True}})
+    m = FE.manifest_symbols(tmp_path, "EQUS.SUMMARY")
+    assert m == {}
+    assert FE.covered(m, "statistics", "2025-01-02", ["AAA"]) is True
+
+
+def test_unverified_skips_names_the_assumed_ones_only(tmp_path):
+    from common import databento_fetch as FE
+    jobs = [("2025-01-02", ["AAA"], "statistics", "s", "e", None, 0.0, 0, True),
+            ("2025-01-03", ["AAA"], "statistics", "s", "e", None, 0.0, 0, True),
+            ("2025-01-06", ["AAA"], "statistics", "s", "e", None, 0.5, 9, False)]
+    m = {"statistics/2025-01-02": {"AAA"}}
+    assert FE.unverified_skips(m, jobs) == [("statistics", "2025-01-03")]
+
+
+# --- the backfill must not invent coverage ----------------------------------
+
+class _Out:
+    def __init__(self, n=7):
+        self.n = n
+
+    def exists(self):
+        return True
+
+    def stat(self):
+        return type("S", (), {"st_size": self.n})()
+
+
+def _have(day, syms, schema="statistics"):
+    return (day, syms, schema, "s", "e", _Out(), 0.0, 0, True)
+
+
+def test_backfilling_an_unknown_file_records_no_symbol_list(tmp_path):
+    """A skipped file was never opened, so this run learned nothing about what
+    is inside it. Stamping the REQUEST onto it asserts coverage nothing
+    established -- and covered() would then believe it, permanently."""
+    from common import databento_fetch as FE
+    ent = FE.backfill_entries({}, [_have("2025-01-02", ["AAA"])], {})
+    row = ent["statistics/2025-01-02"]
+    assert "symbols" not in row
+    assert row["symbols_unverified"] is True
+
+
+def test_backfilling_never_shrinks_a_recorded_symbol_list(tmp_path):
+    """A file recorded as holding 83 symbols, re-requested for 16, is skipped
+    as covered -- and must not be rewritten as holding 16, or the next run
+    re-BUYS a date that is already paid for and on disk."""
+    from common import databento_fetch as FE
+    m = {"statistics/2025-01-02": {"AAA", "BBB", "CCC"}}
+    ent = FE.backfill_entries(m, [_have("2025-01-02", ["AAA"])], {})
+    assert ent["statistics/2025-01-02"]["symbols"] == ["AAA", "BBB", "CCC"]
+
+
+def test_the_backfill_still_records_the_condition(tmp_path):
+    """The reason the backfill exists at all: a day that was degraded when it
+    was captured is unrecoverable once the plan window rolls past it."""
+    from common import databento_fetch as FE
+    ent = FE.backfill_entries({}, [_have("2025-01-02", ["AAA"])],
+                              {"2025-01-02": "degraded"})
+    assert ent["statistics/2025-01-02"]["condition"] == "degraded"
+    assert ent["statistics/2025-01-02"]["bytes"] == 7
