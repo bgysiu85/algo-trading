@@ -95,3 +95,30 @@ def test_a_cutoff_with_no_observations_is_labelled_rather_than_blank():
     rows = [{"symbol": "A", "date": "2025-04-09", "20:00": 0.05}]
     out = I.render(rows, 0, 1.0)
     assert "(no data)" in out
+
+
+def test_a_thinly_covered_cutoff_is_flagged_as_a_selection_effect():
+    """At 09:30 only 135 of 182 symbol-days had data on both sides. The
+    excluded ones are those EQUS.MINI saw LEAST, so dropping them biases the
+    early medians upward -- the figure is conditional, and a reader comparing
+    it against the 20:00 column needs to know that."""
+    rows = ([{"symbol": f"S{i}", "date": "2025-04-09",
+              "09:30": 0.02, "20:00": 0.05} for i in range(50)]
+            + [{"symbol": f"T{i}", "date": "2025-04-09", "20:00": 0.05}
+               for i in range(50)])
+    out = I.render(rows, 0, 1.0)
+    assert "selection effect" in out
+    assert "09:30" in out and "50% of symbol-days" in out
+
+
+def test_full_coverage_says_no_cutoff_is_conditioned():
+    rows = [{"symbol": f"S{i}", "date": "2025-04-09",
+             **{lab: 0.05 for _, lab in I.CUTOFFS}} for i in range(20)]
+    assert "no cutoff below is materially conditioned" in I.render(rows, 0, 1.0)
+
+
+def test_the_premarket_ladder_covers_the_hours_before_the_open():
+    """07:00 alone came back with n=0 on the first pass, leaving the whole
+    pre-market as one unlit gap between 04:00 and 09:30."""
+    labels = [lab for _, lab in I.CUTOFFS]
+    assert ["07:00", "08:00", "09:00", "09:30"] == labels[:4]

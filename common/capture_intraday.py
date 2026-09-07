@@ -61,6 +61,8 @@ from common.report_io import emit
 # likely to behave differently; the rest trace the shape.
 CUTOFFS = [
     (7 * 60, "07:00"),
+    (8 * 60, "08:00"),
+    (9 * 60, "09:00"),
     (9 * 60 + 30, "09:30"),
     (10 * 60, "10:00"),
     (11 * 60, "11:00"),
@@ -216,10 +218,26 @@ def render(rows, missing, elapsed_min) -> str:
                   "actually reads."]
         L.append("")
 
-    L += ["  A cutoff's n is lower than the total wherever the consolidated",
-          "  tape had published nothing by that time -- most often at 07:00 on",
-          "  a thin name. Those are omitted, not zero-filled: a symbol with no",
-          "  pre-market prints has no capture ratio, rather than one of 0%."]
+    thin = [(label, len([r for r in rows if r.get(label)]))
+            for _, label in CUTOFFS]
+    thin = [(lab, n) for lab, n in thin if n < 0.9 * len(rows)]
+    L += ["READING THE EARLY CUTOFFS", "",
+          "  A cutoff's n is below the total wherever one side had published",
+          "  nothing by that time. Those symbol-days are omitted, not",
+          "  zero-filled: a name with no pre-market prints has NO capture",
+          "  ratio, rather than one of 0%.", ""]
+    if thin:
+        L += ["  That makes the early figures CONDITIONAL on having data on",
+              "  both sides, which is a selection effect and not a neutral one.",
+              "  The excluded names are the ones EQUS.MINI saw least, so the",
+              "  early medians below are more likely optimistic than",
+              "  pessimistic:", ""]
+        for lab, n in thin:
+            L.append(f"    {lab}  {n:>6,} of {len(rows):,}  "
+                     f"({100*n/len(rows):.0f}% of symbol-days)")
+    else:
+        L.append("  Every cutoff has data on nearly all symbol-days, so no "
+                 "cutoff below is materially conditioned.")
     return "\n".join(L)
 
 
