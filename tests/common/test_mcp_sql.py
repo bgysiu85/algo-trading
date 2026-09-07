@@ -264,3 +264,41 @@ def test_a_connection_error_does_not_leak_the_password(monkeypatch, capsys):
     monkeypatch.setattr(M, "read_only_engine", lambda *a, **k: Boom())
     M.main(["--selftest"])
     assert "hunter2" not in capsys.readouterr().out
+
+
+# --- the selftest result has to outlive the terminal ------------------------
+
+def test_the_selftest_writes_its_result_to_a_file(eng, monkeypatch, tmp_path):
+    """Every measurement in this project goes to a file; this one printed and
+    nothing else, so the result that says whether the login is actually
+    read-only existed only in whichever terminal ran it -- and could not be
+    read by anyone who was not standing there."""
+    monkeypatch.setattr(M, "read_only_engine", lambda *a, **k: eng)
+    out = tmp_path / "selftest.txt"
+    M.main(["--selftest", "--report", str(out)])
+    text = out.read_text(encoding="utf-8")
+    assert "IS THE LOGIN ACTUALLY READ-ONLY" in text
+    assert "THE LOGIN CAN WRITE" in text          # sqlite lets anyone write
+
+
+def test_the_report_never_contains_the_connection_url(eng, monkeypatch, tmp_path):
+    """A report is a file that gets copied around -- it exists to be read by
+    someone who was not there. It must not carry a credential with it."""
+    D.remember_secret("hunter2hunter2")
+    monkeypatch.setattr(M, "read_only_engine", lambda *a, **k: eng)
+    out = tmp_path / "selftest.txt"
+    M.main(["--selftest", "--report", str(out)])
+    text = out.read_text(encoding="utf-8")
+    assert "hunter2hunter2" not in text
+    assert "mssql+pyodbc://" not in text
+
+
+def test_a_failed_connection_is_written_out_too(monkeypatch, tmp_path):
+    """The failing case is the one somebody needs to send on."""
+    class Boom:
+        def connect(self):
+            raise RuntimeError("[28000] Login failed for user 'x'. (18456)")
+    monkeypatch.setattr(M, "read_only_engine", lambda *a, **k: Boom())
+    out = tmp_path / "selftest.txt"
+    assert M.main(["--selftest", "--report", str(out)]) == 1
+    assert "Windows Authentication mode" in out.read_text(encoding="utf-8")

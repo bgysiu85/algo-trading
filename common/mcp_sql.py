@@ -198,11 +198,35 @@ def main(argv=None) -> int:
     ap.add_argument("--url", help="override TRADING_DB_RO_URL (testing only)")
     ap.add_argument("--selftest", action="store_true",
                     help="connect, list the tables, and exit without serving")
+    ap.add_argument("--report", default="var/reports/mcp_sql_selftest.txt",
+                    help="where the selftest result is written "
+                         "(default: %(default)s)")
     a = ap.parse_args(argv)
 
     if a.selftest:
         from sqlalchemy import func, select
         from common import db as D
+
+        # EVERY MEASUREMENT IN THIS PROJECT GOES TO A FILE. This one printed
+        # and nothing else, so its result -- the one that says whether the
+        # login is actually read-only -- existed only in whichever terminal
+        # happened to run it. That is the same omission three other tools here
+        # made, and the reason for the rule.
+        lines: list[str] = []
+
+        def say(*parts):
+            msg = " ".join(str(x) for x in parts)
+            print(msg)
+            lines.append(msg)
+
+        def finish(rc: int) -> int:
+            from common.report_io import emit
+            # The URL is never written. A report is a file that gets copied
+            # around, and this one exists to be read by someone else.
+            emit("\n".join(lines), a.report,
+                 header="common.mcp_sql --selftest")
+            return rc
+
         eng = read_only_engine(a.url)
         try:
             with eng.connect() as c:
@@ -211,46 +235,46 @@ def main(argv=None) -> int:
             # A traceback is not a diagnosis. common/db.py already learned this
             # for the read-write path; the selftest, whose entire job is to
             # diagnose, was shipped without it.
-            print(f"\nCOULD NOT CONNECT: {D._scrub(e)}\n")
+            say(f"\nCOULD NOT CONNECT: {D._scrub(e)}\n")
             if "18456" in str(e) or "Login failed" in str(e):
-                print("Login failed (18456). The server answered and rejected")
-                print("the credentials, so the URL and the driver are fine. In")
-                print("order of how often it is each one:\n")
-                print("  1. THE INSTANCE ONLY ACCEPTS WINDOWS LOGINS. A fresh")
-                print("     install defaults to Windows Authentication mode")
-                print("     unless Mixed Mode was chosen, and then a SQL login")
-                print("     fails with 18456 whatever its password is.")
-                print("       SELECT SERVERPROPERTY('IsIntegratedSecurityOnly');")
-                print("     1 means Windows-only. Change it in SSMS under")
-                print("     Server Properties > Security, then RESTART the")
-                print("     service -- it does not take effect until you do.\n")
-                print("  2. A database USER exists but no server LOGIN. These")
-                print("     are different objects: the login authenticates, the")
-                print("     user authorises. A user with no login has nothing to")
-                print("     log in with.")
-                print("       SELECT name, type_desc, is_disabled")
-                print("         FROM sys.server_principals WHERE name = "
+                say("Login failed (18456). The server answered and rejected")
+                say("the credentials, so the URL and the driver are fine. In")
+                say("order of how often it is each one:\n")
+                say("  1. THE INSTANCE ONLY ACCEPTS WINDOWS LOGINS. A fresh")
+                say("     install defaults to Windows Authentication mode")
+                say("     unless Mixed Mode was chosen, and then a SQL login")
+                say("     fails with 18456 whatever its password is.")
+                say("       SELECT SERVERPROPERTY('IsIntegratedSecurityOnly');")
+                say("     1 means Windows-only. Change it in SSMS under")
+                say("     Server Properties > Security, then RESTART the")
+                say("     service -- it does not take effect until you do.\n")
+                say("  2. A database USER exists but no server LOGIN. These")
+                say("     are different objects: the login authenticates, the")
+                say("     user authorises. A user with no login has nothing to")
+                say("     log in with.")
+                say("       SELECT name, type_desc, is_disabled")
+                say("         FROM sys.server_principals WHERE name = "
                       "'trading-algo';")
-                print("       SELECT name, type_desc")
-                print("         FROM sys.database_principals WHERE name = "
+                say("       SELECT name, type_desc")
+                say("         FROM sys.database_principals WHERE name = "
                       "'trading-algo';\n")
-                print("  3. The password is wrong, or CHECK_POLICY forced a")
-                print("     change on first use (MUST_CHANGE), which also")
-                print("     presents as 18456.\n")
-                print("Run those three queries as yourself; between them they")
-                print("tell the three cases apart.")
-            return 1
+                say("  3. The password is wrong, or CHECK_POLICY forced a")
+                say("     change on first use (MUST_CHANGE), which also")
+                say("     presents as 18456.\n")
+                say("Run those three queries as yourself; between them they")
+                say("tell the three cases apart.")
+            return finish(1)
         with eng.connect() as c:
             for t in D.META.sorted_tables:
                 n = c.execute(select(func.count()).select_from(t)).scalar_one()
-                print(f"  {t.name:<22} {n:,}")
+                say(f"  {t.name:<22} {n:,}")
         # THE CHECK THAT MATTERS. The statement guard is mine and it is
         # advisory; this asks SQL SERVER whether the login can write, by
         # trying, deliberately bypassing the guard. If this INSERT succeeds
         # the login has more rights than the design assumes and every
         # assurance built on it is void -- so it is loud, and it fails the
         # selftest rather than printing a warning nobody reads.
-        print("\nIS THE LOGIN ACTUALLY READ-ONLY?")
+        say("\nIS THE LOGIN ACTUALLY READ-ONLY?")
         writable = False
         try:
             with eng.begin() as c:
@@ -259,7 +283,7 @@ def main(argv=None) -> int:
                     "VALUES ('__selftest__', 'selftest')")
             writable = True
         except Exception as e:  # noqa: BLE001
-            print(f"  GOOD -- the server refused the write: "
+            say(f"  GOOD -- the server refused the write: "
                   f"{str(D._scrub(e)).splitlines()[0][:120]}")
         if writable:
             with eng.begin() as c:
@@ -268,23 +292,23 @@ def main(argv=None) -> int:
                         "DELETE FROM load_run WHERE run_id = '__selftest__'")
                 except Exception:  # noqa: BLE001
                     pass
-            print("  *** THE LOGIN CAN WRITE. ***")
-            print("  This connection is NOT read-only, so the one real guard")
-            print("  in this design is absent. Fix the login before wiring the")
-            print("  server into anything; the statement check in this module")
-            print("  is advisory and will not save you.")
-            return 1
+            say("  *** THE LOGIN CAN WRITE. ***")
+            say("  This connection is NOT read-only, so the one real guard")
+            say("  in this design is absent. Fix the login before wiring the")
+            say("  server into anything; the statement check in this module")
+            say("  is advisory and will not save you.")
+            return finish(1)
 
-        print("\nread_query guard (advisory only -- the login is the control):")
+        say("\nread_query guard (advisory only -- the login is the control):")
         for probe in ("SELECT TOP 5 * FROM bar_daily",
                       "DROP TABLE bar_daily",
                       "SELECT 1; DELETE FROM bar_daily"):
             try:
                 check_select(probe)
-                print(f"  ALLOW   {probe}")
+                say(f"  ALLOW   {probe}")
             except ValueError as e:
-                print(f"  REFUSE  {probe}   ({e})")
-        return 0
+                say(f"  REFUSE  {probe}   ({e})")
+        return finish(0)
 
     build(lambda: read_only_engine(a.url)).run(transport="stdio")
     return 0
