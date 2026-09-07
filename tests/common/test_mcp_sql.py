@@ -237,3 +237,30 @@ def test_the_code_imports_the_name_the_installed_major_actually_has():
     from mcp.server.mcpserver import MCPServer      # noqa: F401
     import inspect
     assert "MCPServer" in inspect.getsource(M.build)
+
+
+def test_a_failed_connection_is_diagnosed_not_traced(monkeypatch, capsys):
+    """The selftest's whole job is to diagnose, and it shipped throwing a
+    60-line SQLAlchemy traceback at a login failure -- while common/db.py, on
+    the read-write path, already printed the three things it is almost always.
+    A traceback is not a diagnosis."""
+    class Boom:
+        def connect(self):
+            raise RuntimeError("[28000] Login failed for user 'x'. (18456)")
+    monkeypatch.setattr(M, "read_only_engine", lambda *a, **k: Boom())
+    rc = M.main(["--selftest"])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "Windows Authentication mode" in out
+    assert "IsIntegratedSecurityOnly" in out
+    assert "server LOGIN" in out
+
+
+def test_a_connection_error_does_not_leak_the_password(monkeypatch, capsys):
+    class Boom:
+        def connect(self):
+            raise RuntimeError(
+                "mssql+pyodbc://trading-algo:hunter2@localhost/Trading failed")
+    monkeypatch.setattr(M, "read_only_engine", lambda *a, **k: Boom())
+    M.main(["--selftest"])
+    assert "hunter2" not in capsys.readouterr().out

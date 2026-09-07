@@ -198,6 +198,42 @@ def main(argv=None) -> int:
         from sqlalchemy import func, select
         from common import db as D
         eng = read_only_engine(a.url)
+        try:
+            with eng.connect() as c:
+                c.exec_driver_sql("SELECT 1")
+        except Exception as e:  # noqa: BLE001
+            # A traceback is not a diagnosis. common/db.py already learned this
+            # for the read-write path; the selftest, whose entire job is to
+            # diagnose, was shipped without it.
+            print(f"\nCOULD NOT CONNECT: {D._scrub(e)}\n")
+            if "18456" in str(e) or "Login failed" in str(e):
+                print("Login failed (18456). The server answered and rejected")
+                print("the credentials, so the URL and the driver are fine. In")
+                print("order of how often it is each one:\n")
+                print("  1. THE INSTANCE ONLY ACCEPTS WINDOWS LOGINS. A fresh")
+                print("     install defaults to Windows Authentication mode")
+                print("     unless Mixed Mode was chosen, and then a SQL login")
+                print("     fails with 18456 whatever its password is.")
+                print("       SELECT SERVERPROPERTY('IsIntegratedSecurityOnly');")
+                print("     1 means Windows-only. Change it in SSMS under")
+                print("     Server Properties > Security, then RESTART the")
+                print("     service -- it does not take effect until you do.\n")
+                print("  2. A database USER exists but no server LOGIN. These")
+                print("     are different objects: the login authenticates, the")
+                print("     user authorises. A user with no login has nothing to")
+                print("     log in with.")
+                print("       SELECT name, type_desc, is_disabled")
+                print("         FROM sys.server_principals WHERE name = "
+                      "'trading-algo';")
+                print("       SELECT name, type_desc")
+                print("         FROM sys.database_principals WHERE name = "
+                      "'trading-algo';\n")
+                print("  3. The password is wrong, or CHECK_POLICY forced a")
+                print("     change on first use (MUST_CHANGE), which also")
+                print("     presents as 18456.\n")
+                print("Run those three queries as yourself; between them they")
+                print("tell the three cases apart.")
+            return 1
         with eng.connect() as c:
             for t in D.META.sorted_tables:
                 n = c.execute(select(func.count()).select_from(t)).scalar_one()
