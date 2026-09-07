@@ -7,7 +7,6 @@ import order change -- and it would look exactly like a guard that works.
 """
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
