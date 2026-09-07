@@ -111,3 +111,55 @@ def test_offline_reports_a_cache_miss_rather_than_fetching(tmp_path):
 def test_offline_is_off_by_default(tmp_path):
     assert runner(tmp_path, "mcl").offline is False
     assert runner(tmp_path, "mcl").sizes is None
+
+
+def cached_frame(path, dates, tz="America/New_York"):
+    """A superset of 1-minute bars across several sessions, written where the
+    engine looks for it."""
+    import pandas as pd
+    from zoneinfo import ZoneInfo
+    et = ZoneInfo(tz)
+    idx = []
+    for d in dates:
+        idx.append(pd.date_range(f"{d} 04:00", f"{d} 19:59", freq="1min",
+                                 tz=et))
+    ix = idx[0].append(idx[1:]).tz_convert("UTC")
+    df = pd.DataFrame({"open": 5.0, "high": 5.02, "low": 4.98, "close": 5.0,
+                       "volume": 1000}, index=ix)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path)
+    return df
+
+
+def test_offline_actually_reads_and_slices_a_cached_frame(tmp_path):
+    """THE path the other offline test does not reach. _offline_bars calls
+    _slice, whose signature is (frame, want_end, symbol, date_str) -- the first
+    version passed (frame, date_str) and would have raised TypeError on every
+    cache HIT while every cache MISS behaved perfectly. A run over a complete
+    cache would have failed on its first row; a run over an empty one would
+    have looked fine."""
+    r = runner(tmp_path, "mcl", offline=True)
+    cached_frame(r._cache_path("AAA", "2026-03-16"),
+                 ["2026-03-12", "2026-03-13", "2026-03-16"])
+    df, err = r._offline_bars("AAA", "2026-03-16")
+    assert err is None
+    assert df is not None and not df.empty
+    # Sliced to MCL's own window: 2 sessions ending 09:30, not the 3-session
+    # superset. Note the shape -- IB's "N D ending T" is the N-1 preceding
+    # sessions IN FULL plus the target's own session up to but excluding T, so
+    # the earlier session legitimately runs to 19:59 and only the LAST one is
+    # cut at 09:29.
+    local = df.index.tz_convert("America/New_York")
+    assert len(set(local.date)) == r.hist_sessions == 2
+    assert str(local[-1])[:16].endswith("09:29")
+    target = local[[d.isoformat() == "2026-03-16" for d in local.date]]
+    assert max(t.time() for t in target).strftime("%H:%M") == "09:29"
+
+
+def test_a_cache_too_short_for_warm_up_is_a_miss_not_a_short_run(tmp_path):
+    """Under-seeding changes an EMA silently. It has to read as missing."""
+    r = runner(tmp_path, "mcl", offline=True)
+    cached_frame(r._cache_path("AAA", "2026-03-16"), ["2026-03-16"])
+    df, err = r._offline_bars("AAA", "2026-03-16")
+    assert df is None
+    assert "warm-up" in err

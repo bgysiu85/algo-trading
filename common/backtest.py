@@ -395,9 +395,16 @@ class Runner:
         df = self._cache_read(symbol, date_str)
         if df is None:
             return None, "not in cache"
-        sliced = self._slice(df, date_str)
+        # Same window the online path slices, built the same way -- this
+        # engine's own end hour/minute, not the shared superset's. Handing the
+        # strategy the unsliced superset would give it extra warm-up and move
+        # its indicators on bars that are otherwise identical.
+        want_end = datetime.strptime(date_str, "%Y-%m-%d").replace(
+            hour=self.hist_end_hour, minute=self.hist_end_minute, tzinfo=ET)
+        sliced = self._slice(df, want_end, symbol, date_str)
         if sliced is None:
             return None, "cached frame too short for warm-up"
+        self.cache_hits += 1
         return sliced, None
 
     async def run(self, pairs: list[dict], probe_only: bool,
