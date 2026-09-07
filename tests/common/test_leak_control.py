@@ -192,3 +192,60 @@ def test_the_report_names_the_dataset_it_used():
     import inspect
     src = inspect.getsource(S.main)
     assert "dataset={a.dataset}" in src
+
+
+# --- the quality cut, added 2026-09-07 --------------------------------------
+
+def _m(days, trades, net):
+    return {"days": days, "trades": trades, "net": net,
+            "days_with_a_trade": min(days, trades),
+            "entries_per_day": trades / days if days else 0.0,
+            "share_of_days_traded": 0.0,
+            "net_per_day": net / days if days else 0.0,
+            "net_per_trade": (net / trades) if trades else None}
+
+
+def test_the_rate_test_can_pass_while_the_quality_test_fails():
+    """MC5 on 2026-09-07: rejected-day entry rate was 7% of the survivors' --
+    a clear pass -- while the rejected days lost $7.21 a trade against +$1.11
+    on the ones stage 2 kept. The rate test does not detect that, and this is
+    the whole reason the quality cut exists."""
+    surv = _m(21_407, 7_403, 8_209.18)
+    rej = _m(3_886, 92, -663.9)
+    out = "\n".join(L.verdict(surv, rej))
+    assert "SMALL LEAK" in out                      # the rate test passes
+    assert "WARNING" in out                          # and the quality test does not
+    assert "THREW AWAY" in out
+
+
+def test_a_clean_result_says_which_pass_is_the_stronger_one():
+    surv = _m(1000, 500, 500.0)
+    rej = _m(1000, 100, 200.0)          # better per trade on the rejects
+    out = "\n".join(L.quality_verdict(surv, rej))
+    assert "stronger of the two passes" in out
+    assert "WARNING" not in out
+
+
+def test_too_few_rejected_trades_is_reported_as_a_signal_not_a_finding():
+    surv = _m(1000, 500, 500.0)
+    rej = _m(1000, 5, -50.0)
+    out = "\n".join(L.quality_verdict(surv, rej))
+    assert "Too few" in out and "WARNING" not in out
+
+
+def test_a_population_with_no_trades_yields_no_quality_verdict():
+    assert L.quality_verdict(_m(10, 0, 0.0), _m(10, 0, 0.0)) == []
+
+
+def test_the_threshold_is_a_named_constant_not_a_literal():
+    """SMALL_LEAK_RATIO is named so it can be argued with rather than buried in
+    an if. The same has to hold for the new one."""
+    import inspect
+    assert L.QUALITY_MIN_TRADES == 30
+    src = inspect.getsource(L.quality_verdict)
+    assert "QUALITY_MIN_TRADES" in src and "< 30" not in src
+
+
+def test_measure_reports_per_trade_as_none_when_there_are_no_trades():
+    """0.00 per trade and 'never traded' are different findings."""
+    assert _m(10, 0, 0.0)["net_per_trade"] is None

@@ -508,3 +508,109 @@ def test_loading_the_fills_records_where_they_came_from(eng, tmp_path):
     with eng.connect() as c:
         kinds = [r[0] for r in c.execute(select(D.load_run.c.kind)).all()]
     assert "flex_execution" in kinds
+
+
+# --- the controls -----------------------------------------------------------
+
+LEAK_CSV = ("strategy,population,days,trades,days_with_a_trade,net,"
+            "entries_per_day,share_of_days_traded,net_per_day,net_per_trade\n"
+            "mc5,survivors,21407,7403,4110,8209.18,0.346,0.192,0.38,1.11\n"
+            "mc5,rejected,3886,92,66,-663.9,0.024,0.017,-0.17,-7.21\n")
+
+
+def test_the_leak_control_measurements_load(eng, tmp_path):
+    p = tmp_path / "leak_control.csv"
+    p.write_text(LEAK_CSV)
+    with eng.begin() as c:
+        _rid, n = L.load_leak_control(c, p)
+    assert n == 2
+    with eng.connect() as c:
+        rows = c.execute(select(D.leak_control.c.population,
+                                D.leak_control.c.net_per_trade)
+                         .order_by(D.leak_control.c.population)).all()
+    assert dict(rows) == {"rejected": -7.21, "survivors": 1.11}
+
+
+def test_reloading_the_leak_control_does_not_double_it(eng, tmp_path):
+    p = tmp_path / "leak_control.csv"
+    p.write_text(LEAK_CSV)
+    for _ in range(2):
+        with eng.begin() as c:
+            L.load_leak_control(c, p)
+    assert count(eng, D.leak_control) == 2
+
+
+def test_a_population_with_no_trades_stores_null_not_zero(eng, tmp_path):
+    """0.00 per trade and 'no trades at all' are different findings, and one of
+    them is evidence."""
+    p = tmp_path / "leak_control.csv"
+    p.write_text("strategy,population,days,trades,days_with_a_trade,net,"
+                 "entries_per_day,share_of_days_traded,net_per_day,"
+                 "net_per_trade\n"
+                 "vw9,rejected,10,0,0,0,0,0,0,\n")
+    with eng.begin() as c:
+        L.load_leak_control(c, p)
+    with eng.connect() as c:
+        assert c.execute(select(D.leak_control.c.net_per_trade)).scalar() is None
+
+
+HOLDOUT = {
+    "lock_from": "2026-01-12", "both_halves_split": "2025-04-08",
+    "train_first": "2024-07-05", "train_last": "2026-01-09",
+    "n_sessions": 545, "n_train": 381, "n_locked": 164,
+    "n_early": 190, "n_late": 191, "lock_fraction": 0.3,
+    "cut_at": "2026-09-07T14:30:17Z",
+    "universe_fingerprint": "a" * 64,
+    "note": "not out of sample for MC5",
+}
+
+
+def test_the_holdout_cut_loads(eng, tmp_path):
+    p = tmp_path / "holdout.json"
+    p.write_text(json.dumps(HOLDOUT))
+    with eng.begin() as c:
+        fp, n = L.load_holdout(c, p)
+    assert n == 1 and fp == "a" * 64
+    with eng.connect() as c:
+        r = c.execute(select(D.holdout_cut.c.lock_from,
+                             D.holdout_cut.c.n_locked)).one()
+    assert str(r[0]) == "2026-01-12" and r[1] == 164
+
+
+def test_loading_the_same_cut_twice_is_a_no_op(eng, tmp_path):
+    p = tmp_path / "holdout.json"
+    p.write_text(json.dumps(HOLDOUT))
+    for _ in range(2):
+        with eng.begin() as c:
+            L.load_holdout(c, p)
+    assert count(eng, D.holdout_cut) == 1
+
+
+def test_a_cut_against_a_different_universe_keeps_both_rows(eng, tmp_path):
+    """The table IS the history of how the holdout has moved. A second
+    fingerprint means the universe changed, and BOTH rows must survive so the
+    move is visible rather than overwritten."""
+    p = tmp_path / "holdout.json"
+    p.write_text(json.dumps(HOLDOUT))
+    with eng.begin() as c:
+        L.load_holdout(c, p)
+    p.write_text(json.dumps({**HOLDOUT, "universe_fingerprint": "b" * 64,
+                             "lock_from": "2026-03-01"}))
+    with eng.begin() as c:
+        L.load_holdout(c, p)
+    assert count(eng, D.holdout_cut) == 2
+
+
+def test_the_committed_cut_loads_as_written(eng):
+    """The real file, not a fixture -- if holdout.json ever gains a field the
+    loader cannot read, this fails rather than silently storing a null."""
+    from common import holdout as HO
+    with eng.begin() as c:
+        fp, n = L.load_holdout(c, HO.CUT_PATH)
+    assert n == 1 and len(fp) == 64
+    with eng.connect() as c:
+        r = c.execute(select(D.holdout_cut.c.n_sessions,
+                             D.holdout_cut.c.n_locked,
+                             D.holdout_cut.c.note)).one()
+    assert r[0] == 545 and r[1] == 164
+    assert "MC5" in r[2]

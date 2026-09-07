@@ -74,13 +74,23 @@ def measure(reports: Path, states: Path, name: str, keys: set) -> dict:
             "days_with_a_trade": with_any,
             "entries_per_day": trades / len(evaluable) if evaluable else 0.0,
             "share_of_days_traded": with_any / len(evaluable) if evaluable else 0.0,
-            "net_per_day": net / len(evaluable) if evaluable else 0.0}
+            "net_per_day": net / len(evaluable) if evaluable else 0.0,
+            # PER TRADE, not per day. The rate test below asks whether the
+            # strategy would have BEEN in those names; this asks whether the
+            # days stage 2 discarded were different in KIND. They are different
+            # questions and on 2026-09-07 they gave different answers.
+            "net_per_trade": (net / trades) if trades else None}
 
 
 # A rejected-day entry rate at or below this share of the survivors' rate is
 # reported as a small leak. It is a JUDGEMENT, not a measurement, and it is
 # named here so it can be argued with rather than buried in an if.
 SMALL_LEAK_RATIO = 0.25
+
+# Below this many rejected-day trades, the per-trade comparison is a signal
+# rather than a measurement and is reported as such. MC5's was n = 92 on
+# 2026-09-07 -- enough to be worth saying out loud, not enough to conclude on.
+QUALITY_MIN_TRADES = 30
 
 
 def verdict(surv: dict, rej: dict) -> list[str]:
@@ -112,6 +122,46 @@ def verdict(surv: dict, rej: dict) -> list[str]:
         L += [f"  Those rejected-day entries also LOST money "
               f"(${rej['net_per_day']:,.2f} per day),",
               "  which is the shape of a filter that was picking winners."]
+    return L + quality_verdict(surv, rej)
+
+
+def quality_verdict(surv: dict, rej: dict) -> list[str]:
+    """The cut the entry-rate test does not make.
+
+    ADDED 2026-09-07, because the rate test passed MC5 and this one did not.
+    The rate test asks whether the strategy would have BEEN in the names stage
+    2 discarded. It says nothing about whether those days were different in
+    KIND -- and MC5 made +$1.11 a trade on survivors while losing $7.21 a trade
+    on rejects. A filter that only removed days the strategy skips would not
+    produce that gap; a filter that is selecting the days the strategy works on
+    would.
+
+    Computed by hand in a chat window the first time, which is exactly how a
+    finding gets lost. It lives in the tool now.
+    """
+    a, b = surv.get("net_per_trade"), rej.get("net_per_trade")
+    if a is None or b is None:
+        return []
+    L = ["",
+         f"  per trade: survivors ${a:+,.2f}   rejected ${b:+,.2f}   "
+         f"(n={rej['trades']:,})"]
+    if rej["trades"] < QUALITY_MIN_TRADES:
+        return L + [f"  Too few rejected-day trades (<{QUALITY_MIN_TRADES}) to "
+                    "read anything into the gap."]
+    if a > 0 and b < 0:
+        L += ["  WARNING: profitable on the days stage 2 KEPT, unprofitable on "
+              "the days",
+              "  it THREW AWAY. That is the shape of stage 2 selecting the days "
+              "the",
+              "  strategy works on rather than merely agreeing with it -- and "
+              "stage 2 is",
+              "  the half that reads the session's own bar. The entry-rate test "
+              "above",
+              "  does not detect this and passing it is not a defence."]
+    elif b >= a:
+        L += ["  The rejected days were no worse per trade, so stage 2 was not "
+              "selecting",
+              "  on outcome. This is the stronger of the two passes."]
     return L
 
 
@@ -147,6 +197,8 @@ def main(argv=None) -> int:
     ap.add_argument("--reports", default="var/reports/screened")
     ap.add_argument("--states", default="var/state/screened")
     ap.add_argument("--out", default="var/reports/leak_control.txt")
+    ap.add_argument("--csv", default="var/reports/leak_control.csv",
+                    help="machine-readable form, for common.db_load --leak")
     a = ap.parse_args(argv)
 
     surv_keys = population(Path(a.survivors))
@@ -161,6 +213,25 @@ def main(argv=None) -> int:
     for n in a.strategy:
         rows[n] = (measure(Path(a.reports), Path(a.states), n, surv_keys),
                    measure(Path(a.reports), Path(a.states), n, rej_keys))
+
+    if a.csv:
+        # The verdict is prose and belongs in the report. The MEASUREMENTS
+        # belong somewhere they can be compared against a later run -- which
+        # a text file cannot do, and which is the whole reason the database
+        # exists.
+        import csv as _csv
+        cols = ["strategy", "population", "days", "trades", "days_with_a_trade",
+                "net", "entries_per_day", "share_of_days_traded",
+                "net_per_day", "net_per_trade"]
+        Path(a.csv).parent.mkdir(parents=True, exist_ok=True)
+        with open(a.csv, "w", newline="") as fh:
+            w = _csv.DictWriter(fh, fieldnames=cols)
+            w.writeheader()
+            for name, (surv, rej) in rows.items():
+                for pop, m in (("survivors", surv), ("rejected", rej)):
+                    w.writerow({"strategy": name, "population": pop,
+                                **{k: m.get(k) for k in cols[2:]}})
+        print(f"wrote {a.csv}  ({len(rows) * 2} rows)")
 
     from common.report_io import emit
     emit("\n".join(render(rows)), a.out, header="common.leak_control")

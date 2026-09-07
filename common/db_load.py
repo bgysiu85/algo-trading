@@ -406,6 +406,65 @@ def load_daily_bars(conn, archive: Path, dataset: str) -> int:
     return len(rows)
 
 
+# --- the controls -----------------------------------------------------------
+
+def load_leak_control(conn, path: Path) -> tuple[str, int]:
+    """The leakage control's measurements.
+
+    The verdict stays in the text report; these are the figures, so a later run
+    can be compared against this one. That comparison is the reason the
+    database exists and it is exactly what a .txt cannot do.
+    """
+    rid = run_id("leak", path.stem, path)
+    rows = [{
+        "run_id": rid, "strategy": r["strategy"],
+        "population": r["population"], "run_at": datetime.now(),
+        "days": _i(r.get("days")), "trades": _i(r.get("trades")),
+        "days_with_a_trade": _i(r.get("days_with_a_trade")),
+        "net": _f(r.get("net")),
+        "entries_per_day": _f(r.get("entries_per_day")),
+        "share_of_days_traded": _f(r.get("share_of_days_traded")),
+        "net_per_day": _f(r.get("net_per_day")),
+        "net_per_trade": _f(r.get("net_per_trade")),
+    } for r in csv.DictReader(open(path, newline=""))]
+    n = replace(conn, D.leak_control, "run_id", rid, rows)
+    note_load(conn, rid, "leak_control", path, n)
+    return rid, n
+
+
+def load_holdout(conn, path: Path) -> tuple[str, int]:
+    """The committed holdout cut.
+
+    Keyed on the universe fingerprint, so loading the same cut twice is a
+    no-op and loading a cut against a DIFFERENT universe leaves both rows
+    visible. A holdout that quietly moved is the thing this makes impossible to
+    miss.
+    """
+    rec = json.loads(path.read_text())
+    row = {
+        "universe_fingerprint": rec["universe_fingerprint"],
+        "cut_at": _ts(rec.get("cut_at")),
+        "lock_from": _date(rec["lock_from"]),
+        "both_halves_split": _date(rec["both_halves_split"]),
+        "train_first": _date(rec["train_first"]),
+        "train_last": _date(rec["train_last"]),
+        "lock_fraction": _f(rec.get("lock_fraction")),
+        "n_sessions": _i(rec.get("n_sessions")),
+        "n_train": _i(rec.get("n_train")),
+        "n_locked": _i(rec.get("n_locked")),
+        "n_early": _i(rec.get("n_early")),
+        "n_late": _i(rec.get("n_late")),
+        "note": (rec.get("note") or "")[:512],
+    }
+    conn.execute(delete(D.holdout_cut).where(
+        D.holdout_cut.c.universe_fingerprint == row["universe_fingerprint"]))
+    conn.execute(insert(D.holdout_cut), [row])
+    note_load(conn, run_id("holdout", rec["universe_fingerprint"][:12], path),
+              "holdout_cut", path, 1,
+              f"locked from {rec['lock_from']}, {rec['n_locked']} sessions")
+    return rec["universe_fingerprint"], 1
+
+
 # --- which flag fills which table ------------------------------------------
 
 # THE POINT OF THIS MAP IS THE TEST THAT READS IT. Three tables shipped that
@@ -427,7 +486,9 @@ FILLED_BY = {
     "bar_daily": "--daily-bars",
     "compound_run": "--compound",
     "compound_sweep": "--compound",
-    "load_run": "--screen",     # written by note_load on every load
+    "leak_control": "--leak",
+    "holdout_cut": "--holdout",
+    "load_run": "--screen",     # written by note_load on every load     # written by note_load on every load
 }
 
 
@@ -442,6 +503,10 @@ def parser() -> argparse.ArgumentParser:
                     help="force the Flex report timezone (see common.flex --tz-report)")
     ap.add_argument("--compound", nargs="+", metavar="CSV",
                     help="compound_run.csv and/or compound_sweep.csv")
+    ap.add_argument("--leak", metavar="LEAK_CONTROL.csv")
+    ap.add_argument("--holdout", nargs="?", const="holdout.json",
+                    metavar="HOLDOUT.json",
+                    help="the committed cut (default: holdout.json)")
     ap.add_argument("--backtests", nargs=3,
                     metavar=("REPORTS_DIR", "STATES_DIR", "UNIVERSE"))
     ap.add_argument("--strategy", nargs="+", default=["mcl", "mc5", "vw9_5m"])
@@ -471,6 +536,12 @@ def main(argv=None) -> int:
             for p in a.compound:
                 kind, rid, n = load_compound(conn, Path(p))
                 print(f"{kind:<13} {n:,} rows   {rid}")
+        if a.leak:
+            rid, n = load_leak_control(conn, Path(a.leak))
+            print(f"leak control  {n:,} rows   {rid}")
+        if a.holdout:
+            fp, n = load_holdout(conn, Path(a.holdout))
+            print(f"holdout cut   fingerprint {fp[:16]}...")
         if a.dollar_volume:
             print(f"dollar volume {load_dollar_volume(conn, Path(a.dollar_volume)):,}")
         if a.backtests:

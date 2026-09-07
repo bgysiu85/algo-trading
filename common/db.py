@@ -381,6 +381,50 @@ compound_sweep = Table(
     Column("skipped", Integer), Column("dv_capped", Integer),
 )
 
+# --- controls --------------------------------------------------------------
+
+leak_control = Table(
+    "leak_control", META,
+    # Two rows per strategy per run: the survivor population and the rejected
+    # one. Rows rather than columns, so a third population -- a locked holdout,
+    # say -- needs no schema change.
+    Column("run_id", String(KEY), primary_key=True),
+    Column("strategy", String(24), primary_key=True),
+    Column("population", String(12), primary_key=True),
+    Column("run_at", DateTime),
+    Column("days", Integer), Column("trades", Integer),
+    Column("days_with_a_trade", Integer),
+    Column("net", Float),
+    Column("entries_per_day", Float),
+    Column("share_of_days_traded", Float),
+    Column("net_per_day", Float),
+    # The cut the entry-rate test does not make: is the population different in
+    # KIND. Nullable, because a population with no trades has no per-trade
+    # figure and 0.0 would be a lie.
+    Column("net_per_trade", Float),
+)
+
+holdout_cut = Table(
+    "holdout_cut", META,
+    # KEYED BY THE UNIVERSE, not by a run id. Re-cutting against the same
+    # universe replaces the row; cutting against a genuinely different one adds
+    # a second. So the table IS the history of how the holdout has moved, which
+    # is the first question anyone should ask before believing an out-of-sample
+    # figure. holdout.json is the same record in the git tree; this is the copy
+    # that can be joined against a backtest_run.
+    Column("universe_fingerprint", String(64), primary_key=True),
+    Column("cut_at", DateTime),
+    Column("lock_from", Date),
+    Column("both_halves_split", Date),
+    Column("train_first", Date), Column("train_last", Date),
+    Column("lock_fraction", Float),
+    Column("n_sessions", Integer), Column("n_train", Integer),
+    Column("n_locked", Integer),
+    Column("n_early", Integer), Column("n_late", Integer),
+    Column("note", String(512)),
+)
+
+
 # --- provenance ------------------------------------------------------------
 
 load_run = Table(
