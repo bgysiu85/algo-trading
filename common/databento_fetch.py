@@ -10,6 +10,12 @@
     python -m common.databento_fetch --pairs var/state/flex_pairs_all.json \
         --missing-from-cache --schemas ohlcv-1m --confirm
 
+    # several pair lists are UNIONed, so re-scoping a schema to a rebuilt
+    # candidate list never drops the symbol-days the old one captured
+    python -m common.databento_fetch --dataset EQUS.SUMMARY --schemas statistics \
+        --pairs var/state/screen_pairs.json var/state/screen_pairs_consolidated.json \
+        --lookback 0 --max-cost 0.01 --confirm
+
 WHY AN ARCHIVE AND NOT A CACHE
 -------------------------------
 Databento bills on RETRIEVAL. Once a file is on disk it is free to read forever,
@@ -143,9 +149,27 @@ def _key() -> str:
     return k
 
 
-def load_pairs(path: Path) -> list[tuple[str, str]]:
-    data = json.load(open(path))
-    return sorted({(p["symbol"], p["date"]) for p in data})
+def load_pairs(paths) -> list[tuple[str, str]]:
+    """Symbol-days from one pair list, or the UNION of several.
+
+    The union is not a convenience. A fetch scoped to a new candidate list
+    REPLACES the file for each date it touches, so re-running the statistics
+    pull against the rebuilt screen would overwrite 548 dates captured for the
+    old EQUS.MINI universe -- and the two universes are not nested. Names that
+    dropped out on consolidated volume would simply be gone, and they are the
+    only intraday sample of REJECTED symbol-days in the archive, which is what
+    the stage-2 leakage control needs.
+
+    Passing both lists makes the archive monotone: every date is fetched for
+    the union, covered() skips the dates where the union adds nothing, and no
+    already-captured symbol-day is ever dropped by a re-scope.
+    """
+    if isinstance(paths, (str, Path)):
+        paths = [paths]
+    out: set[tuple[str, str]] = set()
+    for path in paths:
+        out |= {(p["symbol"], p["date"]) for p in json.load(open(path))}
+    return sorted(out)
 
 
 def filter_pairs(pairs, *, before=None, after=None, missing_from_cache=None):
@@ -407,7 +431,7 @@ def _write_plan_report(a, root, jobs, todo, have, usd, nbytes) -> None:
 
     lines = [f"SCOPED FETCH PLAN  {a.dataset}  {' '.join(a.schemas)}", "",
              f"  archive              {root}",
-             f"  pair list            {a.pairs}",
+             f"  pair list            {', '.join(map(str, a.pairs))}",
              f"  lookback             {a.lookback} day(s)",
              f"  already on disk      {len(have):,}",
              f"  to download          {len(todo):,}",
@@ -465,7 +489,9 @@ def _write_plan_report(a, root, jobs, todo, have, usd, nbytes) -> None:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Fetch symbol-days into a local archive")
-    ap.add_argument("--pairs", required=True, help="pair list JSON")
+    ap.add_argument("--pairs", nargs="+", required=True, metavar="PAIRS.json",
+                    help="pair list JSON; several are UNIONed, so a re-scope "
+                         "never drops symbol-days an earlier one captured")
     ap.add_argument("--dataset", default="EQUS.ALL")
     ap.add_argument("--schemas", nargs="+", default=["ohlcv-1m"])
     ap.add_argument("--archive", default=str(default_archive()),
@@ -489,7 +515,8 @@ def main(argv=None) -> int:
     except ImportError:
         sys.exit("pip install databento")
 
-    pairs = filter_pairs(load_pairs(Path(a.pairs)), before=a.before, after=a.after,
+    pairs = filter_pairs(load_pairs([Path(p) for p in a.pairs]),
+                         before=a.before, after=a.after,
                          missing_from_cache=a.missing_from_cache)
     if not pairs:
         print("nothing to fetch after filtering")

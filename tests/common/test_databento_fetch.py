@@ -601,3 +601,43 @@ def test_the_backfill_still_records_the_condition(tmp_path):
                               {"2025-01-02": "degraded"})
     assert ent["statistics/2025-01-02"]["condition"] == "degraded"
     assert ent["statistics/2025-01-02"]["bytes"] == 7
+
+
+# --- a re-scope must not silently drop what an earlier one captured ---------
+
+def _plist(tmp_path, name, pairs):
+    p = tmp_path / name
+    p.write_text(json.dumps([{"symbol": s, "date": d} for s, d in pairs]))
+    return p
+
+
+def test_several_pair_lists_are_unioned(tmp_path):
+    """A fetch scoped to a new candidate list REPLACES the file for each date
+    it touches. The old EQUS.MINI statistics archive and the consolidated one
+    are not nested -- names that dropped out on consolidated volume would
+    simply be gone, and those are the only intraday sample of REJECTED
+    symbol-days there is, which is what the stage-2 leakage control needs."""
+    from common import databento_fetch as FE
+    old = _plist(tmp_path, "old.json", [("AAA", "2025-01-02"), ("BBB", "2025-01-02")])
+    new = _plist(tmp_path, "new.json", [("BBB", "2025-01-02"), ("CCC", "2025-01-02")])
+    assert FE.load_pairs([old, new]) == [("AAA", "2025-01-02"),
+                                         ("BBB", "2025-01-02"),
+                                         ("CCC", "2025-01-02")]
+
+
+def test_one_pair_list_still_works_unwrapped(tmp_path):
+    """Every existing caller passes a single Path, overnight_pull included."""
+    from common import databento_fetch as FE
+    p = _plist(tmp_path, "one.json", [("AAA", "2025-01-02")])
+    assert FE.load_pairs(p) == FE.load_pairs([p]) == [("AAA", "2025-01-02")]
+
+
+def test_the_union_is_what_reaches_the_plan(tmp_path):
+    """Wiring, not arithmetic: the union has to survive argument parsing."""
+    from common import databento_fetch as FE
+    old = _plist(tmp_path, "old.json", [("AAA", "2025-01-02")])
+    new = _plist(tmp_path, "new.json", [("CCC", "2025-01-02")])
+    groups = FE.group_by_date(FE.load_pairs([old, new]))
+    jobs, _u, _b = FE.plan(FakeClient(), groups, "EQUS.SUMMARY",
+                           ["statistics"], tmp_path, 0)
+    assert jobs[0][1] == ["AAA", "CCC"]
