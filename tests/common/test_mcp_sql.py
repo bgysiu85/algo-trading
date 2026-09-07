@@ -178,3 +178,30 @@ def test_a_large_result_is_truncated_with_a_visible_note():
 
 def test_no_rows_says_so_rather_than_returning_nothing():
     assert M.rows_to_text(("a",), [], False) == "(no rows)"
+
+
+# --- the selftest has to be able to FAIL ------------------------------------
+
+def test_the_selftest_fails_when_the_login_can_write(eng, monkeypatch, capsys):
+    """The statement guard is mine and advisory; the login is the control. So
+    the selftest asks SQL Server itself, by attempting a write with the guard
+    deliberately bypassed. A selftest that could only pass would be decoration
+    -- this one returns non-zero and says the guard it leaves behind will not
+    save you."""
+    monkeypatch.setattr(M, "read_only_engine", lambda *a, **k: eng)
+    rc = M.main(["--selftest"])          # sqlite lets anyone write
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "THE LOGIN CAN WRITE" in out
+    assert "advisory" in out
+
+
+def test_the_selftest_leaves_no_row_behind(eng, monkeypatch):
+    """It writes to prove it can. It must not then leave that proof in a table
+    somebody later counts."""
+    from sqlalchemy import func, select
+    monkeypatch.setattr(M, "read_only_engine", lambda *a, **k: eng)
+    M.main(["--selftest"])
+    with eng.connect() as c:
+        assert c.execute(select(func.count()).select_from(
+            D.load_run)).scalar_one() == 0

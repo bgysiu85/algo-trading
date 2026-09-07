@@ -194,7 +194,38 @@ def main(argv=None) -> int:
             for t in D.META.sorted_tables:
                 n = c.execute(select(func.count()).select_from(t)).scalar_one()
                 print(f"  {t.name:<22} {n:,}")
-        print("\nread_query guard:")
+        # THE CHECK THAT MATTERS. The statement guard is mine and it is
+        # advisory; this asks SQL SERVER whether the login can write, by
+        # trying, deliberately bypassing the guard. If this INSERT succeeds
+        # the login has more rights than the design assumes and every
+        # assurance built on it is void -- so it is loud, and it fails the
+        # selftest rather than printing a warning nobody reads.
+        print("\nIS THE LOGIN ACTUALLY READ-ONLY?")
+        writable = False
+        try:
+            with eng.begin() as c:
+                c.exec_driver_sql(
+                    "INSERT INTO load_run (run_id, kind) "
+                    "VALUES ('__selftest__', 'selftest')")
+            writable = True
+        except Exception as e:  # noqa: BLE001
+            print(f"  GOOD -- the server refused the write: "
+                  f"{str(D._scrub(e)).splitlines()[0][:120]}")
+        if writable:
+            with eng.begin() as c:
+                try:
+                    c.exec_driver_sql(
+                        "DELETE FROM load_run WHERE run_id = '__selftest__'")
+                except Exception:  # noqa: BLE001
+                    pass
+            print("  *** THE LOGIN CAN WRITE. ***")
+            print("  This connection is NOT read-only, so the one real guard")
+            print("  in this design is absent. Fix the login before wiring the")
+            print("  server into anything; the statement check in this module")
+            print("  is advisory and will not save you.")
+            return 1
+
+        print("\nread_query guard (advisory only -- the login is the control):")
         for probe in ("SELECT TOP 5 * FROM bar_daily",
                       "DROP TABLE bar_daily",
                       "SELECT 1; DELETE FROM bar_daily"):
