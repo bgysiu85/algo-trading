@@ -122,10 +122,11 @@ def eng(tmp_path):
 
 
 def tool(server, name):
-    """FastMCP keeps the callable on its tool manager."""
+    """call_tool is a coroutine; asyncio.run is the supported way to drive one
+    from sync test code. get_event_loop_policy() worked and is deprecated for
+    removal in 3.16 -- a warning today is a failure on a later interpreter."""
     import asyncio
-    return lambda **kw: asyncio.get_event_loop_policy().new_event_loop(
-    ).run_until_complete(server.call_tool(name, kw))
+    return lambda **kw: asyncio.run(server.call_tool(name, kw))
 
 
 def test_list_tables_reports_every_table(eng):
