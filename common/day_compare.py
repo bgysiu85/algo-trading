@@ -367,6 +367,32 @@ def by_entry_block(units: dict, sources) -> dict:
     return {k: out[k] for k in keys + (["NO TIME"] if "NO TIME" in out else [])}
 
 
+def restrict_units(units: dict, rows) -> tuple[dict, dict]:
+    """Keep only the positions that fall on a symbol-day the sheet has a row
+    for. Returns (kept, dropped-per-source).
+
+    The row set is Ben's traded history, and it is the spine of the whole
+    comparison: a strategy trade on a day he did not trade has nothing to be
+    compared against. But a strategy's own artefacts can outlive a pair list --
+    the shipped MCL run held 6 trades on 3 symbol-days that no longer appear in
+    the flex summary at all.
+
+    Left in, those trades sat in the clock sheet and not in the monthly sheet,
+    so the two disagreed by $102.67 on a workbook whose every individual cell
+    was correct. Dropped silently, the same $102.67 vanishes with no record.
+    So they are dropped AND counted, and the caller is expected to say so.
+    """
+    keys = {(r["symbol"], r["date"]) for r in rows}
+    kept, dropped = {}, {}
+    for src, us in units.items():
+        keep = [u for u in us if (u["symbol"], u["date"]) in keys]
+        lost = [u for u in us if (u["symbol"], u["date"]) not in keys]
+        kept[src] = keep
+        if lost:
+            dropped[src] = lost
+    return kept, dropped
+
+
 ET = "America/New_York"
 
 
@@ -439,15 +465,24 @@ def header(names: list[str]) -> list[str]:
     return cols
 
 
-def cells(b: Block) -> list:
+def cells(b: Block, raw: bool = False) -> list:
     """One block's values. An absence is empty, never zero -- see the module
-    docstring: 0.00 turns a day that could not be tested into a break-even."""
+    docstring: 0.00 turns a day that could not be tested into a break-even.
+
+    raw=True skips the display rounding. A spreadsheet must store the exact
+    value and round in the number FORMAT, because its own monthly totals are
+    SUMIFS over these cells: sum 587 values each rounded to the cent and the
+    month is a few cents off the truth, on a sheet that shows both. Rounding
+    for the eye belongs at the point of display, and in a workbook that point
+    is the format string, not the cell.
+    """
     if not b.has_figures:
         return [""] * len(FIELDS)
+    r = (lambda v, n=2: v) if raw else round
     return [b.trades, round(b.buy_shares), round(b.sell_shares),
-            "" if b.avg_buy_price is None else round(b.avg_buy_price, 4),
-            "" if b.avg_sell_price is None else round(b.avg_sell_price, 4),
-            round(b.cost, 2), round(b.gross, 2), round(b.net, 2)]
+            "" if b.avg_buy_price is None else r(b.avg_buy_price, 4),
+            "" if b.avg_sell_price is None else r(b.avg_sell_price, 4),
+            r(b.cost, 2), r(b.gross, 2), r(b.net, 2)]
 
 
 def write_csv(rows, names, path: Path) -> None:

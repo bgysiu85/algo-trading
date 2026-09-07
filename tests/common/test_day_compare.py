@@ -422,3 +422,39 @@ def test_a_round_trip_with_no_entry_time_survives_as_NO_TIME(tmp_path):
                     "net_pnl"])
         w.writerow(["AAA", "2026-03-16", "", 10.0, -1.0, 9.0])
     assert D.my_units(p)[0]["minute"] is None
+
+
+def test_trades_on_days_i_never_traded_are_dropped_and_counted(tmp_path):
+    """The row set is the spine: a strategy trade on a day Ben did not trade
+    has nothing to compare against. But a strategy's artefacts outlive a pair
+    list -- the shipped MCL run held 6 trades on 3 symbol-days absent from the
+    flex summary. Left in, they sat in the clock sheet and not the monthly one,
+    and the two totals disagreed by $102.67 on a workbook whose every
+    individual cell was correct."""
+    s = write_summary(tmp_path, [sday(symbol="AAA")])
+    rows, _ = D.build(s, tmp_path, tmp_path, [])
+    units = {"mcl": [unit(9 * 60), {**unit(10 * 60), "symbol": "GONE"}]}
+    kept, dropped = D.restrict_units(units, rows)
+    assert [u["symbol"] for u in kept["mcl"]] == ["AAA"]
+    assert [u["symbol"] for u in dropped["mcl"]] == ["GONE"]
+
+
+def test_nothing_is_dropped_when_every_trade_has_a_row(tmp_path):
+    s = write_summary(tmp_path, [sday(symbol="AAA")])
+    rows, _ = D.build(s, tmp_path, tmp_path, [])
+    kept, dropped = D.restrict_units({"mcl": [unit(9 * 60)]}, rows)
+    assert dropped == {}
+    assert len(kept["mcl"]) == 1
+
+
+def test_raw_cells_keep_full_precision_but_still_blank_an_absence(tmp_path):
+    """A spreadsheet stores exact and rounds in the format. Its monthly totals
+    are SUMIFS over the day cells, so rounding them to the cent first puts the
+    month a few cents off the rows it is summing -- on a sheet showing both."""
+    b = D.Block(status="TRADED", trades=1, buy_shares=100, sell_shares=100,
+                buy_notional=100 * 5.123456, sell_notional=100 * 6.987654,
+                cost=1.234567, gross=186.4198, net=185.185233)
+    raw, shown = D.cells(b, raw=True), D.cells(b)
+    assert raw[-1] == pytest.approx(185.185233)
+    assert shown[-1] == pytest.approx(185.19)
+    assert D.cells(D.Block(status="NO BARS"), raw=True) == [""] * len(D.FIELDS)
