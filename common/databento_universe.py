@@ -45,7 +45,7 @@ from pathlib import Path
 import json
 
 from common.databento_fetch import (_key, _scrub, conditions, write_manifest,
-                                    default_archive)
+                                    default_archive, require_databento)
 from common.dbn_io import symbology_path
 
 # EQUS.MINI reaches back to 2023-03-28 and is a blended tape rather than one
@@ -88,7 +88,7 @@ def save_symbology(client, path: Path) -> bool:
     instrument ids are reused over time, and a resolution done next year would
     not necessarily answer the same question as one done today.
     """
-    import databento as db
+    db = require_databento()
 
     out = symbology_path(path)
     if out.exists():
@@ -145,10 +145,7 @@ def main(argv=None) -> int:
                          "on disk, without re-downloading any bars")
     a = ap.parse_args(argv)
 
-    try:
-        import databento as db
-    except ImportError:
-        sys.exit("pip install databento")
+    db = require_databento()
 
     root = Path(a.archive)
     client_probe = db.Historical(_key())

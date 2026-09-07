@@ -149,6 +149,63 @@ def _key() -> str:
     return k
 
 
+def _no_databento_message(executable, prefix, base_prefix, cwd,
+                          osname=None) -> str:
+    """The text for an ImportError on databento.
+
+    Every input is a parameter, osname included, because the branch that
+    matters is the Windows one and the tests do not run on Windows. A message
+    only exercised on the platform it is not for is the PowerShell problem in
+    miniature: written, plausible, never executed.
+    """
+    osname = os.name if osname is None else osname
+    win = osname == "nt"
+    in_venv = prefix != base_prefix
+    exe = Path(executable)
+    lines = ["databento is not importable from THIS interpreter.", "",
+             f"  python : {exe}",
+             f"  venv   : {prefix if in_venv else 'NOT ACTIVE'}", ""]
+    if not in_venv:
+        act = ("\\".join([str(cwd).rstrip("\\"), ".venv", "Scripts",
+                          "Activate.ps1"]) if win
+               else "/".join([str(cwd).rstrip("/"), ".venv", "bin", "activate"]))
+        lines += ["The package is almost certainly installed and this shell "
+                  "simply has not",
+                  "activated the virtualenv -- a second terminal opened to run "
+                  "a second pull",
+                  "is exactly when this happens. Activate it and re-run:", "",
+                  f"  {'.' if win else 'source'} {act}", "",
+                  "Only if that fails is the package actually missing:", ""]
+    else:
+        lines += ["The virtualenv IS active, so the package really is missing "
+                  "from it:", ""]
+    lines += [f"  {exe} -m pip install databento"]
+    return "\n".join(lines)
+
+
+def require_databento():
+    """Import databento, or explain the failure that actually happens.
+
+    Every entry point here used to exit with the four words "pip install
+    databento". That is advice for the case that does not occur. The package IS
+    installed -- in the project's .venv -- and the import fails because the
+    terminal is a NEW PowerShell window that never activated it. The message
+    then sends the reader to reinstall a package they already have, into
+    whichever interpreter happens to be on PATH, which at best does nothing and
+    at worst installs it somewhere the project will never import from.
+
+    Same shape as the op:// 401 above: a confident error pointing at the one
+    explanation that is wrong. So name the interpreter, say whether a venv is
+    active, and lead with the activate line when one is not.
+    """
+    try:
+        import databento as db
+    except ImportError:
+        sys.exit(_no_databento_message(sys.executable, sys.prefix,
+                                       sys.base_prefix, Path.cwd()))
+    return db
+
+
 def load_pairs(paths) -> list[tuple[str, str]]:
     """Symbol-days from one pair list, or the UNION of several.
 
@@ -510,10 +567,7 @@ def main(argv=None) -> int:
                     help="where the plan is written (default: %(default)s)")
     a = ap.parse_args(argv)
 
-    try:
-        import databento as db
-    except ImportError:
-        sys.exit("pip install databento")
+    db = require_databento()
 
     pairs = filter_pairs(load_pairs([Path(p) for p in a.pairs]),
                          before=a.before, after=a.after,

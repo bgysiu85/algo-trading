@@ -41,10 +41,9 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-try:
-    import databento as db
-except ImportError:
-    sys.exit("databento not installed.  .venv\\Scripts\\pip install databento")
+from common.databento_fetch import require_databento
+
+db = require_databento()
 
 ET = ZoneInfo("America/New_York")
 SESSION_START, SESSION_END = "04:00", "09:30"

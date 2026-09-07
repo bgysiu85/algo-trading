@@ -119,7 +119,9 @@ def read_dbn(path: str | Path, *, require_symbols: bool = True) -> pd.DataFrame:
     require_symbols=False is available for inspecting a raw file, and is not
     what any analysis should use.
     """
-    import databento as db
+    from common.databento_fetch import require_databento
+
+    db = require_databento()
 
     store = db.DBNStore.from_file(str(path))
     # A file pulled with an EXPLICIT symbol list carries its own mapping -- the

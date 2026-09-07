@@ -23,10 +23,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-try:
-    import databento as db
-except ImportError:
-    sys.exit("databento not installed.  .venv\\Scripts\\pip install databento")
+from common.databento_fetch import require_databento
+
+db = require_databento()
 
 from common import secrets_util as S
 

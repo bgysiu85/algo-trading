@@ -25,7 +25,7 @@ import argparse
 import sys
 from datetime import date, timedelta
 
-from common.databento_fetch import _key, _scrub
+from common.databento_fetch import _key, _scrub, require_databento
 from common.report_io import emit
 
 # The window this project cares about: Ben's trade history plus a fortnight of
@@ -101,10 +101,7 @@ def main(argv=None) -> int:
                     help="where --size writes its report (default: %(default)s)")
     a = ap.parse_args(argv)
 
-    try:
-        import databento as db
-    except ImportError:
-        sys.exit("pip install databento")
+    db = require_databento()
 
     c = db.Historical(_key())
 

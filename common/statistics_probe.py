@@ -57,7 +57,7 @@ from collections import Counter
 from datetime import date, timedelta
 from pathlib import Path
 
-from common.databento_fetch import _key, _scrub
+from common.databento_fetch import _key, _scrub, require_databento
 from common.report_io import emit
 
 OUT_DEFAULT = Path("var/probe")
@@ -250,10 +250,7 @@ def main(argv=None) -> int:
     if a.symbols and not a.day:
         sys.exit("--symbols needs --day")
 
-    try:
-        import databento as db
-    except ImportError:
-        sys.exit("pip install databento")
+    db = require_databento()
 
     client = db.Historical(_key())
 

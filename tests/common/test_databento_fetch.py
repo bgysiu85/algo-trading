@@ -641,3 +641,72 @@ def test_the_union_is_what_reaches_the_plan(tmp_path):
     jobs, _u, _b = FE.plan(FakeClient(), groups, "EQUS.SUMMARY",
                            ["statistics"], tmp_path, 0)
     assert jobs[0][1] == ["AAA", "CCC"]
+
+
+# --- the import error that points at the wrong explanation -------------------
+
+def test_a_missing_venv_is_named_as_the_likely_cause_not_a_missing_package():
+    """Every entry point exited with the four words "pip install databento".
+    That is advice for the case that does not happen. The package IS installed,
+    in the project's .venv, and the import fails because the terminal is a NEW
+    PowerShell window that never activated it -- which is exactly what a second
+    terminal opened to run a second pull is. The message then sent the reader
+    to reinstall a package they already had, into whichever interpreter was on
+    PATH."""
+    from common import databento_fetch as FE
+    msg = FE._no_databento_message(r"C:\Python313\python.exe",
+                                   r"C:\Python313", r"C:\Python313",
+                                   r"D:\Trading", "nt")
+    assert "NOT ACTIVE" in msg
+    # the real answer, spelled for the shell it will be pasted into, and
+    # BEFORE the pip line because that is the order of usefulness
+    assert r"  . D:\Trading\.venv\Scripts\Activate.ps1" in msg
+    assert msg.index("Activate.ps1") < msg.index("pip install")
+
+
+def test_an_active_venv_means_the_package_really_is_missing():
+    """The other branch has to change the advice, or the message is just as
+    misleading in the opposite direction."""
+    from common import databento_fetch as FE
+    msg = FE._no_databento_message("/repo/.venv/bin/python", "/repo/.venv",
+                                   "/usr", "/repo", "posix")
+    assert "NOT ACTIVE" not in msg
+    assert "really is missing" in msg
+    assert "activate" not in msg.lower()
+
+
+def test_the_message_names_the_interpreter_that_actually_failed():
+    """'pip install databento' does not say WHICH python could not import it,
+    and with two terminals open that is the whole question."""
+    from common import databento_fetch as FE
+    msg = FE._no_databento_message(r"C:\Python313\python.exe", "a", "a", ".", "nt")
+    assert r"C:\Python313\python.exe" in msg
+
+
+def test_the_pip_line_targets_the_failing_interpreter_not_bare_pip():
+    """A bare `pip install` in an unactivated shell installs into whichever
+    environment pip belongs to, which is how the package ends up somewhere the
+    project never imports from."""
+    from common import databento_fetch as FE
+    msg = FE._no_databento_message("/repo/.venv/bin/python", "/repo/.venv",
+                                   "/usr", "/repo", "posix")
+    assert "/repo/.venv/bin/python -m pip install databento" in msg
+
+
+def test_require_databento_returns_the_module_when_it_imports():
+    from common import databento_fetch as FE
+    import databento
+    assert FE.require_databento() is databento
+
+
+def test_the_windows_activate_path_is_pinned_though_the_tests_run_on_linux():
+    """The branch that matters is the one the test runner never takes. Pinning
+    the exact string is the only way this is checked at all -- and a wrong
+    activate line is worse than none, because it looks authoritative and fails
+    silently in a terminal nobody is watching."""
+    from common import databento_fetch as FE
+    msg = FE._no_databento_message("py.exe", "a", "a", "D:\\Trading", "nt")
+    assert "  . D:\\Trading\\.venv\\Scripts\\Activate.ps1" in msg
+    # a trailing separator on cwd must not double up
+    msg = FE._no_databento_message("py.exe", "a", "a", "D:\\Trading\\", "nt")
+    assert "D:\\Trading\\.venv" in msg and "Trading\\\\" not in msg
