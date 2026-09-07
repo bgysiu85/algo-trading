@@ -380,6 +380,16 @@ def pairs(execs: list[Execution]) -> list[dict]:
     return [{"symbol": s, "date": d} for s, d in seen]
 
 
+def _hhmm(minute: int | None) -> str:
+    """ET minutes past midnight as HH:MM, or empty when unresolved.
+
+    Empty, not 00:00. A midnight would silently land every unresolved fill in
+    the same 30-minute bucket, which is both wrong and the most eye-catching
+    bucket on the sheet.
+    """
+    return "" if minute is None else f"{minute // 60:02d}:{minute % 60:02d}"
+
+
 def _px(v) -> str:
     """A missing average price is written as empty, never as 0.
 
@@ -428,6 +438,76 @@ def symbol_days(execs: list[Execution]) -> dict[tuple[str, str], SymbolDay]:
             # leave pos at 1e-13 and no day would ever read as flat.
             if round(was, 6) != 0.0 and round(pos, 6) == 0.0:
                 sd.round_trips += 1
+    return out
+
+
+@dataclass
+class RoundTrip:
+    """One position, opened from flat and carried until flat again.
+
+    This is the unit that compares against a strategy's Trade. A fill is not:
+    IBKR books realised P/L on the CLOSING fill, so attributing P/L to fills
+    would put a day's gross in the exits and its commission in both ends, and
+    no time bucket would reconcile.
+
+    Grouping fills into positions puts the gross, the cost and ONE timestamp on
+    the same object, so a 30-minute block can hold gross, cost and net that
+    still satisfy net = gross - cost.
+    """
+    symbol: str
+    date: str
+    entry_minute: int | None      # ET minutes past midnight of the FIRST fill
+    exit_minute: int | None       # of the fill that returned it to flat
+    fills: int = 0
+    shares: float = 0.0
+    max_position: int = 0
+    gross_pnl: float = 0.0
+    commission: float = 0.0
+    open_at_end: bool = False     # never returned to flat -- see below
+
+    @property
+    def net_pnl(self) -> float:
+        return self.gross_pnl + self.commission
+
+
+def round_trips(execs: list[Execution]) -> list[RoundTrip]:
+    """Group each symbol-day's fills into positions.
+
+    A unit starts on the first fill taken while flat and ends on the fill that
+    returns the position to flat. Anything still open when the day's fills run
+    out becomes a unit flagged open_at_end rather than being dropped: its
+    realised P/L is real (partial closes inside it booked FIFO), and dropping
+    it would silently remove that money from every total keyed on time while
+    leaving it in the day totals.
+
+    Requires measure_offsets() to have run if entry_minute is to be anything
+    but None -- et_minute is resolved there, not at parse time.
+    """
+    grouped: dict[tuple[str, str], list[Execution]] = defaultdict(list)
+    for e in execs:
+        grouped[(e.symbol, e.trade_date)].append(e)
+
+    out: list[RoundTrip] = []
+    for (sym, day), rows in sorted(grouped.items()):
+        pos = 0.0
+        cur: RoundTrip | None = None
+        for e in sorted(rows, key=lambda x: (x.time_known, x.dt_raw)):
+            if cur is None:
+                cur = RoundTrip(symbol=sym, date=day,
+                                entry_minute=e.et_minute, exit_minute=None)
+            cur.fills += 1
+            cur.shares += abs(e.qty)
+            cur.gross_pnl += e.fifo_pnl
+            cur.commission += e.commission
+            was, pos = pos, pos + e.qty
+            cur.max_position = max(cur.max_position, int(round(pos)))
+            if round(was, 6) != 0.0 and round(pos, 6) == 0.0:
+                cur.exit_minute = e.et_minute
+                out.append(cur)
+                cur = None
+        if cur is not None:
+            cur.open_at_end = True
+            out.append(cur)
     return out
 
 
@@ -529,6 +609,11 @@ def main(argv=None) -> int:
                          "Executions are de-duplicated across files.")
     ap.add_argument("--pairs", metavar="OUT.json",
                     help="write the symbol-date pairs")
+    ap.add_argument("--round-trips", metavar="OUT.csv",
+                    help="one row per POSITION (flat to flat), with its entry "
+                         "and exit ET times -- the unit that compares against "
+                         "a strategy's trade, and the only one on which a "
+                         "time-of-day bucket reconciles")
     ap.add_argument("--summary", metavar="OUT.csv",
                     help="write per-symbol-day P/L")
     ap.add_argument("--against", metavar="EXISTING.json",
@@ -588,6 +673,22 @@ def main(argv=None) -> int:
                             round(s.gross_pnl, 2), round(s.commission, 2),
                             round(s.net_pnl, 2), int(s.in_band)])
         print(f"wrote {a.summary}  ({len(sd)} symbol-days)")
+
+    if a.round_trips:
+        rt = round_trips(execs)
+        Path(a.round_trips).parent.mkdir(parents=True, exist_ok=True)
+        with open(a.round_trips, "w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(["symbol", "date", "entry_et", "exit_et", "fills",
+                        "shares", "max_position", "gross_pnl", "commission",
+                        "net_pnl", "open_at_end"])
+            for r in rt:
+                w.writerow([r.symbol, r.date, _hhmm(r.entry_minute),
+                            _hhmm(r.exit_minute), r.fills, round(r.shares),
+                            r.max_position, round(r.gross_pnl, 2),
+                            round(r.commission, 2), round(r.net_pnl, 2),
+                            int(r.open_at_end)])
+        print(f"wrote {a.round_trips}  ({len(rt)} round trips)")
     return 0
 
 

@@ -269,6 +269,160 @@ def build(summary: Path, reports: Path, states: Path, names: list[str]):
     return rows, scaled_any
 
 
+# --- summaries -------------------------------------------------------------
+#
+# WHY MONTH AND WEEKDAY COME FROM DAYS, AND THE CLOCK FROM TRADES
+# ----------------------------------------------------------------
+# A day on which a strategy declined every setup is a REAL zero and belongs in
+# a monthly total and in that weekday's total -- it is one of the days the
+# strategy was given and did nothing with. It belongs in no 30-minute bucket at
+# all, because there is no entry to place. So month and weekday aggregate the
+# day blocks (zeros included, day counts honest) and the clock aggregates the
+# individual positions.
+#
+# The consequence to keep hold of: the clock sheet's totals will be the same
+# money as the monthly sheet's, but its counts are TRADES, not days.
+
+BLOCK_MINUTES = 30
+
+
+@dataclass
+class Cell:
+    """An aggregated bucket for one source."""
+    days: int = 0            # or trades, on the clock sheet
+    trades: int = 0
+    gross: float = 0.0
+    cost: float = 0.0
+    net: float = 0.0
+
+    def add(self, gross, cost, net, trades=0):
+        self.days += 1
+        self.trades += trades
+        self.gross += gross
+        self.cost += cost
+        self.net += net
+
+
+WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+            "Saturday", "Sunday"]
+
+
+def by_month(rows, sources) -> dict:
+    return _by_day_key(rows, sources, lambda d: d[:7])
+
+
+def by_weekday(rows, sources) -> dict:
+    from datetime import date as _d
+    return _by_day_key(
+        rows, sources,
+        lambda s: WEEKDAYS[_d.fromisoformat(s).weekday()])
+
+
+def _by_day_key(rows, sources, key) -> dict:
+    """{bucket: {source: Cell}} over the DAY blocks.
+
+    Each source is counted over the days IT could be evaluated on. That is what
+    was asked for, and it is the version that is easiest to misread: a month
+    where a strategy saw 12 days sits beside one where Ben traded 40, in
+    adjacent columns, looking comparable. So `days` is carried on every cell
+    and the writer is expected to show it.
+    """
+    out: dict[str, dict[str, Cell]] = {}
+    for r in rows:
+        k = key(r["date"])
+        bucket = out.setdefault(k, {s: Cell() for s in sources})
+        for src in sources:
+            b = r[src]
+            if b.has_figures:
+                bucket[src].add(b.gross, b.cost, b.net, b.trades)
+    return dict(sorted(out.items()))
+
+
+def block_label(minute: int) -> str:
+    start = (minute // BLOCK_MINUTES) * BLOCK_MINUTES
+    end = start + BLOCK_MINUTES
+    return f"{start//60:02d}:{start%60:02d}-{end//60:02d}:{end%60:02d}"
+
+
+def by_entry_block(units: dict, sources) -> dict:
+    """{block: {source: Cell}} over individual POSITIONS, keyed on ENTRY.
+
+    Entry, not exit: the question a time-of-day sheet is asked is "which part
+    of the morning do I take setups worth taking", and that is a decision that
+    can be made again tomorrow. Where the money was booked is a different
+    question and it does not tell you when you chose to be there.
+
+    A unit with no resolved entry time is counted under NO TIME rather than
+    dropped or floored to midnight -- 00:00 would pile them into one bucket,
+    and the most conspicuous bucket on the sheet.
+    """
+    out: dict[str, dict[str, Cell]] = {}
+    for src in sources:
+        for u in units.get(src, []):
+            k = "NO TIME" if u["minute"] is None else block_label(u["minute"])
+            bucket = out.setdefault(k, {s: Cell() for s in sources})
+            bucket[src].add(u["gross"], u["cost"], u["net"], 1)
+    # NO TIME sorts last, where it reads as a footnote rather than as 00:00.
+    keys = sorted(k for k in out if k != "NO TIME")
+    return {k: out[k] for k in keys + (["NO TIME"] if "NO TIME" in out else [])}
+
+
+ET = "America/New_York"
+
+
+def _et_minute(stamp: str) -> int | None:
+    """Minutes past ET midnight from a strategy's entry_time.
+
+    The engine writes these in UTC ('2026-06-01 08:22:00+00:00'). Bucketing
+    that as-is would put an 04:22 ET pre-market entry in the 08:00 block and
+    shift every bucket by four or five hours -- and the sheet would look
+    entirely reasonable, just describing a market that opens at 13:30.
+    """
+    import pandas as pd
+    try:
+        ts = pd.Timestamp(stamp)
+    except (ValueError, TypeError):
+        return None
+    if ts.tzinfo is None:
+        return None
+    local = ts.tz_convert(ET)
+    return local.hour * 60 + local.minute
+
+
+def strategy_units(path: Path) -> list[dict]:
+    """One dict per strategy trade, with its ENTRY time in ET minutes."""
+    out = []
+    if not path.exists():
+        return out
+    with open(path, newline="") as fh:
+        for r in csv.DictReader(fh):
+            out.append({"symbol": r["symbol"], "date": r["date"],
+                        "minute": _et_minute(r.get("entry_time", "")),
+                        "gross": float(r["gross"]),
+                        "cost": float(r["commission"]),
+                        "net": float(r["net"])})
+    return out
+
+
+def my_units(path: Path) -> list[dict]:
+    """One dict per round trip, from a flex --round-trips CSV."""
+    out = []
+    if not path.exists():
+        return out
+    with open(path, newline="") as fh:
+        for r in csv.DictReader(fh):
+            t = r.get("entry_et") or ""
+            minute = None
+            if ":" in t:
+                hh, _, mm = t.partition(":")
+                minute = int(hh) * 60 + int(mm)
+            cost = -float(r["commission"])      # IBKR negative-is-paid
+            out.append({"symbol": r["symbol"], "date": r["date"],
+                        "minute": minute, "gross": float(r["gross_pnl"]),
+                        "cost": cost, "net": float(r["net_pnl"])})
+    return out
+
+
 # --- output ----------------------------------------------------------------
 
 FIELDS = ("trades", "buy_shares", "sell_shares", "avg_buy_price",

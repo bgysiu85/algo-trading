@@ -404,3 +404,71 @@ def test_a_day_that_never_trades_has_no_round_trip(tmp_path):
     first fill of every day would score one before anything closed."""
     p = write_csv(tmp_path / "f.csv", [row(qty=100)])
     assert flex.symbol_days(flex.load(p))[("AAA", "2026-08-04")].round_trips == 0
+
+
+# --- positions, not fills ---------------------------------------------------
+
+def test_a_round_trip_holds_its_gross_cost_and_time_together(tmp_path):
+    """IBKR books realised P/L on the CLOSING fill. Bucketing FILLS by time
+    would put a day's gross in its exits and its commission at both ends, and
+    no time bucket would satisfy net = gross - cost."""
+    p = write_csv(tmp_path / "f.csv", [
+        row(qty=100, px=5.0, comm=-1.0, pnl=0.0, dt="2026-08-04 14:00:00"),
+        row(qty=-100, px=6.0, comm=-1.0, pnl=100.0, side="SELL",
+            dt="2026-08-04 14:20:00"),
+    ])
+    ex = flex.load(p)
+    flex.measure_offsets(ex)
+    rt = flex.round_trips(ex)
+    assert len(rt) == 1
+    assert rt[0].fills == 2
+    assert rt[0].gross_pnl == 100.0
+    assert rt[0].commission == -2.0
+    assert rt[0].net_pnl == 98.0
+    assert rt[0].entry_minute is not None
+    assert rt[0].entry_minute < rt[0].exit_minute
+
+
+def test_round_trips_reconcile_with_the_day_totals(tmp_path):
+    """Every fill belongs to exactly one unit, so the units must sum to the day.
+    If they ever stop doing so, a time-of-day sheet and a monthly sheet built
+    from the same trades will disagree and neither will look wrong."""
+    p = write_csv(tmp_path / "f.csv", [
+        row(qty=100, comm=-1.0, pnl=0.0, dt="2026-08-04 14:00:00"),
+        row(qty=-100, comm=-1.0, pnl=40.0, side="SELL", dt="2026-08-04 14:10:00"),
+        row(qty=200, comm=-2.0, pnl=0.0, dt="2026-08-04 15:00:00"),
+        row(qty=-200, comm=-2.0, pnl=-15.0, side="SELL", dt="2026-08-04 15:30:00"),
+    ])
+    ex = flex.load(p)
+    flex.measure_offsets(ex)
+    rt = flex.round_trips(ex)
+    day = flex.symbol_days(ex)[("AAA", "2026-08-04")]
+    assert len(rt) == 2
+    assert sum(r.gross_pnl for r in rt) == pytest.approx(day.gross_pnl)
+    assert sum(r.commission for r in rt) == pytest.approx(day.commission)
+    assert sum(r.fills for r in rt) == day.executions
+
+
+def test_a_position_left_open_is_kept_and_flagged(tmp_path):
+    """Its realised P/L is real -- partial closes inside it booked FIFO.
+    Dropping it would remove that money from every time-keyed total while
+    leaving it in the day totals, so the two would silently disagree."""
+    p = write_csv(tmp_path / "f.csv", [
+        row(qty=200, comm=-2.0, dt="2026-08-04 14:00:00"),
+        row(qty=-100, comm=-1.0, pnl=30.0, side="SELL", dt="2026-08-04 15:00:00"),
+    ])
+    ex = flex.load(p)
+    flex.measure_offsets(ex)
+    rt = flex.round_trips(ex)
+    assert len(rt) == 1
+    assert rt[0].open_at_end is True
+    assert rt[0].exit_minute is None
+    assert rt[0].gross_pnl == 30.0
+
+
+def test_an_unresolved_time_is_blank_not_midnight():
+    """00:00 would drop every unresolved fill into one 30-minute bucket -- and
+    the most conspicuous one on the sheet."""
+    assert flex._hhmm(None) == ""
+    assert flex._hhmm(4 * 60) == "04:00"
+    assert flex._hhmm(9 * 60 + 31) == "09:31"

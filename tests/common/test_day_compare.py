@@ -310,3 +310,115 @@ def test_a_summary_without_round_trips_is_refused(tmp_path):
     with pytest.raises(SystemExit) as e:
         D.read_summary(p)
     assert "round_trips" in str(e.value)
+
+
+# --- the summary sheets -----------------------------------------------------
+
+def test_utc_entry_times_are_converted_to_ET_before_bucketing(tmp_path):
+    """THE bug this would otherwise ship with. The engine writes entry_time in
+    UTC ('2026-06-01 08:22:00+00:00'). Bucketed as-is, an 04:22 ET pre-market
+    entry lands in the 08:00 block and every bucket shifts four or five hours
+    -- and the sheet looks entirely reasonable, just describing a market that
+    opens at 13:30."""
+    assert D._et_minute("2026-06-01 08:22:00+00:00") == 4 * 60 + 22
+    assert D._et_minute("2026-01-15 14:35:00+00:00") == 9 * 60 + 35   # EST
+    assert D._et_minute("2026-06-15 13:35:00+00:00") == 9 * 60 + 35   # EDT
+
+
+def test_a_naive_or_unparseable_timestamp_is_not_guessed():
+    """A stamp with no zone could be anything. Assuming UTC would be a four or
+    five hour error dressed as a measurement."""
+    assert D._et_minute("2026-06-01 08:22:00") is None
+    assert D._et_minute("") is None
+    assert D._et_minute("not a time") is None
+
+
+def test_blocks_are_half_open_half_hours():
+    assert D.block_label(4 * 60) == "04:00-04:30"
+    assert D.block_label(4 * 60 + 29) == "04:00-04:30"
+    assert D.block_label(4 * 60 + 30) == "04:30-05:00"
+    assert D.block_label(9 * 60 + 31) == "09:30-10:00"
+
+
+def unit(minute, gross=100.0, cost=1.0, net=99.0, date="2026-03-16"):
+    return {"symbol": "AAA", "date": date, "minute": minute,
+            "gross": gross, "cost": cost, "net": net}
+
+
+def test_the_clock_sheet_counts_trades_and_keys_on_entry(tmp_path):
+    got = D.by_entry_block({"mine": [unit(9 * 60 + 31), unit(9 * 60 + 45)],
+                            "mcl": [unit(4 * 60 + 5)]}, ["mine", "mcl"])
+    assert list(got) == ["04:00-04:30", "09:30-10:00"]
+    assert got["09:30-10:00"]["mine"].trades == 2
+    assert got["09:30-10:00"]["mine"].gross == pytest.approx(200.0)
+    assert got["09:30-10:00"]["mcl"].trades == 0
+    assert got["04:00-04:30"]["mcl"].trades == 1
+
+
+def test_units_with_no_resolved_time_sort_last_under_their_own_label():
+    got = D.by_entry_block({"mine": [unit(None), unit(9 * 60)]}, ["mine"])
+    assert list(got)[-1] == "NO TIME"
+    assert got["NO TIME"]["mine"].trades == 1
+
+
+def test_a_declined_day_counts_in_the_month_but_in_no_time_block(tmp_path):
+    """It is a real zero -- a day the strategy was given and did nothing with
+    -- so it belongs in the monthly day count. It has no entry, so it belongs
+    in no clock bucket. Putting it in one would invent a time."""
+    write_trades(tmp_path, "mcl", [])
+    write_state(tmp_path, "mcl", {"AAA|2026-03-16": {"status": "OK"}})
+    s = write_summary(tmp_path, [sday()])
+    rows, _ = D.build(s, tmp_path, tmp_path, ["mcl"])
+    months = D.by_month(rows, ["mine", "mcl"])
+    assert months["2026-03"]["mcl"].days == 1
+    assert months["2026-03"]["mcl"].net == 0.0
+    assert D.by_entry_block({"mcl": D.strategy_units(
+        tmp_path / "backtest_trades_mcl.csv")}, ["mcl"]) == {}
+
+
+def test_an_untestable_day_is_in_no_month_total_either(tmp_path):
+    """NO BARS is not a zero, so it must not add a day to the count OR a 0.00
+    to the sum -- both would understate the strategy's average."""
+    write_trades(tmp_path, "mcl", [])
+    write_state(tmp_path, "mcl", {"AAA|2026-03-16": {"status": "NO_DATA"}})
+    s = write_summary(tmp_path, [sday()])
+    rows, _ = D.build(s, tmp_path, tmp_path, ["mcl"])
+    m = D.by_month(rows, ["mine", "mcl"])["2026-03"]
+    assert m["mcl"].days == 0
+    assert m["mine"].days == 1
+
+
+def test_weekday_buckets_are_named_not_numbered(tmp_path):
+    s = write_summary(tmp_path, [sday(date="2026-03-16"),      # Monday
+                                 sday(date="2026-03-20")])     # Friday
+    rows, _ = D.build(s, tmp_path, tmp_path, [])
+    got = D.by_weekday(rows, ["mine"])
+    assert set(got) == {"Monday", "Friday"}
+    assert got["Monday"]["mine"].days == 1
+
+
+def test_my_round_trip_costs_are_flipped_to_positive(tmp_path):
+    """Same convention as everywhere else in the sheet, so 'gross minus cost'
+    is one subtraction in every column."""
+    p = tmp_path / "rt.csv"
+    with open(p, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["symbol", "date", "entry_et", "exit_et", "fills", "shares",
+                    "max_position", "gross_pnl", "commission", "net_pnl",
+                    "open_at_end"])
+        w.writerow(["AAA", "2026-03-16", "09:31", "09:45", 2, 200, 100,
+                    100.0, -2.0, 98.0, 0])
+    u = D.my_units(p)[0]
+    assert u["minute"] == 9 * 60 + 31
+    assert u["cost"] == pytest.approx(2.0)
+    assert u["net"] == pytest.approx(u["gross"] - u["cost"])
+
+
+def test_a_round_trip_with_no_entry_time_survives_as_NO_TIME(tmp_path):
+    p = tmp_path / "rt.csv"
+    with open(p, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["symbol", "date", "entry_et", "gross_pnl", "commission",
+                    "net_pnl"])
+        w.writerow(["AAA", "2026-03-16", "", 10.0, -1.0, 9.0])
+    assert D.my_units(p)[0]["minute"] is None
