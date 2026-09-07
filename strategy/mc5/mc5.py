@@ -331,7 +331,13 @@ def slope_distribution(df, tz) -> dict:
     ENTRY_RSI_ROC_PCT = 5.0 was chosen before seeing any of these numbers.
     Run this across the watchlist before trusting that threshold.
     """
-    band = ENFORCE_PRICE_BAND if enforce_price_band is None else enforce_price_band
+    # This line used to read
+    #     band = ENFORCE_PRICE_BAND if enforce_price_band is None else ...
+    # copied from backtest_session, where `enforce_price_band` is a parameter.
+    # Here it is not, so every call raised NameError -- and `band` was never
+    # read afterwards anyway. Nothing calls this function, which is why nobody
+    # noticed: a calibration aid that cannot be run is one that never existed.
+    # Found 2026-09-07 while building the harness.
     df5 = df if _looks_5m(df) else to_5m(df)
     sig = signals(df5)
     local = sig.index.tz_convert(tz)
