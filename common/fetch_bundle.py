@@ -35,9 +35,13 @@ from pathlib import Path
 
 PATTERN = "algo-trading-*.bundle"
 
-# Downloads first because that is where a browser puts it. var/ stays on the
-# list only so a bundle from an older session is still found.
-SEARCH = ["~/Downloads", "~/Desktop", "~/Documents", ".", "var"]
+# "Claude outputs" first: it is where files from a Claude session are put, it
+# is already gitignored, and it is inside the repo so the path is short. Both
+# spellings are listed because Windows does not care about the case and Linux
+# does; duplicates collapse in candidates(). The rest are fallbacks so a
+# bundle downloaded by hand is still found rather than reported missing.
+SEARCH = ["Claude outputs", "claude outputs",
+          "~/Downloads", "~/Desktop", "~/Documents", ".", "var"]
 
 
 def candidates(extra=()) -> list[Path]:

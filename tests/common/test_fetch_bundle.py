@@ -111,3 +111,24 @@ def test_a_dirty_tree_stops_the_merge_rather_than_half_doing_it(monkeypatch,
     assert rc == 1
     assert "NOT merging" in out and "common/thing.py" in out
     assert ("merge", "FETCH_HEAD") not in calls
+
+
+def test_the_claude_outputs_folder_is_searched_first(tmp_path, monkeypatch):
+    """That folder is where files from a Claude session are put, and it is
+    already gitignored. If it stops being searched, every handover goes back to
+    someone typing a path with a space in it."""
+    assert F.SEARCH[0].lower() == "claude outputs"
+    monkeypatch.chdir(tmp_path)
+    d = tmp_path / "Claude outputs"
+    d.mkdir()
+    b = touch(d / "algo-trading-20260907a.bundle")
+    assert F.candidates() and F.candidates()[0] == b.resolve()
+
+
+def test_the_two_spellings_are_not_two_results(tmp_path, monkeypatch):
+    """Windows treats them as one directory, Linux as two. Listing both must
+    not make one file look like two bundles."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "Claude outputs").mkdir()
+    touch(tmp_path / "Claude outputs" / "algo-trading-20260907a.bundle")
+    assert len(F.candidates()) == 1
