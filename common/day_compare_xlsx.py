@@ -393,7 +393,124 @@ CLOCK_NOTE = ("Keyed on the half-hour the position was ENTERED, Eastern time, "
               "here -- there is no entry to place.")
 
 
-def build(rows, units, sources, out: Path, meta) -> Path:
+def write_compounding(wb, results, params, notes):
+    """The compounding replay, at one pair of percentages.
+
+    VALUES, not formulas. Everything else in this workbook is a SUMIFS because
+    it is an aggregation of rows the sheet already holds; this is the output of
+    a path-dependent simulation, and a spreadsheet cannot express "size this
+    trade from the capital the previous forty left you". Pretending otherwise
+    with a formula would be worse than saying so: the provenance line below
+    names the command that produced it.
+    """
+    ws = _sheet(wb, "Compounding")
+    ws.cell(row=1, column=1, value="Compounding capital"
+            ).font = Font(name=FONT, bold=True, size=13)
+    r = 3
+    for k, v in params:
+        ws.cell(row=r, column=1, value=k).font = Font(name=FONT, size=10)
+        c = ws.cell(row=r, column=2, value=v)
+        c.font = Font(name=FONT, bold=True, size=10, color="0000FF")
+        c.fill = MINE_FILL
+        r += 1
+
+    r += 1
+    heads = ["source", "trades taken", "blocked by capital", "hit liquidity cap",
+             "final capital", "multiple", "max drawdown"]
+    for j, h in enumerate(heads, start=1):
+        c = ws.cell(row=r, column=j, value=h)
+        c.font = Font(name=FONT, bold=True, size=10, color="FFFFFF")
+        c.fill = HEAD_FILL
+    r += 1
+    for src, res in results.items():
+        ws.cell(row=r, column=1, value=src).font = Font(name=FONT, size=10)
+        ws.cell(row=r, column=2, value=res.taken).number_format = INT
+        ws.cell(row=r, column=3,
+                value=res.skipped_concurrency).number_format = INT
+        ws.cell(row=r, column=4, value=res.dv_capped).number_format = INT
+        ws.cell(row=r, column=5, value=res.final).number_format = MONEY
+        ws.cell(row=r, column=6, value=res.multiple).number_format = '0.00"x"'
+        ws.cell(row=r, column=7,
+                value=res.max_drawdown).number_format = '0.0%'
+        for c in range(2, 8):
+            ws.cell(row=r, column=c).font = Font(name=FONT, size=10)
+        r += 1
+
+    r += 2
+    for line, head in notes:
+        c = ws.cell(row=r, column=1, value=line)
+        c.font = Font(name=FONT, bold=head, size=11 if head else 10)
+        if head:
+            c.fill = SUB_FILL
+        r += 1
+    ws.column_dimensions["A"].width = 30
+    for i in range(2, 8):
+        ws.column_dimensions[get_column_letter(i)].width = 18
+    return ws
+
+
+def write_sweep(wb, sweep_rows, sources):
+    """Every (per-trade %, total %) pair, per source.
+
+    The grid is the point, not its maximum. A single best cell is the most
+    overfit number a sweep can produce; a smooth ridge is evidence and a lone
+    spike is noise, and only the surface tells you which you have.
+    """
+    ws = _sheet(wb, "Ratio sweep")
+    ws.cell(row=1, column=1, value="Ratio sweep: final capital, and the "
+            "drawdown it cost").font = Font(name=FONT, bold=True, size=13)
+    c = ws.cell(row=2, column=1,
+                value="Read the surface, not the peak. A best cell surrounded "
+                      "by cells that fall away sharply is noise; a plateau is "
+                      "a finding. Drawdown is the column that decides whether "
+                      "a return was worth having.")
+    c.font = Font(name=FONT, italic=True, size=10)
+    c.fill = WARN_FILL
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=12)
+
+    totals = sorted({r["total_pct"] for r in sweep_rows})
+    r = 4
+    for src in sources:
+        rows = [x for x in sweep_rows if x["source"] == src]
+        if not rows:
+            continue
+        pers = sorted({x["per_trade_pct"] for x in rows})
+        for label, key, fmt in (("final capital", "final", MONEY),
+                                ("max drawdown", "max_drawdown", '0.0%')):
+            _style_header(ws, r, 1, 1 + len(totals),
+                          f"{src.upper()}  --  {label}")
+            r += 1
+            ws.cell(row=r, column=1, value="per-trade % \\ total %"
+                    ).font = Font(name=FONT, bold=True, size=9)
+            for j, t in enumerate(totals, start=2):
+                cc = ws.cell(row=r, column=j, value=t / 100.0)
+                cc.number_format = '0%'
+                cc.font = Font(name=FONT, bold=True, size=10)
+                cc.fill = SUB_FILL
+            r += 1
+            look = {(x["per_trade_pct"], x["total_pct"]): x for x in rows}
+            for p in pers:
+                cc = ws.cell(row=r, column=1, value=p / 100.0)
+                cc.number_format = '0%'
+                cc.font = Font(name=FONT, bold=True, size=10)
+                cc.fill = SUB_FILL
+                for j, t in enumerate(totals, start=2):
+                    hit = look.get((p, t))
+                    if hit is None:
+                        continue        # total below per-trade: same experiment
+                    cell = ws.cell(row=r, column=j, value=hit[key])
+                    cell.number_format = fmt
+                    cell.font = Font(name=FONT, size=10)
+                r += 1
+            r += 1
+    ws.column_dimensions["A"].width = 22
+    for i in range(2, 2 + len(totals)):
+        ws.column_dimensions[get_column_letter(i)].width = 14
+    return ws
+
+
+def build(rows, units, sources, out: Path, meta, compounding=None,
+          sweep_rows=None, comp_params=(), comp_notes=()) -> Path:
     wb = Workbook()
     wb.remove(wb.active)
     write_readme(wb, sources, meta)
@@ -412,6 +529,10 @@ def build(rows, units, sources, out: Path, meta) -> Path:
                    "By day", spans, OWN_DAYS_NOTE)
     _summary_sheet(wb, "By 30 min", blocks, sources, "E", 2, last_trade,
                    "Trades", spans, CLOCK_NOTE, count_trades=True)
+    if compounding:
+        write_compounding(wb, compounding, comp_params, comp_notes)
+    if sweep_rows:
+        write_sweep(wb, sweep_rows, sources)
     out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out)
     return out
@@ -425,6 +546,13 @@ def main(argv=None) -> int:
     ap.add_argument("--reports", default="var/reports")
     ap.add_argument("--states", default="var/state")
     ap.add_argument("--out", default="var/reports/day_compare.xlsx")
+    ap.add_argument("--compound", action="store_true",
+                    help="add the compounding replay and the ratio sweep")
+    ap.add_argument("--capital", type=float, default=10_000.0)
+    ap.add_argument("--per-trade-pct", type=float, default=60.0)
+    ap.add_argument("--total-pct", type=float, default=100.0)
+    ap.add_argument("--dollar-volume", default="")
+    ap.add_argument("--dv-cap-pct", type=float, default=1.0)
     a = ap.parse_args(argv)
 
     rows, scaled = D.build(Path(a.summary), Path(a.reports), Path(a.states),
@@ -453,7 +581,61 @@ def main(argv=None) -> int:
         meta.append("SCALED rows present -- price columns blank on those: "
                     + ", ".join(f"{k}={len(v)}" for k, v in scaled.items()))
 
-    out = build(rows, units, sources, Path(a.out), meta)
+    comp = sweep_rows = None
+    params = notes = ()
+    if a.compound:
+        from common import compound_sim as CS
+        legs = {"mine": CS.my_legs(Path(a.round_trips))}
+        for n in a.strategy:
+            legs[n] = CS.strategy_legs(
+                Path(a.reports) / f"backtest_trades_{n}.csv", n)
+        dv = (CS.load_dollar_volume(Path(a.dollar_volume))
+              if a.dollar_volume else None)
+        comp = {src: CS.simulate(ls, a.capital, a.per_trade_pct, a.total_pct,
+                                 dollar_volume=dv, dv_cap_pct=a.dv_cap_pct)
+                for src, ls in legs.items()}
+        grid = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+        sweep_rows = []
+        for src, ls in legs.items():
+            for r in CS.sweep(ls, a.capital, grid, grid, dollar_volume=dv,
+                              dv_cap_pct=a.dv_cap_pct):
+                sweep_rows.append({"source": src, **r})
+        params = (("starting capital", a.capital),
+                  ("per-trade cap (% of equity)", a.per_trade_pct / 100.0),
+                  ("total deployed cap (% of equity)", a.total_pct / 100.0),
+                  ("liquidity cap (% of day's $ volume)",
+                   a.dv_cap_pct / 100.0 if dv else "not applied"))
+        notes = (
+            ("What this simulates", True),
+            ("Every trade replayed in time order against one account. A "
+             "position is sized from the", False),
+            ("capital free at that moment, profit folds in when it closes, and "
+             "a trade with no", False),
+            ("funding is SKIPPED -- capital can only ever make a run take "
+             "fewer trades, never", False),
+            ("invent one.", False),
+            ("", False),
+            ("What it assumes, and cannot check", True),
+            ("A larger order fills at the same price. It would not. Positions "
+             "are held at cost", False),
+            ("rather than marked to market, so the account never sizes up on "
+             "an unrealised gain.", False),
+            ("Strategy commission is recomputed exactly at the new quantity; "
+             "mine is scaled from", False),
+            ("what I actually paid, so my own execution habit travels with the "
+             "trade rather than", False),
+            ("being replaced by a tidier model.", False),
+            ("", False),
+            ("Produced by common.compound_sim, not by this sheet", True),
+            ("These are simulation outputs, not aggregations of the rows in "
+             "this workbook, so", False),
+            ("they are values rather than formulas. A spreadsheet cannot "
+             "express 'size this trade", False),
+            ("from the capital the previous forty left you'.", False),
+        )
+
+    out = build(rows, units, sources, Path(a.out), meta, compounding=comp,
+                sweep_rows=sweep_rows, comp_params=params, comp_notes=notes)
     print(f"wrote {out}")
     return 0
 
