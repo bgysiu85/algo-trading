@@ -236,3 +236,28 @@ def test_intraday_timestamps_are_still_converted_to_et():
     f = stats_frame([("AAA", "19:30", 700, 6)])       # 19:30 ET, inside session
     assert C.cleared_by_cutoff(f, C.SESSION_END_MIN) == {"AAA": 700}
     assert C.cleared_by_cutoff(f, C.RTH_CLOSE_MIN) == {}
+
+
+def test_the_mixed_verdict_states_the_actual_split_not_the_middle_of_its_band():
+    """At ICC 0.675 the banded prose said 'roughly as much within as between'
+    while between was 2.1x within. A sentence written for the middle of a wide
+    band describes the band, not the number in front of it."""
+    rows = ([{"symbol": f"S{i}", "capture_2000": v}
+             for i in range(20) for v in (0.04, 0.05)]
+            + [{"symbol": f"T{i}", "capture_2000": v}
+               for i in range(20) for v in (0.09, 0.12)])
+    out = C.render([dict(r, date="2025-04-09") for r in rows],
+                   [{"daily_bar": 1000, "minutes_full": 1000,
+                     "minutes_rth": 600}], 0, 0, 1.0)
+    assert "between / within" in out
+    if "MIXED" in out:
+        assert "% of the variation is day-to-day" in out
+
+
+def test_a_thin_repeat_sample_is_flagged_before_the_verdict_is_read():
+    """21 symbols seen twice, out of 158, is not a basis for splitting variance
+    -- and the verdict paragraph reads just as confidently either way."""
+    rows = [{"symbol": s, "date": "2025-04-09", "capture_2000": v}
+            for s in "ABCDE" for v in (0.04, 0.06)]
+    out = C.render(rows, [], 0, 0, 1.0)
+    assert "CAUTION: only 5 symbols" in out

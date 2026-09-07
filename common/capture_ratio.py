@@ -318,9 +318,23 @@ def render(rows, checks, impossible, missing, elapsed_min) -> str:
         L += ["", "  Not enough repeated symbols to separate the two. The "
               "screened", "  universe may simply not revisit names often enough."]
     else:
+        ratio = (d["between_var"] / d["within_var"]) if d["within_var"] else None
         L += [f"  between-symbol variance     {d['between_var']:.4f}",
               f"  within-symbol variance      {d['within_var']:.4f}",
-              f"  share between (ICC)         {d['icc']:.3f}", ""]
+              f"  share between (ICC)         {d['icc']:.3f}"]
+        if ratio:
+            L.append(f"  between / within            {ratio:.2f}x")
+        L.append("")
+        # State the ratio, not just the band. At ICC 0.675 the old prose said
+        # "roughly as much within as between" while between was actually 2.1x
+        # within -- a banded sentence describing the middle of its band rather
+        # than the number in front of it.
+        if d["symbols_with_repeats"] < 30:
+            L += [f"  CAUTION: only {d['symbols_with_repeats']} symbols appear "
+                  "on two or more days, so the",
+                  "  within-symbol figure rests on very little. Read the split "
+                  "as indicative",
+                  "  until the full run.", ""]
         if d["icc"] >= 0.7:
             L += ["  MOSTLY A PER-SYMBOL PROPERTY. Capture is roughly stable "
                   "for a given",
@@ -343,12 +357,15 @@ def render(rows, checks, impossible, missing, elapsed_min) -> str:
                   "  volume inputs on consolidated data, not just rescaling "
                   "the floors."]
         else:
-            L += ["  MIXED. Neither reading is safe on its own -- roughly as "
-                  "much of the",
-                  "  variation is day-to-day within a name as is between "
-                  "names. Treat RVOL",
-                  "  as partly contaminated and check any RVOL-dependent "
-                  "result against",
+            share = 100 * (1 - d["icc"])
+            L += [f"  MIXED. {share:.0f}% of the variation is day-to-day "
+                  "within a name, so the",
+                  "  per-symbol factor does NOT fully cancel out of RVOL. RVOL "
+                  "is measuring",
+                  "  tape coverage as well as activity, to that extent. Treat "
+                  "any",
+                  "  RVOL-dependent result as partly contaminated and check it "
+                  "against",
                   "  consolidated volume before relying on it."]
     L.append("")
 
