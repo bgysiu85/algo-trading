@@ -8,3 +8,8 @@ databento
 # strategy/mcl and strategy/mc5 tests are standalone scripts run with -m,
 # common/ and strategy/vw9 tests are pytest. run_tests.ps1 runs both.
 pytest
+
+# --- the relational store (common/db.py). pyodbc needs Microsoft ODBC
+# Driver 18 installed separately; it does not come with the engine.
+sqlalchemy>=2.0
+pyodbc>=5.0
