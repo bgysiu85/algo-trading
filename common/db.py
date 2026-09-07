@@ -75,23 +75,129 @@ DEFAULT_URL = (
     "&trusted_connection=yes&TrustServerCertificate=yes"
 )
 
+def _password_of(url: str) -> str:
+    """The password in a URL, or "" -- best effort, for the scrubber.
+
+    Deliberately tolerant: a URL that will not parse is exactly the one whose
+    password is about to appear somewhere it should not.
+    """
+    try:
+        from sqlalchemy.engine import make_url
+        return make_url(url).password or ""
+    except Exception:  # noqa: BLE001
+        m = re.search(r"://[^:/]*:([^@]*)@", url)
+        return m.group(1) if m else ""
+
+
 SYM = 24            # generous: the longest US ticker seen in the archive is 8
 KEY = 128
 
 
+# Secrets this process has resolved, so they can be removed from any text by
+# VALUE rather than by pattern. See _scrub.
+_KNOWN: set[str] = set()
+
+
+MIN_SECRET = 6      # shorter than this and redaction starts eating prose
+
+
+def remember_secret(v: str) -> None:
+    """Remember a secret AND the pieces of it that can escape on their own.
+
+    A password containing '@' is split by the URL parser, and what reaches the
+    error text is the TAIL -- "could not connect to <tail>@localhost". Only the
+    fragment leaks, so remembering only the whole value scrubs nothing. That is
+    not hypothetical: it is what happened, and the tail reached a chat.
+
+    Fragments are registered on the characters a URL splits at, and only when
+    they are long enough that redacting them cannot swallow ordinary words.
+    """
+    if not v or len(v) < MIN_SECRET:
+        return
+    _KNOWN.add(v)
+    for sep in "@:/?#":
+        for part in v.split(sep):
+            if len(part) >= MIN_SECRET and part != v:
+                _KNOWN.add(part)
+
+
 def _scrub(text) -> str:
-    """Never let a password reach a log, however it got into a URL."""
-    return re.sub(r"(?i)(:)([^:@/]{3,})(@)", r"\1<redacted>\3", str(text))
+    """Remove a password from text, by value first and pattern second.
+
+    THE PATTERN ALONE WAS NOT ENOUGH, and the way it failed is worth keeping.
+    It matched ":<something>@" on the assumption that a URL is well formed. A
+    password containing an '@' makes it malformed: the parser splits at the
+    first '@', so the tail of the password becomes the HOSTNAME, and the driver
+    then helpfully reports "could not connect to <tail-of-password>@localhost".
+    The password was no longer in a password-shaped position, so the regex left
+    it alone and it went into a terminal and from there into a chat transcript.
+
+    A scrubber that only works on well-formed input is no scrubber: text
+    reaching it is by definition an error path, which is exactly where the
+    input is malformed. So every resolved secret is remembered and stripped by
+    exact value, and the pattern is kept only as a second line for secrets this
+    process never saw.
+    """
+    out = str(text)
+    for v in sorted(_KNOWN, key=len, reverse=True):
+        out = out.replace(v, "<redacted>")
+    return re.sub(r"(?i)(:)([^:@/\s]{3,})(@)", r"\1<redacted>\3", out)
+
+
+def url_from_parts(host: str, database: str, user: str, password: str,
+                   driver: str = "ODBC Driver 18 for SQL Server",
+                   trust_cert: bool = True) -> str:
+    """Build a URL with the password ESCAPED, rather than pasted into a string.
+
+    URL.create percent-encodes each component, so '@', ':', '/' and '?' in a
+    password stop being structure. Hand-assembling the string is what put a
+    password in a hostname; this is the same job done by something that knows
+    the grammar.
+    """
+    from sqlalchemy.engine import URL
+
+    remember_secret(password)
+    q = {"driver": driver}
+    if trust_cert:
+        q["TrustServerCertificate"] = "yes"
+    return URL.create("mssql+pyodbc", username=user, password=password,
+                      host=host, database=database, query=q).render_as_string(
+                          hide_password=False)
+
+
+def _with_password(url: str, var: str) -> str:
+    """Inject a separately-stored password into a URL, escaped.
+
+    A password belongs in its own field, not inside a URL that something has
+    to parse. When <VAR>_PASSWORD is set, the URL is expected to carry no
+    password at all and this puts it in through the URL builder, which encodes
+    it. That way a '@' or a ':' in a password is data rather than syntax.
+    """
+    pw = os.environ.get(f"{var}_PASSWORD", "").strip()
+    if not pw:
+        return url
+    from common import secrets_util as S
+    from sqlalchemy.engine import make_url
+    if pw.startswith("op://"):
+        pw = S.resolve(f"{var}_PASSWORD", "SQL Server password") or pw
+    remember_secret(pw)
+    u = make_url(url)
+    if u.password:
+        sys.exit(f"{var} already contains a password and {var}_PASSWORD is "
+                 "also set. Use one or the other, so there is no question "
+                 "which one is in force.")
+    return u.set(password=pw).render_as_string(hide_password=False)
 
 
 def database_url(explicit: str | None = None) -> str:
     if explicit:
-        return explicit
+        return _with_password(explicit, "TRADING_DB")
     from common import secrets_util as S
 
     v = S.resolve("TRADING_DB_URL", "SQL Server connection URL")
     if v:
-        return v
+        remember_secret(_password_of(v))
+        return _with_password(v, "TRADING_DB")
     try:
         if URL_CONFIG.exists():
             t = URL_CONFIG.read_text(encoding="utf-8").strip()

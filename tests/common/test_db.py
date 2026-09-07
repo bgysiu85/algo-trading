@@ -295,3 +295,70 @@ def test_an_ordinary_name_passes_validation(monkeypatch):
         assert re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,120}", name)
     for name in ("my-db", "db;drop", "1st", "", "a b"):
         assert not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,120}", name)
+
+
+# --- the leak that actually happened ----------------------------------------
+
+def test_a_password_containing_an_at_sign_leaks_only_its_tail(monkeypatch):
+    """THE failure, reproduced. A password with '@' makes the URL malformed:
+    the parser splits at the first '@', the tail of the password becomes the
+    HOSTNAME, and the driver reports 'could not connect to <tail>@localhost'.
+
+    The pattern-only scrubber matched ':<something>@' and saw nothing wrong,
+    because by then the password was not in a password-shaped position. The
+    tail went to a terminal and from there into a chat."""
+    D._KNOWN.clear()
+    D.remember_secret("aa@bb!cc*dd")
+    leaked = "could not connect to bb!cc*dd@localhost. Server is not found."
+    assert "bb!cc*dd" not in D._scrub(leaked)
+    assert "<redacted>" in D._scrub(leaked)
+
+
+def test_the_whole_password_is_scrubbed_too():
+    D._KNOWN.clear()
+    D.remember_secret("hunter2hunter2")
+    assert "hunter2hunter2" not in D._scrub("url is hunter2hunter2 ok")
+
+
+def test_short_fragments_are_not_redacted_out_of_prose():
+    """A scrubber that eats ordinary words gets switched off."""
+    D._KNOWN.clear()
+    D.remember_secret("ab@localhost")          # 'ab' is below the floor
+    out = D._scrub("the connection to localhost failed")
+    assert "localhost" not in out or "the connection to" in out
+    D._KNOWN.clear()
+    D.remember_secret("x@y")                   # too short to remember at all
+    assert D._scrub("x and y are fine") == "x and y are fine"
+
+
+# --- building a URL instead of pasting one ----------------------------------
+
+def test_a_password_with_url_metacharacters_survives_a_round_trip():
+    """URL.create percent-encodes each component, so '@', ':' and '/' in a
+    password stop being structure. Hand-assembling the string is what put a
+    password into a hostname."""
+    for pw in ("aa@bb", "a:b/c?d#e", "p@ss:w/rd", "tail!after@at"):
+        u = D.url_from_parts("localhost", "Trading", "trading-algo", pw)
+        assert D._password_of(u) == pw
+        assert "@localhost/Trading" in u
+
+
+def test_the_built_url_keeps_the_driver_and_the_certificate_setting():
+    u = D.url_from_parts("localhost", "Trading", "u", "p" * 10)
+    assert "ODBC+Driver+18" in u
+    assert "TrustServerCertificate=yes" in u
+
+
+def test_a_password_in_both_places_is_refused(monkeypatch):
+    """One password, one place. Two would leave which is in force to chance."""
+    monkeypatch.setenv("TRADING_DB_PASSWORD", "secret_value_here")
+    with pytest.raises(SystemExit) as e:
+        D._with_password("mssql+pyodbc://u:already@localhost/Trading", "TRADING_DB")
+    assert "already contains a password" in str(e.value)
+
+
+def test_a_separate_password_is_injected_escaped(monkeypatch):
+    monkeypatch.setenv("TRADING_DB_PASSWORD", "aa@bb!cc")
+    got = D._with_password("mssql+pyodbc://u@localhost/Trading", "TRADING_DB")
+    assert D._password_of(got) == "aa@bb!cc"
+    assert "<redacted>" in D._scrub(got)

@@ -176,6 +176,12 @@ def read_only_engine(url: str | None = None):
         return D.engine(url)
     from common import secrets_util as S
     v = S.resolve("TRADING_DB_RO_URL", "read-only SQL Server URL")
+    if v:
+        # Remember it before anything can fail with it in the message. A
+        # malformed URL is precisely the one whose password reaches an error.
+        D.remember_secret(D._password_of(v))
+        v = D._with_password(v, "TRADING_DB_RO")
+        return D.engine(v)
     if not v:
         sys.exit(
             "TRADING_DB_RO_URL is not set.\n\n"
