@@ -137,6 +137,33 @@ class SymbolDay:
     # that ran 2,000 measures position size, not decisions.
     max_position: int = 0
 
+    # Bought and sold sides kept apart, with the NOTIONAL rather than a running
+    # average price.
+    #
+    # An average of averages is wrong whenever the fills are unequal, and these
+    # fills are wildly unequal -- a day can be 31 executions from 100 to 5,000
+    # shares. Keeping sum(qty * price) and dividing once at the end is exact;
+    # keeping a mean and updating it is not, and the error is invisible because
+    # the number it produces is always plausible.
+    #
+    # `shares` above stays the total transacted (buys + sells), because
+    # everything downstream already reads it that way.
+    buy_shares: float = 0.0
+    sell_shares: float = 0.0
+    buy_notional: float = 0.0
+    sell_notional: float = 0.0
+
+    @property
+    def avg_buy_price(self) -> float | None:
+        """None, not 0.0 -- a day with no buys has no average buy price, and a
+        zero would average into any summary as though it were a real one."""
+        return self.buy_notional / self.buy_shares if self.buy_shares else None
+
+    @property
+    def avg_sell_price(self) -> float | None:
+        return (self.sell_notional / self.sell_shares
+                if self.sell_shares else None)
+
     @property
     def net_pnl(self) -> float:
         # IB reports commission as a negative number already.
@@ -347,6 +374,16 @@ def pairs(execs: list[Execution]) -> list[dict]:
     return [{"symbol": s, "date": d} for s, d in seen]
 
 
+def _px(v) -> str:
+    """A missing average price is written as empty, never as 0.
+
+    A 0.00 in an average-price column reads as a real price and averages into
+    any downstream summary as one. Empty is the only value that cannot be
+    mistaken for a measurement.
+    """
+    return "" if v is None else f"{v:.4f}"
+
+
 def symbol_days(execs: list[Execution]) -> dict[tuple[str, str], SymbolDay]:
     grouped: dict[tuple[str, str], list[Execution]] = defaultdict(list)
     for e in execs:
@@ -365,6 +402,16 @@ def symbol_days(execs: list[Execution]) -> dict[tuple[str, str], SymbolDay]:
             sd.gross_pnl += e.fifo_pnl
             sd.commission += e.commission
             sd.prices.append(abs(e.price))
+            # Side comes from the SIGN of qty, not from e.side. Both are
+            # present and they agree today, but the sign is what every other
+            # number here is derived from (shares, max_position), so deriving
+            # this from the string would let the two drift apart silently.
+            if e.qty > 0:
+                sd.buy_shares += e.qty
+                sd.buy_notional += e.qty * abs(e.price)
+            elif e.qty < 0:
+                sd.sell_shares += -e.qty
+                sd.sell_notional += -e.qty * abs(e.price)
             pos += e.qty
             sd.max_position = max(sd.max_position, int(round(pos)))
     return out
@@ -513,10 +560,14 @@ def main(argv=None) -> int:
         with open(a.summary, "w", newline="") as fh:
             w = csv.writer(fh)
             w.writerow(["symbol", "date", "executions", "shares",
-                        "gross_pnl", "commission", "net_pnl", "in_band"])
+                        "buy_shares", "sell_shares", "avg_buy_price",
+                        "avg_sell_price", "gross_pnl", "commission",
+                        "net_pnl", "in_band"])
             for k in sorted(sd):
                 s = sd[k]
                 w.writerow([s.symbol, s.date, s.executions, round(s.shares),
+                            round(s.buy_shares), round(s.sell_shares),
+                            _px(s.avg_buy_price), _px(s.avg_sell_price),
                             round(s.gross_pnl, 2), round(s.commission, 2),
                             round(s.net_pnl, 2), int(s.in_band)])
         print(f"wrote {a.summary}  ({len(sd)} symbol-days)")

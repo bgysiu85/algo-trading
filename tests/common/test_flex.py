@@ -311,3 +311,61 @@ def test_a_missing_trade_id_fails_loudly_rather_than_guessing(tmp_path):
     p = write_csv(tmp_path / "f.csv", [row(trade_id="")])
     with pytest.raises(ValueError, match="no TradeID"):
         flex.load_many([p])
+
+
+# --- buy and sell sides, kept apart -----------------------------------------
+
+def test_average_prices_are_share_weighted_not_an_average_of_averages(tmp_path):
+    """The fills are wildly unequal -- a day can be 31 executions running from
+    100 to 5,000 shares. Averaging the fill prices gives 5.50 here; weighting
+    by shares gives 8.00, and only one of them is what the account paid. The
+    wrong one is not detectably wrong: it is always a plausible price."""
+    p = write_csv(tmp_path / "f.csv", [
+        row(qty=100, px=2.0),
+        row(qty=900, px=9.0),
+    ])
+    s = flex.symbol_days(flex.load(p))[("AAA", "2026-08-04")]
+    assert s.buy_shares == 1000
+    assert s.avg_buy_price == pytest.approx(8.30)   # (200 + 8100) / 1000
+    assert s.avg_buy_price != pytest.approx(5.50)   # the mean of the prices
+
+
+def test_buys_and_sells_are_separated_by_the_sign_not_the_side_string(tmp_path):
+    """Every other figure here -- shares, max_position -- is derived from the
+    sign of qty. Deriving this one from the Buy/Sell string instead would let
+    the two drift apart on a row where they disagree, silently."""
+    p = write_csv(tmp_path / "f.csv", [
+        row(qty=200, px=4.0, side="BUY"),
+        row(qty=-200, px=6.0, side="SELL"),
+    ])
+    s = flex.symbol_days(flex.load(p))[("AAA", "2026-08-04")]
+    assert (s.buy_shares, s.sell_shares) == (200, 200)
+    assert s.avg_buy_price == pytest.approx(4.0)
+    assert s.avg_sell_price == pytest.approx(6.0)
+    assert s.shares == 400          # unchanged: total transacted, both sides
+
+
+def test_a_day_with_no_sells_has_no_average_sell_price(tmp_path):
+    """None, not 0.0. A zero in an average-price column reads as a real price
+    and averages into any summary as one."""
+    p = write_csv(tmp_path / "f.csv", [row(qty=100, px=5.0)])
+    s = flex.symbol_days(flex.load(p))[("AAA", "2026-08-04")]
+    assert s.avg_sell_price is None
+    assert s.avg_buy_price == pytest.approx(5.0)
+
+
+def test_the_new_columns_do_not_disturb_the_old_totals(tmp_path):
+    """Strictly additive. If gross, commission or net moved, every conclusion
+    already drawn from this aggregation moved with them."""
+    p = write_csv(tmp_path / "f.csv", [
+        row(pnl=10.0, comm=-1.0, qty=100),
+        row(pnl=-4.0, comm=-1.0, qty=-100, side="SELL"),
+        row(pnl=2.0, comm=-1.0, qty=50),
+    ])
+    s = flex.symbol_days(flex.load(p))[("AAA", "2026-08-04")]
+    assert (s.executions, s.shares, s.gross_pnl, s.net_pnl) == (3, 250, 8.0, 5.0)
+
+
+def test_a_missing_average_price_is_written_empty_not_zero():
+    assert flex._px(None) == ""
+    assert flex._px(4.5) == "4.5000"
