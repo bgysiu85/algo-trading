@@ -44,9 +44,16 @@ SEARCH = ["Claude outputs", "claude outputs",
           "~/Downloads", "~/Desktop", "~/Documents", ".", "var"]
 
 
-def candidates(extra=()) -> list[Path]:
+def candidates(extra=(), search=None) -> list[Path]:
+    """Newest first, de-duplicated.
+
+    `search` exists so a test can name the ONLY directories to look in. Without
+    it every test ran against whatever bundles happened to be on the machine:
+    six passed in an empty sandbox and failed on Ben's, where 25 real bundles
+    live in the directories this searches by design.
+    """
     seen, out = set(), []
-    for d in list(extra) + SEARCH:
+    for d in list(extra) + (SEARCH if search is None else list(search)):
         p = Path(d).expanduser()
         if not p.is_dir():
             continue
@@ -81,6 +88,8 @@ def main(argv=None) -> int:
     ap.add_argument("--file", help="skip the search and use this bundle")
     ap.add_argument("--dir", action="append", default=[],
                     help="also look here (repeatable)")
+    ap.add_argument("--only", action="store_true",
+                    help="look ONLY in --dir, not the usual places")
     ap.add_argument("--ref", default="main")
     ap.add_argument("--no-merge", action="store_true",
                     help="fetch into FETCH_HEAD and stop")
@@ -93,10 +102,11 @@ def main(argv=None) -> int:
             return 1
         found = [chosen]
     else:
-        found = candidates(a.dir)
+        where = [] if a.only else SEARCH
+        found = candidates(a.dir, search=where)
         if not found:
             print(f"No {PATTERN} found in:")
-            for d in list(a.dir) + SEARCH:
+            for d in list(a.dir) + where:
                 print(f"  {Path(d).expanduser()}")
             print("\nDownload the bundle from the chat first, or pass --file.")
             return 1
