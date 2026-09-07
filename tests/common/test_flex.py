@@ -369,3 +369,38 @@ def test_the_new_columns_do_not_disturb_the_old_totals(tmp_path):
 def test_a_missing_average_price_is_written_empty_not_zero():
     assert flex._px(None) == ""
     assert flex._px(4.5) == "4.5000"
+
+
+# --- fills are not trades ---------------------------------------------------
+
+def test_round_trips_count_returns_to_flat_not_fills(tmp_path):
+    """'Number of trades' has to mean the same thing in every column of a
+    comparison. A strategy's count is round trips; `executions` is fills, and a
+    day of 31 fills can be three decisions. Putting one beside the other
+    compares an order-slicing habit against a decision count."""
+    p = write_csv(tmp_path / "f.csv", [
+        row(qty=100, dt="2026-08-04 14:00:00"),
+        row(qty=100, dt="2026-08-04 14:01:00"),          # scaling in
+        row(qty=-200, dt="2026-08-04 14:05:00", side="SELL"),   # flat: 1
+        row(qty=300, dt="2026-08-04 15:00:00"),
+        row(qty=-300, dt="2026-08-04 15:30:00", side="SELL"),   # flat: 2
+    ])
+    s = flex.symbol_days(flex.load(p))[("AAA", "2026-08-04")]
+    assert s.executions == 5
+    assert s.round_trips == 2
+
+
+def test_a_position_left_open_at_the_close_is_not_a_round_trip(tmp_path):
+    p = write_csv(tmp_path / "f.csv", [
+        row(qty=100, dt="2026-08-04 14:00:00"),
+        row(qty=-50, dt="2026-08-04 15:00:00", side="SELL"),
+    ])
+    s = flex.symbol_days(flex.load(p))[("AAA", "2026-08-04")]
+    assert s.round_trips == 0
+
+
+def test_a_day_that_never_trades_has_no_round_trip(tmp_path):
+    """Counted on the CROSSING to flat, not on being flat -- otherwise the
+    first fill of every day would score one before anything closed."""
+    p = write_csv(tmp_path / "f.csv", [row(qty=100)])
+    assert flex.symbol_days(flex.load(p))[("AAA", "2026-08-04")].round_trips == 0

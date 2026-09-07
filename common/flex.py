@@ -152,6 +152,12 @@ class SymbolDay:
     sell_shares: float = 0.0
     buy_notional: float = 0.0
     sell_notional: float = 0.0
+    # Times the position returned to flat. THIS is what a strategy calls a
+    # trade; `executions` is fills, and the two are not the same unit -- a day
+    # of 31 executions can be three round trips. Putting fills beside a
+    # strategy's trade count in one column would compare an order-slicing habit
+    # against a decision count.
+    round_trips: int = 0
 
     @property
     def avg_buy_price(self) -> float | None:
@@ -412,8 +418,16 @@ def symbol_days(execs: list[Execution]) -> dict[tuple[str, str], SymbolDay]:
             elif e.qty < 0:
                 sd.sell_shares += -e.qty
                 sd.sell_notional += -e.qty * abs(e.price)
+            was = pos
             pos += e.qty
             sd.max_position = max(sd.max_position, int(round(pos)))
+            # Flat is counted on the CROSSING, not on the level, so a day that
+            # starts flat does not count one before it has traded, and a day
+            # left open at the close does not have a round trip invented for
+            # it. Rounding matters: fractional-share residue would otherwise
+            # leave pos at 1e-13 and no day would ever read as flat.
+            if round(was, 6) != 0.0 and round(pos, 6) == 0.0:
+                sd.round_trips += 1
     return out
 
 
@@ -559,13 +573,15 @@ def main(argv=None) -> int:
         Path(a.summary).parent.mkdir(parents=True, exist_ok=True)
         with open(a.summary, "w", newline="") as fh:
             w = csv.writer(fh)
-            w.writerow(["symbol", "date", "executions", "shares",
+            w.writerow(["symbol", "date", "executions", "round_trips",
+                        "shares",
                         "buy_shares", "sell_shares", "avg_buy_price",
                         "avg_sell_price", "max_position", "gross_pnl",
                         "commission", "net_pnl", "in_band"])
             for k in sorted(sd):
                 s = sd[k]
-                w.writerow([s.symbol, s.date, s.executions, round(s.shares),
+                w.writerow([s.symbol, s.date, s.executions, s.round_trips,
+                            round(s.shares),
                             round(s.buy_shares), round(s.sell_shares),
                             _px(s.avg_buy_price), _px(s.avg_sell_price),
                             s.max_position,

@@ -50,7 +50,8 @@ def write_state(tmp_path, name, done):
     return p
 
 
-SUMMARY_COLS = ["symbol", "date", "executions", "shares", "buy_shares",
+SUMMARY_COLS = ["symbol", "date", "executions", "round_trips", "shares",
+                "buy_shares",
                 "sell_shares", "avg_buy_price", "avg_sell_price",
                 "max_position", "gross_pnl", "commission", "net_pnl",
                 "in_band"]
@@ -66,8 +67,10 @@ def write_summary(tmp_path, rows):
 
 
 def sday(symbol="AAA", date="2026-03-16", execs=4, buy=1000, sell=1000,
-         abp=5.0, asp=6.0, gross=1000.0, commission=-12.0, net=988.0):
+         abp=5.0, asp=6.0, gross=1000.0, commission=-12.0, net=988.0,
+         round_trips=2):
     return {"symbol": symbol, "date": date, "executions": execs,
+            "round_trips": round_trips,
             "shares": buy + sell, "buy_shares": buy, "sell_shares": sell,
             "avg_buy_price": abp, "avg_sell_price": asp,
             "max_position": max(buy, sell), "gross_pnl": gross,
@@ -280,3 +283,30 @@ def test_the_csv_writes_blanks_for_absences(tmp_path):
     assert got["mcl_status"] == "NO BARS"
     assert got["mcl_net"] == ""
     assert got["mine_net"] == "988.0"
+
+
+def test_my_trade_count_is_round_trips_and_the_fills_sit_beside_it(tmp_path):
+    """A strategy's 'trades' are round trips. If mine were executions, the
+    column would compare how finely orders were sliced against how many
+    decisions a strategy made -- and mine would always look larger."""
+    s = write_summary(tmp_path, [sday(execs=31, round_trips=3)])
+    b = D.read_summary(s)[("AAA", "2026-03-16")]
+    assert b.trades == 3
+    assert b.fills == 31
+    rows, _ = D.build(s, tmp_path, tmp_path, [])
+    out = tmp_path / "cmp.csv"
+    D.write_csv(rows, [], out)
+    got = list(csv.DictReader(open(out)))[0]
+    assert got["mine_trades"] == "3" and got["mine_fills"] == "31"
+
+
+def test_a_summary_without_round_trips_is_refused(tmp_path):
+    p = tmp_path / "old.csv"
+    cols = [c for c in SUMMARY_COLS if c != "round_trips"]
+    with open(p, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
+        w.writeheader()
+        w.writerow(sday())
+    with pytest.raises(SystemExit) as e:
+        D.read_summary(p)
+    assert "round_trips" in str(e.value)

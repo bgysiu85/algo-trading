@@ -105,6 +105,10 @@ class Block:
     cost: float = 0.0
     gross: float = 0.0
     net: float = 0.0
+    # Ben's side only: the raw fill count. `trades` is round trips on BOTH
+    # sides so the column compares like with like; this sits beside it because
+    # 31 fills and 3 round trips are both true and both worth seeing.
+    fills: int | None = None
 
     @property
     def avg_buy_price(self) -> float | None:
@@ -224,7 +228,8 @@ def read_summary(path: Path) -> dict[tuple[str, str], Block]:
     out: dict[tuple[str, str], Block] = {}
     with open(path, newline="") as fh:
         rd = csv.DictReader(fh)
-        need = {"buy_shares", "sell_shares", "avg_buy_price", "avg_sell_price"}
+        need = {"buy_shares", "sell_shares", "avg_buy_price", "avg_sell_price",
+                "round_trips"}
         missing = need - set(rd.fieldnames or [])
         if missing:
             sys.exit(f"{path} is an older summary without {sorted(missing)}. "
@@ -234,7 +239,12 @@ def read_summary(path: Path) -> dict[tuple[str, str], Block]:
             ss = float(r["sell_shares"] or 0)
             out[(r["symbol"], r["date"])] = Block(
                 status="TRADED",
-                trades=int(r["executions"]),
+                # round_trips, NOT executions. A strategy's trade count is
+                # round trips; executions are fills. A day of 31 fills can be
+                # 3 decisions, and putting the two in one column would compare
+                # an order-slicing habit against a decision count.
+                trades=int(r["round_trips"]),
+                fills=int(r["executions"]),
                 buy_shares=bs, sell_shares=ss,
                 buy_notional=bs * float(r["avg_buy_price"] or 0),
                 sell_notional=ss * float(r["avg_sell_price"] or 0),
@@ -269,6 +279,8 @@ def header(names: list[str]) -> list[str]:
     cols = ["symbol", "date"]
     for src in ["mine"] + names:
         cols.append(f"{src}_status")
+        if src == "mine":
+            cols.append("mine_fills")
         cols += [f"{src}_{f}" for f in FIELDS]
     return cols
 
@@ -294,6 +306,8 @@ def write_csv(rows, names, path: Path) -> None:
             for src in ["mine"] + names:
                 b = r[src]
                 line.append(b.status)
+                if src == "mine":
+                    line.append("" if b.fills is None else b.fills)
                 line += cells(b)
             w.writerow(line)
 
