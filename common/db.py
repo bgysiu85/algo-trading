@@ -313,9 +313,44 @@ def counts(eng) -> dict:
     return out
 
 
+def ensure_database(url: str) -> str:
+    """Create the target database if it is not there, then return its URL.
+
+    This tool otherwise creates TABLES, and a missing DATABASE presents as a
+    login failure -- which sends the reader off to check permissions and
+    drivers for a problem that is neither. Doing it here saves needing SSMS or
+    sqlcmd just to type one statement.
+
+    CREATE DATABASE cannot run inside a transaction, hence AUTOCOMMIT, and the
+    name is validated rather than interpolated: it arrives from a URL, and a
+    database name is not a place to find out what f-strings will do.
+    """
+    import re as _re
+    from sqlalchemy.engine import make_url
+
+    u = make_url(url)
+    name = u.database or "Trading"
+    if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,120}", name):
+        sys.exit(f"refusing to create a database named {name!r}: letters, "
+                 "digits and underscores only")
+    master = create_engine(str(u.set(database="master")), future=True)
+    with master.connect().execution_options(
+            isolation_level="AUTOCOMMIT") as c:
+        existed = c.exec_driver_sql(
+            f"SELECT DB_ID('{name}')").scalar_one() is not None
+        if not existed:
+            c.exec_driver_sql(f"CREATE DATABASE [{name}]")
+    print(f"database {name}: {'already present' if existed else 'CREATED'}")
+    return url
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Trading database: schema and status")
     ap.add_argument("--url", help="SQLAlchemy URL (default: see module docstring)")
+    ap.add_argument("--create-database", action="store_true",
+                    help="create the database itself first (connects to "
+                         "master). Without it, a missing database presents as "
+                         "a login failure.")
     ap.add_argument("--create", action="store_true", help="create missing tables")
     ap.add_argument("--check", action="store_true", help="connect and report")
     ap.add_argument("--ddl", action="store_true",
@@ -331,6 +366,12 @@ def main(argv=None) -> int:
 
     url = database_url(a.url)
     print(f"url  {_scrub(url)}")
+    if a.create_database:
+        try:
+            ensure_database(url)
+        except Exception as e:  # noqa: BLE001
+            print(f"\nCOULD NOT CREATE THE DATABASE: {_scrub(e)}")
+            return 1
     try:
         eng = engine(url)
         with eng.connect() as c:

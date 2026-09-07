@@ -276,3 +276,22 @@ def test_every_load_records_where_it_came_from(eng, tmp_path):
     assert row["source_path"].endswith("backtest_trades_mcl.csv")
     assert row["rows"] == 1
     assert row["source_mtime"] is not None
+
+
+# --- creating the database itself -------------------------------------------
+
+def test_a_database_name_is_validated_not_interpolated():
+    """The name arrives from a URL and goes into CREATE DATABASE. A URL is not
+    a place to find out what an f-string will do."""
+    with pytest.raises(SystemExit) as e:
+        D.ensure_database("mssql+pyodbc://@localhost/Trading];DROP DATABASE x--")
+    assert "refusing" in str(e.value)
+
+
+def test_an_ordinary_name_passes_validation(monkeypatch):
+    """The guard must not reject the names people actually use."""
+    import re
+    for name in ("Trading", "trading_db", "T1", "_scratch"):
+        assert re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,120}", name)
+    for name in ("my-db", "db;drop", "1st", "", "a b"):
+        assert not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,120}", name)
