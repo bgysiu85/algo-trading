@@ -94,10 +94,18 @@ def rows_to_text(cols, rows, truncated: bool) -> str:
 
 
 def build(engine_factory):
-    """The MCP server, with its engine injected so it can be tested."""
-    from mcp.server.fastmcp import FastMCP
+    """The MCP server, with its engine injected so it can be tested.
 
-    mcp = FastMCP("trading-sql")
+    MCPServer is the mcp 2.x name; it was FastMCP in 1.x. The first version of
+    this module imported FastMCP because that is what happened to be installed
+    in the container it was written in, and shipped a requirement of mcp>=1.2 --
+    which cheerfully allows the 2.x that a fresh install actually gets. Every
+    test here passed and every one of them failed on Ben's machine. The pin
+    below now names the major that was tested, not the one that was handy.
+    """
+    from mcp.server.mcpserver import MCPServer
+
+    mcp = MCPServer("trading-sql")
 
     @mcp.tool()
     def list_tables() -> str:

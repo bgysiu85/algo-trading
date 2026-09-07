@@ -205,3 +205,34 @@ def test_the_selftest_leaves_no_row_behind(eng, monkeypatch):
     with eng.connect() as c:
         assert c.execute(select(func.count()).select_from(
             D.load_run)).scalar_one() == 0
+
+
+# --- the pin has to match the code --------------------------------------
+
+def test_the_installed_mcp_satisfies_the_pin_the_code_needs():
+    """The bug that shipped: the code imported mcp 1.x's FastMCP because that
+    is what the container happened to have, and requirements said mcp>=1.2 --
+    which allows the 2.x a fresh install actually gets. Every test passed here
+    and every one failed on Ben's machine.
+
+    A pin is a claim about what the code was tested against. This checks the
+    claim against reality rather than trusting it."""
+    import importlib.metadata as md
+    from pathlib import Path
+    req = Path(__file__).resolve().parents[2] / "requirements.txt"
+    spec = [l.strip() for l in req.read_text().splitlines()
+            if l.strip().startswith("mcp")]
+    assert spec, "requirements.txt no longer pins mcp"
+    from packaging.requirements import Requirement
+    r = Requirement(spec[0])
+    installed = md.version("mcp")
+    assert installed in r.specifier, (
+        f"mcp {installed} does not satisfy {r} -- the pin and the code "
+        "disagree, which is exactly how the FastMCP/MCPServer break shipped")
+
+
+def test_the_code_imports_the_name_the_installed_major_actually_has():
+    """Belt and braces: the pin can be right and the import still wrong."""
+    from mcp.server.mcpserver import MCPServer      # noqa: F401
+    import inspect
+    assert "MCPServer" in inspect.getsource(M.build)

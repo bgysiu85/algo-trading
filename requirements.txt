@@ -14,4 +14,6 @@ pytest
 sqlalchemy>=2.0
 pyodbc>=5.0
 # --- the read-only MCP server (common/mcp_sql.py)
-mcp>=1.2
+# 2.x renamed FastMCP to MCPServer. >=1.2 allowed a major that does not
+# have the API this is written against; pin the one that was tested.
+mcp>=2,<3
