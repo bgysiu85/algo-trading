@@ -75,7 +75,22 @@ from common.report_io import emit
 
 from common.databento_fetch import default_archive
 
-DATASET_DEFAULT = "EQUS.MINI"
+# CONSOLIDATED BY DEFAULT, and this default is load-bearing.
+#
+# Every threshold in this screen is a volume threshold or derived from one, and
+# EQUS.MINI is not the tape those thresholds mean. Measured in
+# claude/consolidated_volume_gap.md: EQUS.MINI carries a MEDIAN 4.7% of
+# consolidated volume (p05 1.6%, p95 10.8%), and the shortfall varies four-fold
+# BETWEEN SYMBOLS -- so an RVOL computed on it is wrong by a factor that
+# changes per name. Rebuilding the screen on consolidated volume took recall
+# against Ben's own trades from 30% to 63%.
+#
+# The default used to be EQUS.MINI, and the failure that produced this comment
+# is the reason it is not: a run with the flag omitted returned 12,128
+# candidates instead of ~22,900, wrote them to a file named
+# screen_pairs_consolidated.json, and reported nothing unusual. A wrong answer
+# that looks like a right one is exactly what a default should not make easy.
+DATASET_DEFAULT = "EQUS.SUMMARY"
 
 # Exchange TEST symbols. These are not securities -- venues publish them
 # continuously so members can verify connectivity, and they carry real-looking
@@ -447,7 +462,10 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Rebuild the watchlist from daily bars")
     ap.add_argument("--archive", default=str(default_archive()),
                     help="archive root (default: %(default)s)")
-    ap.add_argument("--dataset", default=DATASET_DEFAULT)
+    ap.add_argument("--dataset", default=DATASET_DEFAULT,
+                    help="consolidated by default (%(default)s). EQUS.MINI "
+                         "carries a median 4.7%% of the tape and every rule "
+                         "here is a volume rule.")
     ap.add_argument("--pairs", metavar="OUT.json", help="write candidate pairs")
     ap.add_argument("--rejects", metavar="OUT.json",
                     help="write a sample of stage-1 passers that stage 2 threw "

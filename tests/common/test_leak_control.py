@@ -171,3 +171,24 @@ def test_an_empty_reject_population_returns_an_empty_frame():
     rej = feats([])
     sel = feats([("S0", "2026-03-16", 5.0, 1e7, 99.0, 99.0)])
     assert S.sample_rejects(rej, sel, 10, seed=0).empty
+
+
+# --- the default that produced a plausible wrong answer ---------------------
+
+def test_the_screen_defaults_to_consolidated_volume():
+    """Every threshold in the screen is a volume threshold. EQUS.MINI carries a
+    median 4.7% of the consolidated tape and the shortfall varies four-fold
+    between symbols, so an RVOL computed on it is wrong by a per-name factor.
+
+    The default used to be EQUS.MINI. A run with the flag omitted returned
+    12,128 candidates instead of ~22,900, wrote them to a file named
+    screen_pairs_consolidated.json, and reported nothing unusual."""
+    assert S.DATASET_DEFAULT == "EQUS.SUMMARY"
+
+
+def test_the_report_names_the_dataset_it_used():
+    """The one thing that would have caught it: the header says which tape the
+    numbers came from."""
+    import inspect
+    src = inspect.getsource(S.main)
+    assert "dataset={a.dataset}" in src
