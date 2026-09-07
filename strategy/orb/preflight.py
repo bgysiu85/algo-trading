@@ -108,6 +108,13 @@ class DayRow:
     orb_minutes: int
     status: str = ""                 # OK | NO_RTH | FEW_BARS | TOO_NARROW | TOO_WIDE
     range_bars: int = 0
+    # The WHOLE session's RTH bar count, recorded even when the range is
+    # rejected. Without it, FEW_BARS cannot be told apart from NO DATA -- a
+    # symbol-day with 2 opening bars and 300 RTH bars is a thin open on a name
+    # that traded all day; one with 2 and 2 is a hole in the cache. Those are
+    # different problems with different fixes and the first run of this module
+    # could not distinguish them.
+    rth_bars: int = 0
     orb_high: float | None = None
     orb_low: float | None = None
     width_pct: float | None = None
@@ -162,6 +169,7 @@ def measure_day(sess: pd.DataFrame, symbol: str, day: str, population: str,
                 minutes: int) -> DayRow:
     row = DayRow(symbol=symbol, date=day, population=population,
                  orb_minutes=minutes)
+    row.rth_bars = len(sess)
     if sess.empty:
         row.status = "NO_RTH"
         return row
@@ -309,6 +317,43 @@ def render(rows: list[DayRow]) -> list[str]:
 
     base = by_min.get(15, [])
     ok = [r for r in base if r.status == "OK"]
+
+    # 10.1b. The first run of this module excluded 67% of symbol-days as
+    # FEW_BARS and could not say why, which made every number after it
+    # unreadable: a 27% subset selected by an unknown mechanism is not a
+    # sample of the universe.
+    few = [r for r in base if r.status == "FEW_BARS"]
+    if few or base:
+        L += ["", "10.1b  WHY THE RANGE IS UNUSABLE (15-minute range)", "",
+              "  A thin OPEN on a name that traded all day is a liquidity fact.",
+              "  A symbol-day with no RTH bars at all is a hole in the cache.",
+              "  They need different fixes, so they are counted separately.", ""]
+        empty = [r for r in base if r.rth_bars == 0]
+        sparse = [r for r in few if r.rth_bars >= 100]
+        thin = [r for r in few if 0 < r.rth_bars < 100]
+        L += [f"  no RTH bars at all                {len(empty):>8,}   "
+              "-> the cache, not the market",
+              f"  few opening bars, >=100 RTH bars  {len(sparse):>8,}   "
+              "-> traded all day, thin at the open",
+              f"  few opening bars, <100 RTH bars   {len(thin):>8,}   "
+              "-> thin all day",
+              ""]
+        if few:
+            rb = [r.range_bars for r in few]
+            L += [f"  opening bars among the excluded: p10 {_f(pct(rb, 10), 0)}"
+                  f"  p50 {_f(pct(rb, 50), 0)}  p90 {_f(pct(rb, 90), 0)} of 15",
+                  ""]
+        # The threshold is a guess (spec section 8). Show what it costs.
+        L += ["  usable ranges at other MIN_RANGE_BARS settings:", ""]
+        for k in (3, 5, 8, 10, 12):
+            n = sum(1 for r in base if r.range_bars >= k)
+            L.append(f"    >= {k:>2} of 15 bars   {n:>8,}  "
+                     f"({n/len(base)*100:>5.1f}% of symbol-days)")
+        L += ["",
+              "  MIN_RANGE_BARS is 10 of 15 and was never measured. If the",
+              "  curve above is flat, the threshold is not what is excluding",
+              "  these days and the data is. If it is steep, the threshold is",
+              "  a choice about how much of the universe ORB gives up."]
 
     L += ["", "10.2  THE RTH SCREEN AT THE RANGE END (15-minute range)", ""]
     if ok:

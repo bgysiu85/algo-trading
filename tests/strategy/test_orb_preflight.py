@@ -227,3 +227,50 @@ def test_no_numpy_scalars_escape_into_the_record():
     for name, v in vars(r).items():
         assert not isinstance(v, np.generic), (
             f"{name} is a numpy scalar ({type(v).__name__}), not a Python type")
+
+
+# --- 10.1b: telling a thin open apart from a missing session ----------------
+
+def test_the_whole_session_bar_count_is_recorded_even_when_the_range_fails():
+    """FEW_BARS on its own cannot distinguish a thin OPEN on a name that traded
+    all day from a hole in the cache. The first full run excluded 67% of
+    symbol-days and could not say which."""
+    # Three bars at the open, then a full afternoon. The range window is
+    # 09:30-09:45, so the later bars must NOT rescue it -- and must still be
+    # counted, because they are what says the name traded.
+    import pandas as pd
+    sess = pd.concat([session([(10, 10, 10, 10)] * 3, start="09:30"),
+                      session([(10, 11, 9, 10)] * 200, start="10:00")])
+    r = P.measure_day(sess, "AAA", DAY, "survivors", 15)
+    assert r.status == "FEW_BARS"
+    assert r.range_bars == 3
+    assert r.rth_bars == 203, "the session's own bar count was not kept"
+
+
+def test_the_report_separates_a_cache_hole_from_a_thin_open():
+    rows = [
+        P.DayRow(symbol="EMPTY", date=DAY, population="survivors",
+                 orb_minutes=15, status="NO_RTH", rth_bars=0, range_bars=0),
+        P.DayRow(symbol="THINOPEN", date=DAY, population="survivors",
+                 orb_minutes=15, status="FEW_BARS", rth_bars=300,
+                 range_bars=4),
+        P.DayRow(symbol="THINDAY", date=DAY, population="survivors",
+                 orb_minutes=15, status="FEW_BARS", rth_bars=20, range_bars=2),
+    ]
+    out = "\n".join(P.render(rows))
+    assert "the cache, not the market" in out
+    assert "traded all day, thin at the open" in out
+    assert "thin all day" in out
+
+
+def test_the_report_shows_what_the_bar_threshold_costs():
+    """MIN_RANGE_BARS is 10 of 15 and was never measured. A flat curve means
+    the data is the constraint; a steep one means the threshold is a choice."""
+    rows = [P.DayRow(symbol=f"S{i}", date=DAY, population="survivors",
+                     orb_minutes=15, status="OK", range_bars=i % 16,
+                     rth_bars=300, width_pct=5.0)
+            for i in range(64)]
+    out = "\n".join(P.render(rows))
+    assert "MIN_RANGE_BARS is 10 of 15 and was never measured" in out
+    for k in (3, 5, 8, 10, 12):
+        assert f">= {k:>2} of 15 bars" in out
