@@ -65,6 +65,7 @@ from zoneinfo import ZoneInfo
 
 from common.analysis import load_sessions, LIVE
 from common.commissions import order_cost
+from common.report_io import emit
 from strategy.mcl import mcl as MCL
 from strategy.mc5 import mc5 as MC5
 
@@ -82,12 +83,24 @@ class Book:
     """One account across all symbols on one date."""
 
     def __init__(self, capital: float, per_trade_pct: float,
-                 max_positions: int, compound: bool, fixed_qty: int = 0):
+                 max_positions: int, compound: bool, fixed_qty: int = 0,
+                 max_shares: int = 0, participation_pct: float = 0.0):
         self.start = capital
         self.cash = capital
         self.per_trade_pct = per_trade_pct
         self.max_positions = max_positions
         self.compound = compound
+        # A share ceiling on top of the capital rule. The per-session engines
+        # have always had MAX_SHARES; this module did not, so MAX_SHARES was
+        # not a thing a sweep here could vary. 0 means no ceiling.
+        self.max_shares = max_shares
+        # And a ceiling from the TAPE rather than from the account: at most
+        # this share of the entry minute's own volume, measured in
+        # common/capacity.py. Without it a capital sweep will recommend 1,500
+        # shares of a name that printed 4,000 in the minute it filled, and the
+        # fill model will price every one of them at the close. 0 means the
+        # old behaviour -- unlimited, and optimistic by an unmeasured amount.
+        self.participation_pct = participation_pct
         # Equivalence mode: reproduce the per-session engine's flat MAX_SHARES
         # instead of sizing from capital. Needed because "unlimited capital"
         # cannot be expressed as a huge number -- at 100% per trade the first
@@ -98,6 +111,19 @@ class Book:
         self.trades: list[dict] = []
         self.rejected_capital = 0
         self.rejected_slots = 0
+        # Trades the tape shrank, and by how much in total. Counted rather
+        # than folded into the P/L, because "capacity cost $X" and "capacity
+        # blocked N trades" are different findings and only one of them is
+        # visible in a net figure.
+        self.capped_by_tape = 0
+        self.shares_lost_to_tape = 0
+        # Entries the tape cap could not be applied to at all, because the
+        # entry minute reports no volume. They are EXEMPTED rather than sized
+        # to zero -- capping them to nothing would drop the trade entirely and
+        # make the capped and uncapped runs incomparable on trade count. But
+        # they are exactly the thinnest minutes, so the exemption flatters the
+        # capped run and has to be visible.
+        self.no_volume = 0
 
     @property
     def equity_base(self) -> float:
@@ -109,11 +135,33 @@ class Book:
     def can_open(self) -> bool:
         return len(self.open) < self.max_positions
 
-    def size(self, price: float) -> int:
+    def size(self, price: float, minute_volume: float | None = None) -> int:
+        """Shares, after the account, the share ceiling and the tape.
+
+        Order matters only for what gets reported: the capital rule decides
+        the affordable size, then MAX_SHARES caps it, then the tape caps it
+        again. Only the last of the three is counted separately, because it is
+        the one no earlier version of this module could see.
+        """
         if self.fixed_qty:
             return self.fixed_qty
+        if price <= 0:
+            return 0
         cap = min(self.per_trade_pct / 100.0 * self.equity_base, self.cash)
-        return max(0, math.floor(cap / price)) if price > 0 else 0
+        qty = max(0, math.floor(cap / price))
+        if self.max_shares:
+            qty = min(qty, self.max_shares)
+        if self.participation_pct:
+            if not minute_volume:
+                self.no_volume += 1
+            else:
+                allowed = math.floor(minute_volume
+                                     * self.participation_pct / 100.0)
+                if allowed < qty:
+                    self.capped_by_tape += 1
+                    self.shares_lost_to_tape += qty - allowed
+                    qty = max(0, allowed)
+        return qty
 
     def enter(self, symbol, ts, price, qty, plan):
         cost = price * qty
@@ -225,7 +273,8 @@ def run_date(by_symbol, book: Book, strat, band, trail_pct, plan):
             px = float(row["close"]) + strat.SLIPPAGE_TICKS * strat.TICK
             if band and not (strat.PRICE_MIN <= px <= strat.PRICE_MAX):
                 continue
-            qty = book.size(px)
+            vol = row.get("volume")
+            qty = book.size(px, None if vol is None else float(vol))
             if qty < 1:
                 book.rejected_capital += 1
                 continue
@@ -243,25 +292,53 @@ def run_date(by_symbol, book: Book, strat, band, trail_pct, plan):
 
 
 def simulate(sessions, strat, capital, per_trade_pct, max_positions,
-             compound=False, trail_pct=None, band=True, fixed_qty=0):
+             compound=False, trail_pct=None, band=True, fixed_qty=0,
+             max_shares=0, participation_pct=0.0, stats=None, prepared=None):
+    """`stats`, if given, is filled with the tape-cap counters.
+
+    Passed in rather than returned so that the four-tuple every existing
+    caller unpacks keeps working. A fifth return value would have been tidier
+    and would have broken five call sites and their tests for nothing.
+
+    `prepared`, if given, is a date -> signals cache that persists across
+    calls. Computing the signals is the whole cost of a run -- 28 seconds for
+    373 sessions against well under a second for the walk -- so a sweep that
+    recomputes them per cell takes twenty minutes to answer a question the
+    same data answers in one. The cache is only ever read by the walk, never
+    written to, and a test asserts that two runs sharing one cache agree with
+    two runs that do not.
+    """
     by_date = defaultdict(list)
     for s in sessions:
         by_date[s[1]].append(s)
     trail_pct = trail_pct if trail_pct is not None else strat.TRAIL_PCT
     plan = strat.COMMISSION_PLAN
+    if prepared is None:
+        prepared = {}
 
     cash = capital
     all_trades, rej_cap, rej_slot = [], 0, 0
+    capped = lost = novol = 0
     for date_str in sorted(by_date):
         book = Book(cash if compound else capital, per_trade_pct,
-                    max_positions, compound, fixed_qty)
-        run_date(prepare_date(by_date[date_str], strat, band), book,
+                    max_positions, compound, fixed_qty,
+                    max_shares=max_shares, participation_pct=participation_pct)
+        if date_str not in prepared:
+            prepared[date_str] = prepare_date(by_date[date_str], strat, band)
+        run_date(prepared[date_str], book,
                  strat, band, trail_pct, plan)
         all_trades.extend(book.trades)
         rej_cap += book.rejected_capital
         rej_slot += book.rejected_slots
+        capped += book.capped_by_tape
+        lost += book.shares_lost_to_tape
+        novol += book.no_volume
         if compound:
             cash = book.cash
+    if stats is not None:
+        stats["capped_by_tape"] = capped
+        stats["shares_lost_to_tape"] = lost
+        stats["no_volume"] = novol
     return all_trades, rej_cap, rej_slot, cash
 
 
@@ -286,11 +363,77 @@ def summarise(tag, trades, rej_cap, rej_slot, capital, final=None):
           f"{100*net/capital:>8.1f}%")
 
 
+def sweep_rows(sessions, strat, capital, max_positions, shares_grid,
+               pct_grid, participation_pct, prepared):
+    """One row per (MAX_SHARES, per-trade %) cell. Net is after friction."""
+    out = []
+    for ms in shares_grid:
+        for pct in pct_grid:
+            st: dict = {}
+            tr, rc, rs, _f = simulate(sessions, strat, capital, pct,
+                                      max_positions, max_shares=ms,
+                                      participation_pct=participation_pct,
+                                      stats=st, prepared=prepared)
+            by_sym: dict[str, float] = defaultdict(float)
+            for t in tr:
+                by_sym[t["symbol"]] += t["real"]
+            net = sum(by_sym.values())
+            top = sorted(by_sym.values(), reverse=True)
+            out.append(dict(
+                max_shares=ms, per_trade_pct=pct, trades=len(tr), net=net,
+                per_trade=net / len(tr) if tr else 0.0,
+                drop5=net - sum(top[:5]),
+                max_qty=max((t["qty"] for t in tr), default=0),
+                capped=st.get("capped_by_tape", 0),
+                no_volume=st.get("no_volume", 0),
+                rejected_capital=rc, rejected_slots=rs))
+    return out
+
+
+def report_sweep(rows, shares_grid, pct_grid, tag) -> list[str]:
+    L = [f"  {tag}",
+         f"    {'max_sh':>7}{'per%':>6}{'trades':>8}{'net':>11}{'per tr':>9}"
+         f"{'drop5':>11}{'max qty':>9}{'tape-capped':>13}{'no-vol':>8}"]
+    for r in rows:
+        ms = "none" if not r["max_shares"] else f"{r['max_shares']:,}"
+        L.append(f"    {ms:>7}{r['per_trade_pct']:>6.0f}{r['trades']:>8,}"
+                 f"${r['net']:>10,.0f}${r['per_trade']:>8.2f}"
+                 f"${r['drop5']:>10,.0f}{r['max_qty']:>9,}{r['capped']:>13,}"
+                 f"{r.get('no_volume', 0):>8,}")
+
+    # THE BOUNDARY CHECK. An optimum on the edge of the grid is being
+    # arbitraged, not fitted -- the sweep is saying "further", and the honest
+    # response is to widen the box rather than to quote the edge as a result.
+    best = max(rows, key=lambda r: r["drop5"])
+    edges = []
+    if best["max_shares"] in (shares_grid[0], shares_grid[-1]):
+        edges.append("MAX_SHARES")
+    if best["per_trade_pct"] in (pct_grid[0], pct_grid[-1]):
+        edges.append("per-trade %")
+    ms = "none" if not best["max_shares"] else f"{best['max_shares']:,}"
+    L.append(f"    best on drop-top-5: max_shares {ms}, "
+             f"{best['per_trade_pct']:.0f}% per trade, ${best['drop5']:,.0f}")
+    if edges:
+        L.append(f"    ON THE BOUNDARY in {', '.join(edges)} -- this is not an "
+                 "optimum, it is the edge of the box.")
+    return L + [""]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Portfolio backtest")
     ap.add_argument("--capital", type=float, default=5000.0)
     ap.add_argument("--per-trade-pct", type=float, default=60.0)
     ap.add_argument("--max-positions", type=int, default=2)
+    ap.add_argument("--max-shares", type=int, default=0,
+                    help="share ceiling on top of the capital rule; 0 = none")
+    ap.add_argument("--participation-pct", type=float, default=0.0,
+                    help="cap a position at this %% of the entry minute's "
+                         "volume; 0 = no cap, which is the old behaviour and "
+                         "is optimistic by an unmeasured amount")
+    ap.add_argument("--sweep-out", default="var/reports/sizing_sweep.txt")
+    ap.add_argument("--sweep", action="store_true",
+                    help="grid over MAX_SHARES x per-trade %%, with and "
+                         "without the tape cap")
     ap.add_argument("--verify", action="store_true")
     a = ap.parse_args()
 
@@ -319,6 +462,42 @@ def main() -> int:
             print(f"  {name}: portfolio {len(tr)} trades ${pn:,.2f} vs "
                   f"per-session {len(ref)} ${rn:,.2f} — "
                   f"{'MATCH' if same else 'DIFFER'}")
+        return 0
+
+    if a.sweep:
+        shares_grid = (100, 200, 400, 800, 0)
+        pct_grid = (20.0, 40.0, 60.0, 80.0)
+        L = [f"SIZING SWEEP -- MAX_SHARES x per-trade %, at "
+             f"${a.capital:,.0f} of capital", "",
+             f"  {len(sessions)} sessions, max {a.max_positions} open, net "
+             "after tiered commission and the measured $4.26/RT friction.",
+             "  The tape cap is measured in common/capacity.py; without it a",
+             "  capital rule can buy more of a minute than the minute printed.",
+             ""]
+        for strat, name in ((MCL, "MCL"), (MC5, "MC5")):
+            L += [f"{name}", ""]
+            prepared: dict = {}
+            L += report_sweep(sweep_rows(sessions, strat, a.capital,
+                                         a.max_positions, shares_grid,
+                                         pct_grid, 0.0, prepared),
+                              shares_grid, pct_grid,
+                              "no tape cap (optimistic)")
+            L += report_sweep(sweep_rows(sessions, strat, a.capital,
+                                         a.max_positions, shares_grid,
+                                         pct_grid, 1.0, prepared),
+                              shares_grid, pct_grid,
+                              "capped at 1% of the entry minute's volume")
+        L += ["READ IT THIS WAY", "",
+              "  A sweep over a strategy with no established edge finds the",
+              "  setting that loses least. It is not a recommendation, and any",
+              "  cell of it has to be re-run on whatever eventually has an edge.",
+              "",
+              "  The one thing a sweep like this CAN establish is a direction,",
+              "  and only if it is monotone across the whole grid and survives",
+              "  drop-top-5 -- which is the column to read, not net."]
+        emit("\n".join(L), a.sweep_out,
+             header=f"common.portfolio --sweep  capital={a.capital:g}  "
+                    f"max_positions={a.max_positions}")
         return 0
 
     hdr = (f"  {'configuration':<30}{'tr':>5}{'real':>10}{'per':>9}"
