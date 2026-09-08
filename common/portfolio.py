@@ -47,6 +47,16 @@ WHAT THIS STILL CANNOT SEE
   * RUIN. The book never goes bankrupt. A run that loses more than the
     starting capital keeps trading; a real account would be flat and closed.
 
+THE BARS MATTER MORE HERE THAN IN A FLAT-100 BACKTEST
+-----------------------------------------------------
+Sizing DIVIDES CAPITAL BY A PRICE, so a wrong price is a wrong share count --
+and IB history is SPLIT-ADJUSTED. Measured 2026-09-08 over the 368 traded
+symbol-days that have a raw daily bar: 267 of them differ from the raw close by
+more than 3%, p90 is 25x, and the worst is HUBC at $143,967 against $0.52.
+A flat-100 backtest is far less exposed: a wrong price moves its P/L but not
+its size. Here it moves both, and it also changes WHICH trades pass the $2-20
+band. Pass --cache bar_cache_xnas for raw prices.
+
 When several symbols signal at the same timestamp and capital cannot fund them
 all, they are taken in a deterministic order (see ENTRY_ORDER). Which one wins
 is arbitrary in the backtest and is NOT arbitrary live, where common/tv_feed.py
@@ -434,10 +444,18 @@ def main() -> int:
     ap.add_argument("--sweep", action="store_true",
                     help="grid over MAX_SHARES x per-trade %%, with and "
                          "without the tape cap")
+    ap.add_argument("--cache", default="bar_cache",
+                    help="IB bars are SPLIT-ADJUSTED. 267 of 368 traded "
+                         "symbol-days differ from the raw daily close by more "
+                         "than 3%%, the worst by 280,000x, so a rule that "
+                         "divides capital BY A PRICE sizes those positions "
+                         "from an adjustment factor. Point this at "
+                         "bar_cache_xnas for raw prices.")
     ap.add_argument("--verify", action="store_true")
     a = ap.parse_args()
 
-    sessions = load_sessions(Path("bar_cache"))
+    sessions = load_sessions(Path(a.cache))
+    print(f"bars: {a.cache}")
     print(f"{len(sessions)} sessions. Honest fills, peak from entry price, "
           f"measured friction.\n")
 
