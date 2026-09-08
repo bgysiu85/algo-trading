@@ -85,4 +85,14 @@ _backup*/
 *_backup_*/
 databento/
 .databento_archive
-bar_cache_db/
+
+# Every Databento-derived cache root, present and future. A GLOB, not a list:
+# only `bar_cache_db/` was named here, so `--out bar_cache_xnas` produced an
+# untracked directory of bar data sitting in the repo. Nothing committed it,
+# but it blocked a merge and left ~28k generated files where a reflexive
+# `git add -A` would swallow them. The next tape gets its own root by the same
+# convention and has to be covered before it exists, not after.
+#
+# The plain `bar_cache/` above stays separate on purpose: it holds IB bars, on
+# a different price basis, and the two must never be treated as one thing.
+bar_cache_*/

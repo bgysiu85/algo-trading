@@ -79,7 +79,21 @@ def git(*args, **kw) -> subprocess.CompletedProcess:
 
 
 def dirty() -> list[str]:
-    r = git("status", "--porcelain")
+    """Uncommitted changes to TRACKED files. Untracked files are NOT included.
+
+    An untracked file does not break a merge. Git refuses one only when an
+    incoming file would overwrite an untracked file, and it says exactly which
+    when it does. Refusing on plain `git status --porcelain` -- which lists
+    untracked paths too -- blocked a merge on `?? bar_cache_xnas/`, a build
+    output that could not collide with anything in a bundle, and told Ben to
+    commit or stash a directory of bar data he must do neither with.
+
+    So this asks only about tracked work, which is the case the refusal is
+    actually for: a merge onto uncommitted edits fails halfway and leaves a
+    state that needs git knowledge to get out of. The rest is left to git,
+    which detects it precisely where a pre-check only guesses.
+    """
+    r = git("status", "--porcelain", "--untracked-files=no")
     return [l for l in r.stdout.splitlines() if l.strip()]
 
 

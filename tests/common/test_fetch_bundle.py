@@ -160,3 +160,85 @@ def test_the_two_spellings_are_not_two_results(tmp_path, monkeypatch):
     (tmp_path / "Claude outputs").mkdir()
     touch(tmp_path / "Claude outputs" / "algo-trading-20260907a.bundle")
     assert len(F.candidates(search=F.SEARCH[:2])) == 1
+
+
+# --- what counts as "too dirty to merge" ------------------------------------
+#
+# On 2026-09-08 a merge was refused with "you have uncommitted changes: ??
+# bar_cache_xnas/" and the instruction to commit or stash it. That directory is
+# 28k generated bar files. Committing it would put machine-local derived data
+# in the repo; stashing it does nothing, because `git stash` leaves untracked
+# files alone by default. The advice was unfollowable and the refusal was
+# unnecessary -- an untracked file cannot break a merge unless the merge would
+# overwrite it, and git detects that case itself.
+
+def _repo(tmp_path):
+    import subprocess
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    for k, v in (("user.email", "t@t"), ("user.name", "t")):
+        subprocess.run(["git", "-C", str(tmp_path), "config", k, v], check=True)
+    (tmp_path / "tracked.txt").write_text("one\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-qm", "init"],
+                   check=True)
+    return tmp_path
+
+
+def test_an_untracked_build_output_does_not_block_the_merge(tmp_path,
+                                                            monkeypatch):
+    repo = _repo(tmp_path / "r")
+    (repo / "bar_cache_xnas").mkdir()
+    (repo / "bar_cache_xnas" / "AAA_2026-01-07.csv.gz").write_bytes(b"x")
+    monkeypatch.chdir(repo)
+    assert F.dirty() == []
+
+
+def test_an_uncommitted_edit_to_a_tracked_file_still_blocks_it(tmp_path,
+                                                               monkeypatch):
+    """The refusal exists for THIS case and must survive the fix: a merge onto
+    uncommitted edits fails halfway and leaves a state that needs git knowledge
+    to get out of."""
+    repo = _repo(tmp_path / "r")
+    (repo / "tracked.txt").write_text("two\n")
+    monkeypatch.chdir(repo)
+    assert F.dirty() == [" M tracked.txt"]
+
+
+def test_a_staged_addition_still_blocks_it(tmp_path, monkeypatch):
+    import subprocess
+    repo = _repo(tmp_path / "r")
+    (repo / "new.txt").write_text("x\n")
+    subprocess.run(["git", "-C", str(repo), "add", "new.txt"], check=True)
+    monkeypatch.chdir(repo)
+    assert F.dirty() == ["A  new.txt"]
+
+
+# --- the cache roots the repo must never swallow ----------------------------
+
+def test_every_databento_cache_root_is_ignored():
+    """`--out bar_cache_xnas` created an untracked directory of ~28k generated
+    files in the repo because only `bar_cache_db/` was named. The pattern has
+    to cover the root a future tape will use, before that root exists."""
+    import subprocess
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    # Trailing slashes are required, not cosmetic: the pattern ends in "/" so
+    # it matches directories only, and check-ignore cannot tell what a path
+    # that does not exist yet would be without them.
+    for name in ("bar_cache_db/", "bar_cache_xnas/", "bar_cache_arcx/",
+                 "bar_cache_db/3d_to_2000/AAA_2026-01-07.csv.gz"):
+        r = subprocess.run(["git", "-C", str(root), "check-ignore", "-q", name])
+        assert r.returncode == 0, f"{name} is NOT gitignored"
+
+
+def test_the_ib_cache_is_ignored_under_its_own_rule():
+    """bar_cache/ holds SPLIT-ADJUSTED IB bars. It is covered by its own line,
+    not by the databento glob -- the two price bases stay distinguishable in
+    the ignore file as well as on disk."""
+    import subprocess
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    r = subprocess.run(["git", "-C", str(root), "check-ignore", "-v", "bar_cache/"],
+                       text=True, capture_output=True)
+    assert r.returncode == 0
+    assert "bar_cache_*/" not in r.stdout
