@@ -55,7 +55,9 @@ def test_the_ddl_compiles_for_sql_server():
                     for t in D.META.sorted_tables)
     assert "[close]" in ddl
     assert "CREATE TABLE bar_minute" in ddl
-    assert "PRIMARY KEY (symbol, ts_utc)" in ddl
+    # dataset joined this key on 2026-09-08: two tapes hold different
+    # observations of the same minute, not duplicates of it.
+    assert "PRIMARY KEY (dataset, symbol, ts_utc)" in ddl
 
 
 def test_a_password_is_never_printed():
@@ -183,7 +185,7 @@ def test_overlapping_cache_windows_are_deduplicated(eng, tmp_path):
                 ["2026-03-16 13:30", "2026-03-16 13:31",   # repeated
                  "2026-03-17 13:30"])                      # new
     with eng.begin() as c:
-        n_sym, n = L.load_minute_bars(c, root, progress=None)
+        n_sym, n = L.load_minute_bars(c, root, "EQUS.MINI", progress=None)
     assert n_sym == 1
     assert n == 3                       # not 5
     assert count(eng, D.bar_minute) == 3
@@ -194,7 +196,7 @@ def test_reloading_a_symbol_replaces_rather_than_appends(eng, tmp_path):
     write_cache(root, "AAA", "2026-03-16", ["2026-03-16 13:30"])
     for _ in range(3):
         with eng.begin() as c:
-            L.load_minute_bars(c, root, progress=None)
+            L.load_minute_bars(c, root, "EQUS.MINI", progress=None)
     assert count(eng, D.bar_minute) == 1
 
 
@@ -203,7 +205,7 @@ def test_two_symbols_do_not_collide(eng, tmp_path):
     write_cache(root, "AAA", "2026-03-16", ["2026-03-16 13:30"])
     write_cache(root, "BBB", "2026-03-16", ["2026-03-16 13:30"])
     with eng.begin() as c:
-        L.load_minute_bars(c, root, progress=None)
+        L.load_minute_bars(c, root, "EQUS.MINI", progress=None)
     assert count(eng, D.bar_minute) == 2
 
 
@@ -614,3 +616,106 @@ def test_the_committed_cut_loads_as_written(eng):
                              D.holdout_cut.c.note)).one()
     assert r[0] == 545 and r[1] == 164
     assert "MC5" in r[2]
+
+
+# --- two tapes, one table ---------------------------------------------------
+
+def bars_dir(tmp_path, symbol, day, rows):
+    import gzip as _gz
+    d = tmp_path / "3d_to_2000"
+    d.mkdir(parents=True, exist_ok=True)
+    with _gz.open(d / f"{symbol}_{day}.csv.gz", "wt") as fh:
+        fh.write("timestamp,open,high,low,close,volume\n")
+        for ts, o, h, lo, c, v in rows:
+            fh.write(f"{ts},{o},{h},{lo},{c},{v}\n")
+    return d
+
+
+def test_two_tapes_of_the_same_minute_both_survive(eng, tmp_path):
+    """EQUS.MINI publishes a measured median 4.8% of the consolidated tape, so
+    its bars and XNAS.BASIC's are different OBSERVATIONS of the same minute,
+    not duplicates. Before dataset was in the key, the second load deleted the
+    first by symbol and the table looked complete while holding one tape with
+    nothing to say which."""
+    mini = bars_dir(tmp_path / "mini", "AAA", "2026-03-16",
+                    [("2026-03-16 13:30:00+00:00", 10, 10, 10, 10, 100)])
+    basic = bars_dir(tmp_path / "basic", "AAA", "2026-03-16",
+                     [("2026-03-16 13:30:00+00:00", 10, 11, 9, 10.5, 5000)])
+    with eng.begin() as c:
+        L.load_minute_bars(c, mini, "EQUS.MINI", progress=None)
+        L.load_minute_bars(c, basic, "XNAS.BASIC", progress=None)
+    assert count(eng, D.bar_minute) == 2
+    with eng.connect() as c:
+        got = dict(c.execute(select(D.bar_minute.c.dataset,
+                                    D.bar_minute.c.volume)).all())
+    assert got == {"EQUS.MINI": 100, "XNAS.BASIC": 5000}
+
+
+def test_reloading_one_tape_leaves_the_other_alone(eng, tmp_path):
+    mini = bars_dir(tmp_path / "mini", "AAA", "2026-03-16",
+                    [("2026-03-16 13:30:00+00:00", 10, 10, 10, 10, 100)])
+    basic = bars_dir(tmp_path / "basic", "AAA", "2026-03-16",
+                     [("2026-03-16 13:30:00+00:00", 10, 11, 9, 10.5, 5000)])
+    with eng.begin() as c:
+        L.load_minute_bars(c, mini, "EQUS.MINI", progress=None)
+        L.load_minute_bars(c, basic, "XNAS.BASIC", progress=None)
+        L.load_minute_bars(c, mini, "EQUS.MINI", progress=None)
+    assert count(eng, D.bar_minute) == 2
+
+
+def test_the_dataset_is_in_the_minute_bar_primary_key():
+    """bar_daily has always had it. bar_minute did not, and that was harmless
+    only while there was one tape."""
+    assert "dataset" in [c.name for c in D.bar_minute.primary_key.columns]
+
+
+# --- the ORB pre-flight rows ------------------------------------------------
+
+ORB_CSV = ("symbol,date,population,orb_minutes,status,range_bars,rth_bars,"
+           "orb_high,orb_low,width_pct,orb_volume,price_at_range_end,"
+           "change_from_open_pct,in_price_band,passes_rth_move,up_trigger,"
+           "down_trigger,up_trigger_bar,up_close_over_pct,near_level,"
+           "retest_touch,retest_zone,entry_px,r_structure_pct,r_opposite_pct,"
+           "r_rangefrac_pct,bars_to_2r,bars_to_stop\n"
+           "AAA,2026-03-16,survivors,15,OK,15,380,11.0,9.0,22.2,50000,10.5,"
+           "6.1,True,True,True,False,3,0.4,False,True,False,11.2,2.8,10.4,"
+           "4.4,6,3\n"
+           "BBB,2026-03-16,rejected,15,FEW_BARS,1,40,,,,,,,,,False,False,,,,"
+           "False,False,,,,,,\n")
+
+
+def test_orb_preflight_rows_load_with_their_dataset(eng, tmp_path):
+    p = tmp_path / "orb_preflight.csv"
+    p.write_text(ORB_CSV)
+    with eng.begin() as c:
+        n = L.load_orb_preflight(c, p, "XNAS.BASIC")
+    assert n == 2
+    with eng.connect() as c:
+        r = c.execute(select(D.orb_preflight.c.status,
+                             D.orb_preflight.c.r_opposite_pct)
+                      .where(D.orb_preflight.c.symbol == "AAA")).one()
+    assert r[0] == "OK" and r[1] == 10.4
+
+
+def test_an_empty_orb_field_is_null_not_zero(eng, tmp_path):
+    """A symbol-day with no usable range has NO width, which is not a width of
+    zero -- and zero would land inside every percentile this feeds."""
+    p = tmp_path / "orb_preflight.csv"
+    p.write_text(ORB_CSV)
+    with eng.begin() as c:
+        L.load_orb_preflight(c, p, "XNAS.BASIC")
+    with eng.connect() as c:
+        v = c.execute(select(D.orb_preflight.c.width_pct)
+                      .where(D.orb_preflight.c.symbol == "BBB")).scalar()
+    assert v is None
+
+
+def test_the_two_tapes_preflight_rows_coexist(eng, tmp_path):
+    """The entire point of the XNAS.BASIC pull is comparing these against the
+    EQUS.MINI ones."""
+    p = tmp_path / "orb_preflight.csv"
+    p.write_text(ORB_CSV)
+    with eng.begin() as c:
+        L.load_orb_preflight(c, p, "EQUS.MINI")
+        L.load_orb_preflight(c, p, "XNAS.BASIC")
+    assert count(eng, D.orb_preflight) == 4

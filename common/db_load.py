@@ -368,17 +368,31 @@ def minute_rows(paths) -> list[dict]:
     return [seen[k] for k in sorted(seen)]
 
 
-def load_minute_bars(conn, root: Path, progress=print) -> tuple[int, int]:
+def load_minute_bars(conn, root: Path, dataset: str,
+                     progress=print) -> tuple[int, int]:
+    """One tape's minute bars.
+
+    `dataset` is REQUIRED and is part of the key. EQUS.MINI and XNAS.BASIC hold
+    different observations of the same minute -- EQUS.MINI publishes a measured
+    median 4.8% of the consolidated tape -- so without it the second load would
+    delete the first tape's bars for each symbol and the table would look
+    complete while silently holding a mixture, or the wrong one.
+    """
     by_sym = cache_files_by_symbol(root)
     total, n_sym = 0, 0
     for sym, paths in by_sym.items():
         rows = minute_rows(paths)
         if not rows:
             continue
-        # Per SYMBOL, not per file: one symbol's bars are replaced together,
-        # so an interrupted load can be resumed by re-running without leaving
-        # a half-loaded symbol behind.
-        conn.execute(delete(D.bar_minute).where(D.bar_minute.c.symbol == sym))
+        for r in rows:
+            r["dataset"] = dataset
+        # Per SYMBOL AND DATASET, not per file: one symbol's bars on one tape
+        # are replaced together, so an interrupted load resumes by re-running
+        # without leaving a half-loaded symbol behind -- and without touching
+        # the other tape.
+        conn.execute(delete(D.bar_minute).where(
+            (D.bar_minute.c.symbol == sym)
+            & (D.bar_minute.c.dataset == dataset)))
         for i in range(0, len(rows), BATCH):
             conn.execute(insert(D.bar_minute), rows[i:i + BATCH])
         total += len(rows)
@@ -465,6 +479,56 @@ def load_holdout(conn, path: Path) -> tuple[str, int]:
     return rec["universe_fingerprint"], 1
 
 
+def load_orb_preflight(conn, path: Path, dataset: str) -> int:
+    """The per-symbol-day ORB measurements.
+
+    The report renders distributions; these are the rows behind them, so a
+    later question -- what does the R distribution look like above $5, do thin
+    opens cluster on particular dates -- is a query rather than a re-run over
+    25,769 symbol-days.
+    """
+    def b(v):
+        s = str(v).strip().lower()
+        return None if s in ("", "none") else s in ("true", "1")
+
+    rows = []
+    for r in csv.DictReader(open(path, newline="")):
+        rows.append({
+            "dataset": dataset, "symbol": r["symbol"],
+            "session_date": _date(r["date"]),
+            "orb_minutes": _i(r["orb_minutes"]),
+            "population": r.get("population"), "status": r.get("status"),
+            "range_bars": _i(r.get("range_bars")),
+            "rth_bars": _i(r.get("rth_bars")),
+            "orb_high": _f(r.get("orb_high")), "orb_low": _f(r.get("orb_low")),
+            "width_pct": _f(r.get("width_pct")),
+            "orb_volume": _f(r.get("orb_volume")),
+            "price_at_range_end": _f(r.get("price_at_range_end")),
+            "change_from_open_pct": _f(r.get("change_from_open_pct")),
+            "in_price_band": b(r.get("in_price_band")),
+            "passes_rth_move": b(r.get("passes_rth_move")),
+            "up_trigger": b(r.get("up_trigger")),
+            "down_trigger": b(r.get("down_trigger")),
+            "up_trigger_bar": _i(r.get("up_trigger_bar")),
+            "up_close_over_pct": _f(r.get("up_close_over_pct")),
+            "near_level": b(r.get("near_level")),
+            "retest_touch": b(r.get("retest_touch")),
+            "retest_zone": b(r.get("retest_zone")),
+            "entry_px": _f(r.get("entry_px")),
+            "r_structure_pct": _f(r.get("r_structure_pct")),
+            "r_opposite_pct": _f(r.get("r_opposite_pct")),
+            "r_rangefrac_pct": _f(r.get("r_rangefrac_pct")),
+            "bars_to_2r": _i(r.get("bars_to_2r")),
+            "bars_to_stop": _i(r.get("bars_to_stop"))})
+    conn.execute(delete(D.orb_preflight).where(
+        D.orb_preflight.c.dataset == dataset))
+    for i in range(0, len(rows), BATCH):
+        conn.execute(insert(D.orb_preflight), rows[i:i + BATCH])
+    note_load(conn, run_id("orb", dataset, path), "orb_preflight", path,
+              len(rows))
+    return len(rows)
+
+
 # --- which flag fills which table ------------------------------------------
 
 # THE POINT OF THIS MAP IS THE TEST THAT READS IT. Three tables shipped that
@@ -483,6 +547,7 @@ FILLED_BY = {
     "backtest_coverage": "--backtests",
     "day_dollar_volume": "--dollar-volume",
     "bar_minute": "--minute-bars",
+    "orb_preflight": "--orb-preflight",
     "bar_daily": "--daily-bars",
     "compound_run": "--compound",
     "compound_sweep": "--compound",
@@ -511,7 +576,12 @@ def parser() -> argparse.ArgumentParser:
                     metavar=("REPORTS_DIR", "STATES_DIR", "UNIVERSE"))
     ap.add_argument("--strategy", nargs="+", default=["mcl", "mc5", "vw9_5m"])
     ap.add_argument("--dollar-volume", metavar="CSV")
-    ap.add_argument("--minute-bars", metavar="CACHE_ROOT")
+    ap.add_argument("--minute-bars", nargs=2,
+                    metavar=("CACHE_ROOT", "DATASET"),
+                    help="the bar cache and the tape it was built from -- the "
+                         "dataset is part of the key, see db.bar_minute")
+    ap.add_argument("--orb-preflight", nargs=2,
+                    metavar=("PREFLIGHT.csv", "DATASET"))
     ap.add_argument("--daily-bars", nargs=2, metavar=("ARCHIVE", "DATASET"))
     return ap
 
@@ -554,13 +624,17 @@ def main(argv=None) -> int:
             arch, ds = a.daily_bars
             print(f"daily bars    {load_daily_bars(conn, Path(arch), ds):,}  ({ds})")
         if a.minute_bars:
-            root = Path(a.minute_bars)
+            root, ds = Path(a.minute_bars[0]), a.minute_bars[1]
             if not (root / "3d_to_2000").exists() and root.name != "3d_to_2000":
                 print(f"no 3d_to_2000 window under {root}")
             else:
                 w = root if root.name == "3d_to_2000" else root / "3d_to_2000"
-                n_sym, n = load_minute_bars(conn, w)
-                print(f"minute bars   {n:,} rows over {n_sym:,} symbols")
+                n_sym, n = load_minute_bars(conn, w, ds)
+                print(f"minute bars   {n:,} rows over {n_sym:,} symbols  ({ds})")
+        if a.orb_preflight:
+            n = load_orb_preflight(conn, Path(a.orb_preflight[0]),
+                                   a.orb_preflight[1])
+            print(f"orb preflight {n:,} rows   ({a.orb_preflight[1]})")
     return 0
 
 

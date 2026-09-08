@@ -239,9 +239,22 @@ bar_daily = Table(
 
 bar_minute = Table(
     "bar_minute", META,
-    # (symbol, ts) and NOT (symbol, cache_date, ts): see the module docstring.
-    # The cache stores overlapping three-session windows, so file-keyed rows
-    # would trebly count every bar.
+    # DATASET IS IN THE KEY, added 2026-09-08, for the reason bar_daily has
+    # always had it: the same symbol-minute exists on more than one tape and
+    # the two do not agree. EQUS.MINI publishes a MEASURED MEDIAN 4.8% of the
+    # consolidated tape (var/reports/capture_ratio.txt), so its bars and
+    # XNAS.BASIC's are different observations of the same minute, not
+    # duplicates of it.
+    #
+    # Without this column load_minute_bars -- which deletes by symbol and
+    # re-inserts -- would have silently REPLACED one tape's bars with the
+    # other's, leaving a table that looks complete and cannot say which tape
+    # produced it. Comparing results across the two tapes is the entire point
+    # of holding both.
+    Column("dataset", String(24), primary_key=True),
+    # (dataset, symbol, ts) and NOT (dataset, symbol, cache_date, ts): see the
+    # module docstring. The cache stores overlapping three-session windows, so
+    # file-keyed rows would trebly count every bar.
     Column("symbol", String(SYM), primary_key=True),
     Column("ts_utc", DateTime, primary_key=True),
     Column("open", Float), Column("high", Float), Column("low", Float),
@@ -380,6 +393,39 @@ compound_sweep = Table(
     Column("max_drawdown", Float), Column("taken", Integer),
     Column("skipped", Integer), Column("dv_capped", Integer),
 )
+
+orb_preflight = Table(
+    "orb_preflight", META,
+    # One row per symbol-day per ORB_MINUTES. The report renders distributions;
+    # these are the rows behind them, so a later question ("what does the R
+    # distribution look like above $5?") is a query rather than a re-run over
+    # 25,769 symbol-days.
+    #
+    # dataset is in the key for the same reason as bar_minute's: the whole
+    # purpose of the 2026-09-08 XNAS.BASIC pull is to compare these
+    # measurements against the EQUS.MINI ones.
+    Column("dataset", String(24), primary_key=True),
+    Column("symbol", String(SYM), primary_key=True),
+    Column("session_date", Date, primary_key=True),
+    Column("orb_minutes", Integer, primary_key=True),
+    Column("population", String(12)),
+    Column("status", String(16)),
+    Column("range_bars", Integer), Column("rth_bars", Integer),
+    Column("orb_high", Float), Column("orb_low", Float),
+    Column("width_pct", Float), Column("orb_volume", Float),
+    Column("price_at_range_end", Float),
+    Column("change_from_open_pct", Float),
+    Column("in_price_band", Boolean), Column("passes_rth_move", Boolean),
+    Column("up_trigger", Boolean), Column("down_trigger", Boolean),
+    Column("up_trigger_bar", Integer), Column("up_close_over_pct", Float),
+    Column("near_level", Boolean),
+    Column("retest_touch", Boolean), Column("retest_zone", Boolean),
+    Column("entry_px", Float),
+    Column("r_structure_pct", Float), Column("r_opposite_pct", Float),
+    Column("r_rangefrac_pct", Float),
+    Column("bars_to_2r", Integer), Column("bars_to_stop", Integer),
+)
+
 
 # --- controls --------------------------------------------------------------
 
