@@ -719,3 +719,121 @@ def test_the_two_tapes_preflight_rows_coexist(eng, tmp_path):
         L.load_orb_preflight(c, p, "EQUS.MINI")
         L.load_orb_preflight(c, p, "XNAS.BASIC")
     assert count(eng, D.orb_preflight) == 4
+
+
+# --- schema drift -----------------------------------------------------------
+#
+# create_all() is create-if-not-exists: it never ALTERS a table. So a column
+# added to a model after its table was made is simply absent, and until
+# 2026-09-08 nothing said so -- --create printed "schema ensured", --check
+# printed healthy row counts, and a 27,777-file bar_minute load then died on its
+# first DELETE with "Invalid column name 'dataset'".
+
+def _sqlite(tmp_path):
+    from sqlalchemy import create_engine
+    return create_engine(f"sqlite:///{tmp_path/'t.db'}")
+
+
+def test_a_schema_built_from_the_model_has_no_drift(tmp_path):
+    eng = _sqlite(tmp_path)
+    D.create_all(eng)
+    assert D.schema_drift(eng) == {}
+
+
+def test_a_column_added_after_the_table_was_made_is_reported(tmp_path):
+    """The exact 2026-09-08 failure, reproduced: build the table WITHOUT the
+    column the model has, then ask."""
+    from sqlalchemy import Column, MetaData, String, Table
+
+    eng = _sqlite(tmp_path)
+    old = MetaData()
+    cols = [c._copy() for c in D.bar_minute.columns if c.name != "dataset"]
+    Table("bar_minute", old, *cols)
+    old.create_all(eng)
+
+    drift = D.schema_drift(eng)
+    assert "bar_minute" in drift, "the missing column was not detected"
+    assert drift["bar_minute"] == ["dataset"]
+
+
+def test_create_all_does_not_silently_fix_it(tmp_path):
+    """The trap. Running --create over a drifted table looks like a repair and
+    is not: create_all skips a table that exists, whatever shape it is."""
+    from sqlalchemy import MetaData, Table
+
+    eng = _sqlite(tmp_path)
+    old = MetaData()
+    Table("bar_minute", old,
+          *[c._copy() for c in D.bar_minute.columns if c.name != "dataset"])
+    old.create_all(eng)
+
+    D.create_all(eng)
+    assert D.schema_drift(eng) == {"bar_minute": ["dataset"]}, \
+        "create_all appeared to fix drift -- it cannot, and must not seem to"
+
+
+def test_a_missing_table_is_not_drift(tmp_path):
+    """create_all's job. Reporting it here would bury the real signal under
+    sixteen rows on any fresh database."""
+    eng = _sqlite(tmp_path)
+    assert D.schema_drift(eng) == {}
+
+
+def test_rebuilding_a_derived_table_clears_the_drift(tmp_path):
+    from sqlalchemy import MetaData, Table
+
+    eng = _sqlite(tmp_path)
+    old = MetaData()
+    Table("bar_minute", old,
+          *[c._copy() for c in D.bar_minute.columns if c.name != "dataset"])
+    old.create_all(eng)
+
+    D.rebuild_table(eng, "bar_minute")
+    assert D.schema_drift(eng) == {}
+
+
+def test_rebuild_reports_what_it_discarded(tmp_path):
+    """The row count is the cost of the rebuild and has to be stated, not
+    implied. A silent drop of 25 million bars would also 'work'."""
+    import datetime as dt
+
+    eng = _sqlite(tmp_path)
+    D.create_all(eng)
+    with eng.begin() as c:
+        c.execute(D.bar_minute.insert(), [
+            {"dataset": "EQUS.MINI", "symbol": "AAA",
+             "ts_utc": dt.datetime(2026, 1, 5, 14, 30 + i),
+             "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1}
+            for i in range(3)])
+    assert D.rebuild_table(eng, "bar_minute") == 3
+    with eng.connect() as c:
+        from sqlalchemy import func as _f, select as _s
+        assert c.execute(_s(_f.count()).select_from(D.bar_minute)).scalar_one() == 0
+
+
+def test_rebuilding_a_table_that_is_the_only_copy_is_refused(tmp_path):
+    """flex_execution holds Ben's real fills, parsed from broker statements
+    that are not regenerable by re-running a loader over a cache."""
+    eng = _sqlite(tmp_path)
+    D.create_all(eng)
+    with pytest.raises(ValueError, match="only copy"):
+        D.rebuild_table(eng, "flex_execution")
+
+
+def test_every_derived_table_names_a_real_reload_command():
+    """A rebuild instruction that names a flag db_load does not have leaves the
+    table empty and the user stuck."""
+    import common.db_load as L
+    for name, cmd in D.DERIVED_TABLES.items():
+        assert name in D.TABLES, f"{name} is not a table"
+        flag = [w for w in cmd.split() if w.startswith("--")]
+        assert flag, f"{name}: no flag in {cmd!r}"
+        known = {a for act in L.parser()._actions for a in act.option_strings}
+        assert flag[0] in known, (
+            f"{name}: DERIVED_TABLES tells the user to run {flag[0]}, which "
+            "db_load does not accept -- they would drop the table and then be "
+            "unable to refill it")
+        assert name in L.FILLED_BY, f"{name} has no loader in FILLED_BY"
+        assert L.FILLED_BY[name] == flag[0], (
+            f"{name}: DERIVED_TABLES says {flag[0]}, FILLED_BY says "
+            f"{L.FILLED_BY[name]}")

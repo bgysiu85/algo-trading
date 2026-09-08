@@ -497,6 +497,80 @@ def create_all(eng) -> list[str]:
     return TABLES
 
 
+# Tables holding nothing a file cannot reproduce. Dropping one costs the time to
+# re-run its loader and nothing else, which is what makes --rebuild-table safe
+# for these and unsafe for anything else. An explicit allowlist, not inferred:
+# "derived" is a fact about where the rows came from, and only someone who knows
+# the pipeline can assert it.
+DERIVED_TABLES = {
+    "bar_minute": "python -m common.db_load --minute-bars <CACHE_ROOT> <DATASET>",
+    "bar_daily": "python -m common.db_load --daily-bars <ARCHIVE> <DATASET>",
+    "orb_preflight": "python -m common.db_load --orb-preflight <CSV> <DATASET>",
+    "day_dollar_volume": "python -m common.db_load --dollar-volume <CSV>",
+}
+
+
+def schema_drift(eng) -> dict[str, list[str]]:
+    """Columns the model has and the live database does not, per table.
+
+    WHY THIS EXISTS. `META.create_all` is create-if-not-exists. It never ALTERS
+    an existing table, so a column added to a model after that table was made is
+    simply absent, and nothing says so: `--create` prints "schema ensured",
+    `--check` prints healthy row counts, and the gap surfaces only when a query
+    naming the column fails.
+
+    Which is how it surfaced on 2026-09-08. `dataset` went into bar_minute's
+    primary key so two tapes could coexist. The live table predated that, and a
+    27,777-file load died on its first DELETE with "Invalid column name
+    'dataset'" -- after the schema check had reported everything fine.
+
+    Only ADDITIONS are reported. A column the database has and the model does
+    not is usually an older shape rather than a fault, and this tool has no
+    business proposing to drop one.
+    """
+    from sqlalchemy import inspect as _inspect
+
+    insp = _inspect(eng)
+    live = set(insp.get_table_names())
+    out: dict[str, list[str]] = {}
+    for t in META.sorted_tables:
+        if t.name not in live:
+            continue           # a missing table is create_all's job, not drift
+        have = {c["name"] for c in insp.get_columns(t.name)}
+        missing = [c.name for c in t.columns if c.name not in have]
+        if missing:
+            out[t.name] = missing
+    return out
+
+
+def rebuild_table(eng, name: str) -> int:
+    """Drop and recreate ONE derived table. Returns the row count discarded.
+
+    The alternative is an ALTER path per change: add the column, backfill it,
+    drop and recreate the primary key. For a table whose every row is
+    reproducible from files on disk that is more machinery to get wrong than
+    the work it saves -- and the backfill would have to GUESS which tape the
+    existing rows came from, inventing provenance, which is the exact failure
+    the dataset column was added to prevent.
+
+    So: drop, recreate, reload from the caches. Refused for anything outside
+    DERIVED_TABLES, where the rows may be the only copy.
+    """
+    if name not in DERIVED_TABLES:
+        raise ValueError(
+            f"{name} is not a derived table, so its rows may be the only copy "
+            f"of something. Rebuildable: {', '.join(sorted(DERIVED_TABLES))}")
+    table = META.tables[name]
+    with eng.begin() as c:
+        try:
+            n = c.execute(select(func.count()).select_from(table)).scalar_one()
+        except Exception:  # noqa: BLE001 -- absent is a 0, not an error
+            n = 0
+        table.drop(c, checkfirst=True)
+        table.create(c)
+    return n
+
+
 def counts(eng) -> dict:
     out = {}
     with eng.connect() as c:
@@ -549,6 +623,11 @@ def main(argv=None) -> int:
                          "a login failure.")
     ap.add_argument("--create", action="store_true", help="create missing tables")
     ap.add_argument("--check", action="store_true", help="connect and report")
+    ap.add_argument("--rebuild-table", metavar="NAME",
+                    help="drop and recreate one DERIVED table, discarding its "
+                         "rows, then reload it with its own loader. This is how "
+                         "a column added to a model reaches a table that "
+                         "already exists: create_all never alters one.")
     ap.add_argument("--ddl", action="store_true",
                     help="print the T-SQL without connecting to anything")
     a = ap.parse_args(argv)
@@ -571,7 +650,15 @@ def main(argv=None) -> int:
     try:
         eng = engine(url)
         with eng.connect() as c:
-            ver = c.exec_driver_sql("SELECT @@VERSION").scalar_one()
+            # Dialect-aware so this tool can be exercised against SQLite in a
+            # test. It could not be: `SELECT @@VERSION` is T-SQL, so every path
+            # below it -- including the schema-drift report -- was unreachable
+            # without a live SQL Server, which is precisely the report that was
+            # missing when a 27,777-file load died on a column that was not
+            # there.
+            ver = (c.exec_driver_sql("SELECT @@VERSION").scalar_one()
+                   if eng.dialect.name == "mssql"
+                   else f"{eng.dialect.name} (not SQL Server)")
         print(f"connected: {str(ver).splitlines()[0]}")
     except Exception as e:  # noqa: BLE001
         print(f"\nCOULD NOT CONNECT: {_scrub(e)}\n")
@@ -585,9 +672,50 @@ def main(argv=None) -> int:
         print("    not the database: CREATE DATABASE Trading; first.")
         return 1
 
+    if a.rebuild_table:
+        try:
+            n = rebuild_table(eng, a.rebuild_table)
+        except ValueError as e:
+            print(f"\nREFUSED: {e}")
+            return 1
+        print(f"\n{a.rebuild_table}: dropped and recreated, "
+              f"{n:,} row(s) discarded")
+        print(f"  reload with:  {DERIVED_TABLES[a.rebuild_table]}")
+
     if a.create:
         made = create_all(eng)
         print(f"schema ensured: {len(made)} table(s)")
+
+    # ALWAYS after --create, never before: create_all makes missing tables, and
+    # a table that did not exist a moment ago has no drift to report.
+    if a.check or a.create or a.rebuild_table:
+        drift = schema_drift(eng)
+        if drift:
+            print("\nSCHEMA DRIFT -- the model has columns these tables do not:")
+            for t, cols in sorted(drift.items()):
+                print(f"  {t:<22} missing: {', '.join(cols)}")
+            print("\n  create_all() only CREATES tables; it never alters one, so"
+                  " a column added")
+            print("  to a model after its table was made is silently absent "
+                  "until a query")
+            print("  naming it fails mid-load.")
+            fixable = sorted(t for t in drift if t in DERIVED_TABLES)
+            if fixable:
+                print("\n  These hold only what a file can reproduce, so they "
+                      "can be rebuilt:")
+                for t in fixable:
+                    print(f"    python -m common.db --rebuild-table {t}")
+                    print(f"      then:  {DERIVED_TABLES[t]}")
+            other = sorted(t for t in drift if t not in DERIVED_TABLES)
+            if other:
+                print("\n  NOT auto-rebuildable, because their rows may be the "
+                      "only copy:")
+                print(f"    {', '.join(other)}")
+                print("    Migrate these by hand, or reload them from source "
+                      "after a rebuild.")
+        else:
+            print("\nschema matches the model")
+
     if a.check or a.create:
         print()
         for name, n in counts(eng).items():
