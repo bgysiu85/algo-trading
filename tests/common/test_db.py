@@ -837,3 +837,60 @@ def test_every_derived_table_names_a_real_reload_command():
         assert L.FILLED_BY[name] == flag[0], (
             f"{name}: DERIVED_TABLES says {flag[0]}, FILLED_BY says "
             f"{L.FILLED_BY[name]}")
+
+
+# --- the status report ------------------------------------------------------
+#
+# db.py printed to the terminal and wrote nothing. Every other tool in this
+# project emits a report, which is how results get read back later or over a
+# bridge -- the database was the one part of the pipeline whose state could
+# only be seen by the person standing at the keyboard.
+
+def test_the_status_can_be_written_to_a_file(tmp_path):
+    out = tmp_path / "db_status.txt"
+    D.main(["--check", "--url", f"sqlite:///{tmp_path/'t.db'}",
+            "--report", str(out)])
+    assert out.exists()
+    text = out.read_text()
+    assert "ROW COUNTS" in text
+    assert "generated" in text.splitlines()[0], "no timestamp on a saved report"
+
+
+def test_row_counts_are_broken_out_by_dataset(tmp_path):
+    """A single bar_minute total cannot say whether BOTH tapes are loaded --
+    which is the entire reason `dataset` is in the key. The one number the
+    report exists to answer would have been the one it could not."""
+    import datetime as dt
+    from sqlalchemy import create_engine
+
+    url = f"sqlite:///{tmp_path/'t.db'}"
+    eng = create_engine(url)
+    D.create_all(eng)
+    with eng.begin() as c:
+        c.execute(D.bar_minute.insert(), [
+            {"dataset": ds, "symbol": "AAA",
+             "ts_utc": dt.datetime(2026, 1, 5, 14, 30) + dt.timedelta(minutes=i),
+             "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1}
+            for ds, n in (("EQUS.MINI", 5), ("XNAS.BASIC", 17))
+            for i in range(n)])
+
+    out = tmp_path / "s.txt"
+    D.main(["--check", "--url", url, "--report", str(out)])
+    text = out.read_text()
+    assert "bar_minute by dataset" in text
+    assert "EQUS.MINI" in text and "5" in text
+    assert "XNAS.BASIC" in text and "17" in text
+
+
+def test_the_report_path_has_a_default(tmp_path, monkeypatch):
+    """--report with no value must land somewhere predictable, beside every
+    other report, so it can be read without being told where it went."""
+    monkeypatch.chdir(tmp_path)
+    D.main(["--check", "--url", f"sqlite:///{tmp_path/'t.db'}", "--report"])
+    assert (tmp_path / "var/reports/db_status.txt").exists()
+
+
+def test_no_report_is_written_without_the_flag(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    D.main(["--check", "--url", f"sqlite:///{tmp_path/'t.db'}"])
+    assert not (tmp_path / "var").exists()

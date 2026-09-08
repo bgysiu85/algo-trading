@@ -630,6 +630,12 @@ def main(argv=None) -> int:
                          "already exists: create_all never alters one.")
     ap.add_argument("--ddl", action="store_true",
                     help="print the T-SQL without connecting to anything")
+    ap.add_argument("--report", nargs="?", const="var/reports/db_status.txt",
+                    metavar="PATH",
+                    help="also write the status to a file. Every other tool "
+                         "here emits one; these printed to the terminal only, "
+                         "which made the database the one part of the pipeline "
+                         "nothing could read back.")
     a = ap.parse_args(argv)
 
     if a.ddl:
@@ -688,38 +694,62 @@ def main(argv=None) -> int:
 
     # ALWAYS after --create, never before: create_all makes missing tables, and
     # a table that did not exist a moment ago has no drift to report.
+    L: list[str] = []
     if a.check or a.create or a.rebuild_table:
         drift = schema_drift(eng)
         if drift:
-            print("\nSCHEMA DRIFT -- the model has columns these tables do not:")
+            L.append("SCHEMA DRIFT -- the model has columns these tables do not:")
             for t, cols in sorted(drift.items()):
-                print(f"  {t:<22} missing: {', '.join(cols)}")
-            print("\n  create_all() only CREATES tables; it never alters one, so"
-                  " a column added")
-            print("  to a model after its table was made is silently absent "
-                  "until a query")
-            print("  naming it fails mid-load.")
+                L.append(f"  {t:<22} missing: {', '.join(cols)}")
+            L += ["",
+                  "  create_all() only CREATES tables; it never alters one, so "
+                  "a column added",
+                  "  to a model after its table was made is silently absent "
+                  "until a query",
+                  "  naming it fails mid-load."]
             fixable = sorted(t for t in drift if t in DERIVED_TABLES)
             if fixable:
-                print("\n  These hold only what a file can reproduce, so they "
-                      "can be rebuilt:")
+                L += ["", "  These hold only what a file can reproduce, so they "
+                          "can be rebuilt:"]
                 for t in fixable:
-                    print(f"    python -m common.db --rebuild-table {t}")
-                    print(f"      then:  {DERIVED_TABLES[t]}")
+                    L.append(f"    python -m common.db --rebuild-table {t}")
+                    L.append(f"      then:  {DERIVED_TABLES[t]}")
             other = sorted(t for t in drift if t not in DERIVED_TABLES)
             if other:
-                print("\n  NOT auto-rebuildable, because their rows may be the "
-                      "only copy:")
-                print(f"    {', '.join(other)}")
-                print("    Migrate these by hand, or reload them from source "
-                      "after a rebuild.")
+                L += ["", "  NOT auto-rebuildable, because their rows may be "
+                          "the only copy:",
+                      f"    {', '.join(other)}",
+                      "    Migrate these by hand, or reload them from source "
+                      "after a rebuild."]
         else:
-            print("\nschema matches the model")
+            L.append("schema matches the model")
 
     if a.check or a.create:
-        print()
+        L.append("")
+        # The tape is part of bar_minute's and bar_daily's key, so a single
+        # total cannot say whether BOTH tapes are loaded -- which is the whole
+        # reason the column was added. Break those two out by dataset.
+        L += ["  ROW COUNTS", ""]
         for name, n in counts(eng).items():
-            print(f"  {name:<22} {'-' if n is None else format(n, ',')}")
+            L.append(f"  {name:<22} {'-' if n is None else format(n, ',')}")
+        for tbl in (bar_minute, bar_daily):
+            try:
+                with eng.connect() as c:
+                    rows = c.execute(
+                        select(tbl.c.dataset, func.count())
+                        .group_by(tbl.c.dataset)
+                        .order_by(tbl.c.dataset)).all()
+            except Exception:  # noqa: BLE001 -- absent or drifted; counts said so
+                rows = []
+            if rows:
+                L += ["", f"  {tbl.name} by dataset:"]
+                for ds, n in rows:
+                    L.append(f"    {str(ds):<20} {n:,}")
+
+    text = "\n".join(L)
+    if text.strip():
+        from common.report_io import emit
+        emit(text, a.report, header=f"common.db  {_scrub(url)}")
     return 0
 
 
