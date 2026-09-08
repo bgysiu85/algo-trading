@@ -102,7 +102,8 @@ from strategy.mcl.mcl import PRICE_MIN, PRICE_MAX
 MARKET = "america"
 
 # THE SCREEN, as of 2026-09-08 (Ben: "remove all the existing filters and
-# only have the following"). Two clauses.
+# only have the following", plus a volume floor added later that day). Three
+# clauses.
 #
 #   1. pre-market price between $2 and $25
 #   2. pre-market change >= 20%. TradingView's own definition, as Ben
@@ -132,6 +133,14 @@ MARKET = "america"
 # decision with a backtest behind it, not a side effect of a screen edit.
 PREMARKET_CHANGE_MIN = 20.0            # Pre-mkt chg >= 20%  (vs previous regular close)
 CHANGE_COLUMN = "premarket_change"
+# 3. pre-market volume >= 100k shares (Ben, 2026-09-08). The one liquidity
+#    clause on the screen: with relative volume and float gone, this is what
+#    keeps a name that gapped 30% on three prints out of the watchlist.
+#    premarket_volume is cumulative since 04:00, so it is tightest early and
+#    loosens through the morning -- a name can fail it at 04:10 and pass at
+#    06:00. That is the intended shape; HOT/WARM/COLD in tv_feed keeps a name
+#    that later drops out rather than deleting it.
+PREMARKET_VOLUME_MIN = 100_000
 PREMARKET_PRICE_RANGE = (2.0, 25.0)    # Pre-mkt price  2 to 25 USD, inclusive
 
 # Retained for day_over_day_only() and the record; NOT in the shipped screen.
@@ -147,6 +156,8 @@ FILTERS = [
     # float filter, which used the same operation.
     {"left": "premarket_close", "operation": "in_range",
      "right": list(PREMARKET_PRICE_RANGE)},
+    {"left": "premarket_volume", "operation": "egreater",
+     "right": PREMARKET_VOLUME_MIN},
 ]
 
 # Both change columns are returned so a row shows the gap AND the move since
@@ -228,7 +239,7 @@ def main() -> int:
     if a.json or True:
         print(json.dumps(payload(a.limit, a.capped), indent=2))
     print()
-    print("# Both filters apply server-side. Still check")
+    print("# All three filters apply server-side. Still check")
     print("# check_response() for ignored_filters on every call -- the server")
     print("# accepts unsupported clauses and silently drops them.")
     print()

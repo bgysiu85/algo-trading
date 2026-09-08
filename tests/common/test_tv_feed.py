@@ -36,7 +36,8 @@ def test_payload_is_built_from_the_screener_definition():
     sent = F.tv_payload()["filter"]
     assert sent == [dict(f) for f in FILTERS]
     # The screen as of 2026-09-08: exactly two clauses, nothing else.
-    assert {c["left"] for c in sent} == {"premarket_change", "premarket_close"}
+    assert {c["left"] for c in sent} == {"premarket_change", "premarket_close",
+                                         "premarket_volume"}
 
 
 def test_parse_maps_positional_columns_to_names():
@@ -200,11 +201,13 @@ def test_the_screen_is_exactly_the_two_clauses_ben_asked_for():
     not lowered."""
     from common import tv_screener as S
     lefts = [f["left"] for f in S.FILTERS]
-    assert lefts == ["premarket_change", "premarket_close"]
+    assert lefts == ["premarket_change", "premarket_close", "premarket_volume"]
     chg = next(f for f in S.FILTERS if f["left"] == "premarket_change")
     px = next(f for f in S.FILTERS if f["left"] == "premarket_close")
+    vol = next(f for f in S.FILTERS if f["left"] == "premarket_volume")
     assert chg["operation"] == "egreater" and chg["right"] == 20.0
     assert px["operation"] == "in_range" and px["right"] == [2.0, 25.0]
+    assert vol["operation"] == "egreater" and vol["right"] == 100_000
     for gone in ("relative_volume_10d_calc", "float_shares_outstanding",
                  "premarket_change_from_open"):
         assert gone not in lefts, f"{gone} is not part of the screen any more"
