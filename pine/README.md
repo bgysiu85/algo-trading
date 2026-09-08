@@ -17,6 +17,16 @@ Nothing pointed at it because nothing in the repo knew the script existed.
 | `MC5.pine` | `strategy/mc5/mc5.py` | MC5 — Momentum 5m |
 | `VW9.pine` | `strategy/vw9/backtest.py` (VW9-5) | VW9 — VWAP + 9 EMA |
 
+## None of these three has a positive edge after measured costs
+
+Recorded here because this file is where someone loading a script will look.
+As of 2026-09-08, on the screened universe with tiered commission and the
+$4.26/round-trip slippage measured live on 09-03: MCL is negative, VW9 is
+negative, and MC5 — described as the survivor for one day — is −$3.15 a trade
+on EQUS.MINI and −$8.93 a trade on XNAS.BASIC. The scripts exist to gather
+paper results against a live feed, not because the history supports any of
+them. `claude/premarket_hypotheses_results_20260908.md` has the numbers.
+
 ## What is verified, and what is not
 
 `tests/strategy/vw9/test_pine_port_equivalence.py` transcribes VW9's Pine state

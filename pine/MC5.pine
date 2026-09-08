@@ -10,16 +10,18 @@
 //           OR the 09:30 window close
 // Size    : min(100 shares, 40% of equity / price), price $2-20 only
 //
-// WHY THIS ONE MATTERS
-// --------------------
-// On the first universe this project did not hand-pick — 27,877 screened
-// symbol-days, 2024-07 to 2026-09 — MC5 nets +$8,209 over 7,403 trades at
-// +$1.11/trade and stays positive through drop-top-5 across 1,791 symbols.
-// It is the only result here that has ever survived that test.
+// WHAT THIS STRATEGY IS WORTH — corrected 2026-09-08
+// --------------------------------------------------
+// For one day this header said MC5 was the only result in the project to
+// survive drop-top-5: +$8,209 over 7,403 trades on the screened universe.
+// That figure was BEFORE the $4.26 per round trip of slippage measured live on
+// 09-03; with it, the same trades are -$3.15 each. And on XNAS.BASIC — the
+// tape with the TRF prints EQUS.MINI's 4.8% capture omits — MC5 is -$97,335
+// over 10,905 trades, -$8.93 a trade, negative on every subset of symbols.
+// See claude/premarket_hypotheses_results_20260908.md.
 //
-// It is also thin and fragile. The edge dies somewhere between 3 and 4 orders
-// per round trip, so anything that fragments an order threatens it, and the
-// per-trade margin is about a dollar. See claude/screened_universe_results.md.
+// It is kept here to gather PAPER results, like the others. Do not read a
+// green Strategy Tester on a hand-picked symbol as evidence for it.
 //
 // GRADIENT IS A RATE OF CHANGE, NOT AN ANGLE
 // ------------------------------------------
