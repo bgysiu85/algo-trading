@@ -14,9 +14,23 @@ rests on; if the harness disagrees with it, the harness is wrong.
 The bars are six symbol-days staged out of bar_cache_db. They are gitignored,
 so this skips on a fresh clone rather than failing -- and the skip message says
 how to get them, because a test that silently skips forever is not a test.
+
+WHICH IS EXACTLY WHAT HAPPENED. Until 2026-09-08 BARS was a single hard-coded
+path: the cloud sandbox's upload directory. That path exists in the sandbox and
+nowhere else, so all 14 of these ran green where they were written and skipped
+on Ben's machine -- on every run since. He noticed the skip COUNT; the tests
+themselves said nothing. The suite reported "715 passed, 16 skipped" while the
+only control on the shared position lifecycle had never once executed on the
+machine that produces the results.
+
+So the location is now a LIST, repo-relative first, and
+test_the_bars_are_looked_for_where_this_repo_keeps_them asserts that list is
+not sandbox-only. That assertion needs no bars and runs everywhere, which is
+what makes this class of permanent skip loud instead of quiet.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import asdict
 from datetime import date, time as dtime
 from pathlib import Path
@@ -26,7 +40,33 @@ import pytest
 
 from common import harness as H
 
-BARS = Path("/mnt/user-data/uploads/Trading/bar_cache_db/3d_to_2000")
+REPO = Path(__file__).resolve().parents[2]
+WINDOW = "3d_to_2000"
+
+# Ordered by how much each one means. The repo-relative path is where the build
+# writes on Ben's machine, so it goes first; the sandbox upload directory is
+# last because it is real in exactly one place.
+BARS_CANDIDATES = [
+    p for p in (
+        Path(os.environ["ALGO_TEST_BARS"]) if os.environ.get("ALGO_TEST_BARS")
+        else None,
+        REPO / "bar_cache_db" / WINDOW,
+        REPO / "bar_cache_xnas" / WINDOW,
+        Path("/mnt/user-data/uploads/Trading/bar_cache_db") / WINDOW,
+    ) if p is not None
+]
+
+
+def bars_dir() -> Path:
+    """The first candidate that exists, else the repo-relative one -- so a skip
+    names where the bars BELONG rather than whatever happened to be last."""
+    for c in BARS_CANDIDATES:
+        if c.is_dir():
+            return c
+    return REPO / "bar_cache_db" / WINDOW
+
+
+BARS = bars_dir()
 
 CASES = [
     ("AAL", "2024-12-05"),
@@ -38,13 +78,28 @@ CASES = [
 ]
 
 
+def test_the_bars_are_looked_for_where_this_repo_keeps_them():
+    """The guard on the permanent silent skip.
+
+    Needs no bars, so it runs on every machine, and it fails the moment the
+    search list stops including a path relative to THIS repo. That is the whole
+    defect: a list of absolute sandbox paths would let all 14 equivalence tests
+    skip forever on the machine that matters while passing where they were
+    written.
+    """
+    assert (REPO / "bar_cache_db" / WINDOW) in BARS_CANDIDATES
+    assert any(c == REPO or REPO in c.parents for c in BARS_CANDIDATES), \
+        f"no candidate is inside {REPO}: {BARS_CANDIDATES}"
+
+
 def load(symbol: str, day: str):
     p = BARS / f"{symbol}_{day}.csv.gz"
     if not p.exists():
         pytest.skip(
-            f"{p} absent -- bar_cache_db is gitignored and machine-local. "
-            "Stage a few symbol-days from bar_cache_db/3d_to_2000/ to run the "
-            "harness equivalence control.")
+            f"{p} absent -- bar_cache_db is gitignored and machine-local, so "
+            f"the harness equivalence control is NOT running here. Build it "
+            f"({', '.join(sorted({s for s, _ in CASES}))} are enough) or point "
+            "ALGO_TEST_BARS at a directory of SYMBOL_DATE.csv.gz files.")
     df = pd.read_csv(p, index_col=0, parse_dates=True)
     if df.index.tz is None:
         df.index = df.index.tz_localize("UTC")
