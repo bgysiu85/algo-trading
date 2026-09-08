@@ -240,21 +240,41 @@ class Signals:
 
 
 def evaluate_last_bar(df: pd.DataFrame,
-                      require_macd_pos: bool | None = None) -> "Signals | None":
+                      require_macd_pos: bool | None = None,
+                      use_apex: bool | None = None) -> "Signals | None":
     """Evaluate the strategy on the LAST CLOSED bar of df.
 
     df must have columns open/high/low/close/volume, 1-minute bars in
     chronological order, already restricted to the bars indicators should be
     built from (i.e. including pre-market). require_macd_pos overrides
     REQUIRE_MACD_POSITIVE for this call only, same as signals().
+
+    USE_APEX_EXIT IS APPLIED HERE, not left to the caller.
+
+    It was, until 2026-09-08, and the result was a live/backtest split on the
+    one rule that changed. `signals()` computes the raw apex condition;
+    `backtest_session` gates it on USE_APEX_EXIT, which has been False since
+    2026-09-05; this function returned the UNGATED value, and trader.py acted
+    on it. So the backtest, the Pine script and every published figure were
+    V11 (apex off) while the live trader was still V7 (apex on) -- the version
+    measured at +$3.86/trade against ~$4.26 of round-trip friction, i.e. the
+    one that does not clear its own costs.
+
+    claude/mcl_apex_macd_sweep.md states "live and backtest both route through
+    signals() / evaluate_last_bar(), so the flag governs both -- no separate
+    live edit". Routing through the same function was necessary and was not
+    sufficient: the flag is read in backtest_session, which the live path never
+    calls. It is read here now, so that claim is true rather than nearly true.
     """
     if len(df) < MIN_BARS_REQUIRED:
         return None
+    if use_apex is None:
+        use_apex = USE_APEX_EXIT
     sig = signals(df, require_macd_pos=require_macd_pos)
     row = sig.iloc[-1]
     return Signals(
         long_entry=bool(row["entry"]),
-        exit_signal=bool(row["exit_sig"]),
+        exit_signal=bool(row["exit_sig"]) and use_apex,
         close=float(row["close"]),
         detail={
             "macd": round(float(row["macd"]), 5),
