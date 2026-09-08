@@ -36,7 +36,7 @@ def test_payload_is_built_from_the_screener_definition():
     sent = F.tv_payload()["filter"]
     assert sent == [dict(f) for f in FILTERS]
     # The screen as of 2026-09-08: exactly two clauses, nothing else.
-    assert {c["left"] for c in sent} == {"premarket_change_from_open", "premarket_close"}
+    assert {c["left"] for c in sent} == {"premarket_change", "premarket_close"}
 
 
 def test_parse_maps_positional_columns_to_names():
@@ -192,20 +192,21 @@ def test_the_feed_writes_the_file_the_trader_reads():
 # --- the screen as of 2026-09-08 -------------------------------------------------
 
 def test_the_screen_is_exactly_the_two_clauses_ben_asked_for():
-    """Ben, 2026-09-08: remove all existing filters; keep only pre-market
-    price $2-25 and pre-market change FROM OPEN >= 20% -- movement since the
-    04:00 print, by TradingView's own definition, not the overnight gap.
-    Relative volume and float are GONE, not lowered -- a screen that still
-    carried them would silently be the old screen."""
+    """Ben, 2026-09-08, final: remove all existing filters; keep only
+    pre-market price $2-25 and pre-market change >= 20% -- the gap versus the
+    PREVIOUS REGULAR-SESSION CLOSE, by TradingView's own definition. Not the
+    move since the 04:00 print (premarket_change_from_open), which was the
+    screen for one bundle and was wrong. Relative volume and float are GONE,
+    not lowered."""
     from common import tv_screener as S
     lefts = [f["left"] for f in S.FILTERS]
-    assert lefts == ["premarket_change_from_open", "premarket_close"]
-    chg = next(f for f in S.FILTERS if f["left"] == "premarket_change_from_open")
+    assert lefts == ["premarket_change", "premarket_close"]
+    chg = next(f for f in S.FILTERS if f["left"] == "premarket_change")
     px = next(f for f in S.FILTERS if f["left"] == "premarket_close")
     assert chg["operation"] == "egreater" and chg["right"] == 20.0
     assert px["operation"] == "in_range" and px["right"] == [2.0, 25.0]
     for gone in ("relative_volume_10d_calc", "float_shares_outstanding",
-                 "premarket_change"):
+                 "premarket_change_from_open"):
         assert gone not in lefts, f"{gone} is not part of the screen any more"
 
 

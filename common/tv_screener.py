@@ -105,21 +105,21 @@ MARKET = "america"
 # only have the following"). Two clauses.
 #
 #   1. pre-market price between $2 and $25
-#   2. pre-market change FROM OPEN >= 20%. TradingView's own definition, as
-#      Ben supplied it 2026-09-08:
+#   2. pre-market change >= 20%. TradingView's own definition, as Ben
+#      supplied it 2026-09-08 (his final answer, after two corrections):
 #
-#          Pre-market Change from Open  = premarket close - premarket open
-#          Pre-market Change from Open% = that / premarket open * 100
+#          Pre-market Change  = premarket close - PREVIOUS REGULAR-SESSION close
+#          Pre-market Change% = that / previous regular-session close * 100
 #
-#      where "open" is the OPENING PRINT OF THE PRE-MARKET SESSION, not
-#      yesterday's close. So this is movement SINCE 04:00, and a name that
-#      gapped 30% overnight and has been flat since does NOT pass. The column
-#      is `premarket_change_from_open`. (`premarket_change`, the gap versus
-#      yesterday's close, was used for about an hour and was the wrong one.)
+#      i.e. the overnight GAP, including everything since yesterday's 16:00.
+#      The column is `premarket_change`, verified to filter server-side on
+#      2026-09-05. A name that gapped 30% at 04:00 and has been flat since
+#      PASSES this -- that is what is wanted.
 #
-#      NOT YET VERIFIED TO FILTER SERVER-SIDE. Every other column here was
-#      checked on 2026-09-05; this one was not. The feed now warns on any
-#      ignored_filters in the response, so the first poll settles it.
+#      The sibling `premarket_change_from_open` measures movement since the
+#      first pre-market print instead. It was the screen for one bundle
+#      (2026-09-08q) and is NOT what Ben meant. Kept in COLUMNS so both
+#      figures show on every row; the difference between them is the gap.
 #
 # Relative volume and float are GONE, not lowered. The previous screen's
 # history is kept below because its findings about the columns were expensive
@@ -130,8 +130,8 @@ MARKET = "america"
 # WARM and are refused at entry. That is deliberate -- tonight's paper data
 # stays on the band the backtests measured. Widening the trader is a separate
 # decision with a backtest behind it, not a side effect of a screen edit.
-PREMARKET_CHANGE_MIN = 20.0            # Pre-mkt chg from open >= 20%  (since 04:00)
-CHANGE_COLUMN = "premarket_change_from_open"
+PREMARKET_CHANGE_MIN = 20.0            # Pre-mkt chg >= 20%  (vs previous regular close)
+CHANGE_COLUMN = "premarket_change"
 PREMARKET_PRICE_RANGE = (2.0, 25.0)    # Pre-mkt price  2 to 25 USD, inclusive
 
 # Retained for day_over_day_only() and the record; NOT in the shipped screen.
@@ -151,7 +151,7 @@ FILTERS = [
 
 # Both change columns are returned so a row shows the gap AND the move since
 # the open side by side -- the difference between them is the overnight gap.
-COLUMNS = ["name", "premarket_change_from_open", "premarket_change",
+COLUMNS = ["name", "premarket_change", "premarket_change_from_open",
            "premarket_close", "premarket_volume",
            "volume", "volume_change", "relative_volume_10d_calc",
            "float_shares_outstanding", "close"]
