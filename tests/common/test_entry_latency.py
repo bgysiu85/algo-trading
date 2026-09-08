@@ -166,3 +166,47 @@ def test_the_cli_runs_on_real_mcl_trades(tmp_path):
     assert f"trades measured   {len(trades):,}" in text
     assert "signal bar not found in cache: 0" in text, \
         "the engine's own trades did not match its own bars"
+
+
+def test_a_5_minute_strategy_is_measured_against_5_minute_bars(tmp_path):
+    """The first MC5 run compared a 5-minute fill with a 1-minute bar and
+    reported fill positions of 7.85x the range. The signal bar has to be the
+    bar the strategy actually saw."""
+    from dataclasses import asdict
+    from strategy.mc5 import mc5
+    cache = next((c for c in BARS_CANDIDATES if c.is_dir()), None)
+    if cache is None:
+        pytest.skip("no bar cache")
+    trades = []
+    for sym, day in CASES:
+        p = cache / f"{sym}_{day}.csv.gz"
+        if not p.exists():
+            continue
+        df = pd.read_csv(p, index_col=0, parse_dates=True)
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+        for t in mc5.backtest_session(df, date.fromisoformat(day), ET):
+            d = asdict(t); d["symbol"] = sym; trades.append(d)
+    if not trades:
+        pytest.skip("MC5 produced no trades on the cached cases")
+    tpath = tmp_path / "t.csv"
+    with open(tpath, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(trades[0].keys()))
+        w.writeheader(); w.writerows(trades)
+    out = tmp_path / "r.txt"
+    rc = subprocess.run([sys.executable, "-m", "common.entry_latency",
+                         "--trades", str(tpath), "--cache", str(cache.parent),
+                         "--bar-minutes", "5", "--out", str(out),
+                         "--csv", str(tmp_path / "r.csv")],
+                        capture_output=True, text=True, cwd=REPO)
+    assert rc.returncode == 0, rc.stderr[-800:]
+    text = out.read_text()
+    assert "signal bar not found in cache: 0" in text, \
+        "MC5's own 5-minute signal bars must all be found at 5 minutes"
+    # Every fill sits within a plausible distance of its own bar: the +1 tick
+    # can push it just above the high, never several ranges above it.
+    import csv as _csv
+    rows = list(_csv.DictReader(open(tmp_path / "r.csv")))
+    for r in rows:
+        if r["fill_pos"]:
+            assert -0.5 <= float(r["fill_pos"]) <= 1.5, r

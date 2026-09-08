@@ -72,6 +72,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from common.cache_io import load_cached_bars
+from common.indicators import resample_bars
 from common.report_io import emit
 
 ET = ZoneInfo("America/New_York")
@@ -260,6 +261,14 @@ def main(argv=None) -> int:
     ap.add_argument("--cache", required=True,
                     help="the cache the trades were GENERATED on")
     ap.add_argument("--window", default="3d_to_2000")
+    ap.add_argument("--bar-minutes", type=int, default=1,
+                    help="the strategy's bar size. MC5 trades 5-minute bars "
+                         "and stamps entry_time with the 5-minute bar; measured "
+                         "against 1-minute bars its fill is compared with one "
+                         "minute of a five-minute signal, and a third of its "
+                         "signal bars are 'not found'. The first MC5 run did "
+                         "exactly that and reported fill positions of 7.85x "
+                         "the bar range -- every number in it was wrong.")
     ap.add_argument("--out", default="var/reports/entry_latency.txt")
     ap.add_argument("--csv", default=None)
     a = ap.parse_args(argv)
@@ -277,7 +286,10 @@ def main(argv=None) -> int:
     for t in trades:
         key = (t["symbol"], t["date"])
         if key not in cache_hits:
-            cache_hits[key] = load_cached_bars(cache, *key)
+            b = load_cached_bars(cache, *key)
+            if b is not None and not b.empty and a.bar_minutes > 1:
+                b = resample_bars(b, a.bar_minutes)
+            cache_hits[key] = b
         bars = cache_hits[key]
         if bars is None or bars.empty:
             missing += 1
@@ -297,8 +309,13 @@ def main(argv=None) -> int:
                 w.writerow(asdict(r))
         print(f"wrote {a.csv}")
 
+    if missing > len(rows) * 0.05:
+        print(f"\nWARNING: {missing:,} of {missing + len(rows):,} signal bars "
+              "were not found. If this strategy trades a bar size other than "
+              f"{a.bar_minutes} minute(s), pass --bar-minutes to match it; "
+              "the numbers above are otherwise measured against the wrong bar.")
     emit("\n".join(render(rows, missing, a.trades)), a.out,
-         header=f"common.entry_latency  cache={cache}")
+         header=f"common.entry_latency  cache={cache}  bar={a.bar_minutes}m")
     return 0
 
 
