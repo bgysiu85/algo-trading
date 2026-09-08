@@ -75,7 +75,13 @@ LOG = logging.getLogger("tv_feed")
 ET = ZoneInfo("America/New_York")
 
 ENDPOINT = f"https://scanner.tradingview.com/{MARKET}/scan"
-WATCHLIST = Path("watchlist.txt")
+# THE SAME FILE THE TRADER READS. It was Path("watchlist.txt") -- the repo
+# ROOT -- while brokers/ibkr/trader.py and brokers/ibkr/scanner.py both default
+# to var/watchlist.txt. Nothing failed: this feed would log "watchlist -> 7
+# symbols" while the trader logged "watchlist is empty -- watching nothing",
+# both correct about different files, and a whole session would be watched by
+# nobody. tests/common/test_tv_feed.py pins the three together.
+WATCHLIST = Path("var/watchlist.txt")
 
 SESSION_START = dtime(4, 0)
 SESSION_END = dtime(9, 30)

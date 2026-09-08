@@ -157,3 +157,34 @@ def test_session_window_matches_MCL(hhmm, expected):
     from datetime import datetime
     now = datetime(2026, 9, 2, *hhmm, tzinfo=F.ET)
     assert F.in_session(now) is expected
+
+
+def test_the_feed_writes_the_file_the_trader_reads():
+    """THREE PROCESSES, ONE FILE, AND THEY MUST AGREE ON WHICH.
+
+    tv_feed wrote watchlist.txt in the repo root; trader.py and scanner.py both
+    read var/watchlist.txt. Neither side errors -- the feed reports the symbols
+    it wrote, the trader reports an empty watchlist, and both are telling the
+    truth about different files. A pre-market session would run watching
+    nothing, which looks exactly like a quiet morning.
+
+    The two argparse defaults are read out of the SOURCE rather than retyped
+    here, because retyping them would move the drift into the test.
+    """
+    import inspect
+    import re
+    from pathlib import Path
+
+    import brokers.ibkr.scanner as SC
+    import brokers.ibkr.trader as TR
+    from common import tv_feed as TV
+
+    paths = {"tv_feed": Path(TV.WATCHLIST).resolve()}
+    for name, mod in (("trader", TR), ("scanner", SC)):
+        m = re.search(r'"--watchlist",\s*default="([^"]+)"', inspect.getsource(mod))
+        assert m, f"{name}: no --watchlist default found to compare against"
+        paths[name] = Path(m.group(1)).resolve()
+
+    assert len(set(paths.values())) == 1, (
+        "the watchlist writers and the reader disagree on the file:\n  "
+        + "\n  ".join(f"{k:<8} {v}" for k, v in sorted(paths.items())))
