@@ -382,7 +382,15 @@ def render(rows: list[DayRow], tape: str = "") -> list[str]:
     # sample of the universe.
     few = [r for r in base if r.status == "FEW_BARS"]
     if few or base:
-        L += ["", "10.1b  WHY THE RANGE IS UNUSABLE (15-minute range)", ""]
+        # The heading is a CONCLUSION and must follow the data like any other.
+        # On XNAS.BASIC it read "WHY THE RANGE IS UNUSABLE" directly above a
+        # body saying the range is measurable -- a section arguing with its own
+        # title, and the title is the part people quote.
+        usable_frac = len(ok) / len(base) if base else 0.0
+        head = ("10.1b  WHY THE RANGE IS UNUSABLE (15-minute range)"
+                if usable_frac < 0.5 else
+                "10.1b  WHERE THE RANGE IS UNUSABLE, AND WHY (15-minute range)")
+        L += ["", head, ""]
         L += _tape_caveat(tape)
         empty = [r for r in base if r.rth_bars == 0]
         sparse = [r for r in few if r.rth_bars >= 100]

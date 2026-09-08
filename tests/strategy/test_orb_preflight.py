@@ -368,3 +368,24 @@ def test_the_report_says_orb_cannot_be_evaluated_rather_than_rejected():
     assert "it does not reject ORB" in out
     assert "cannot be" in out and "evaluated on these bars" in out
     assert "XNAS.BASIC" in out
+
+
+def test_the_10_1b_heading_follows_the_data():
+    """A section heading is a conclusion. On XNAS.BASIC this one read "WHY THE
+    RANGE IS UNUSABLE" directly above a body explaining that the range is
+    measurable -- and the heading is the part that gets quoted."""
+    mostly_thin = [P.DayRow(symbol=f"S{i}", date=DAY, population="survivors",
+                            orb_minutes=15, status="FEW_BARS", rth_bars=40,
+                            range_bars=1) for i in range(20)]
+    assert "WHY THE RANGE IS UNUSABLE" in "\n".join(
+        P.render(mostly_thin, "EQUS.MINI"))
+
+    mostly_ok = [P.DayRow(symbol=f"S{i}", date=DAY, population="survivors",
+                          orb_minutes=15, status="OK", rth_bars=300,
+                          range_bars=14, width_pct=5.0) for i in range(20)]
+    mostly_ok += [P.DayRow(symbol="T", date=DAY, population="survivors",
+                           orb_minutes=15, status="FEW_BARS", rth_bars=40,
+                           range_bars=1)]
+    out = "\n".join(P.render(mostly_ok, "XNAS.BASIC"))
+    assert "WHERE THE RANGE IS UNUSABLE, AND WHY" in out
+    assert "WHY THE RANGE IS UNUSABLE (15-minute range)" not in out
