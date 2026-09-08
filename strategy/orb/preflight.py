@@ -282,7 +282,65 @@ def pct(vals, q):
     return statistics.quantiles(vals, n=100)[q - 1] if len(vals) > 1 else vals[0]
 
 
-def render(rows: list[DayRow]) -> list[str]:
+def cache_tape(cache: Path) -> str:
+    """Which tape produced this cache, read off its SOURCE.txt.
+
+    WHY THIS IS NOT A CONSTANT. Until 2026-09-08 section 10.1b opened with a
+    hardcoded paragraph asserting the bars came from EQUS.MINI and that a low
+    bar count was therefore a tape artifact rather than a liquidity fact. The
+    first XNAS.BASIC run printed that paragraph verbatim over XNAS.BASIC
+    numbers -- a report describing a tape it had not read, telling the reader
+    to dismiss the very counts that had just been fixed.
+
+    The dataset is on disk beside the bars (common/bar_cache_build.py writes
+    SOURCE.txt precisely so a cache says what it is). Read it. An unreadable
+    marker returns "" and the report says it does not know, which is the only
+    honest third option.
+    """
+    marker = cache.parent / "SOURCE.txt"
+    if not marker.exists():
+        marker = cache / "SOURCE.txt"
+    try:
+        first = marker.read_text(encoding="utf-8").splitlines()[0].strip()
+    except (OSError, IndexError):
+        return ""
+    parts = first.split()
+    # "databento XNAS.BASIC ohlcv-1m"
+    return parts[1] if len(parts) >= 2 and parts[0] == "databento" else ""
+
+
+def _tape_caveat(tape: str) -> list[str]:
+    """The 10.1b preamble, which depends entirely on which tape was read."""
+    if tape == "EQUS.MINI":
+        return [
+            "  READ THE TAPE CAVEAT BELOW BEFORE THE COUNTS. These bars are",
+            "  EQUS.MINI, whose measured capture of the consolidated tape is a",
+            "  MEDIAN 4.8% at 16:00 and 1.5% by 09:30 (var/reports/",
+            "  capture_ratio.txt, capture_intraday.txt). A name that traded",
+            "  every minute of the session appears here with roughly 19 bars of",
+            "  390. So a LOW BAR COUNT IS THE EXPECTED APPEARANCE OF AN ORDINARY",
+            "  NAME ON THIS TAPE, and none of the rows below can be read as a",
+            "  fact about liquidity.", ""]
+    if not tape:
+        return [
+            "  TAPE UNKNOWN. No readable SOURCE.txt beside this cache, so this",
+            "  report cannot say which tape produced the bars -- and whether a",
+            "  low bar count means a thin name or a thin tape depends entirely",
+            "  on that. Treat every count below as uninterpreted until the cache",
+            "  is identified.", ""]
+    return [
+            f"  TAPE: {tape}, which carries the FINRA TRF prints. Unlike",
+            "  EQUS.MINI (a median 4.8% of the consolidated tape at 16:00, 1.5%",
+            "  by 09:30), a low bar count here IS a fact about the name rather",
+            "  than an artifact of the feed, so the rows below can be read as",
+            "  liquidity.",
+            "",
+            "  NOT COMPARABLE to any earlier run of this report built on",
+            "  EQUS.MINI. The counts moved because the tape changed; nothing",
+            "  about the market or the universe did.", ""]
+
+
+def render(rows: list[DayRow], tape: str = "") -> list[str]:
     L = ["ORB PRE-FLIGHT -- measurements before any entry logic exists", "",
          "  No strategy, no P/L. Each section can invalidate ORB on its own.",
          ""]
@@ -324,24 +382,19 @@ def render(rows: list[DayRow]) -> list[str]:
     # sample of the universe.
     few = [r for r in base if r.status == "FEW_BARS"]
     if few or base:
-        L += ["", "10.1b  WHY THE RANGE IS UNUSABLE (15-minute range)", "",
-              "  READ THE TAPE CAVEAT BELOW BEFORE THE COUNTS. bar_cache_db is",
-              "  built from EQUS.MINI, whose measured capture of the",
-              "  consolidated tape is a MEDIAN 4.8% at 16:00 and 1.5% by 09:30",
-              "  (var/reports/capture_ratio.txt, capture_intraday.txt). A name",
-              "  that traded every minute of the session appears here with",
-              "  roughly 19 bars of 390. So a LOW BAR COUNT IS THE EXPECTED",
-              "  APPEARANCE OF AN ORDINARY NAME ON THIS TAPE, and none of the",
-              "  rows below can be read as a fact about liquidity.", ""]
+        L += ["", "10.1b  WHY THE RANGE IS UNUSABLE (15-minute range)", ""]
+        L += _tape_caveat(tape)
         empty = [r for r in base if r.rth_bars == 0]
         sparse = [r for r in few if r.rth_bars >= 100]
         thin = [r for r in few if 0 < r.rth_bars < 100]
+        thin_note = ("-> indistinguishable: 4.8% of a full day looks like this"
+                     if tape == "EQUS.MINI" else "-> genuinely thin all day")
         L += [f"  no RTH bars at all                {len(empty):>8,}   "
               "-> nothing published on this tape",
               f"  few opening bars, >=100 RTH bars  {len(sparse):>8,}   "
               "-> visible all day, invisible at the open",
               f"  few opening bars, <100 RTH bars   {len(thin):>8,}   "
-              "-> indistinguishable: 4.8% of a full day looks like this",
+              f"{thin_note}",
               ""]
         if few:
             rb = [r.range_bars for r in few]
@@ -354,21 +407,37 @@ def render(rows: list[DayRow]) -> list[str]:
             n = sum(1 for r in base if r.range_bars >= k)
             L.append(f"    >= {k:>2} of 15 bars   {n:>8,}  "
                      f"({n/len(base)*100:>5.1f}% of symbol-days)")
-        L += ["",
-              "  MIN_RANGE_BARS is 10 of 15 and was never measured. But note",
-              "  that even >= 3 of 15 leaves most symbol-days out, so the",
-              "  threshold is not what is excluding them -- the tape is. No",
-              "  setting of this parameter rescues an opening range built from",
-              "  one print.", "",
-              "  WHAT THIS MEANS FOR ORB, PLAINLY: an opening range is a HIGH",
-              "  and a LOW over fifteen minutes. Computed from a tape that",
-              "  publishes about one print per fifteen minutes at the open, it",
-              "  is not a measurement of anything. This is not a strategy",
-              "  result and it does not reject ORB -- it says ORB cannot be",
-              "  evaluated on these bars. The fix is a fuller tape:",
-              "  XNAS.BASIC carries the FINRA TRF prints, is tier L0 (free to",
-              "  retrieve), and its history begins 2024-07-01, which is exactly",
-              "  where the screened universe begins."]
+        # The verdict depends on the shape of the curve above, so DERIVE it
+        # rather than asserting it. The hardcoded version said "even >= 3 of 15
+        # leaves most symbol-days out" -- true on EQUS.MINI, false on a fuller
+        # tape, and it was printed either way.
+        at3 = sum(1 for r in base if r.range_bars >= 3) / len(base)
+        at10 = sum(1 for r in base if r.range_bars >= 10) / len(base)
+        L += ["", "  MIN_RANGE_BARS is 10 of 15 and was never measured."]
+        if at3 < 0.667:
+            L += ["  Even >= 3 of 15 leaves most symbol-days out, so the",
+                  "  threshold is not what excludes them -- the tape is. No",
+                  "  setting of this parameter rescues an opening range built",
+                  "  from one print.", "",
+                  "  WHAT THIS MEANS FOR ORB, PLAINLY: an opening range is a",
+                  "  HIGH and a LOW over fifteen minutes. Computed from a tape",
+                  "  that publishes about one print per fifteen minutes at the",
+                  "  open, it is not a measurement of anything. This is not a",
+                  "  strategy result and it does not reject ORB -- it says ORB",
+                  "  cannot be evaluated on these bars. The fix is a fuller",
+                  "  tape: XNAS.BASIC carries the FINRA TRF prints, is tier L0",
+                  "  (free to retrieve), and its history begins 2024-07-01,",
+                  "  which is exactly where the screened universe begins."]
+        else:
+            L += [f"  {at3*100:.1f}% of symbol-days have >= 3 of 15 opening bars"
+                  f" and {at10*100:.1f}% have",
+                  "  >= 10, so the curve is steep across that span and the",
+                  "  threshold IS the choice -- it decides how much of the",
+                  "  universe ORB gives up, and it is still a guess. Set it from",
+                  "  the width and trigger numbers, not from a default.", "",
+                  "  The range is measurable on this tape. That answers 10.1b",
+                  "  and nothing else: a measurable range is a precondition for",
+                  "  evaluating ORB, not evidence for it."]
 
     L += ["", "10.2  THE RTH SCREEN AT THE RANGE END (15-minute range)", ""]
     if ok:
@@ -536,8 +605,12 @@ def main(argv=None) -> int:
                 w.writerow(asdict(r))
         print(f"wrote {a.csv}")
 
+    tape = cache_tape(cache)
+    print(f"tape: {tape or 'UNKNOWN (no readable SOURCE.txt)'}")
+
     from common.report_io import emit
-    emit("\n".join(render(rows)), a.out, header="strategy.orb.preflight")
+    emit("\n".join(render(rows, tape)), a.out,
+         header=f"strategy.orb.preflight  cache={cache}  tape={tape or 'UNKNOWN'}")
     return 0
 
 

@@ -257,7 +257,7 @@ def test_the_report_separates_a_cache_hole_from_a_thin_open():
         P.DayRow(symbol="THINDAY", date=DAY, population="survivors",
                  orb_minutes=15, status="FEW_BARS", rth_bars=20, range_bars=2),
     ]
-    out = "\n".join(P.render(rows))
+    out = "\n".join(P.render(rows, "EQUS.MINI"))
     assert "nothing published on this tape" in out
     assert "visible all day, invisible at the open" in out
     assert "indistinguishable" in out
@@ -270,25 +270,92 @@ def test_the_report_shows_what_the_bar_threshold_costs():
                      orb_minutes=15, status="OK", range_bars=i % 16,
                      rth_bars=300, width_pct=5.0)
             for i in range(64)]
-    out = "\n".join(P.render(rows))
+    out = "\n".join(P.render(rows, "EQUS.MINI"))
     assert "MIN_RANGE_BARS is 10 of 15 and was never measured" in out
     for k in (3, 5, 8, 10, 12):
         assert f">= {k:>2} of 15 bars" in out
 
 
-def test_the_report_names_the_tape_before_the_counts():
-    """The first version of 10.1b labelled 12,702 symbol-days "thin all day".
-    They are not known to be thin: bar_cache_db is EQUS.MINI, whose measured
-    capture is a median 4.8% of the consolidated tape, so an ordinarily-traded
-    name appears with about 19 bars of 390. The counts were being read as a
-    fact about liquidity when they are a fact about the tape."""
-    rows = [P.DayRow(symbol="A", date=DAY, population="survivors",
+def _few_bars_rows():
+    return [P.DayRow(symbol="A", date=DAY, population="survivors",
                      orb_minutes=15, status="FEW_BARS", rth_bars=40,
                      range_bars=1)]
-    out = "\n".join(P.render(rows))
+
+
+def test_the_report_names_the_tape_before_the_counts():
+    """The first version of 10.1b labelled 12,702 symbol-days "thin all day".
+    They are not known to be thin on EQUS.MINI, whose measured capture is a
+    median 4.8% of the consolidated tape, so an ordinarily-traded name appears
+    with about 19 bars of 390. The counts were being read as a fact about
+    liquidity when they were a fact about the tape."""
+    out = "\n".join(P.render(_few_bars_rows(), "EQUS.MINI"))
     assert "READ THE TAPE CAVEAT BELOW BEFORE THE COUNTS" in out
     assert "EQUS.MINI" in out and "4.8%" in out
     assert out.index("EQUS.MINI") < out.index("no RTH bars at all")
+
+
+def test_the_caveat_follows_the_tape_instead_of_being_hardcoded():
+    """THIS TEST REPLACES ONE THAT PINNED THE BUG.
+
+    The version above used to be called with no tape argument and asserted the
+    EQUS.MINI paragraph appeared -- so the suite required the report to claim
+    EQUS.MINI whatever cache it had read. The first XNAS.BASIC run duly printed
+    that paragraph over XNAS.BASIC numbers, telling the reader to dismiss the
+    counts the tape change had just fixed, and the test passed.
+    """
+    out = "\n".join(P.render(_few_bars_rows(), "XNAS.BASIC"))
+    assert "XNAS.BASIC" in out
+    assert "4.8% at 16:00" not in out
+    assert "none of the rows below can be read as a fact about liquidity" \
+        not in out
+    assert "NOT COMPARABLE" in out, \
+        "a tape change moves every count -- the report must say so"
+    assert out.index("XNAS.BASIC") < out.index("no RTH bars at all")
+
+
+def test_an_unidentified_cache_is_not_given_a_tape():
+    """The IB cache has no SOURCE.txt. Guessing a dataset for it is how the
+    original defect worked; saying so is the only honest third option."""
+    out = "\n".join(P.render(_few_bars_rows(), ""))
+    assert "TAPE UNKNOWN" in out
+    assert "EQUS.MINI" not in out.split("no RTH bars at all")[0].split(
+        "TAPE UNKNOWN")[1]
+
+
+def test_the_tape_is_read_from_the_caches_own_marker(tmp_path):
+    """bar_cache_build writes SOURCE.txt beside the window directory precisely
+    so a cache can say what it is. Read it rather than assuming."""
+    root = tmp_path / "bar_cache_x"
+    (root / "3d_to_2000").mkdir(parents=True)
+    (root / "SOURCE.txt").write_text("databento XNAS.BASIC ohlcv-1m\nRAW\n")
+    assert P.cache_tape(root / "3d_to_2000") == "XNAS.BASIC"
+
+    (root / "SOURCE.txt").write_text("databento EQUS.MINI ohlcv-1m\nRAW\n")
+    assert P.cache_tape(root / "3d_to_2000") == "EQUS.MINI"
+
+    (root / "SOURCE.txt").unlink()
+    assert P.cache_tape(root / "3d_to_2000") == "", \
+        "a missing marker must report UNKNOWN, never a default dataset"
+
+
+def test_the_verdict_is_derived_from_the_curve_not_asserted():
+    """The closing paragraph used to state that even >= 3 of 15 leaves most
+    symbol-days out. True on EQUS.MINI, false on a fuller tape, printed either
+    way. It now follows the measured curve."""
+    thin = [P.DayRow(symbol=f"S{i}", date=DAY, population="survivors",
+                     orb_minutes=15, status="FEW_BARS", rth_bars=40,
+                     range_bars=1) for i in range(50)]
+    assert "cannot be evaluated on these bars" in "\n".join(
+        P.render(thin, "EQUS.MINI"))
+
+    rich = [P.DayRow(symbol=f"S{i}", date=DAY, population="survivors",
+                     orb_minutes=15, status="OK", rth_bars=300,
+                     range_bars=14, width_pct=5.0) for i in range(50)]
+    out = "\n".join(P.render(rich, "XNAS.BASIC"))
+    assert "cannot be evaluated on these bars" not in out
+    assert "The range is measurable on this tape" in out
+    assert "not evidence for it" in out, \
+        "a measurable range is a precondition, not a result"
 
 
 def test_the_report_says_orb_cannot_be_evaluated_rather_than_rejected():
