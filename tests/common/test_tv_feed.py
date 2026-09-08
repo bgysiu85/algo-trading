@@ -263,3 +263,34 @@ def test_check_response_reads_both_response_shapes():
     assert check_response(mcp_shape) == ["a"]
     assert check_response(raw_shape) == ["b"]
     assert check_response(clean) == []
+
+
+# --- parity between the three Pine scripts and the Python band --------------
+
+def test_every_pine_script_enforces_the_same_price_band():
+    """PROGRAM_INDEX §1: whatever filter one strategy enforces, all must.
+
+    MCL's Pine was the last of the three without the band, so a chart outside
+    $2-20 showed entry signals the live trader would refuse -- the same
+    live/backtest split that let the apex exit run for three days after it was
+    turned off.
+    """
+    import re
+    from pathlib import Path
+
+    from strategy.mcl.mcl import PRICE_MAX, PRICE_MIN
+
+    root = Path(__file__).resolve().parents[2] / "pine"
+    for name in ("MCL.pine", "MC5.pine", "VW9.pine"):
+        src = (root / name).read_text(encoding="utf-8")
+        assert "usePriceBand" in src, f"{name} has no price-band input"
+        lo = re.search(r'priceMin = input\.float\(([\d.]+)', src)
+        hi = re.search(r'priceMax = input\.float\(([\d.]+)', src)
+        assert lo and hi, f"{name}: could not read the band defaults"
+        assert float(lo.group(1)) == PRICE_MIN, f"{name} min != mcl.py"
+        assert float(hi.group(1)) == PRICE_MAX, f"{name} max != mcl.py"
+        assert 'input.bool(true, "Enforce $2-20 price band"' in src, \
+            f"{name}: the band must default ON, as every engine does"
+        assert "bandBlocked" in src, (
+            f"{name}: no PRICE BAND BLOCKED line. A symbol outside the band "
+            "produces no trades, which reads as no signal unless it says so")

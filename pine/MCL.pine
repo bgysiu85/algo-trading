@@ -115,6 +115,28 @@ grpSize = "Position sizing"
 maxShares    = input.int(100,   "Max shares",       minval=1,             group=grpSize)
 maxEquityPct = input.float(40.0, "Max % of equity", minval=1, maxval=100, group=grpSize)
 
+// PRICE BAND. mcl.py has enforced $2-20 at ENTRY since the apex sweep, and
+// brokers/ibkr/trader.py applies it in the live path too -- this script was the
+// last of the three without it, so a chart outside the band showed signals the
+// strategy would refuse.
+//
+// It is not cosmetic. IB serves SPLIT-ADJUSTED history, so a small cap that
+// later reverse-split comes back at an inflated price: applied to VW9 the same
+// filter moved its headline from -$31,296 to +$3,942, because without it the
+// engine was trading the adjustment factor rather than a price.
+//
+// The residual bias it does NOT fix: filtering on the ADJUSTED price
+// preferentially removes names that later reverse-split, and reverse splits
+// follow collapses, so the surviving subset tilts towards names that held up.
+//
+// NOTE the deliberate gap with the live SCREEN, which runs to $25 as of
+// 2026-09-08. Names at $20-25 reach the watchlist as WARM and are refused here,
+// which is intended: the band is what every backtest measured.
+grpBand = "Universe"
+usePriceBand = input.bool(true, "Enforce $2-20 price band", group=grpBand, tooltip="ON matches mcl.py PRICE_MIN/PRICE_MAX. The status table says PRICE BAND BLOCKED when this symbol is outside it, so an empty result explains itself instead of looking like no signal.")
+priceMin = input.float(2.0,  "Min price", minval=0.0, step=0.5, group=grpBand)
+priceMax = input.float(20.0, "Max price", minval=0.0, step=0.5, group=grpBand)
+
 qualDays = switch syminfo.ticker
     "WETO"  => "31"
     "MOVE"  => "31"
@@ -188,7 +210,8 @@ cBbw  = useBbw ? f_rising(bbw) : true
 cMfi  = f_rising(mfi)
 cRsi  = f_rising(rsi)
 
-longSignal = cMacd and cBbw and cMfi and cRsi and cSurge and cFloor and inSess
+inBand = not usePriceBand or (close >= priceMin and close <= priceMax)
+longSignal = cMacd and cBbw and cMfi and cRsi and cSurge and cFloor and inSess and inBand
 qty = math.min(maxShares, math.floor(strategy.equity * maxEquityPct / 100.0 / close))
 
 if longSignal and strategy.position_size == 0 and qty >= 1
@@ -238,7 +261,10 @@ f_dt(t) => str.format_time(t, "MMM-dd HH:mm", "America/New_York")
 // The status line must name the SHIPPED config, not a superseded one. While
 // this read "V7" a chart with the current rules would have been labelled
 // MODIFIED, and one running the retired apex exit would have read as correct.
-isShipped = requireMacdPos and useVolMultiple and armBars == 0 and minAbsFloor == 0 and not useApex
+isShipped = requireMacdPos and useVolMultiple and armBars == 0 and minAbsFloor == 0 and not useApex and usePriceBand
+// A symbol outside the band produces NO trades, which is indistinguishable
+// from the strategy finding no signal unless the table says so.
+bandBlocked = usePriceBand and not na(close) and (close < priceMin or close > priceMax)
 
 if barstate.islastconfirmedhistory or barstate.islast
     int tot = strategy.closedtrades
@@ -252,8 +278,8 @@ if barstate.islastconfirmedhistory or barstate.islast
                 wins += 1
     f_s(0,  "Symbol / TF",    syminfo.ticker + "  " + timeframe.period)
     f_s(1,  "Config",         isShipped ? "V11 — matches mcl.py" : "MODIFIED — not V11")
-    f_s(2,  "Window",         sessWindow)
-    f_s(3,  "Date filter",    dateMode)
+    f_s(2,  "Price band",     bandBlocked ? "PRICE BAND BLOCKED — no trades" : (usePriceBand ? "on, symbol inside" : "OFF — not mcl.py"))
+    f_s(3,  "Window / dates",  sessWindow + "  " + dateMode)
     f_s(4,  "First bar",      na(firstSess) ? "NO DATA" : f_dt(firstSess))
     f_s(5,  "Last bar",       na(lastSess)  ? "NO DATA" : f_dt(lastSess))
     f_s(6,  "Bars in window", str.tostring(nSessBars))
