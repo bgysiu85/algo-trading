@@ -35,9 +35,8 @@ def test_payload_is_built_from_the_screener_definition():
     and not in the live trader."""
     sent = F.tv_payload()["filter"]
     assert sent == [dict(f) for f in FILTERS]
-    assert {c["left"] for c in sent} >= {
-        "premarket_change", "relative_volume_10d_calc",
-        "premarket_close", "float_shares_outstanding"}
+    # The screen as of 2026-09-08: exactly two clauses, nothing else.
+    assert {c["left"] for c in sent} == {"premarket_change", "premarket_close"}
 
 
 def test_parse_maps_positional_columns_to_names():
@@ -188,3 +187,64 @@ def test_the_feed_writes_the_file_the_trader_reads():
     assert len(set(paths.values())) == 1, (
         "the watchlist writers and the reader disagree on the file:\n  "
         + "\n  ".join(f"{k:<8} {v}" for k, v in sorted(paths.items())))
+
+
+# --- the screen as of 2026-09-08 -------------------------------------------------
+
+def test_the_screen_is_exactly_the_two_clauses_ben_asked_for():
+    """Ben, 2026-09-08: remove all existing filters; keep only pre-market
+    price $2-25 and pre-market change >= 20% (vs prior close). Relative
+    volume and float are GONE, not lowered -- a screen that still carried them
+    would silently be the old screen."""
+    from common import tv_screener as S
+    lefts = [f["left"] for f in S.FILTERS]
+    assert lefts == ["premarket_change", "premarket_close"]
+    chg = next(f for f in S.FILTERS if f["left"] == "premarket_change")
+    px = next(f for f in S.FILTERS if f["left"] == "premarket_close")
+    assert chg["operation"] == "egreater" and chg["right"] == 20.0
+    assert px["operation"] == "in_range" and px["right"] == [2.0, 25.0]
+    for gone in ("relative_volume_10d_calc", "float_shares_outstanding",
+                 "premarket_change_from_open"):
+        assert gone not in lefts
+
+
+def test_the_screen_ceiling_is_above_the_strategy_band_on_purpose():
+    """$25 screen, $20 trader. The gap is what makes $20-25 names WARM."""
+    from common import tv_screener as S
+    assert S.PREMARKET_PRICE_RANGE == (2.0, 25.0)
+    assert S.PRICE_MAX == 20.0
+    assert F.in_band(row("X", 20.0)) and not F.in_band(row("Y", 22.0))
+
+
+def test_an_ignored_filter_is_logged_not_swallowed(monkeypatch, caplog):
+    """The server accepts a clause it cannot apply and lists it under
+    ignored_filters. The feed read the rows and never the key, so an
+    unfiltered watchlist looked exactly like a filtered one."""
+    import io
+    import json as _json
+    import logging
+
+    body = {"data": [{"s": "NASDAQ:AAA", "d": [None] * len(F.COLUMNS)}],
+            "ignored_filters": ["premarket_change"]}
+
+    class _Resp(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(F.urllib.request, "urlopen",
+                        lambda req, timeout: _Resp(_json.dumps(body).encode()))
+    with caplog.at_level(logging.WARNING, logger="tv_feed"):
+        rows = F.fetch()
+    assert len(rows) == 1
+    assert any("IGNORED" in r.message and "premarket_change" in r.message
+               for r in caplog.records), "the ignored filter was not surfaced"
+
+
+def test_check_response_reads_both_response_shapes():
+    from common.tv_screener import check_response
+    mcp_shape = {"data": {"rows": [], "ignored_filters": ["a"]}}
+    raw_shape = {"data": [{"s": "X", "d": []}], "ignored_filters": ["b"]}
+    clean = {"data": [{"s": "X", "d": []}]}
+    assert check_response(mcp_shape) == ["a"]
+    assert check_response(raw_shape) == ["b"]
+    assert check_response(clean) == []

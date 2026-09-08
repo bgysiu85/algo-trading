@@ -101,31 +101,41 @@ from strategy.mcl.mcl import PRICE_MIN, PRICE_MAX
 
 MARKET = "america"
 
-# The saved screen, one clause per row of the TradingView filter panel.
-PREMARKET_CHANGE_MIN = 20.0        # Pre-mkt chg  > 20%
-RELATIVE_VOLUME_MIN = 5.0          # Rel vol      > 5  (10-day, time-adjusted)
-PREMARKET_PRICE_MIN = 2.0          # Pre-mkt price > 2 USD
-FLOAT_RANGE = (0, 20_000_000)      # Float        0 to 20M
+# THE SCREEN, as of 2026-09-08 (Ben: "remove all the existing filters and
+# only have the following"). Two clauses.
+#
+#   1. pre-market price between $2 and $25
+#   2. pre-market change >= 20%  -- versus YESTERDAY'S CLOSE, i.e. the gap.
+#      Confirmed with Ben 2026-09-08: this is `premarket_change`, not
+#      `premarket_change_from_open` (movement since the 04:00 print). The two
+#      answer different questions; a name that gapped 30% overnight and has
+#      been flat since passes this one and not the other.
+#
+# Relative volume and float are GONE, not lowered. The previous screen's
+# history is kept below because its findings about the columns were expensive
+# and still hold.
+#
+# The $25 ceiling is the SCREEN's. The strategy's band is still $2-20
+# (strategy/mcl/mcl.py PRICE_MAX): names at $20-25 appear in the watchlist as
+# WARM and are refused at entry. That is deliberate -- tonight's paper data
+# stays on the band the backtests measured. Widening the trader is a separate
+# decision with a backtest behind it, not a side effect of a screen edit.
+PREMARKET_CHANGE_MIN = 20.0            # Pre-mkt chg   >= 20%   (vs prior close)
+PREMARKET_PRICE_RANGE = (2.0, 25.0)    # Pre-mkt price  2 to 25 USD, inclusive
 
-# Only for the day-over-day alternative, which is NOT the shipped screen.
-# volume_change is a percent change, so 5x yesterday is +400%, not +500%.
+# Retained for day_over_day_only() and the record; NOT in the shipped screen.
+RELATIVE_VOLUME_MIN = 5.0
+PREMARKET_PRICE_MIN = PREMARKET_PRICE_RANGE[0]
+FLOAT_RANGE = (0, 20_000_000)
 VOLUME_CHANGE_MIN = (RELATIVE_VOLUME_MIN - 1.0) * 100.0
 
-# All four apply server-side. Confirmed, not assumed -- see check_response().
 FILTERS = [
-    {"left": "premarket_change", "operation": "greater",
+    {"left": "premarket_change", "operation": "egreater",
      "right": PREMARKET_CHANGE_MIN},
-    # ">= 5", Ben 2026-09-05. "egreater" is confirmed to apply rather than be
-    # ignored (19,959 rows -> 629, same as "greater"). The two return the SAME
-    # 629 today and almost always will: relative volume is a continuous float,
-    # so landing on exactly 5.000000 is vanishingly unlikely. The change is
-    # about the screen saying what is meant, not about the rows it returns.
-    {"left": "relative_volume_10d_calc", "operation": "egreater",
-     "right": RELATIVE_VOLUME_MIN},
-    {"left": "premarket_close", "operation": "greater",
-     "right": PREMARKET_PRICE_MIN},
-    {"left": "float_shares_outstanding", "operation": "in_range",
-     "right": list(FLOAT_RANGE)},
+    # in_range is inclusive at both ends -- confirmed 2026-09-05 with the
+    # float filter, which used the same operation.
+    {"left": "premarket_close", "operation": "in_range",
+     "right": list(PREMARKET_PRICE_RANGE)},
 ]
 
 COLUMNS = ["name", "premarket_change", "premarket_close", "premarket_volume",
@@ -139,14 +149,15 @@ COLUMNS = ["name", "premarket_change", "premarket_close", "premarket_volume",
 def payload(limit: int = 50, cap_price: bool = False) -> dict:
     """The exact arguments to hand to the tvremix run_screener tool.
 
-    cap_price adds the $20 ceiling the backtest assumes but the saved screen
-    does not have. Off by default: this function's job is to reproduce the
-    screen as saved, not to quietly improve it.
+    cap_price narrows the price clause to the STRATEGY's band ($2-20) instead
+    of the screen's ($2-25). Off by default: this function's job is to
+    reproduce the screen as defined, not to quietly improve it.
     """
     filters = list(FILTERS)
     if cap_price:
-        filters.append({"left": "premarket_close", "operation": "less",
-                        "right": PRICE_MAX})
+        filters = [f for f in filters if f["left"] != "premarket_close"]
+        filters.append({"left": "premarket_close", "operation": "in_range",
+                        "right": [PRICE_MIN, PRICE_MAX]})
     return dict(market=MARKET, limit=limit, filters=filters,
                 columns=COLUMNS, sort_by="premarket_change", sort_order="desc")
 
@@ -165,9 +176,20 @@ def day_over_day_only(rows: list[dict]) -> list[dict]:
 
 def check_response(resp: dict) -> list[str]:
     """Return any filters the server admitted to ignoring. Call this on every
-    screener response before believing it."""
-    data = resp.get("data", resp)
-    return list(data.get("ignored_filters") or [])
+    screener response before believing it.
+
+    Two response shapes reach this. The tvremix MCP tool wraps the server's
+    reply under a "data" DICT; the raw scanner endpoint (common/tv_feed.py)
+    returns "data" as the LIST of rows with ignored_filters beside it at the
+    top level. The first version only knew the dict shape and raised
+    AttributeError on the list -- which, in a feed that called it, would have
+    turned every poll into a "screener call failed" backoff.
+    """
+    found: list[str] = []
+    for level in (resp, resp.get("data")):
+        if isinstance(level, dict):
+            found += list(level.get("ignored_filters") or [])
+    return found
 
 
 def out_of_band(rows: list[dict]) -> list[dict]:
@@ -192,13 +214,14 @@ def main() -> int:
     if a.json or True:
         print(json.dumps(payload(a.limit, a.capped), indent=2))
     print()
-    print("# All four filters apply server-side. Still check")
+    print("# Both filters apply server-side. Still check")
     print("# check_response() for ignored_filters on every call -- the server")
     print("# accepts unsupported clauses and silently drops them.")
     print()
-    print(f"# MCL trades ${PRICE_MIN:.0f}-${PRICE_MAX:.0f}. This screen has no "
-          f"upper bound, so rows above ${PRICE_MAX:.0f} are outside")
-    print("# everything the backtest has measured. Pass --capped to add it.")
+    print(f"# MCL trades ${PRICE_MIN:.0f}-${PRICE_MAX:.0f}. This screen goes to "
+          f"${PREMARKET_PRICE_RANGE[1]:.0f}, so rows above ${PRICE_MAX:.0f} are")
+    print("# outside everything the backtest has measured. They surface as WARM")
+    print("# in the watchlist and are refused at entry. Pass --capped to drop them.")
     return 0
 
 

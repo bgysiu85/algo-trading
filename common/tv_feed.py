@@ -69,7 +69,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from common import notify
-from common.tv_screener import (COLUMNS, FILTERS, MARKET, PRICE_MAX, PRICE_MIN)
+from common.tv_screener import (COLUMNS, FILTERS, MARKET, PRICE_MAX, PRICE_MIN,
+                                check_response)
 
 LOG = logging.getLogger("tv_feed")
 ET = ZoneInfo("America/New_York")
@@ -134,7 +135,17 @@ def fetch(limit: int = MAX_SYMBOLS) -> list[dict]:
         headers={"Content-Type": "application/json",
                  "User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as r:
-        return parse(json.load(r))
+        body = json.load(r)
+    # THE RULE tv_screener.py states and this feed was not following: the
+    # server accepts a clause it cannot apply, returns a plausible result set,
+    # and lists the dropped clause under ignored_filters. A feed that does not
+    # read that key writes an unfiltered watchlist and reports success. Logged
+    # as a warning on every poll it happens, so it cannot be missed once.
+    ignored = check_response(body)
+    if ignored:
+        LOG.warning("TradingView IGNORED filter(s) %s -- the rows below are NOT "
+                    "screened on them. Check the column name.", ignored)
+    return parse(body)
 
 
 def in_band(row: dict) -> bool:
