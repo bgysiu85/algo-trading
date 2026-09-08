@@ -1,0 +1,269 @@
+//@version=6
+// Momentum Confluence Long — V11 (matches strategy/mcl/mcl.py, 2026-09-08)
+// ========================================================================
+// Session : 04:00-09:30 ET, flat at 09:30
+// Entry   : MACD > signal AND MACD > 0
+//           AND MFI rising (mfi > mfi[3])
+//           AND RSI rising (rsi > rsi[3])
+//           AND volume >= 3x previous bar
+//           AND previous bar volume >= 50% of trailing 60-bar average
+// Exit    : 5% trailing stop from the high since entry
+//           OR 09:30 window close
+//           (the apex-reversal exit is OFF — see "Apex reversal exit" below)
+//
+// WHAT THIS STRATEGY IS WORTH — read before trusting the Strategy Tester
+// ---------------------------------------------------------------------
+// On the first universe this project did NOT hand-pick — 27,877 screened
+// symbol-days, 2024-07 to 2026-09 — MCL nets -$1,270 over 2,408 trades and
+// fails drop-top-1. It has a +$0.85/trade gross edge against $1.37 of
+// commission. Every earlier headline for this script was measured on the
+// 587 symbol-days Ben chose in real time and then fitted the parameters to.
+// See claude/screened_universe_results.md.
+//
+// It is kept live to gather PAPER results, not because the history supports
+// it. Do not read a green Strategy Tester on one hand-picked symbol as
+// evidence; that is the exact selection this result corrects for.
+//
+// Earlier figures that appeared here (V7 "51 trades +$891 $17.46/trade") are
+// withdrawn twice over: they predate the 2026-09-05 fill-model correction,
+// which took MCL from +$1,567 to +$161 on IDENTICAL trades, and they predate
+// the screened universe above.
+//
+// The entry relaxations tested on 2026-09-03 are still rejected -- see
+// claude/mcl_arming_window_backtest.md and mcl_entry_relaxation_backtest.md.
+// Every loosening raised trade count and lowered both expectancy and
+// robustness. Those toggles stay at their V7 values.
+strategy("Momentum Confluence Long", "MCL", overlay=true,
+     initial_capital       = 100000,
+     default_qty_type      = strategy.fixed,
+     default_qty_value     = 1,
+     pyramiding            = 0,
+     process_orders_on_close = true,
+     commission_type       = strategy.commission.cash_per_order,
+     commission_value      = 0.35,
+     slippage              = 1,
+     calc_on_every_tick    = false)
+
+grpSess = "Session & date range"
+sessWindow = input.string("0400-0930", "Trading window (ET)", group=grpSess)
+flatAtEnd = input.bool(true, "Force flat at window close", group=grpSess)
+dateMode = input.string("Off", "Date filter", group=grpSess, options=["Ticker map", "Manual range", "Off"], tooltip="Off = every session (live/forward use). Ticker map = the Aug 2026 backtest set.")
+startTime = input.time(timestamp("31 Aug 2026 00:00 -0400"), "Manual from", group=grpSess)
+endTime   = input.time(timestamp("01 Sep 2026 00:00 -0400"), "Manual to",   group=grpSess)
+
+grpEntry = "Entry"
+useBbw = input.bool(false, "Include BBW", group=grpEntry)
+requireMacdPos = input.bool(true, "Require MACD > 0", group=grpEntry, tooltip="V7 = true. Setting false was tested and was worse.")
+useVolMultiple = input.bool(true, "Require volume >= N x previous bar", group=grpEntry, tooltip="V7 = true. Removing this was tested and was much worse.")
+volX   = input.float(3.0, "Volume multiple of previous bar", minval=1.0, step=0.1, group=grpEntry)
+armBars = input.int(0, "Bars a volume surge stays armed", minval=0, maxval=30, group=grpEntry, tooltip="V7 = 0 (surge must land on the confirmation bar). 5 was tested and was worse.")
+
+grpFloor = "Volume floor (previous bar)"
+floorMode = input.string("Relative", "Floor type", group=grpFloor, options=["Dollar", "Relative", "Shares", "Off"])
+minDollar = input.float(20000, "Min previous-bar $ volume", minval=0, step=1000, group=grpFloor)
+relFrac   = input.float(0.5, "Fraction of trailing average", minval=0.05, step=0.05, group=grpFloor)
+minAbsFloor = input.int(0, "Absolute share floor (whichever is greater)", minval=0, group=grpFloor, tooltip="V7 = 0. 5000 was tested and was worse.")
+minShares = input.int(6000, "Min previous-bar shares", minval=0, group=grpFloor)
+
+grpLen = "Indicator lengths"
+lenMult  = input.int(1, "Length multiplier", minval=1, maxval=4, group=grpLen)
+macdFastB = input.int(12, "MACD fast (base)",   group=grpLen)
+macdSlowB = input.int(26, "MACD slow (base)",   group=grpLen)
+macdSigB  = input.int(9,  "MACD signal (base)", group=grpLen)
+mfiLenB   = input.int(14, "MFI (base)",         group=grpLen)
+rsiLenB   = input.int(14, "RSI (base)",         group=grpLen)
+trendLenB = input.int(3,  "Gradient lookback (base)", group=grpLen)
+apexLookB = input.int(20, "Apex lookback (base)",     group=grpLen)
+relLenB   = input.int(60, "Floor trailing avg (base)", group=grpLen)
+bbLen    = input.int(20,  "Bollinger length", group=grpLen)
+bbMult   = input.float(2.0, "Bollinger mult", group=grpLen)
+
+macdFast = macdFastB * lenMult
+macdSlow = macdSlowB * lenMult
+macdSigL = macdSigB  * lenMult
+mfiLen   = mfiLenB   * lenMult
+rsiLen   = rsiLenB   * lenMult
+trendLen = trendLenB * lenMult
+apexLook = apexLookB * lenMult
+relLen   = relLenB   * lenMult
+
+grpExit = "Exit"
+useTrail = input.bool(true, "Trailing stop from high since entry", group=grpExit)
+trailPct = input.float(5.0, "Trail (%)", minval=0.1, step=0.1, group=grpExit)
+minHold = input.int(0, "Minimum bars held", minval=0, group=grpExit)
+// APEX REVERSAL EXIT -- off since 2026-09-05, after a 2x2 sweep over 376
+// sessions and 178 symbols (claude/mcl_apex_macd_sweep.md).
+//
+// Apex exits were net -$544 over 213 exits at a 27% win rate: the rule was
+// closing positions while the trail was still intact, and losing money doing
+// it. Every trailing-stop cut was positive.
+//
+// Friction is what decides it. The 2026-09-03 live session measured ~$4.26 per
+// round trip of slippage beyond the tick-each-way modelled here. Apex ON is
+// +$3.86/trade and so does NOT clear its own costs; apex OFF is +$7.79 and
+// does. That is also why that session lost money while this tester showed a
+// profit.
+//
+// WATCH, with it off: holds stretch. Median stays at 2 bars but p90 goes
+// 4 -> 24 and the maximum is 238, so a position open for hours is normal
+// rather than a hung order. The 5% trail is then the ONLY protection, and in
+// live it lives inside the running process. Worst single trade was unchanged
+// at -$97.10, so longer holds did not deepen losses.
+useApex = input.bool(false, "Apex reversal exit", group=grpExit, tooltip="V11 = false, since 2026-09-05. Apex exits were net -$544 over 213 exits at a 27% win rate, and apex ON does not clear the ~$4.26/round-trip live friction. See claude/mcl_apex_macd_sweep.md.")
+
+grpSize = "Position sizing"
+maxShares    = input.int(100,   "Max shares",       minval=1,             group=grpSize)
+maxEquityPct = input.float(40.0, "Max % of equity", minval=1, maxval=100, group=grpSize)
+
+qualDays = switch syminfo.ticker
+    "WETO"  => "31"
+    "MOVE"  => "31"
+    "AEHL"  => "31"
+    "XAIR"  => "31"
+    "XPON"  => "28,25"
+    "QNRX"  => "28"
+    "XLAB"  => "28"
+    "PPCB"  => "27"
+    "YMT"   => "27"
+    "VCIG"  => "26"
+    "AMIX"  => "26"
+    "NEXR"  => "26"
+    "DAIC"  => "26"
+    "SDOT"  => "26,25"
+    "WVVIP" => "25"
+    "USDE"  => "25"
+    "OLOX"  => "25"
+    "SUGP"  => "25,21"
+    "JUNS"  => "21"
+    "ADXN"  => "21"
+    "SGLY"  => "20,26"
+    => ""
+
+mapMatch = year == 2026 and month == 8 and str.contains("," + qualDays + ",", "," + str.tostring(dayofmonth) + ",")
+
+inWin = not na(time(timeframe.period, sessWindow, "America/New_York"))
+inDates = switch dateMode
+    "Ticker map"   => mapMatch
+    "Manual range" => time >= startTime and time < endTime
+    => true
+inSess  = inWin and inDates
+sessEnd = flatAtEnd and inSess[1] and not inSess
+
+[macdLine, sigLine, _hist]  = ta.macd(close, macdFast, macdSlow, macdSigL)
+[bbBasis, bbUpper, bbLower] = ta.bb(close, bbLen, bbMult)
+bbw = bbBasis != 0 ? (bbUpper - bbLower) / bbBasis * 100.0 : na
+mfi = ta.mfi(hlc3, mfiLen)
+rsi = ta.rsi(close, rsiLen)
+
+f_rising(src)  => not na(src[trendLen]) and src > src[trendLen]
+f_falling(src) => not na(src[trendLen]) and src < src[trendLen]
+
+macdBsh = -ta.highestbars(macdLine, apexLook)
+mfiBsh  = -ta.highestbars(mfi, apexLook)
+rsiBsh  = -ta.highestbars(rsi, apexLook)
+
+prevVol   = nz(volume[1])
+avgVolRaw = ta.sma(volume, relLen)
+prevAvg   = nz(avgVolRaw[1])
+
+// minAbsFloor = 0 gives exactly the V7 relative floor.
+relLevel = math.max(prevAvg * relFrac, minAbsFloor)
+
+cFloor = switch floorMode
+    "Dollar"   => prevVol * nz(close[1]) >= minDollar
+    "Relative" => prevVol >= relLevel and relLevel > 0
+    "Shares"   => prevVol >= minShares
+    => true
+
+rawSurge = volume >= prevVol * volX and prevVol > 0
+surgeNow = useVolMultiple ? rawSurge : true
+
+var int armedUntil = -1
+if rawSurge
+    armedUntil := bar_index + armBars
+cSurge = useVolMultiple ? (armBars > 0 ? bar_index <= armedUntil : surgeNow) : true
+
+cMacd = macdLine > sigLine and (requireMacdPos ? macdLine > 0 : true)
+cBbw  = useBbw ? f_rising(bbw) : true
+cMfi  = f_rising(mfi)
+cRsi  = f_rising(rsi)
+
+longSignal = cMacd and cBbw and cMfi and cRsi and cSurge and cFloor and inSess
+qty = math.min(maxShares, math.floor(strategy.equity * maxEquityPct / 100.0 / close))
+
+if longSignal and strategy.position_size == 0 and qty >= 1
+    strategy.entry("Long", strategy.long, qty=qty)
+    alert("MCL BUY " + syminfo.ticker + " qty " + str.tostring(qty) + " ref " + str.tostring(close) + " — use marketable LIMIT, check spread", alert.freq_once_per_bar_close)
+
+apexMacd = f_falling(macdLine) and macdBsh >= 1
+apexMfi  = f_falling(mfi)      and mfiBsh  >= 1
+apexRsi  = f_falling(rsi)      and rsiBsh  >= 1
+sellSignal = useApex and (apexMacd or apexMfi or apexRsi)
+
+var float peakSinceEntry = na
+if strategy.position_size > 0
+    peakSinceEntry := na(peakSinceEntry) ? math.max(high, strategy.position_avg_price) : math.max(peakSinceEntry, high)
+else
+    peakSinceEntry := na
+
+trailLevel = not na(peakSinceEntry) ? peakSinceEntry * (1.0 - trailPct / 100.0) : na
+barsHeld = strategy.position_size > 0 ? bar_index - strategy.opentrades.entry_bar_index(0) : 0
+
+if strategy.position_size > 0
+    if useTrail and not na(trailLevel)
+        strategy.exit("Trail", from_entry="Long", stop=trailLevel)
+    if sessEnd
+        strategy.close("Long", comment="Window close")
+        alert("MCL EXIT " + syminfo.ticker + " — window close 09:30", alert.freq_once_per_bar_close)
+    else if sellSignal and barsHeld >= minHold
+        strategy.close("Long", comment="Signal")
+        alert("MCL SELL " + syminfo.ticker + " ref " + str.tostring(close) + " — apex reversal", alert.freq_once_per_bar_close)
+
+var int nSessBars = 0
+var int firstSess = na
+var int lastSess = na
+
+if inSess
+    nSessBars += 1
+    if na(firstSess)
+        firstSess := time
+    lastSess := time
+
+var table ts = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 10), border_width=1, border_color=color.new(color.gray, 60))
+f_s(r, k, v) =>
+    table.cell(ts, 0, r, k, text_color=color.silver, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(ts, 1, r, v, text_color=color.white,  text_size=size.tiny, text_halign=text.align_right)
+f_dt(t) => str.format_time(t, "MMM-dd HH:mm", "America/New_York")
+
+// The status line must name the SHIPPED config, not a superseded one. While
+// this read "V7" a chart with the current rules would have been labelled
+// MODIFIED, and one running the retired apex exit would have read as correct.
+isShipped = requireMacdPos and useVolMultiple and armBars == 0 and minAbsFloor == 0 and not useApex
+
+if barstate.islastconfirmedhistory or barstate.islast
+    int tot = strategy.closedtrades
+    float pl = 0.0
+    int wins = 0
+    if tot > 0
+        for i = 0 to tot - 1
+            float p = strategy.closedtrades.profit(i)
+            pl += p
+            if p > 0
+                wins += 1
+    f_s(0,  "Symbol / TF",    syminfo.ticker + "  " + timeframe.period)
+    f_s(1,  "Config",         isShipped ? "V11 — matches mcl.py" : "MODIFIED — not V11")
+    f_s(2,  "Window",         sessWindow)
+    f_s(3,  "Date filter",    dateMode)
+    f_s(4,  "First bar",      na(firstSess) ? "NO DATA" : f_dt(firstSess))
+    f_s(5,  "Last bar",       na(lastSess)  ? "NO DATA" : f_dt(lastSess))
+    f_s(6,  "Bars in window", str.tostring(nSessBars))
+    f_s(7,  "Closed trades",  str.tostring(tot))
+    f_s(8,  "Wins / losses",  str.tostring(wins) + " / " + str.tostring(tot - wins))
+    f_s(9,  "NET P/L",        str.tostring(pl, "#.##"))
+    f_s(10, "Avg $ / trade",  tot > 0 ? str.tostring(pl / tot, "#.##") : "n/a")
+    f_s(11, "In position",    strategy.position_size != 0 ? "YES @ " + str.tostring(strategy.position_avg_price, format.mintick) : "flat")
+
+bgcolor(inSess ? color.new(color.teal, 92) : na, title="In window")
+plotshape(longSignal and strategy.position_size == 0, "Buy", shape.triangleup, location.belowbar, color.new(color.teal, 0), size=size.small)
+plotshape(sellSignal and strategy.position_size > 0, "Sell", shape.triangledown, location.abovebar, color.new(color.maroon, 0), size=size.small)
+plot(strategy.position_size > 0 ? trailLevel : na, "Trail", color.new(color.red, 0), style=plot.style_linebr)

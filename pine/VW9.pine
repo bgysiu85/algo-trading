@@ -1,0 +1,442 @@
+//@version=6
+// VW9 — VWAP + 9 EMA momentum (matches strategy/vw9/backtest.py, VW9-5)
+// ======================================================================
+// Session : 04:00-20:00 ET, flat at the window close
+// Regime  : BEARISH  close <= vwap
+//           STRONG   close > vwap and close > ema9
+//           WEAK     close > vwap and close <= ema9
+//           undefined until the session has 9 bars AND $50k cumulative
+//           dollar volume — nothing can fire before that
+// Setup A : VWAP reclaim. >= 2 consecutive bearish bars, then a bar closing
+//           back above BOTH vwap and ema9. Stop structure = the lowest low of
+//           the qualifying stretch, capped at 6 bars back.
+// Setup B : 9 EMA retest. While STRONG with a session high inside the last 10
+//           bars, a bar closing below ema9 but above vwap opens a pullback.
+//           Every bar in it must be controlled (bar-to-bar drop <= 1.5 x ATR14)
+//           and it must resolve within 6 bars. Closing back above ema9 is the
+//           trigger; closing below vwap, an uncontrolled drop, or running out
+//           of bars abandons it.
+// Gates   : liquidity (trigger-bar $ volume >= $40k per bar-minute),
+//           extension ((close - ema9) / ATR14 <= 2.0),
+//           pullback volume (Setup B: largest down-bar volume in the pullback
+//           must not exceed the largest up-bar volume of the impulse),
+//           re-entry (max 4 entries per session).
+//           OVERHEAD HEADROOM IS NOT IMPLEMENTED, here or in Python.
+// Exit    : structural stop at structure_low - 0.10 x ATR14, then VWAP lost,
+//           then session end, then the exit mode's own target.
+// Size    : min(100 shares, 40% of equity / price), price $2-20 only
+//
+// WHAT THIS STRATEGY IS WORTH
+// ---------------------------
+// On the first universe this project did not hand-pick — 27,877 screened
+// symbol-days — VW9 nets -$7,325 over 1,477 trades at -$4.96/trade, is worse
+// out of sample than in, and fails drop-top-1 by a wide margin. It is the
+// weakest of the three. It is here to collect PAPER results so the decision
+// rests on live data rather than on history alone; nothing below is evidence
+// for it. See claude/screened_universe_results.md.
+//
+// An earlier headline of -$31,296 was almost entirely the $2-20 band being
+// absent: IB serves SPLIT-ADJUSTED history, so names that later reverse-split
+// came back at inflated prices and the engine took positions at $4,152 and
+// $1,976 a share. Inside the band the same run was +$3,942. Those were never
+// prices anyone could trade — they were the adjustment factor. The band is on
+// by default here for that reason, not as a universe nicety.
+//
+// SESSION-SCOPED INDICATORS — THE THING MOST LIKELY TO BE GOT WRONG
+// -----------------------------------------------------------------
+// Python evaluates ONE session at a time: ema9, ATR14, VWAP and the bar count
+// all restart at 04:00 ET. Pine's ta.ema and ta.atr run continuously across
+// the whole chart, so using them would silently seed every session with
+// yesterday's state and change which bars are STRONG. So they are hand-rolled
+// here with an explicit reset, matching common/indicators.py exactly:
+//   ema  = ewm(span, adjust=False)   -> ema[0] = close[0]
+//   atr  = rma(tr, 14)               -> rma[0] = tr[0], tr[0] = high - low
+//   vwap = cumsum((h+l+c)/3 * vol) / cumsum(vol), anchored at 04:00
+//
+// FOUR WAYS THIS TESTER DIFFERS FROM THE PYTHON ENGINE
+// ----------------------------------------------------
+// 1. SAME-BAR TARGET vs VWAP. Python's priority is stop > VWAP lost > session
+//    end > target. Pine fills a limit intrabar, so a bar that tags 2R AND
+//    closes below VWAP books the target here and the VWAP exit there.
+// 2. GAP-THROUGH. strategy.exit(stop=) fills AT the stop; Python fills at
+//    min(stop, bar open), because a bar that OPENS below the level never
+//    offered it.
+// 3. R <= 0. Python declines the trade outright when the stop buffer leaves no
+//    positive R. Pine cannot know the fill until the bar after the signal, so
+//    it enters and closes immediately; the status table counts those.
+// 4. SESSION END. Python exits on the last bar's close; Pine's window-close
+//    detection fires on the first bar after, so it exits at that bar's open.
+//
+// EXTENDED HOURS MUST BE ON. Without it the chart has no 04:00-09:30 bars,
+// VWAP anchors at 09:30 instead, and every regime call changes. The status
+// table says PRE-MARKET BARS MISSING when that has happened.
+strategy("VW9 — VWAP + 9 EMA", "VW9", overlay=true,
+     initial_capital       = 100000,
+     default_qty_type      = strategy.fixed,
+     default_qty_value     = 1,
+     pyramiding            = 0,
+     process_orders_on_close = true,
+     commission_type       = strategy.commission.cash_per_order,
+     commission_value      = 0.35,
+     slippage              = 1,
+     calc_on_every_tick    = false)
+
+grpSess = "Session"
+sessWindow = input.string("0400-2000", "Trading window (ET)", group=grpSess)
+flatAtEnd  = input.bool(true, "Force flat at window close", group=grpSess)
+
+grpReg = "Regime maturity (spec 2.2)"
+emaFastLen = input.int(9, "EMA fast", minval=1, group=grpReg)
+atrLen     = input.int(14, "ATR length", minval=1, group=grpReg)
+minVwapBars = input.int(3, "Min bars before VWAP is usable", minval=1, group=grpReg)
+minVwapDV   = input.float(50000, "Min cumulative $ volume", minval=0, step=1000, group=grpReg, tooltip="VWAP on bar 1 is just that bar's typical price. Nothing may fire before the session has both this and the bar count above.")
+
+grpA = "Setup A — VWAP reclaim"
+minBelowBars    = input.int(2, "Bearish bars required before a reclaim", minval=1, group=grpA)
+reclaimLookback = input.int(6, "Structure low capped at N bars back", minval=1, group=grpA)
+
+grpB = "Setup B — 9 EMA retest"
+impulseLookback = input.int(10, "Session high must be within N bars", minval=1, group=grpB)
+pullbackCtrlAtr = input.float(1.5, "Max bar-to-bar drop, in ATR", minval=0.1, step=0.1, group=grpB)
+maxPullbackBars = input.int(6, "Pullback must resolve within N bars", minval=1, group=grpB)
+
+grpGate = "Entry gates (spec 4.3)"
+minTriggerDvPerMin = input.float(40000, "Min trigger-bar $ volume per bar-minute", minval=0, step=1000, group=grpGate, tooltip="NOT MEASURED. This is spec section 6's naive scaling of the volume-floor finding, not what section 6 instructs (measure first). Replace once section 8.2 has run.")
+maxExtAtr = input.float(2.0, "Max extension, (close - ema9) / ATR14", minval=0.1, step=0.1, group=grpGate)
+maxEntriesPerSession = input.int(4, "Max entries per session", minval=1, group=grpGate)
+usePullbackVolGate = input.bool(true, "Setup B pullback-volume gate", group=grpGate)
+
+grpExit = "Exit"
+exitMode = input.string("fixed_2r", "Exit mode", options=["fixed_2r", "ride_ema9", "trail_atr", "trail_pct"], group=grpExit, tooltip="fixed_2r is the shipped default (vw9_5m.py DEFAULT_EXIT_MODE).")
+// Turn OFF to test MCL's exit shape, where the trail is the only protection.
+// Worth testing: in the best measured cell the 123 structural-stop exits were
+// -$6,505.99 at a 0% win rate — which they must be, since the stop sits below
+// the entry by construction.
+useStructuralStop = input.bool(true, "Structural stop", group=grpExit, tooltip="OFF gives MCL's shape: the trail is the only protection.")
+stopBufferAtr = input.float(0.10, "Stop buffer, in ATR below structure", minval=0.0, step=0.05, group=grpExit)
+targetR = input.float(2.0, "Target, in R", minval=0.1, step=0.1, group=grpExit)
+useVwapExit = input.bool(true, "Exit when VWAP is lost", group=grpExit)
+// VWAP-EXIT GRACE. 0 is the spec's literal section 5.3, and it is measured to
+// hurt: 189 of 386 vwap_lost exits fired on the FILL BAR ITSELF, for
+// -$27,191.79. The mechanism is structural, not bad luck. Setup A enters
+// BECAUSE a bar closed back above VWAP; the fill is the next open; if that bar
+// closes back below, the position is shut the instant it is opened, paying two
+// ticks and commission both ways. Price sitting on VWAP is exactly when it
+// oscillates across it, so the rule fires hardest where it is least
+// informative. A grace period lets the trade prove itself over N bars first.
+vwapGraceBars = input.int(0, "VWAP-exit grace period (bars)", minval=0, group=grpExit, tooltip="0 is the spec's literal 5.3. Measured: 189 of 386 vwap_lost exits fired on the fill bar itself, for -$27,191.79.")
+// The ATR trail is far wider than it reads. 2 x ATR14 as a percentage of price,
+// over 67,020 5-minute bars, is median 7.3%, p75 12.7%, p90 21.0%, p99 63.4% —
+// against MCL's flat 5%. It is widest on exactly the names that move most,
+// which is backwards. trail_pct exists to test the other shape.
+trailAtrMult = input.float(2.0, "ATR trail multiple", minval=0.1, step=0.1, group=grpExit, tooltip="Median 7.3% of price, p90 21.0%. Far wider than MCL's flat 5%.")
+trailPct = input.float(5.0, "Percent trail", minval=0.1, step=0.1, group=grpExit)
+
+grpSize = "Position sizing"
+maxShares    = input.int(100,   "Max shares",       minval=1,             group=grpSize)
+maxEquityPct = input.float(40.0, "Max % of equity", minval=1, maxval=100, group=grpSize)
+
+grpBand = "Universe"
+usePriceBand = input.bool(true, "Enforce $2-20 price band", group=grpBand)
+priceMin = input.float(2.0,  "Min price", minval=0.0, step=0.5, group=grpBand)
+priceMax = input.float(20.0, "Max price", minval=0.0, step=0.5, group=grpBand)
+
+// --- session ---------------------------------------------------------------
+inSess = not na(time(timeframe.period, sessWindow, "America/New_York"))
+newSession = inSess and not inSess[1]
+sessEnd = flatAtEnd and inSess[1] and not inSess
+
+tfMinutes = timeframe.in_seconds(timeframe.period) / 60.0
+
+// --- session-scoped indicators (see the header) ------------------------------
+var float emaV  = na
+var float atrV  = na
+var float cumPV = 0.0
+var float cumV  = 0.0
+var float cumDV = 0.0
+var int barCount = 0
+
+if newSession
+    emaV := na
+    atrV := na
+    cumPV := 0.0
+    cumV := 0.0
+    cumDV := 0.0
+    barCount := 0
+
+float trV = na
+if inSess
+    barCount := barCount + 1
+    trV := barCount == 1 ? high - low : math.max(high - low, math.max(math.abs(high - close[1]), math.abs(low - close[1])))
+    emaV := barCount == 1 ? close : emaV + (2.0 / (emaFastLen + 1)) * (close - emaV)
+    atrV := barCount == 1 ? trV : atrV + (trV - atrV) / atrLen
+    cumPV := cumPV + ((high + low + close) / 3.0) * volume
+    cumV  := cumV + volume
+    cumDV := cumDV + close * volume
+
+vwapV = cumV > 0 ? cumPV / cumV : na
+mature = inSess and barCount >= emaFastLen and barCount >= minVwapBars and cumDV >= minVwapDV and not na(vwapV)
+
+// 0 = undefined, 1 = BEARISH, 2 = STRONG, 3 = WEAK_BULL
+int regime = 0
+if mature
+    regime := close <= vwapV ? 1 : (close > emaV ? 2 : 3)
+
+// --- session-high tracking (raw structure, independent of maturity) ---------
+var float sessHigh = na
+var int barsSinceHigh = 0
+if newSession
+    sessHigh := na
+    barsSinceHigh := 0
+if inSess
+    if na(sessHigh) or high >= sessHigh
+        sessHigh := high
+        barsSinceHigh := 0
+    else
+        barsSinceHigh := barsSinceHigh + 1
+
+// --- Setup A: VWAP reclaim ---------------------------------------------------
+// Checked using the bearish streak as of the PREVIOUS bar, then the streak is
+// updated — the same order as vw9.py's loop. Reversing it would let the
+// reclaim bar count itself as part of the run it is reclaiming from.
+var int bearRun = 0
+var array<float> bearLows = array.new_float()
+if newSession
+    bearRun := 0
+    array.clear(bearLows)
+
+bool trigA = false
+float structLowA = na
+
+if regime == 2 and bearRun >= minBelowBars
+    int n = array.size(bearLows)
+    float lo = na
+    if n == 0
+        lo := low
+    else
+        for i = math.max(0, n - reclaimLookback) to n - 1
+            float v = array.get(bearLows, i)
+            lo := na(lo) ? v : math.min(lo, v)
+    trigA := true
+    structLowA := lo
+    bearRun := 0
+    array.clear(bearLows)
+
+if inSess
+    if regime == 1
+        bearRun := bearRun + 1
+        array.push(bearLows, low)
+    else
+        bearRun := 0
+        array.clear(bearLows)
+
+// --- Setup B: 9 EMA retest ---------------------------------------------------
+var bool  inPullback = false
+var float pbLow = na
+var int   pbStartIdx = 0
+var float impulseUpVol = 0.0     // running max up-bar volume while STRONG
+var float pbImpulseUpVol = na    // frozen at the moment a pullback opens
+var float pbMaxDownVol = na
+var int   prevRegime = 0
+var float prevClose = na
+
+if newSession
+    inPullback := false
+    impulseUpVol := 0.0
+    prevRegime := 0
+    prevClose := na
+
+bool trigB = false
+float structLowB = na
+float bImpulseUp = na
+float bMaxDown = na
+
+if inSess and inPullback
+    pbLow := math.min(pbLow, low)
+    int pbLen = barCount - pbStartIdx
+    float dropIn = na(prevClose) ? 0.0 : prevClose - close
+    bool uncIn = atrV > 0 and dropIn > pullbackCtrlAtr * atrV
+    if dropIn > 0
+        pbMaxDownVol := math.max(nz(pbMaxDownVol, 0.0), volume)
+    if regime == 1
+        inPullback := false
+    else if regime == 2
+        if pbLen <= maxPullbackBars and not uncIn
+            trigB := true
+            structLowB := pbLow
+            bImpulseUp := pbImpulseUpVol
+            bMaxDown := pbMaxDownVol
+        inPullback := false
+    else
+        if uncIn or pbLen > maxPullbackBars
+            inPullback := false
+else if inSess
+    if regime == 3 and prevRegime == 2 and barsSinceHigh <= impulseLookback
+        float dropOpen = na(prevClose) ? 0.0 : prevClose - close
+        bool uncOpen = atrV > 0 and dropOpen > pullbackCtrlAtr * atrV
+        if not uncOpen
+            inPullback := true
+            pbStartIdx := barCount
+            pbLow := low
+            pbImpulseUpVol := impulseUpVol
+            pbMaxDownVol := dropOpen > 0 ? volume : 0.0
+
+// Impulse up-volume: running max while STRONG, reset the instant regime leaves
+// STRONG, so each fresh impulse starts from zero. It has to be FROZEN into
+// pbImpulseUpVol when a pullback opens — by the time this line runs on that
+// bar the value would already be gone.
+if inSess
+    if regime == 2
+        if not na(prevClose) and close > prevClose
+            impulseUpVol := math.max(impulseUpVol, volume)
+    else
+        impulseUpVol := 0.0
+    prevRegime := regime
+    prevClose := close
+
+// --- gates (spec 4.3) --------------------------------------------------------
+var int entriesThisSession = 0
+if newSession
+    entriesThisSession := 0
+
+triggerDV = close * volume
+gateLiquidity = triggerDV >= minTriggerDvPerMin * tfMinutes
+// ext is undefined only when ATR14 is exactly zero — a degenerate, effectively
+// flat opening print. Treat that as "not extended" rather than divide by zero.
+extAtr = atrV > 0 ? (close - emaV) / atrV : na
+gateExtension = na(extAtr) or extAtr <= maxExtAtr
+gatePbVol = not usePullbackVolGate or na(bImpulseUp) or na(bMaxDown) or bMaxDown <= bImpulseUp
+gateReentry = entriesThisSession < maxEntriesPerSession
+inBand = not usePriceBand or (close >= priceMin and close <= priceMax)
+
+// Setup A wins a tie, matching the order vw9.py appends them in.
+takeA = trigA and gateLiquidity and gateExtension
+takeB = trigB and gateLiquidity and gateExtension and gatePbVol
+structLow = takeA ? structLowA : structLowB
+// r > 0 is checked properly on the fill bar; this is the necessary condition
+// knowable now, and it keeps a doomed order from being sent at all.
+plausibleR = not na(structLow) and structLow < close
+
+enterNow = (takeA or takeB) and gateReentry and inBand and plausibleR and strategy.position_size == 0
+
+var float pendingStop = na
+qty = math.min(maxShares, math.floor(strategy.equity * maxEquityPct / 100.0 / close))
+
+if enterNow and qty >= 1
+    pendingStop := structLow - stopBufferAtr * nz(atrV, 0.0)
+    entriesThisSession := entriesThisSession + 1
+    strategy.entry("Long", strategy.long, qty=qty)
+    alert("VW9 BUY " + syminfo.ticker + " setup " + (takeA ? "A" : "B") + " qty " + str.tostring(qty) + " ref " + str.tostring(close) + " — use marketable LIMIT, check spread", alert.freq_once_per_bar_close)
+
+// --- position management -----------------------------------------------------
+var float stopLvl = na
+var float targetLvl = na
+var float rSize = na
+var float peakPrev = na
+var int fillBar = na
+var int badR = 0
+
+justFilled = strategy.position_size > 0 and strategy.position_size[1] == 0
+if justFilled
+    stopLvl := pendingStop
+    rSize := strategy.position_avg_price - stopLvl
+    targetLvl := strategy.position_avg_price + targetR * rSize
+    peakPrev := strategy.position_avg_price
+    fillBar := bar_index
+
+inPos = strategy.position_size > 0
+barsSinceFill = inPos and not na(fillBar) ? bar_index - fillBar : 0
+
+trailAtrLvl = inPos and not na(peakPrev) ? peakPrev - trailAtrMult * nz(atrV, 0.0) : na
+trailPctLvl = inPos and not na(peakPrev) ? peakPrev * (1.0 - trailPct / 100.0) : na
+
+if inPos
+    if na(rSize) or rSize <= 0
+        // Python declines this trade outright; Pine only learns the fill price
+        // one bar later. Counted rather than hidden.
+        badR := badR + 1
+        strategy.close("Long", comment="R<=0")
+    else
+        if useStructuralStop
+            strategy.exit("Stop", from_entry="Long", stop=stopLvl, limit=exitMode == "fixed_2r" ? targetLvl : na)
+        else if exitMode == "fixed_2r"
+            strategy.exit("Target", from_entry="Long", limit=targetLvl)
+        if useVwapExit and barsSinceFill >= vwapGraceBars and not na(vwapV) and close <= vwapV
+            strategy.close("Long", comment="VWAP lost")
+            alert("VW9 EXIT " + syminfo.ticker + " — VWAP lost", alert.freq_once_per_bar_close)
+        else if sessEnd
+            strategy.close("Long", comment="Session close")
+        else if exitMode == "ride_ema9" and close < emaV
+            strategy.close("Long", comment="EMA9 lost")
+            alert("VW9 EXIT " + syminfo.ticker + " — 9 EMA lost", alert.freq_once_per_bar_close)
+        else if exitMode == "trail_atr" and not na(trailAtrLvl)
+            strategy.exit("TrailATR", from_entry="Long", stop=trailAtrLvl)
+        else if exitMode == "trail_pct" and not na(trailPctLvl)
+            strategy.exit("TrailPct", from_entry="Long", stop=trailPctLvl)
+
+// Peak updated at the END of the bar, so any trail tested on a bar reflects the
+// peak as of the PREVIOUS one. Same no-same-bar-lookahead rule as MCL and MC5.
+peakPrev := inPos ? math.max(nz(peakPrev, strategy.position_avg_price), high) : na
+if not inPos
+    stopLvl := na
+    targetLvl := na
+    rSize := na
+    fillBar := na
+
+// --- status ------------------------------------------------------------------
+var int nSessBars = 0
+var int preBars = 0
+var int firstSess = na
+var int lastSess = na
+if inSess
+    nSessBars += 1
+    et = str.format_time(time, "HHmm", "America/New_York")
+    if str.tonumber(et) < 930
+        preBars += 1
+    if na(firstSess)
+        firstSess := time
+    lastSess := time
+
+var table ts = table.new(position.top_right, 2, 14, bgcolor=color.new(color.black, 10), border_width=1, border_color=color.new(color.gray, 60))
+f_s(r, k, v) =>
+    table.cell(ts, 0, r, k, text_color=color.silver, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(ts, 1, r, v, text_color=color.white,  text_size=size.tiny, text_halign=text.align_right)
+f_dt(t) => str.format_time(t, "MMM-dd HH:mm", "America/New_York")
+
+tfOk = timeframe.period == "5"
+bandBlocked = usePriceBand and not na(close) and (close < priceMin or close > priceMax)
+regimeTxt = regime == 0 ? "undefined (immature)" : regime == 1 ? "BEARISH" : regime == 2 ? "STRONG" : "WEAK_BULL"
+
+if barstate.islastconfirmedhistory or barstate.islast
+    int tot = strategy.closedtrades
+    float pl = 0.0
+    int wins = 0
+    if tot > 0
+        for i = 0 to tot - 1
+            float p = strategy.closedtrades.profit(i)
+            pl += p
+            if p > 0
+                wins += 1
+    f_s(0,  "Symbol / TF",    syminfo.ticker + "  " + timeframe.period)
+    f_s(1,  "Timeframe",      tfOk ? "5m — VW9-5" : "NOT 5m — this is not VW9-5")
+    f_s(2,  "Pre-market",     preBars > 0 ? str.tostring(preBars) + " bars" : "PRE-MARKET BARS MISSING — turn on extended hours")
+    f_s(3,  "Price band",     bandBlocked ? "PRICE BAND BLOCKED — no trades" : (usePriceBand ? "on, symbol inside" : "off"))
+    f_s(4,  "Exit mode",      exitMode + (useStructuralStop ? " + structural stop" : " (no fixed stop)"))
+    f_s(5,  "Regime now",     regimeTxt)
+    f_s(6,  "First bar",      na(firstSess) ? "NO DATA" : f_dt(firstSess))
+    f_s(7,  "Last bar",       na(lastSess)  ? "NO DATA" : f_dt(lastSess))
+    f_s(8,  "Bars in window", str.tostring(nSessBars))
+    f_s(9,  "Closed trades",  str.tostring(tot))
+    f_s(10, "Wins / losses",  str.tostring(wins) + " / " + str.tostring(tot - wins))
+    f_s(11, "NET P/L",        str.tostring(pl, "#.##"))
+    f_s(12, "Avg $ / trade",  tot > 0 ? str.tostring(pl / tot, "#.##") : "n/a")
+    f_s(13, "R<=0 at fill",   badR > 0 ? str.tostring(badR) + " — Python would skip these" : "0")
+
+bgcolor(inSess ? color.new(color.teal, 94) : na, title="In window")
+bgcolor(regime == 2 ? color.new(color.green, 92) : regime == 1 ? color.new(color.red, 94) : na, title="Regime")
+plotshape(takeA and strategy.position_size == 0, "Setup A", shape.triangleup, location.belowbar, color.new(color.teal, 0), size=size.small, text="A")
+plotshape(takeB and strategy.position_size == 0, "Setup B", shape.triangleup, location.belowbar, color.new(color.blue, 0), size=size.small, text="B")
+plot(inSess ? vwapV : na, "VWAP", color.new(color.yellow, 0), style=plot.style_linebr)
+plot(inSess ? emaV : na, "EMA9", color.new(color.aqua, 0), style=plot.style_linebr)
+plot(inPos ? stopLvl : na, "Stop", color.new(color.red, 0), style=plot.style_linebr)
+plot(inPos and exitMode == "fixed_2r" ? targetLvl : na, "Target", color.new(color.lime, 0), style=plot.style_linebr)

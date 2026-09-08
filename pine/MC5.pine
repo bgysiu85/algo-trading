@@ -1,0 +1,238 @@
+//@version=6
+// MC5 — pre-market momentum on 5-minute bars (matches strategy/mc5/mc5.py)
+// ========================================================================
+// Session : 04:00-09:30 ET, flat at 09:30
+// Entry   : RSI rate-of-change >= +5% over the last 3 bars
+//           AND EMA9 > EMA21
+//           AND MACD line > MACD signal
+// Exit    : RSI ROC <= 0 AND MACD slope < 0   (BOTH, as specified)
+//           OR price falls 5% below the highest price since entry
+//           OR the 09:30 window close
+// Size    : min(100 shares, 40% of equity / price), price $2-20 only
+//
+// WHY THIS ONE MATTERS
+// --------------------
+// On the first universe this project did not hand-pick — 27,877 screened
+// symbol-days, 2024-07 to 2026-09 — MC5 nets +$8,209 over 7,403 trades at
+// +$1.11/trade and stays positive through drop-top-5 across 1,791 symbols.
+// It is the only result here that has ever survived that test.
+//
+// It is also thin and fragile. The edge dies somewhere between 3 and 4 orders
+// per round trip, so anything that fragments an order threatens it, and the
+// per-trade margin is about a dollar. See claude/screened_universe_results.md.
+//
+// GRADIENT IS A RATE OF CHANGE, NOT AN ANGLE
+// ------------------------------------------
+// An angle on a chart is not a property of the data — it depends on the pixel
+// scale of the pane, so the same RSI move reads as 20 degrees or 60 depending
+// on zoom. So the entry gradient is a least-squares fit over 3 bars, expressed
+// as a percentage of the fitted START value.
+//
+// MACD uses the SIGN of the fitted slope instead, never a percentage. MACD
+// oscillates around zero, so a percentage is undefined there and explodes
+// either side of it: a move from -0.001 to +0.001 is an infinite percentage
+// rise and a meaningless signal.
+//
+// The RSI denominator is FLOORED at 5. Unfloored, RSI moving 2 -> 8 reads as
+// +300% while the stock is still deeply oversold; synthetic runs produced
+// readings above 7000%. An unbounded input has no place in a threshold test.
+//
+// TWO WAYS THIS TESTER IS MORE OPTIMISTIC THAN THE PYTHON ENGINE
+// --------------------------------------------------------------
+// 1. FILL TIMING. mc5.py enters at the SIGNAL BAR'S CLOSE. Pine with
+//    process_orders_on_close fills at the NEXT bar's open. On 5-minute bars
+//    that is a real gap, and it cuts both ways.
+// 2. GAP-THROUGH EXITS. strategy.exit(stop=) fills AT the stop price. The
+//    Python engine fills at min(stop, bar open), because a bar that OPENS
+//    below the level never offered it. Measured on 688 MC5 stop exits, the
+//    bar opened below the trail 48% of the time, and pricing those at the
+//    stop overstated P/L by $20,394 against a headline of $20,156 — the whole
+//    apparent edge was that one assumption. Pine cannot express it.
+//
+// Treat the Strategy Tester here as directional, not as a P/L figure.
+strategy("MC5 — Momentum 5m", "MC5", overlay=true,
+     initial_capital       = 100000,
+     default_qty_type      = strategy.fixed,
+     default_qty_value     = 1,
+     pyramiding            = 0,
+     process_orders_on_close = true,
+     commission_type       = strategy.commission.cash_per_order,
+     commission_value      = 0.35,
+     slippage              = 1,
+     calc_on_every_tick    = false)
+
+grpSess = "Session"
+sessWindow = input.string("0400-0930", "Trading window (ET)", group=grpSess)
+flatAtEnd = input.bool(true, "Force flat at window close", group=grpSess)
+
+grpEntry = "Entry"
+entryRocPct = input.float(5.0, "Min RSI rate of change (%)", step=0.5, group=grpEntry, tooltip="Over SLOPE_BARS bars, on the least-squares fit, as a percent of the fitted start. mc5.py ENTRY_RSI_ROC_PCT.")
+slopeBars = input.int(3, "Gradient window (bars)", minval=2, maxval=20, group=grpEntry)
+rocMinBase = input.float(5.0, "RSI percentage floor", minval=0.1, step=0.5, group=grpEntry, tooltip="Denominator floor. RSI can sit near zero, where a percentage is unbounded and meaningless. mc5.py ROC_MIN_BASE.")
+
+grpExit = "Exit"
+exitRocPct = input.float(0.0, "Exit RSI rate of change (%)", step=0.5, group=grpExit, tooltip="Exit needs RSI ROC at or below this AND a negative MACD slope. 0 = any negative gradient, as specified. -5 demands the same magnitude the entry does.")
+trailPct = input.float(5.0, "Trail (%)", minval=0.1, step=0.1, group=grpExit)
+useTrail = input.bool(true, "Trailing stop from high since entry", group=grpExit)
+
+grpLen = "Indicator lengths"
+emaFastLen = input.int(9,  "EMA fast", group=grpLen)
+emaSlowLen = input.int(21, "EMA slow", group=grpLen)
+macdFast = input.int(12, "MACD fast",   group=grpLen)
+macdSlow = input.int(26, "MACD slow",   group=grpLen)
+macdSigL = input.int(9,  "MACD signal", group=grpLen)
+rsiLen   = input.int(14, "RSI",         group=grpLen)
+
+grpSize = "Position sizing"
+maxShares    = input.int(100,   "Max shares",       minval=1,             group=grpSize)
+maxEquityPct = input.float(40.0, "Max % of equity", minval=1, maxval=100, group=grpSize)
+
+// PRICE BAND. Not cosmetic, and not only a universe rule. IB serves
+// SPLIT-ADJUSTED history, so a small cap that later reverse-split comes back
+// at an inflated price — entries up to $32,104 were observed on this pair set,
+// which is $3.2m of notional the account could never hold. Applied to VW9 the
+// same filter moved its headline from -$31,296 to +$3,942: the loss was
+// entirely the adjustment factor being traded as if it were a price.
+//
+// Residual bias it does NOT fix: filtering on the ADJUSTED price
+// preferentially removes names that later reverse-split, and reverse splits
+// follow collapses. The surviving subset tilts towards names that held up.
+grpBand = "Universe"
+usePriceBand = input.bool(true, "Enforce $2-20 price band", group=grpBand, tooltip="ON matches mc5.py. The status table says PRICE BAND BLOCKED when this symbol is outside it, so an empty result explains itself instead of looking like no signal.")
+priceMin = input.float(2.0,  "Min price", minval=0.0, step=0.5, group=grpBand)
+priceMax = input.float(20.0, "Max price", minval=0.0, step=0.5, group=grpBand)
+
+// --- gradients -------------------------------------------------------------
+// ols_slope over n bars, closed form: with x = 0..n-1 the slope is
+// sum((x_i - xbar) * y_i) / sum((x_i - xbar)^2). Written as the general loop
+// rather than the n=3 shortcut ((y - y[2]) / 2) so the input stays meaningful.
+f_olsSlope(src, n) =>
+    float xbar = (n - 1) / 2.0
+    float denom = 0.0
+    float num = 0.0
+    for i = 0 to n - 1
+        float dx = i - xbar
+        denom := denom + dx * dx
+        num := num + dx * src[n - 1 - i]
+    denom == 0 ? na : num / denom
+
+// roc_pct: percent change across the FITTED line, so the numerator is immune
+// to a spike in an interior bar, over a floored fitted start.
+f_rocPct(src, n, minBase) =>
+    float slope = f_olsSlope(src, n)
+    float span  = slope * (n - 1)
+    float start = math.max(ta.sma(src, n) - span / 2.0, minBase)
+    na(slope) ? na : span / start * 100.0
+
+// --- session ---------------------------------------------------------------
+inWin = not na(time(timeframe.period, sessWindow, "America/New_York"))
+sessEnd = flatAtEnd and inWin[1] and not inWin
+
+// --- indicators ------------------------------------------------------------
+[macdLine, sigLine, _hist] = ta.macd(close, macdFast, macdSlow, macdSigL)
+rsiV    = ta.rsi(close, rsiLen)
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+
+rsiRoc    = f_rocPct(rsiV, slopeBars, rocMinBase)
+macdSlope = f_olsSlope(macdLine, slopeBars)
+
+// --- conditions ------------------------------------------------------------
+cRsi  = not na(rsiRoc) and rsiRoc >= entryRocPct
+cEma  = emaFast > emaSlow
+cMacd = macdLine > sigLine
+inBand = not usePriceBand or (close >= priceMin and close <= priceMax)
+
+longSignal = cRsi and cEma and cMacd and inWin and inBand
+
+// Exit needs BOTH gradients negative, as specified. RSI uses the percentage;
+// MACD uses the sign of the fitted slope only.
+xRsi  = not na(rsiRoc) and rsiRoc <= exitRocPct
+xMacd = not na(macdSlope) and macdSlope < 0
+sellSignal = xRsi and xMacd
+
+qty = math.min(maxShares, math.floor(strategy.equity * maxEquityPct / 100.0 / close))
+
+if longSignal and strategy.position_size == 0 and qty >= 1
+    strategy.entry("Long", strategy.long, qty=qty)
+    alert("MC5 BUY " + syminfo.ticker + " qty " + str.tostring(qty) + " ref " + str.tostring(close) + " — use marketable LIMIT, check spread", alert.freq_once_per_bar_close)
+
+// TRAIL PEAK, ordered to match mc5.py exactly. The peak is seeded at the ENTRY
+// PRICE — not the entry bar's high, which happened BEFORE the close we bought
+// at and would price a move the position never had. It is updated at the END
+// of each bar, so the level tested on any bar reflects the peak as of the
+// PREVIOUS one. No same-bar lookahead. Both effects are larger on 5-minute
+// bars than on 1-minute ones, because the high sits further from the close.
+var float peakPrev = na
+inPos = strategy.position_size > 0
+if inPos and na(peakPrev)
+    peakPrev := strategy.position_avg_price
+
+trailLevel = inPos and not na(peakPrev) ? peakPrev * (1.0 - trailPct / 100.0) : na
+
+if inPos
+    if useTrail and not na(trailLevel)
+        strategy.exit("Trail", from_entry="Long", stop=trailLevel)
+    if sessEnd
+        strategy.close("Long", comment="Window close")
+        alert("MC5 EXIT " + syminfo.ticker + " — window close 09:30", alert.freq_once_per_bar_close)
+    else if sellSignal
+        strategy.close("Long", comment="Gradient reversal")
+        alert("MC5 SELL " + syminfo.ticker + " ref " + str.tostring(close) + " — RSI and MACD both turning down", alert.freq_once_per_bar_close)
+
+peakPrev := inPos ? math.max(nz(peakPrev, strategy.position_avg_price), high) : na
+
+// --- status ----------------------------------------------------------------
+var int nSessBars = 0
+var int firstSess = na
+var int lastSess = na
+if inWin
+    nSessBars += 1
+    if na(firstSess)
+        firstSess := time
+    lastSess := time
+
+var table ts = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 10), border_width=1, border_color=color.new(color.gray, 60))
+f_s(r, k, v) =>
+    table.cell(ts, 0, r, k, text_color=color.silver, text_size=size.tiny, text_halign=text.align_left)
+    table.cell(ts, 1, r, v, text_color=color.white,  text_size=size.tiny, text_halign=text.align_right)
+f_dt(t) => str.format_time(t, "MMM-dd HH:mm", "America/New_York")
+
+// MC5 IS DEFINED ON 5-MINUTE BARS. On any other timeframe every indicator
+// length and the 3-bar gradient window mean something different, and the
+// result is a plausible-looking backtest of a strategy that does not exist.
+// Say so on the chart rather than letting the numbers speak for themselves.
+tfOk = timeframe.period == "5"
+// A symbol outside the band produces NO trades. Without this line that is
+// indistinguishable from the strategy finding no signal.
+bandBlocked = usePriceBand and not na(close) and (close < priceMin or close > priceMax)
+
+if barstate.islastconfirmedhistory or barstate.islast
+    int tot = strategy.closedtrades
+    float pl = 0.0
+    int wins = 0
+    if tot > 0
+        for i = 0 to tot - 1
+            float p = strategy.closedtrades.profit(i)
+            pl += p
+            if p > 0
+                wins += 1
+    f_s(0,  "Symbol / TF",    syminfo.ticker + "  " + timeframe.period)
+    f_s(1,  "Timeframe",      tfOk ? "5m — correct" : "WRONG TF — MC5 is 5m only")
+    f_s(2,  "Price band",     bandBlocked ? "PRICE BAND BLOCKED — no trades" : (usePriceBand ? "on, symbol inside" : "off"))
+    f_s(3,  "Window",         sessWindow)
+    f_s(4,  "First bar",      na(firstSess) ? "NO DATA" : f_dt(firstSess))
+    f_s(5,  "Last bar",       na(lastSess)  ? "NO DATA" : f_dt(lastSess))
+    f_s(6,  "Bars in window", str.tostring(nSessBars))
+    f_s(7,  "Closed trades",  str.tostring(tot))
+    f_s(8,  "Wins / losses",  str.tostring(wins) + " / " + str.tostring(tot - wins))
+    f_s(9,  "NET P/L",        str.tostring(pl, "#.##"))
+    f_s(10, "Avg $ / trade",  tot > 0 ? str.tostring(pl / tot, "#.##") : "n/a")
+    f_s(11, "In position",    strategy.position_size != 0 ? "YES @ " + str.tostring(strategy.position_avg_price, format.mintick) : "flat")
+
+bgcolor(inWin ? color.new(color.teal, 92) : na, title="In window")
+plotshape(longSignal and strategy.position_size == 0, "Buy", shape.triangleup, location.belowbar, color.new(color.teal, 0), size=size.small)
+plotshape(sellSignal and strategy.position_size > 0, "Sell", shape.triangledown, location.abovebar, color.new(color.maroon, 0), size=size.small)
+plot(strategy.position_size > 0 ? trailLevel : na, "Trail", color.new(color.red, 0), style=plot.style_linebr)
+plot(emaFast, "EMA9",  color.new(color.aqua, 0))
+plot(emaSlow, "EMA21", color.new(color.orange, 0))
