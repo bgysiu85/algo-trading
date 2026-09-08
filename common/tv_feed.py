@@ -69,8 +69,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from common import notify
-from common.tv_screener import (COLUMNS, FILTERS, MARKET, PRICE_MAX, PRICE_MIN,
-                                check_response)
+from common.tv_screener import (CHANGE_COLUMN, COLUMNS, FILTERS, MARKET,
+                                PRICE_MAX, PRICE_MIN, check_response)
 
 LOG = logging.getLogger("tv_feed")
 ET = ZoneInfo("America/New_York")
@@ -110,7 +110,11 @@ def tv_payload(limit: int = MAX_SYMBOLS) -> dict:
         "markets": [MARKET],
         "symbols": {"query": {"types": []}, "tickers": []},
         "columns": list(COLUMNS),
-        "sort": {"sortBy": "premarket_change", "sortOrder": "desc"},
+        # Ranked on the SCREEN's column: the trader walks the file in order,
+        # and with MAX_CONCURRENT_POSITIONS = 2 the top of the file is what
+        # gets to open a position. Sorting on a different column than the one
+        # filtered would rank by a number the screen no longer uses.
+        "sort": {"sortBy": CHANGE_COLUMN, "sortOrder": "desc"},
         "range": [0, limit],
     }
 

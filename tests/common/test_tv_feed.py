@@ -36,7 +36,7 @@ def test_payload_is_built_from_the_screener_definition():
     sent = F.tv_payload()["filter"]
     assert sent == [dict(f) for f in FILTERS]
     # The screen as of 2026-09-08: exactly two clauses, nothing else.
-    assert {c["left"] for c in sent} == {"premarket_change", "premarket_close"}
+    assert {c["left"] for c in sent} == {"premarket_change_from_open", "premarket_close"}
 
 
 def test_parse_maps_positional_columns_to_names():
@@ -193,19 +193,30 @@ def test_the_feed_writes_the_file_the_trader_reads():
 
 def test_the_screen_is_exactly_the_two_clauses_ben_asked_for():
     """Ben, 2026-09-08: remove all existing filters; keep only pre-market
-    price $2-25 and pre-market change >= 20% (vs prior close). Relative
-    volume and float are GONE, not lowered -- a screen that still carried them
-    would silently be the old screen."""
+    price $2-25 and pre-market change FROM OPEN >= 20% -- movement since the
+    04:00 print, by TradingView's own definition, not the overnight gap.
+    Relative volume and float are GONE, not lowered -- a screen that still
+    carried them would silently be the old screen."""
     from common import tv_screener as S
     lefts = [f["left"] for f in S.FILTERS]
-    assert lefts == ["premarket_change", "premarket_close"]
-    chg = next(f for f in S.FILTERS if f["left"] == "premarket_change")
+    assert lefts == ["premarket_change_from_open", "premarket_close"]
+    chg = next(f for f in S.FILTERS if f["left"] == "premarket_change_from_open")
     px = next(f for f in S.FILTERS if f["left"] == "premarket_close")
     assert chg["operation"] == "egreater" and chg["right"] == 20.0
     assert px["operation"] == "in_range" and px["right"] == [2.0, 25.0]
     for gone in ("relative_volume_10d_calc", "float_shares_outstanding",
-                 "premarket_change_from_open"):
-        assert gone not in lefts
+                 "premarket_change"):
+        assert gone not in lefts, f"{gone} is not part of the screen any more"
+
+
+def test_the_feed_ranks_on_the_column_it_filters_on():
+    """The trader takes the top of the file. Sorting on the gap while
+    filtering on the move since open would rank the list by a number the
+    screen no longer uses."""
+    from common import tv_screener as S
+    assert F.tv_payload()["sort"]["sortBy"] == S.CHANGE_COLUMN
+    assert S.payload()["sort_by"] == S.CHANGE_COLUMN
+    assert S.CHANGE_COLUMN in S.COLUMNS, "the ranking column must be returned"
 
 
 def test_the_screen_ceiling_is_above_the_strategy_band_on_purpose():

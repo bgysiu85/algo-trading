@@ -105,11 +105,21 @@ MARKET = "america"
 # only have the following"). Two clauses.
 #
 #   1. pre-market price between $2 and $25
-#   2. pre-market change >= 20%  -- versus YESTERDAY'S CLOSE, i.e. the gap.
-#      Confirmed with Ben 2026-09-08: this is `premarket_change`, not
-#      `premarket_change_from_open` (movement since the 04:00 print). The two
-#      answer different questions; a name that gapped 30% overnight and has
-#      been flat since passes this one and not the other.
+#   2. pre-market change FROM OPEN >= 20%. TradingView's own definition, as
+#      Ben supplied it 2026-09-08:
+#
+#          Pre-market Change from Open  = premarket close - premarket open
+#          Pre-market Change from Open% = that / premarket open * 100
+#
+#      where "open" is the OPENING PRINT OF THE PRE-MARKET SESSION, not
+#      yesterday's close. So this is movement SINCE 04:00, and a name that
+#      gapped 30% overnight and has been flat since does NOT pass. The column
+#      is `premarket_change_from_open`. (`premarket_change`, the gap versus
+#      yesterday's close, was used for about an hour and was the wrong one.)
+#
+#      NOT YET VERIFIED TO FILTER SERVER-SIDE. Every other column here was
+#      checked on 2026-09-05; this one was not. The feed now warns on any
+#      ignored_filters in the response, so the first poll settles it.
 #
 # Relative volume and float are GONE, not lowered. The previous screen's
 # history is kept below because its findings about the columns were expensive
@@ -120,7 +130,8 @@ MARKET = "america"
 # WARM and are refused at entry. That is deliberate -- tonight's paper data
 # stays on the band the backtests measured. Widening the trader is a separate
 # decision with a backtest behind it, not a side effect of a screen edit.
-PREMARKET_CHANGE_MIN = 20.0            # Pre-mkt chg   >= 20%   (vs prior close)
+PREMARKET_CHANGE_MIN = 20.0            # Pre-mkt chg from open >= 20%  (since 04:00)
+CHANGE_COLUMN = "premarket_change_from_open"
 PREMARKET_PRICE_RANGE = (2.0, 25.0)    # Pre-mkt price  2 to 25 USD, inclusive
 
 # Retained for day_over_day_only() and the record; NOT in the shipped screen.
@@ -130,7 +141,7 @@ FLOAT_RANGE = (0, 20_000_000)
 VOLUME_CHANGE_MIN = (RELATIVE_VOLUME_MIN - 1.0) * 100.0
 
 FILTERS = [
-    {"left": "premarket_change", "operation": "egreater",
+    {"left": CHANGE_COLUMN, "operation": "egreater",
      "right": PREMARKET_CHANGE_MIN},
     # in_range is inclusive at both ends -- confirmed 2026-09-05 with the
     # float filter, which used the same operation.
@@ -138,7 +149,10 @@ FILTERS = [
      "right": list(PREMARKET_PRICE_RANGE)},
 ]
 
-COLUMNS = ["name", "premarket_change", "premarket_close", "premarket_volume",
+# Both change columns are returned so a row shows the gap AND the move since
+# the open side by side -- the difference between them is the overnight gap.
+COLUMNS = ["name", "premarket_change_from_open", "premarket_change",
+           "premarket_close", "premarket_volume",
            "volume", "volume_change", "relative_volume_10d_calc",
            "float_shares_outstanding", "close"]
 
@@ -159,7 +173,7 @@ def payload(limit: int = 50, cap_price: bool = False) -> dict:
         filters.append({"left": "premarket_close", "operation": "in_range",
                         "right": [PRICE_MIN, PRICE_MAX]})
     return dict(market=MARKET, limit=limit, filters=filters,
-                columns=COLUMNS, sort_by="premarket_change", sort_order="desc")
+                columns=COLUMNS, sort_by=CHANGE_COLUMN, sort_order="desc")
 
 
 def day_over_day_only(rows: list[dict]) -> list[dict]:
