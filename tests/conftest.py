@@ -74,3 +74,14 @@ def no_writes_to_real_artefacts(monkeypatch):
 
     monkeypatch.setattr(report_io, "emit", guarded)
     yield
+
+def pytest_configure(config):
+    """Register the markers this suite uses.
+
+    Unregistered marks are only a warning, which is how a typo'd @pytest.mark
+    silently marks nothing. `slow` gates the dry-session replays: they step a
+    synthetic session minute by minute through the real trader and cost
+    seconds rather than milliseconds. Run `pytest -m "not slow"` to skip them.
+    """
+    config.addinivalue_line(
+        "markers", "slow: steps a session through the real trader; seconds")
