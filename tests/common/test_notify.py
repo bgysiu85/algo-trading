@@ -20,8 +20,10 @@ import pytest
 from common import notify as N
 
 
-def row(ticker="AOUT", chg=27.47, px=12.76, relvol=65.46, flt=10_589_237.0):
+def row(ticker="AOUT", chg=27.47, px=12.76, relvol=65.46, flt=10_589_237.0,
+        pmvol=271_202.0):
     return {"ticker": ticker, "premarket_change": chg, "premarket_close": px,
+            "premarket_volume": pmvol,
             "relative_volume_10d_calc": relvol, "float_shares_outstanding": flt}
 
 
@@ -134,7 +136,8 @@ def test_watchlist_message_carries_the_trigger_values():
     assert "AOUT" in msg and "OLD" in msg and "PRICEY" in msg
     assert "+27.5%" in msg and "$12.76" in msg
     assert "relvol 65.5" in msg
-    assert "10,589,237" in msg
+    assert "float 10.6m" in msg, "float in k/m, not raw shares (Ben, 09-09)"
+    assert "pmvol 271k" in msg, "volume statistics, in k/m (Ben, 09-09)"
     assert "07:15:00 ET" in msg, "every alert needs an explicit timezone"
 
 
@@ -156,15 +159,16 @@ def test_fill_messages_name_the_strategy():
     """With MCL, MC5 and VW9 in the repo, a fill on a phone has to say which
     one fired it."""
     assert N.buy_filled("AOUT", 12.76, 100, 0.35, now=NOW,
-                        strategy="MCL").startswith("<b>MCL · BUY AOUT</b>")
+                        strategy="MCL").splitlines()[1] == "<b>MCL BUY AOUT</b>"
     assert N.sell_filled("AOUT", 13.4, 100, 0.35, 63.3, now=NOW,
-                         strategy="VW9").startswith("<b>VW9 · SELL AOUT</b>")
+                         strategy="VW9").splitlines()[1] == "<b>VW9 SELL AOUT</b>"
 
 
 def test_an_unknown_strategy_is_left_blank_not_guessed():
     """A fill labelled with the WRONG strategy is worse than one labelled with
     none, so there is no default."""
-    assert N.buy_filled("A", 1.0, 1, 0.1, now=NOW).startswith("<b>BUY A</b>")
+    assert N.buy_filled("A", 1.0, 1, 0.1,
+                        now=NOW).splitlines()[1] == "<b>BUY A</b>"
 
 
 def test_the_trader_reads_the_name_from_its_strategy_module():
@@ -209,7 +213,7 @@ def test_a_losing_sell_is_visually_distinct():
 
 def test_heartbeat_states_that_the_feed_is_alive():
     msg = N.heartbeat(12, 3, 2, 7, stats="telegram sent=4", now=NOW)
-    assert "alive" in msg and "07:15:00 ET" in msg
+    assert "alive" in msg and "(07:15 ET)" in msg
     assert "12" in msg
 
 
@@ -301,3 +305,88 @@ def test_scrub_catches_the_secret_half_on_its_own():
     n = N.Notifier("8743043831:AAFsecretsecretsecretsecretsecret", "1")
     out = n._scrub("something AAFsecretsecretsecretsecretsecret leaked")
     assert "AAFsecret" not in out
+
+
+# --- the 2026-09-09 message changes ----------------------------------------
+
+def test_the_first_line_is_the_day_date_and_both_clocks():
+    """Ben's format, 2026-09-09: 'Monday 7 Sep 2026 18:30'. He chose local +
+    ET after it, so a message can be lined up against the fill CSV (ET) as
+    well as read off a phone (AEST/AEDT)."""
+    monday = datetime(2026, 9, 7, 4, 30, tzinfo=N.ET)
+    assert N.header(monday) == "Monday 7 Sep 2026 18:30 AEST (04:30 ET)"
+
+
+def test_the_day_number_has_no_leading_zero():
+    """%-d is Linux-only and %#d is Windows-only; this runs on Windows."""
+    assert N.header(datetime(2026, 9, 7, 4, 30, tzinfo=N.ET)).startswith(
+        "Monday 7 Sep")
+
+
+def test_the_header_tracks_australian_daylight_saving_not_a_fixed_offset():
+    """AEST and AEDT sit 14 and 16 hours from ET, and the two countries change
+    over on different weekends. A fixed offset is wrong for weeks each year."""
+    sep = N.header(datetime(2026, 9, 7, 4, 30, tzinfo=N.ET))
+    jan = N.header(datetime(2026, 1, 15, 4, 30, tzinfo=N.ET))
+    assert "18:30 AEST" in sep
+    assert "20:30 AEDT" in jan
+    assert "(04:30 ET)" in sep and "(04:30 ET)" in jan
+
+
+def test_every_message_type_carries_the_header():
+    for msg in (N.buy_filled("A", 1.0, 100, 0.35, now=NOW, strategy="MCL"),
+                N.sell_filled("A", 1.0, 100, 0.35, 1.0, now=NOW, strategy="MCL"),
+                N.watchlist_change(["A"], [], ["A"], [], [], now=NOW),
+                N.heartbeat(1, 1, 0, 0, now=NOW)):
+        assert msg.splitlines()[0] == N.header(NOW)
+
+
+def test_the_second_line_of_an_order_is_strategy_then_side():
+    """Ben, 2026-09-09: '2nd line - Strategy BUY/SELL'. The ticker stays on it
+    -- a fill notification without the symbol is not a fill notification."""
+    buy = N.buy_filled("WYHG", 5.82, 100, 0.35, now=NOW, strategy="MCL")
+    assert buy.splitlines()[1] == "<b>MCL BUY WYHG</b>"
+
+
+def test_share_counts_are_abbreviated_and_money_never_is():
+    """A P/L rounded to '1.3k' on a phone cannot be reconciled against the
+    fill log, so _money stays exact."""
+    assert N._kmb(9_318_299) == "9.3m"
+    assert N._kmb(271_202) == "271k"
+    assert N._kmb(934) == "934"
+    assert N._kmb(None) == "?"
+    assert N._kmb(-2_500_000) == "-2.5m"
+    assert N._money(1_300.0) == "$1,300.00"
+    assert "$1,300.00" in N.sell_filled("A", 13.0, 100, 0.35, 1_300.0, now=NOW)
+
+
+def test_a_drop_reason_names_the_clause_the_value_and_the_threshold():
+    from common.tv_screener import failing_clauses
+    why = N.drop_reason(failing_clauses(
+        {"premarket_change": 25.0, "premarket_close": 8.0,
+         "premarket_volume": 62_000.0}))
+    assert why == "pm vol 62k < 100k"
+
+
+def test_a_drop_reason_reports_every_failing_clause_not_just_the_first():
+    from common.tv_screener import failing_clauses
+    why = N.drop_reason(failing_clauses(
+        {"premarket_change": 4.0, "premarket_close": 41.0,
+         "premarket_volume": 62_000.0}))
+    assert "pm chg" in why and "price" in why and "pm vol" in why
+
+
+def test_no_reason_is_reported_rather_than_a_guessed_one():
+    """The lookup that finds the reason is a separate request and can fail. A
+    guessed cause would be exactly the plausible-looking wrong number this
+    project keeps finding weeks later."""
+    assert N.drop_reason([], fallback="") == ""
+    msg = N.watchlist_change([], ["GONE"], [], [], ["GONE"], now=NOW,
+                             reasons={})
+    assert "GONE" in msg and "—" not in msg.split("no longer screening:")[1].split("\n")[1]
+
+
+def test_a_reason_reaches_the_message_when_there_is_one():
+    msg = N.watchlist_change([], ["GONE"], [], [], ["GONE"], now=NOW,
+                             reasons={"GONE": "pm vol 62k < 100k"})
+    assert "GONE  —  pm vol 62k < 100k" in msg

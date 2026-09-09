@@ -71,6 +71,11 @@ from common import secrets_util as S
 
 LOG = logging.getLogger("notify")
 ET = ZoneInfo("America/New_York")
+# Ben's wall clock. Named as an IANA zone, never a fixed offset: Australia and
+# the US change over on different weekends, so AEST/AEDT sits 14, 15 or 16
+# hours from ET depending on the date, and a hard-coded offset is wrong for
+# several weeks a year. Same rule the Flex parser learned the hard way.
+LOCAL = ZoneInfo("Australia/Sydney")
 
 TOKEN_VAR = "TELEGRAM_BOT_TOKEN"
 CHAT_VAR = "TELEGRAM_CHAT_ID"
@@ -279,7 +284,53 @@ def _tag(strategy: str) -> str:
     """Which strategy fired this. Empty when unknown rather than guessing a
     default -- a fill labelled with the wrong strategy is worse than one
     labelled with none, and there is more than one trader in this repo."""
-    return f"{strategy} · " if strategy else ""
+    # "MCL BUY WYHG", not "MCL · BUY WYHG": Ben asked on 2026-09-09 for the
+    # second line to be "Strategy BUY/SELL". The ticker stays on it -- his spec
+    # did not mention it, and a fill notification without the symbol is not a
+    # fill notification.
+    return f"{strategy} " if strategy else ""
+
+
+def header(now: datetime | None = None) -> str:
+    """First line of every message: 'Monday 7 Sep 2026 18:30 AEDT (04:30 ET)'.
+
+    BOTH CLOCKS, chosen by Ben on 2026-09-09 knowing the line is longer for it.
+    Local is the clock he reads the phone in; ET is the one the fill CSV, the
+    bar timestamps and the session window are all stamped in, so a message and
+    a log line can be put side by side without arithmetic. Local alone would be
+    ambiguous twice a year -- AEST and AEDT sit 14 and 16 hours from ET, and
+    the gap changes on four separate dates because the two countries shift on
+    different weekends.
+
+    The day number carries no leading zero, and it is built from dt.day rather
+    than a strftime code because the codes that do it are platform-specific --
+    %-d on Linux, %#d on Windows -- and this runs on Windows.
+    """
+    dt = now or datetime.now(ET)
+    local = dt.astimezone(LOCAL)
+    et = dt.astimezone(ET)
+    zone = local.strftime("%Z") or "local"
+    return (f"{local:%A} {local.day} {local:%b %Y} {local:%H:%M} {zone} "
+            f"({et:%H:%M} ET)")
+
+
+def _kmb(x, dp_m: int = 1) -> str:
+    """9,318,299 -> '9.3m'; 271,202 -> '271k'; 934 -> '934'.
+
+    Share counts and volumes only. Never money: _money() stays exact, because
+    a P/L rounded to '1.3k' on a phone is a number that cannot be reconciled
+    against the fill log.
+    """
+    if not isinstance(x, (int, float)) or isinstance(x, bool):
+        return "?"
+    a = abs(x)
+    if a >= 1e9:
+        return f"{x / 1e9:.{dp_m}f}b"
+    if a >= 1e6:
+        return f"{x / 1e6:.{dp_m}f}m"
+    if a >= 1e3:
+        return f"{x / 1e3:.0f}k"
+    return f"{x:,.0f}"
 
 
 def _money(x: float) -> str:
@@ -294,17 +345,63 @@ def _trigger_line(r: dict) -> str:
     def num(key, fmt, suffix=""):
         v = r.get(key)
         return f"{v:{fmt}}{suffix}" if isinstance(v, (int, float)) else "?"
+    px = (_money(r["premarket_close"])
+          if isinstance(r.get("premarket_close"), (int, float)) else "?")
+    # Volume in three readings, because they answer different questions and
+    # only the first is what the screen actually filters on: how much has
+    # traded pre-market (the clause), how that compares with a normal day
+    # (relvol), and how much of the company can trade at all (float).
     return (f"    {r.get('ticker','?')}  "
-            f"{num('premarket_change', '+.1f', '%')}  "
-            f"{_money(r['premarket_close']) if isinstance(r.get('premarket_close'), (int, float)) else '?'}  "
+            f"{num('premarket_change', '+.1f', '%')}  {px}  "
+            f"pmvol {_kmb(r.get('premarket_volume'))}  "
             f"relvol {num('relative_volume_10d_calc', '.1f')}  "
-            f"float {num('float_shares_outstanding', ',.0f')}")
+            f"float {_kmb(r.get('float_shares_outstanding'))}")
+
+
+def drop_reason(clauses: list[dict] | None, fallback: str = "") -> str:
+    """'pm vol 62k < 100k' from tv_screener.failing_clauses() output.
+
+    A name that stops screening returns NO ROW from the server, so the reason
+    cannot be read off the poll that dropped it -- the caller has to go and ask
+    for the name's current values. When that lookup fails or the clause list is
+    empty, this returns the fallback rather than inventing a cause: "no longer
+    screening" with no reason is honest, and a guessed reason is the kind of
+    plausible-looking wrong number this project keeps finding weeks later.
+    """
+    if not clauses:
+        return fallback
+    parts = []
+    for c in clauses:
+        col, label, v, op, right = (c.get("column"), c.get("label"),
+                                    c.get("value"), c.get("operation"),
+                                    c.get("right"))
+        shares = col in ("premarket_volume", "volume",
+                         "float_shares_outstanding")
+        if v is None:
+            parts.append(f"{label} n/a")
+            continue
+        got = _kmb(v) if shares else (f"{v:,.1f}" if col != "premarket_close"
+                                      else _money(v))
+        if op == "in_range" and isinstance(right, (list, tuple)) and len(right) == 2:
+            lo, hi = right
+            want = (f"{_kmb(lo)}-{_kmb(hi)}" if shares
+                    else f"{_money(lo)}-{_money(hi)}"
+                    if col == "premarket_close" else f"{lo:g}-{hi:g}")
+            parts.append(f"{label} {got} outside {want}")
+        else:
+            sym = {"egreater": "<", "greater": "<=",
+                   "eless": ">", "less": ">="}.get(op, "fails")
+            want = _kmb(right) if shares else (
+                _money(right) if col == "premarket_close" else f"{right:g}")
+            parts.append(f"{label} {got} {sym} {want}")
+    return ", ".join(parts)
 
 
 def watchlist_change(added: list[str], removed: list[str],
                      hot: list[str], warm: list[str], cold: list[str],
                      now: datetime | None = None,
-                     rows: list[dict] | None = None) -> str:
+                     rows: list[dict] | None = None,
+                     reasons: dict[str, str] | None = None) -> str:
     """One message per poll that changed something -- not one per symbol.
 
     "removed" is a deliberate simplification of what the feed does. The feed
@@ -312,16 +409,24 @@ def watchlist_change(added: list[str], removed: list[str],
     stops screening is demoted to COLD, and only the size cap evicts anything.
     So this reads as "no longer screening", and the tier list below it shows
     where the name actually went.
+
+    `reasons` maps ticker -> why, already formatted by the caller (which is the
+    only place that can look the values up). A ticker missing from it is
+    reported without a reason rather than with a guessed one.
     """
     by_ticker = {r.get("ticker"): r for r in (rows or [])}
-    lines = [f"<b>Watchlist {_ts(now)}</b>"]
+    reasons = reasons or {}
+    lines = [header(now), f"<b>Watchlist</b>  {_ts(now)}"]
     if added:
         lines.append(f"➕ added: <b>{', '.join(added)}</b>")
         for t in added:
             if t in by_ticker:
                 lines.append(_trigger_line(by_ticker[t]))
     if removed:
-        lines.append(f"➖ no longer screening: {', '.join(removed)}")
+        lines.append("➖ no longer screening:")
+        for t in removed:
+            why = reasons.get(t)
+            lines.append(f"    {t}" + (f"  —  {why}" if why else ""))
     lines.append("")
     lines.append(f"🔥 HOT ({len(hot)}): {', '.join(hot) if hot else '—'}")
     lines.append(f"🟡 WARM ({len(warm)}): {', '.join(warm) if warm else '—'}")
@@ -335,7 +440,7 @@ def heartbeat(scanned: int, hot: int, warm: int, cold: int,
     "a dead alerter and a quiet market look identical from the phone." A quiet
     pre-market produces no watchlist changes at all, which is exactly when a
     crashed feed is invisible."""
-    line = (f"💓 <b>feed alive</b> {_ts(now)} — screened {scanned}, "
+    line = (f"{header(now)}\n💓 <b>feed alive</b> — screened {scanned}, "
             f"hot {hot} / warm {warm} / cold {cold}")
     return line + (f"\n<i>{stats}</i>" if stats else "")
 
@@ -344,7 +449,8 @@ def buy_filled(ticker: str, price: float, qty: int, commission: float,
                now: datetime | None = None, strategy: str = "") -> str:
     cost = price * qty
     return "\n".join([
-        f"<b>{_tag(strategy)}BUY {ticker}</b>  {_ts(now)}",
+        header(now),
+        f"<b>{_tag(strategy)}BUY {ticker}</b>",
         f"price      {_money(price)}",
         f"shares     {qty:,}",
         f"cost       {_money(cost)}",
@@ -362,7 +468,8 @@ def sell_filled(ticker: str, price: float, qty: int, commission: float,
     proceeds = price * qty
     sign = "🟢" if net_profit >= 0 else "🔴"
     return "\n".join([
-        f"<b>{_tag(strategy)}SELL {ticker}</b>  {_ts(now)}",
+        header(now),
+        f"<b>{_tag(strategy)}SELL {ticker}</b>",
         f"price      {_money(price)}",
         f"shares     {qty:,}",
         f"proceeds   {_money(proceeds)}",
@@ -406,8 +513,10 @@ def main() -> int:
                                      rows=[{"ticker": "AOUT",
                                             "premarket_change": 27.47,
                                             "premarket_close": 12.76,
+                                            "premarket_volume": 271_202.0,
                                             "relative_volume_10d_calc": 65.46,
-                                            "float_shares_outstanding": 10_589_237.0}]),
+                                            "float_shares_outstanding": 10_589_237.0}],
+                                     reasons={"OLDNAME": "pm vol 62k < 100k"}),
                     buy_filled("AOUT", 12.76, 100, 0.35, strategy="MCL"),
                     sell_filled("AOUT", 13.40, 100, 0.35, 63.30,
                                 strategy="MCL")):

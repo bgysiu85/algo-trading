@@ -294,3 +294,87 @@ def test_every_pine_script_enforces_the_same_price_band():
         assert "bandBlocked" in src, (
             f"{name}: no PRICE BAND BLOCKED line. A symbol outside the band "
             "produces no trades, which reads as no signal unless it says so")
+
+
+# --- why a name dropped off the watchlist (Ben, 2026-09-09) -----------------
+
+def test_the_drop_lookup_asks_for_the_named_symbols_with_no_filters():
+    """The screen is applied server-side, so a name that stops passing returns
+    no row. The only way to learn why is to ask for it unfiltered."""
+    p = F.tickers_payload(["NASDAQ:WYHG", "NYSE:BNC"])
+    assert p["filter"] == [], "any clause here re-hides the row we are asking about"
+    assert p["symbols"]["tickers"] == ["NASDAQ:WYHG", "NYSE:BNC"]
+    assert p["columns"] == list(F.COLUMNS), (
+        "the reason is computed from these columns; a short list means a "
+        "clause cannot be evaluated and gets reported as 'n/a'")
+
+
+def test_the_reason_is_derived_from_the_live_filter_list():
+    """THE TRAP THIS TEST EXISTS FOR. The screen was five clauses last week and
+    is three today. A hand-written explanation would keep describing last
+    week's screen, confidently, in a message that looked right."""
+    from common import tv_screener as TS
+    row = {"premarket_change": 25.0, "premarket_close": 8.0,
+           "premarket_volume": 62_000.0}
+    assert [c["column"] for c in TS.failing_clauses(row)] == ["premarket_volume"]
+
+    # Add a clause to the screen and the explanation follows it, with no edit
+    # here and none in notify.py.
+    extra = list(TS.FILTERS) + [{"left": "relative_volume_10d_calc",
+                                 "operation": "egreater", "right": 5.0}]
+    cols = [c["column"] for c in TS.failing_clauses(row, filters=extra)]
+    assert cols == ["premarket_volume", "relative_volume_10d_calc"]
+
+
+def test_a_missing_column_is_a_failure_not_a_pass():
+    """A row TradingView returns without the column is not a row that passed
+    on it. Treating absent as passing would drop the real reason silently."""
+    from common import tv_screener as TS
+    bad = TS.failing_clauses({"premarket_change": 25.0, "premarket_close": 8.0})
+    assert [c["column"] for c in bad] == ["premarket_volume"]
+    assert bad[0]["value"] is None
+
+
+def test_an_operation_the_evaluator_does_not_know_blames_nothing():
+    """Reporting an unevaluable clause as failed would blame a clause the row
+    may well pass."""
+    from common import tv_screener as TS
+    weird = [{"left": "premarket_close", "operation": "matches_pattern",
+              "right": "x"}]
+    assert TS.failing_clauses({"premarket_close": 8.0}, filters=weird) == []
+
+
+def test_the_lookup_never_raises_into_the_poll(monkeypatch):
+    """This is a cosmetic feature inside the loop that keeps the watchlist
+    current. A TradingView hiccup must cost a reason string, never a poll."""
+    def boom(*a, **k):
+        raise OSError("connection reset")
+    monkeypatch.setattr(F.urllib.request, "urlopen", boom)
+    assert F.explain_drops(["NASDAQ:WYHG"]) == {}
+
+
+def test_a_symbol_the_unfiltered_query_also_loses_is_not_blamed_on_a_clause(
+        monkeypatch):
+    """Halted, delisted, or simply not carried by the scanner. Naming a clause
+    it failed would be a lie -- we never saw a value to judge."""
+    monkeypatch.setattr(F, "_scan", lambda payload: {"data": []})
+    assert F.explain_drops(["NASDAQ:GONE"]) == {
+        "GONE": "no longer returned by the scanner"}
+
+
+def test_a_symbol_that_comes_back_is_explained_by_its_failing_clause(
+        monkeypatch):
+    vals = {"premarket_change": 25.0, "premarket_close": 8.0,
+            "premarket_volume": 62_000.0}
+    d = [vals.get(c) for c in F.COLUMNS]
+    monkeypatch.setattr(F, "_scan",
+                        lambda payload: {"data": [{"s": "NASDAQ:WYHG", "d": d}]})
+    assert F.explain_drops(["NASDAQ:WYHG"]) == {"WYHG": "pm vol 62k < 100k"}
+
+
+def test_nothing_dropped_means_no_extra_request(monkeypatch):
+    """One extra call per poll that lost something, and none otherwise."""
+    calls = []
+    monkeypatch.setattr(F, "_scan", lambda payload: calls.append(payload) or {})
+    assert F.explain_drops([]) == {}
+    assert calls == []

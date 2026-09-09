@@ -146,6 +146,13 @@ PREMARKET_PRICE_RANGE = (2.0, 25.0)    # Pre-mkt price  2 to 25 USD, inclusive
 # Retained for day_over_day_only() and the record; NOT in the shipped screen.
 RELATIVE_VOLUME_MIN = 5.0
 PREMARKET_PRICE_MIN = PREMARKET_PRICE_RANGE[0]
+# NOT A FILTER. Ben, 2026-09-09, asked to raise the float ceiling to 35m "if
+# float is still a filter" -- it is not, and he chose to leave it off and keep
+# float as a DISPLAYED column only. The number is kept at what it was when the
+# clause last shipped, deliberately: retyping it to 35m would leave a constant
+# that has never screened anything claiming to be the current ceiling. If float
+# is ever re-added, that is a decision with a universe change behind it and the
+# ceiling gets set then.
 FLOAT_RANGE = (0, 20_000_000)
 VOLUME_CHANGE_MIN = (RELATIVE_VOLUME_MIN - 1.0) * 100.0
 
@@ -159,6 +166,65 @@ FILTERS = [
     {"left": "premarket_volume", "operation": "egreater",
      "right": PREMARKET_VOLUME_MIN},
 ]
+
+# Human labels for the filtered columns, so a message can say "pm vol 62k <
+# 100k" rather than "premarket_volume". Display only.
+CLAUSE_LABELS = {
+    "premarket_change": "pm chg",
+    "premarket_close": "price",
+    "premarket_volume": "pm vol",
+    "relative_volume_10d_calc": "relvol",
+    "float_shares_outstanding": "float",
+}
+
+# The operations FILTERS may use, as callables. Evaluating a clause locally is
+# only sound if this agrees with the server; the set is small on purpose and
+# every member is one of the operations verified live on 2026-09-05 above.
+_OPS = {
+    "greater": lambda v, r: v > r,
+    "egreater": lambda v, r: v >= r,
+    "less": lambda v, r: v < r,
+    "eless": lambda v, r: v <= r,
+    "in_range": lambda v, r: r[0] <= v <= r[1],
+}
+
+
+def failing_clauses(row: dict, filters: list[dict] | None = None) -> list[dict]:
+    """Which of FILTERS this row does NOT satisfy — i.e. why it stopped screening.
+
+    DERIVED FROM FILTERS, NEVER RESTATED. The screen is three clauses today and
+    was five last week. A hand-written "why did it drop" check would go on
+    answering with last week's screen, confidently and in a message that looked
+    right — which is the failure mode this project keeps paying for. Reading
+    FILTERS means the explanation cannot describe a screen that is not running.
+
+    A missing or non-numeric value is reported as a failure with value None: a
+    row TradingView returns without the column is not a row that passed on it.
+
+    Returns {column, label, value, operation, right} dicts and does no
+    formatting, so the logic can be tested without a message around it.
+    """
+    out = []
+    for f in (FILTERS if filters is None else filters):
+        col, op, right = f["left"], f["operation"], f["right"]
+        v = row.get(col)
+        ok = False
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            fn = _OPS.get(op)
+            if fn is None:
+                # An operation this cannot evaluate must NOT be reported as a
+                # failure — that would blame a clause the row may well pass.
+                continue
+            try:
+                ok = bool(fn(v, right))
+            except (TypeError, IndexError):
+                continue
+        if not ok:
+            out.append({"column": col, "label": CLAUSE_LABELS.get(col, col),
+                        "value": v if isinstance(v, (int, float)) else None,
+                        "operation": op, "right": right})
+    return out
+
 
 # Both change columns are returned so a row shows the gap AND the move since
 # the open side by side -- the difference between them is the overnight gap.

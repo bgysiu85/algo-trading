@@ -1184,7 +1184,10 @@ WATCHLIST_TEMPLATE = """\
 # Cleared automatically at the end of the {date} session; the list that ran
 # that day is in archive/watchlist_{stamp}.txt
 #
-# Screen: $2-20 price, RVOL(1D) >= 5x, float < 20m, top pre-market gainer.
+# Screen: pre-market change >= 20% (against the PREVIOUS REGULAR CLOSE),
+#         pre-market price $2-25, pre-market volume >= 100k.
+#         Float is NOT filtered; it is shown on the alert only.
+#         The trader still refuses entries outside $2-20.
 # The running script re-reads this file every 5 seconds, so names can be added
 # or removed mid-session without restarting.
 #

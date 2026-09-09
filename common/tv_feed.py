@@ -70,7 +70,8 @@ from zoneinfo import ZoneInfo
 
 from common import notify
 from common.tv_screener import (CHANGE_COLUMN, COLUMNS, FILTERS, MARKET,
-                                PRICE_MAX, PRICE_MIN, check_response)
+                                PRICE_MAX, PRICE_MIN, check_response,
+                                failing_clauses)
 
 LOG = logging.getLogger("tv_feed")
 ET = ZoneInfo("America/New_York")
@@ -134,12 +135,7 @@ def parse(body: dict) -> list[dict]:
 
 
 def fetch(limit: int = MAX_SYMBOLS) -> list[dict]:
-    req = urllib.request.Request(
-        ENDPOINT, data=json.dumps(tv_payload(limit)).encode(),
-        headers={"Content-Type": "application/json",
-                 "User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as r:
-        body = json.load(r)
+    body = _scan(tv_payload(limit))
     # THE RULE tv_screener.py states and this feed was not following: the
     # server accepts a clause it cannot apply, returns a plausible result set,
     # and lists the dropped clause under ignored_filters. A feed that does not
@@ -150,6 +146,72 @@ def fetch(limit: int = MAX_SYMBOLS) -> list[dict]:
         LOG.warning("TradingView IGNORED filter(s) %s -- the rows below are NOT "
                     "screened on them. Check the column name.", ignored)
     return parse(body)
+
+
+def _scan(payload: dict) -> dict:
+    """One POST to the scanner endpoint. Split out of fetch() so the drop
+    lookup shares exactly the request the feed itself makes, and so a test can
+    replace the network in one place instead of patching urllib."""
+    req = urllib.request.Request(
+        ENDPOINT, data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json",
+                 "User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as r:
+        return json.load(r)
+
+
+def tickers_payload(symbols: list[str]) -> dict:
+    """The same columns, for named symbols, with NO filter clauses.
+
+    This is the only way to say WHY a name dropped. The screen is applied
+    server-side, so a name that stops passing returns no row at all, and the
+    poll that dropped it carries no information about it beyond its absence.
+    Asking for the symbol explicitly and unfiltered gets its current values
+    back, and tv_screener.failing_clauses() then names the clause it now fails.
+
+    `symbols` are full TradingView symbols ("NASDAQ:WYHG"), not tickers.
+    """
+    return {
+        "filter": [],
+        "options": {"lang": "en"},
+        "markets": [MARKET],
+        "symbols": {"query": {"types": []}, "tickers": list(symbols)},
+        "columns": list(COLUMNS),
+        "range": [0, len(symbols)],
+    }
+
+
+def explain_drops(symbols: list[str]) -> dict[str, str]:
+    """ticker -> why it stopped screening. Never raises, never stalls the poll.
+
+    One extra request, and only on a poll where something actually dropped,
+    which is rare. It is wrapped because this is a cosmetic feature sitting
+    inside the loop that keeps the watchlist current: a TradingView hiccup here
+    must cost a reason string, never a poll. On failure the names come back
+    with no reason at all, and the message simply omits it.
+    """
+    if not symbols:
+        return {}
+    try:
+        rows = parse(_scan(tickers_payload(symbols)))
+    except Exception as e:                                    # noqa: BLE001
+        LOG.info("could not look up why %d name(s) dropped (%s: %s)",
+                 len(symbols), type(e).__name__, e)
+        return {}
+
+    out: dict[str, str] = {}
+    seen = set()
+    for row in rows:
+        seen.add(row["ticker"])
+        out[row["ticker"]] = notify.drop_reason(failing_clauses(row))
+    # A symbol the UNFILTERED query does not return either is not "failing a
+    # clause" -- it is gone from the scanner altogether (halted, delisted, or
+    # not carried). Naming a clause for it would be a lie.
+    for s in symbols:
+        t = s.split(":")[-1]
+        if t not in seen:
+            out[t] = "no longer returned by the scanner"
+    return {k: v for k, v in out.items() if v}
 
 
 def in_band(row: dict) -> bool:
@@ -293,8 +355,17 @@ def main() -> int:
         # symbol would be up to 2,000 messages a session and would trip
         # Telegram's per-chat rate limit long before that.
         if added or removed:
+            # Why each dropped name dropped. One extra request, only on a poll
+            # that lost something, and only when there is somewhere to send it
+            # -- with Telegram off this is pure cost.
+            reasons = {}
+            if removed and tg.enabled:
+                reasons = explain_drops(
+                    [rank.ever[t]["symbol"] for t in removed
+                     if t in rank.ever and rank.ever[t].get("symbol")])
             tg.send(notify.watchlist_change(added, removed, hot, warm, cold,
-                                            now=now, rows=rows))
+                                            now=now, rows=rows,
+                                            reasons=reasons))
 
         # A quiet pre-market produces no changes at all, which is exactly when
         # a crashed feed looks identical to a calm market from the phone.
