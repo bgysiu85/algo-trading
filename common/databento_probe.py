@@ -23,10 +23,13 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from common.databento_fetch import _key, _scrub, require_databento
 from common.report_io import emit
+
+ET = ZoneInfo("America/New_York")
 
 # The window this project cares about: Ben's trade history plus a fortnight of
 # lookback for the relative-volume denominator.
@@ -34,11 +37,42 @@ WANT_START = "2025-05-20"
 WANT_END = "2026-09-05"
 
 
-def size_one_day(client, dataset: str, schema: str, day: str) -> tuple[float, float]:
-    """Billable MB and USD for ONE day of a dataset/schema. Metadata only."""
-    end = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
+def day_bounds(day: str, window: str | None = None) -> tuple[str, str]:
+    """The [start, end) a size query should ask about.
+
+    `window` is "HH:MM-HH:MM" in ET. It exists for the screener simulation,
+    which needs only the PRE-MARKET slice -- 04:00 to the moment the screen
+    runs. Pricing a whole day would overstate that by better than an order of
+    magnitude and could talk us out of a pull we can comfortably afford.
+
+    ET, not UTC, because every session boundary in this project is stated in ET
+    and converting by hand is how a DST week ends up an hour out.
+    """
+    if not window:
+        return day, (date.fromisoformat(day) + timedelta(days=1)).isoformat()
+    a, _, b = window.partition("-")
+    if not b:
+        sys.exit(f"--window {window!r} needs the form HH:MM-HH:MM, "
+                 "e.g. 04:00-04:30")
+    d = date.fromisoformat(day)
+
+    def stamp(hhmm: str) -> str:
+        h, _, m = hhmm.partition(":")
+        return (datetime(d.year, d.month, d.day, int(h), int(m or 0),
+                         tzinfo=ET)
+                .astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"))
+
+    return stamp(a), stamp(b)
+
+
+def size_one_day(client, dataset: str, schema: str, day: str,
+                 window: str | None = None) -> tuple[float, float]:
+    """Billable MB and USD for one day, or one intraday window, of a
+    dataset/schema. Metadata only -- get_billable_size and get_cost are both
+    free, which is the whole point of asking before pulling."""
+    start, end = day_bounds(day, window)
     kw = dict(dataset=dataset, schema=schema, symbols="ALL_SYMBOLS",
-              stype_in="raw_symbol", start=day, end=end)
+              stype_in="raw_symbol", start=start, end=end)
     mb = int(client.metadata.get_billable_size(**kw)) / 1e6
     usd = float(client.metadata.get_cost(**kw))
     return mb, usd
@@ -55,7 +89,8 @@ def parse_size_args(items) -> list[tuple[str, str]]:
     return out
 
 
-def probe_sizes(client, day: str, pairs, out=None) -> int:
+def probe_sizes(client, day: str, pairs, out=None,
+                window: str | None = None) -> int:
     """Price one day of each dataset/schema, so a plan total can be checked.
 
     A whole-plan estimate is one number per job with nothing to compare it
@@ -68,14 +103,16 @@ def probe_sizes(client, day: str, pairs, out=None) -> int:
     printed, which put the figure this decision turns on in scrollback where it
     had to be copied back by hand -- the exact thing report_io exists to stop.
     """
-    lines = [f"ONE-DAY SIZE PROBE  ({day}, whole universe, billable)", "",
-             f"{'dataset / schema':<30} {'MB/day':>12} {'USD/day':>10}"
+    span = f"{day} {window} ET" if window else f"{day}, whole day"
+    unit = "MB/win" if window else "MB/day"
+    lines = [f"ONE-DAY SIZE PROBE  ({span}, whole universe, billable)", "",
+             f"{'dataset / schema':<30} {unit:>12} {'USD':>10}"
              f"  {'x21 -> MB/month':>16}",
              "-" * 74]
     for dataset, schema in pairs:
         label = f"{dataset} {schema}"
         try:
-            mb, usd = size_one_day(client, dataset, schema, day)
+            mb, usd = size_one_day(client, dataset, schema, day, window)
         except Exception as e:  # noqa: BLE001
             lines.append(f"{label:<30} FAILED: {_scrub(e)}")
             continue
@@ -84,7 +121,9 @@ def probe_sizes(client, day: str, pairs, out=None) -> int:
               "Compare the month column against the same job in the overnight",
               "plan. A large disagreement means one of the two estimates is",
               "wrong, and neither should be acted on until that is settled."]
-    emit("\n".join(lines), out, header=f"common.databento_probe --size  day={day}")
+    emit("\n".join(lines), out,
+         header=f"common.databento_probe --size  day={day}"
+                + (f" window={window} ET" if window else ""))
     return 0
 
 
@@ -95,6 +134,10 @@ def main(argv=None) -> int:
     ap.add_argument("--filter", default="", help="only datasets containing this")
     ap.add_argument("--size", nargs="+", metavar="DATASET:SCHEMA",
                     help="instead of listing, price ONE day of each of these")
+    ap.add_argument("--window", default=None,
+                    help="HH:MM-HH:MM in ET, e.g. 04:00-04:30. Prices only "
+                         "that slice of the day -- what the screener "
+                         "simulation actually needs")
     ap.add_argument("--day", default="2026-08-04",
                     help="the day --size prices (default: %(default)s)")
     ap.add_argument("--out", default="var/reports/databento_size_probe.txt",
@@ -106,7 +149,7 @@ def main(argv=None) -> int:
     c = db.Historical(_key())
 
     if a.size:
-        return probe_sizes(c, a.day, parse_size_args(a.size), a.out)
+        return probe_sizes(c, a.day, parse_size_args(a.size), a.out, a.window)
 
     try:
         names = c.metadata.list_datasets()

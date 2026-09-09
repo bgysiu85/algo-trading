@@ -86,3 +86,77 @@ def test_a_failure_still_reaches_the_file(tmp_path):
     P.probe_sizes(FakeClient(Dead(0)), "2026-08-04",
                   [("EQUS.SUMMARY", "statistics")], out)
     assert "FAILED" in out.read_text(encoding="utf-8")
+
+
+# --- pricing an intraday window ---------------------------------------------
+# Added 2026-09-09 for the screener simulation, which needs only the pre-market
+# slice. Pricing a whole day overstates that by better than an order of
+# magnitude, which is enough to talk someone out of an affordable pull.
+
+from datetime import datetime, timezone          # noqa: E402
+from zoneinfo import ZoneInfo                    # noqa: E402
+
+ET_ = ZoneInfo("America/New_York")
+
+
+def test_no_window_still_prices_a_whole_calendar_day():
+    """The existing behaviour, unchanged, or every earlier size probe in the
+    reports directory silently stops being comparable."""
+    assert P.day_bounds("2026-08-04") == ("2026-08-04", "2026-08-05")
+
+
+def test_a_window_is_read_in_ET_and_sent_as_UTC():
+    """Databento takes UTC. Every session boundary in this project is stated in
+    ET, and converting by hand is how a DST week ends up an hour out."""
+    start, end = P.day_bounds("2026-08-04", "04:00-04:30")
+    assert start == "2026-08-04T08:00:00", "04:00 ET in August is 08:00 UTC"
+    assert end == "2026-08-04T08:30:00"
+
+
+def test_the_conversion_follows_daylight_saving_rather_than_a_fixed_offset():
+    """August is EDT (UTC-4), January is EST (UTC-5). A hard-coded offset would
+    price the wrong half-hour for five months of every year -- and would return
+    a plausible number rather than an error."""
+    summer, _ = P.day_bounds("2026-08-04", "04:00-04:30")
+    winter, _ = P.day_bounds("2026-01-14", "04:00-04:30")
+    assert summer.endswith("T08:00:00")
+    assert winter.endswith("T09:00:00")
+
+
+def test_a_window_covering_the_screen_is_a_small_fraction_of_the_day():
+    """Sanity on the arithmetic itself: 30 minutes is 30 minutes."""
+    s, e = P.day_bounds("2026-08-04", "04:00-04:30")
+    span = (datetime.fromisoformat(e).replace(tzinfo=timezone.utc)
+            - datetime.fromisoformat(s).replace(tzinfo=timezone.utc))
+    assert span.total_seconds() == 1800
+
+
+def test_a_malformed_window_is_refused_rather_than_guessed():
+    """A window silently read as a whole day would price the pull at 20x and
+    the error would appear as a budget decision, not as a bug."""
+    import pytest
+    with pytest.raises(SystemExit):
+        P.day_bounds("2026-08-04", "0400")
+
+
+def test_the_window_reaches_the_billing_call(tmp_path):
+    """A window that is parsed correctly and then not forwarded prices the
+    whole day anyway -- and reports the window in its own header while doing
+    it, which is worse than not offering the option at all."""
+    m = FakeMeta(1.0)
+    P.probe_sizes(FakeClient(m), "2026-08-04", [("XNAS.BASIC", "ohlcv-1m")],
+                  out=str(tmp_path / "r.txt"), window="04:00-04:30")
+    kw = m.calls[0]
+    assert kw["start"] == "2026-08-04T08:00:00"
+    assert kw["end"] == "2026-08-04T08:30:00"
+
+
+def test_the_report_says_which_window_it_priced(tmp_path):
+    """The figure decides a spend. A report that does not name its window
+    cannot be compared with the next one."""
+    p = tmp_path / "r.txt"
+    P.probe_sizes(FakeClient(FakeMeta(1.0)), "2026-08-04",
+                  [("XNAS.BASIC", "ohlcv-1m")], out=str(p),
+                  window="04:00-04:30")
+    text = p.read_text()
+    assert "04:00-04:30" in text and "ET" in text
