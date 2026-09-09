@@ -180,6 +180,34 @@ rsi = ta.rsi(close, rsiLen)
 f_rising(src)  => not na(src[trendLen]) and src > src[trendLen]
 f_falling(src) => not na(src[trendLen]) and src < src[trendLen]
 
+// --- the alert payload -----------------------------------------------------
+// Ben, 2026-09-09: "TV bought at 6:21, IBKR bought at 6:23 -- why the 2 minute
+// difference?" That question could not be answered from the old alert text,
+// because it said WHAT was decided and never WHEN. The only timestamp
+// available was TradingView's delivery time, and reading a delivery time as a
+// bar time is exactly how a two-minute gap becomes unexplainable.
+//
+// BOTH bar stamps go in, because "the 06:21 signal" is ambiguous between the
+// bar LABELLED 06:21 and the moment 06:22:00 when that bar closed and the rule
+// could first fire. The trader cannot act before bar_close_ms, so that is the
+// number its fill must be measured against; bar_time_ms is what the chart
+// shows. Carrying both settles the ambiguity instead of leaving it to be
+// re-argued from a screenshot.
+//
+// Milliseconds since epoch, UTC, unformatted on purpose: a preformatted local
+// string is a daylight-saving bug waiting to happen, and this project reads
+// its clocks in both Sydney and New York.
+f_alert(action, reason, refPx, q) =>
+    '{"v":1,"strategy":"MCL"' +
+      ',"symbol":"'      + syminfo.ticker + '"' +
+      ',"action":"'      + action + '"' +
+      ',"reason":"'      + reason + '"' +
+      ',"bar_time_ms":'  + str.tostring(time, "#") +
+      ',"bar_close_ms":' + str.tostring(time_close, "#") +
+      ',"ref_close":'    + str.tostring(refPx, "#.####") +
+      ',"qty":'          + str.tostring(q, "#") +
+      ',"tf":"'          + timeframe.period + '"}'
+
 macdBsh = -ta.highestbars(macdLine, apexLook)
 mfiBsh  = -ta.highestbars(mfi, apexLook)
 rsiBsh  = -ta.highestbars(rsi, apexLook)
@@ -216,7 +244,7 @@ qty = math.min(maxShares, math.floor(strategy.equity * maxEquityPct / 100.0 / cl
 
 if longSignal and strategy.position_size == 0 and qty >= 1
     strategy.entry("Long", strategy.long, qty=qty)
-    alert("MCL BUY " + syminfo.ticker + " qty " + str.tostring(qty) + " ref " + str.tostring(close) + " — use marketable LIMIT, check spread", alert.freq_once_per_bar_close)
+    alert(f_alert("BUY", "entry_signal", close, qty), alert.freq_once_per_bar_close)
 
 apexMacd = f_falling(macdLine) and macdBsh >= 1
 apexMfi  = f_falling(mfi)      and mfiBsh  >= 1
@@ -234,13 +262,27 @@ barsHeld = strategy.position_size > 0 ? bar_index - strategy.opentrades.entry_ba
 
 if strategy.position_size > 0
     if useTrail and not na(trailLevel)
-        strategy.exit("Trail", from_entry="Long", stop=trailLevel)
+        // THE EXIT THAT CARRIES ALMOST ALL OF THEM. 456 of 479 backtested
+        // exits are this stop, and it fires INTRABAR -- so it cannot use the
+        // alert() calls above, which are once-per-bar-close by design. Without
+        // alert_message the record would show every entry and almost no exit.
+        //
+        // The reference is the trail LEVEL rather than a fill price, because
+        // the fill is not known when this line runs. That is the same
+        // reference the live trader logs as ref_kind=trail_level, so the two
+        // sides remain comparable.
+        //
+        // REQUIRES the TradingView alert to be created with order-fill events
+        // enabled; an alert set to "alert() function calls only" will silently
+        // drop these.
+        strategy.exit("Trail", from_entry="Long", stop=trailLevel,
+             alert_message=f_alert("SELL", "trailing_stop", trailLevel, strategy.position_size))
     if sessEnd
         strategy.close("Long", comment="Window close")
-        alert("MCL EXIT " + syminfo.ticker + " — window close 09:30", alert.freq_once_per_bar_close)
+        alert(f_alert("SELL", "window_close", close, strategy.position_size), alert.freq_once_per_bar_close)
     else if sellSignal and barsHeld >= minHold
         strategy.close("Long", comment="Signal")
-        alert("MCL SELL " + syminfo.ticker + " ref " + str.tostring(close) + " — apex reversal", alert.freq_once_per_bar_close)
+        alert(f_alert("SELL", "apex_reversal", close, strategy.position_size), alert.freq_once_per_bar_close)
 
 var int nSessBars = 0
 var int firstSess = na
