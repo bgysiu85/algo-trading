@@ -205,6 +205,131 @@ def signals(df5: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+# --- the live path --------------------------------------------------------
+#
+# Counted in FIVE-MINUTE bars, not minutes. MACD needs MACD_SLOW + MACD_SIGNAL
+# to mean anything, the gradients need SLOPE_BARS on top, and roc_pct needs one
+# more. 40 five-minute bars is 3 hours 20 minutes of wall clock -- against
+# MCL's 40 one-minute bars, which is 40 minutes.
+#
+# THAT DIFFERENCE IS A WARM-UP PROBLEM A BACKTEST CANNOT SHOW. backtest_session
+# computes signals() over the WHOLE cached frame (three days) and only then
+# restricts to the session date, so its indicators are warm at 04:00. The live
+# trader requests durationStr="1 D", so live MC5 would not be warm until about
+# 07:20 and would sit out more than half of a 04:00-09:30 session. Returning
+# None while cold is correct and is NOT the fix; the fix is fetching enough
+# history, and it belongs with the trader.
+MIN_BARS_REQUIRED = MACD_SLOW + MACD_SIGNAL + SLOPE_BARS + 2
+
+
+@dataclass
+class Signals:
+    """Same field names as strategy/mcl/mcl.Signals, deliberately.
+
+    The trader consumes whichever the active strategy returns, so the two have
+    to stay interchangeable. They are separate classes rather than one shared
+    import because making either module depend on the other is a coupling
+    neither needs -- and a test asserts the field names match, so drift is
+    caught here rather than discovered live.
+    """
+    long_entry: bool
+    exit_signal: bool
+    close: float
+    detail: dict
+
+
+def last_closed_bucket(df1m: pd.DataFrame, now) -> "pd.Timestamp | None":
+    """The most recent 5-minute bucket that is provably COMPLETE.
+
+    THE TRAP THIS EXISTS FOR. resample_bars labels a bucket at its START, so at
+    08:07 the newest bucket is 08:05 and it holds two minutes of a five-minute
+    bar. Evaluating it enters on a signal that has not formed -- and it will
+    look like it works, because a bucket that is going to close green is
+    usually already green. The trader's own 1-minute trim does not help: it
+    drops the forming MINUTE, which still leaves a forming BUCKET.
+
+    This project has paid for this once. entry_latency's first MC5 run compared
+    5-minute fills with 1-minute bars and reported fill positions of 7.85x the
+    bar range with a third of signal bars "not found" -- every number wrong,
+    and the report looked complete.
+
+    A bucket labelled T is complete when BOTH hold:
+
+      * the clock has passed T + BAR_MINUTES, and
+      * the frame carries a closed 1-minute bar at or after T + BAR_MINUTES - 1.
+
+    The clock alone is not enough: IB history can lag, and a bucket missing its
+    last two minutes is not complete because a wall clock says so. The data
+    alone is not enough either -- a minute with no print produces no bar, so
+    "we hold the 08:09 bar" can never be required.
+
+    A name thin enough to print nothing for several minutes waits for its next
+    print. That is the right answer: there is no fill to be had in a minute
+    with no trades, and it resolves as soon as anything trades.
+    """
+    if df1m is None or len(df1m) == 0:
+        return None
+    last_1m = df1m.index[-1]
+    now = pd.Timestamp(now)
+    if now.tzinfo is None:
+        now = now.tz_localize(last_1m.tz)
+    step = pd.Timedelta(minutes=BAR_MINUTES)
+    minute = pd.Timedelta(minutes=1)
+    # Floor to the bucket the last closed minute falls in, then walk back until
+    # one is complete. One step in practice; the loop is here so a stale frame
+    # degrades to "no signal" rather than to a wrong one.
+    bucket = last_1m.floor(f"{BAR_MINUTES}min")
+    while bucket >= df1m.index[0]:
+        if now >= bucket + step and last_1m >= bucket + step - minute:
+            return bucket
+        bucket -= step
+    return None
+
+
+def evaluate_last_bar(df, now) -> "Signals | None":
+    """Evaluate MC5 on the last COMPLETE 5-minute bar. None if there is none.
+
+    `df` may be 1-minute or 5-minute bars. `now` is required rather than
+    defaulted: every safe answer here depends on what time it is, and a default
+    would be a guess made in the one place a guess is most expensive.
+
+    Returns None -- not a no-signal Signals -- whenever the strategy has
+    nothing to say: too few bars to warm the indicators, or no complete bucket
+    yet. The trader already treats None as "nothing happened this poll".
+    """
+    if df is None or len(df) == 0:
+        return None
+    if _looks_5m(df):
+        df5 = df
+    else:
+        closed_at = last_closed_bucket(df, now)
+        if closed_at is None:
+            return None
+        df5 = to_5m(df)
+        df5 = df5[df5.index <= closed_at]
+    if len(df5) < MIN_BARS_REQUIRED:
+        return None
+
+    sig = signals(df5)
+    row = sig.iloc[-1]
+    return Signals(
+        long_entry=bool(row["entry"]),
+        exit_signal=bool(row["exit_sig"]),
+        close=float(row["close"]),
+        detail={
+            "macd": round(float(row["macd"]), 5),
+            "macd_sig": round(float(row["macd_sig"]), 5),
+            "rsi": round(float(row["rsi"]), 2),
+            "rsi_roc": round(float(row["rsi_roc"]), 3),
+            "macd_slope": round(float(row["macd_slope"]), 5),
+            "vol": int(row["volume"]),
+            "c_rsi": bool(row["c_rsi"]),
+            "c_ema": bool(row["c_ema"]),
+            "c_macd": bool(row["c_macd"]),
+        },
+    )
+
+
 # --- backtest -------------------------------------------------------------
 
 @dataclass
