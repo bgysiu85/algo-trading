@@ -384,7 +384,7 @@ def _trigger_line(r: dict) -> str:
     # (relvol), and how much of the company can trade at all (float).
     return (f"    {_esc(r.get('ticker', '?'))}  "
             f"{num('premarket_change', '+.1f', '%')}  {px}  "
-            f"pmvol {_kmb(r.get('premarket_volume'))}  "
+            f"pm vol {_kmb(r.get('premarket_volume'))}  "
             f"relvol {num('relative_volume_10d_calc', '.1f')}  "
             f"float {_kmb(r.get('float_shares_outstanding'))}")
 

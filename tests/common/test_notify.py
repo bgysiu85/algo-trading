@@ -139,7 +139,9 @@ def test_watchlist_message_carries_the_trigger_values():
     assert "+27.5%" in msg and "$12.76" in msg
     assert "relvol 65.5" in msg
     assert "float 10.6m" in msg, "float in k/m, not raw shares (Ben, 09-09)"
-    assert "pmvol 271k" in msg, "volume statistics, in k/m (Ben, 09-09)"
+    assert "pm vol 271k" in msg, (
+        "same label as the drop reason uses for the same column -- two "
+        "spellings of one metric is how a reader ends up asking what it is")
     assert "07:15:00 ET" in msg, "every alert needs an explicit timezone"
 
 
