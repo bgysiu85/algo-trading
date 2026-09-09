@@ -30,6 +30,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from brokers.ibkr import trader as M
+from common import strategy_adapter as SA
 from strategy.mcl import mcl as S
 
 from tests.brokers.ibkr.test_dryrun_roundtrip import (FakeTicker,
@@ -68,10 +69,10 @@ async def drive(tag, target_price):
                           Path(tempfile.gettempdir()) / "wl.txt", log,
                           dry_run=False)
     tr.equity = 22290.96
-    st = M.SymbolState(symbol="TEST")
+    st = M.SymbolState(symbol="TEST", strategy=SA.mcl_adapter())
     st.contract = object()
     st.ticker = FakeTicker()
-    tr.states["TEST"] = st
+    tr.states[(st.strategy.name, "TEST")] = st
 
     now = datetime(2026, 9, 2, 8, 0, tzinfo=M.ET)
     for i, k in enumerate(range(M.MIN_BARS_REQUIRED, n)):
@@ -122,10 +123,22 @@ def main():
     # If someone changes the backtest band, live follows. The whole defect was
     # two copies of one rule drifting apart, so a duplicated constant here
     # would reintroduce it in a new place.
-    src = Path("brokers/ibkr/trader.py").read_text()
-    good = "S.PRICE_MIN <= sig.close <= S.PRICE_MAX" in src
+    # Rewritten 2026-09-09. This used to grep trader.py for the literal
+    # "S.PRICE_MIN <= sig.close <= S.PRICE_MAX". The trader now asks a
+    # StrategyAdapter instead, so that grep would fail while the behaviour was
+    # perfectly correct -- and, worse, would have PASSED if the adapter had
+    # quietly kept a band of its own. Checked by moving the strategy's band and
+    # watching the live path follow.
+    real_max = S.PRICE_MAX
+    try:
+        S.PRICE_MAX = 6.0
+        moved = SA.mcl_adapter()
+        good = (moved.price_max == 6.0 and not moved.in_band(7.0)
+                and moved.in_band(5.0))
+    finally:
+        S.PRICE_MAX = real_max
     print(("PASS" if good else "FAIL"),
-          "trader.py tests against S.PRICE_MIN/S.PRICE_MAX, not its own copy")
+          "the live path follows the STRATEGY's band rather than a copy")
     ok &= good
     good = S.ENFORCE_PRICE_BAND and (S.PRICE_MIN, S.PRICE_MAX) == (2.0, 20.0)
     print(("PASS" if good else "FAIL"),

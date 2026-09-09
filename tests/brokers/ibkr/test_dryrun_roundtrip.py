@@ -17,6 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 from brokers.ibkr import trader as M
+from common import strategy_adapter as SA
 
 
 class FakeTicker:
@@ -81,10 +82,10 @@ async def run_case(tag, bars_seq):
                           log, dry_run=True)
     tr.equity = 22290.96
 
-    st = M.SymbolState(symbol="TEST")
+    st = M.SymbolState(symbol="TEST", strategy=SA.mcl_adapter())
     st.contract = object()
     st.ticker = FakeTicker()
-    tr.states["TEST"] = st
+    tr.states[(st.strategy.name, "TEST")] = st
 
     now = datetime(2026, 9, 2, 8, 0, tzinfo=M.ET)
     for i, df in enumerate(bars_seq):

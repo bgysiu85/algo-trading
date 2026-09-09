@@ -43,10 +43,16 @@ from common import session_lock
 # the trader on its own client id.
 SESSION_MODES = {"paper", "dry"}
 
-# Strategies the LIVE trader can drive. Only MCL implements the streaming
-# interface trader.py needs (evaluate_last_bar, MIN_BARS_REQUIRED, Signals);
-# MC5 and VW9 are backtest/measurement only for now.
-LIVE_STRATEGIES = {"mcl"}
+# Strategies the LIVE trader can drive. MC5 joined 2026-09-09 once it had an
+# evaluate_last_bar that only ever reads a CLOSED 5-minute bucket
+# (strategy/mc5/mc5.last_closed_bucket) and a StrategyAdapter to carry its own
+# band, trail and session. VW9 is still backtest-only: it exits on 2R targets,
+# a structure stop and vwap_lost, none of which manage_position implements.
+#
+# More than one may be given. They run in ONE process sharing ONE position
+# book, because they share one IB account -- two processes would each see half
+# of it and both spend the same buying power.
+LIVE_STRATEGIES = {"mcl", "mc5"}
 
 # Strategies the backtest engine can dispatch to. All four expose
 # backtest_session(df, session_date, tz) over the same 1-minute frame;
@@ -72,8 +78,11 @@ def run(argv: list[str] | None = None) -> int:
     args, passthrough = p.parse_known_args(argv)
 
     if args.mode in SESSION_MODES:
-        if args.strategy not in LIVE_STRATEGIES:
-            return _fail(f"--strategy {args.strategy} cannot be traded live; "
+        wanted = args.strategy.split(",") if "," in args.strategy \
+            else [args.strategy]
+        bad = [w for w in wanted if w not in LIVE_STRATEGIES]
+        if bad:
+            return _fail(f"--strategy {','.join(bad)} cannot be traded live; "
                          f"the live trader supports {sorted(LIVE_STRATEGIES)}. "
                          f"Use --mode backtest for it instead.")
         held = session_lock.active()
@@ -83,7 +92,7 @@ def run(argv: list[str] | None = None) -> int:
                          + ".\n  Two sessions would compete for IB's "
                            "account-wide request budget.")
         from brokers.ibkr import trader
-        forwarded = list(passthrough)
+        forwarded = list(passthrough) + ["--strategy", *wanted]
         if args.mode == "dry" and "--dry-run" not in forwarded:
             forwarded.append("--dry-run")
         with session_lock.held(args.mode, args.strategy):

@@ -77,6 +77,7 @@ except ImportError:  # pragma: no cover
     sys.exit("ib_async not installed.  pip install ib_async pandas")
 
 from common import notify
+from common import strategy_adapter as SA
 from common.commissions import order_cost
 from strategy.mcl import mcl as S
 from strategy.mcl.mcl import (  # re-exported so tests/tools can do trader.evaluate(...)
@@ -291,6 +292,12 @@ class SymbolState:
     """
     symbol: str
     feed: SymbolFeed | None = None
+    # The StrategyAdapter this state belongs to. Required in the live path;
+    # None only in a caller that predates multi-strategy, which step_symbol
+    # refuses loudly rather than defaulting -- a state silently attributed to
+    # the wrong strategy is the whole class of defect this stage exists to
+    # prevent.
+    strategy: object = None
     position: Position | None = None
     last_bar_ts: datetime | None = None
     retired: bool = False           # removed from the watchlist; no new entries
@@ -332,7 +339,12 @@ def parse_watchlist(path: Path) -> list[str]:
 # --------------------------------------------------------------------------
 
 FIELDS = [
-    "ts_et", "symbol", "action", "reason",
+    "ts_et",
+    # WHICH strategy. One file, not one per strategy: the IB account is shared,
+    # so only a single ledger can be reconciled against it -- and a per-strategy
+    # file cannot show that two of them were competing for the same cap.
+    "strategy",
+    "symbol", "action", "reason",
     "ref_close",            # the price this order was measured against
     "ref_kind",             # WHICH price that is -- see _exit_reference()
     "bid", "ask", "spread", "spread_pct",
@@ -398,7 +410,7 @@ class FillLog:
 
 class MCLPaperTrader:
     def __init__(self, ib: IB, watchlist: Path, log: FillLog, dry_run: bool,
-                 tg: "notify.Notifier | None" = None):
+                 tg: "notify.Notifier | None" = None, strategies=None):
         self.ib = ib
         # Default to a DISABLED notifier rather than resolving credentials
         # here. Constructing one per test, or per dry run, must not touch
@@ -407,9 +419,12 @@ class MCLPaperTrader:
         self.watchlist = watchlist
         self.log = log
         self.dry_run = dry_run
-        self.states: dict[str, SymbolState] = {}
+        # Keyed by (strategy name, symbol). One symbol can carry a state per
+        # strategy; they share a SymbolFeed and compete for one position cap.
+        self.states: dict[tuple[str, str], SymbolState] = {}
         # Per SYMBOL, shared across strategies. See SymbolFeed.
         self.feeds: dict[str, SymbolFeed] = {}
+        self.strategies = list(strategies or [SA.mcl_adapter()])
         self.equity = 0.0
         self.session_pnl = 0.0
         self.session_trades = 0
@@ -444,8 +459,14 @@ class MCLPaperTrader:
         return feed
 
     async def _subscribe(self, symbol: str) -> bool:
-        st = SymbolState(symbol=symbol, feed=self.feed_for(symbol))
-        self.states[symbol] = st
+        feed = self.feed_for(symbol)
+        made = [SymbolState(symbol=symbol, feed=feed, strategy=a)
+                for a in self.strategies]
+        for st in made:
+            self.states[(st.strategy.name, symbol)] = st
+        # Qualification and the data line are per SYMBOL, so they are done once
+        # against the first state and reach the others through the shared feed.
+        st = made[0]
         c = Stock(symbol, "SMART", "USD", primaryExchange="NASDAQ")
         try:
             qualified = await self.ib.qualifyContractsAsync(c)
@@ -593,10 +614,10 @@ class MCLPaperTrader:
         if not wanted and first:
             return
 
-        for sym in wanted - set(self.states):
+        for sym in wanted - self.symbols:
             await self._subscribe(sym)
 
-        for sym, st in self.states.items():
+        for (_name, sym), st in self.states.items():
             if sym not in wanted and not st.retired:
                 st.retired = True
                 if st.position:
@@ -626,11 +647,34 @@ class MCLPaperTrader:
 
     # -- helpers ----------------------------------------------------------
 
-    def in_session(self, now_et: datetime) -> bool:
-        return S.SESSION_START <= now_et.time() < S.SESSION_END
+    @property
+    def symbols(self) -> set:
+        return {sym for _name, sym in self.states}
 
-    def size_for(self, price: float) -> int:
-        return S.size_for(price, self.equity)
+    def in_session(self, now_et: datetime, adapter=None) -> bool:
+        """Whether THIS strategy is trading now.
+
+        MCL and MC5 share 04:00-09:30 so today every answer is the same; VW9
+        runs to 20:00 and will not. Taking the window off the adapter rather
+        than a module means adding VW9 does not silently extend MCL's session
+        or truncate VW9's.
+        """
+        a = adapter or self.strategies[0]
+        return a.session_start <= now_et.time() < a.session_end
+
+    def any_session_open(self, now_et: datetime) -> bool:
+        return any(self.in_session(now_et, a) for a in self.strategies)
+
+    def size_for(self, price: float, adapter=None) -> int:
+        a = adapter or self.strategies[0]
+        return a.module.size_for(price, self.equity)
+
+    @staticmethod
+    def _name_of(st: SymbolState) -> str:
+        """The strategy label for a fill row. Empty rather than a default when
+        unknown: a row labelled with the WRONG strategy is worse than one
+        labelled with none, which is the same rule notify.py applies."""
+        return st.strategy.name if st.strategy is not None else ""
 
     def quote(self, st: SymbolState) -> tuple[float, float]:
         t = st.ticker
@@ -726,7 +770,8 @@ class MCLPaperTrader:
             base = bid
         if base != base or base <= 0:
             LOG.warning("%s no quote — skipping %s", st.symbol, action)
-            self.log.write(ts_et=now_et_str(), symbol=st.symbol, action=action,
+            self.log.write(ts_et=now_et_str(), strategy=self._name_of(st),
+                           symbol=st.symbol, action=action,
                            reason=reason, ref_close=ref_close,
                            ref_kind=ref_kind, bid=bid, ask=ask,
                            spread=spread, spread_pct=spread_pct, qty=qty,
@@ -737,7 +782,8 @@ class MCLPaperTrader:
         raw = base + cross if action == "BUY" else base - cross
         limit = round_to_tick(raw, action, st.min_tick)
 
-        row = dict(ts_et=now_et_str(), symbol=st.symbol, action=action, reason=reason,
+        row = dict(ts_et=now_et_str(), strategy=self._name_of(st),
+                   symbol=st.symbol, action=action, reason=reason,
                    ref_close=ref_close, ref_kind=ref_kind, bid=bid, ask=ask,
                    spread=spread, spread_pct=spread_pct, limit_sent=limit,
                    qty=qty, **detail)
@@ -827,7 +873,8 @@ class MCLPaperTrader:
             # of what happened and must not be delayed or skipped because a
             # third party is slow. The send itself cannot block or raise --
             # see common/notify.py -- but ordering makes that explicit.
-            self.notify_fill(st.symbol, action, avg, filled, rt)
+            self.notify_fill(st.symbol, action, avg, filled, rt,
+                             strategy=self._name_of(st) or STRATEGY_NAME)
             return avg, filled
 
         self.ib.cancelOrder(order)
@@ -984,7 +1031,7 @@ class MCLPaperTrader:
             candidates.append(bar_high)
         pos.peak = max(candidates)
 
-        if not self.in_session(now_et):
+        if not self.in_session(now_et, st.strategy):
             reason = "window_close"
         elif last_price <= pos.trail_level():
             reason = "trailing_stop"
@@ -1039,6 +1086,11 @@ class MCLPaperTrader:
     # -- per-symbol logic -------------------------------------------------
 
     async def step_symbol(self, st: SymbolState, now_et: datetime):
+        if st.strategy is None:
+            raise RuntimeError(
+                f"{st.symbol} has no strategy attached. Refusing rather than "
+                "assuming one: a state attributed to the wrong strategy sizes, "
+                "bands and trails against rules it never agreed to.")
         if st.blocked or st.contract is None:
             return
 
@@ -1047,7 +1099,10 @@ class MCLPaperTrader:
             return
 
         last_ts = df.index[-1].to_pydatetime()
-        sig = evaluate(df)
+        # The ADAPTER decides which bar has closed. For MCL that is the last
+        # 1-minute row; for MC5 the last complete 5-minute bucket, which is why
+        # the current time goes in.
+        sig = st.strategy.evaluate(df, now_et)
         if sig is None:
             return
 
@@ -1072,7 +1127,7 @@ class MCLPaperTrader:
         # ---- look for an entry -----------------------------------------
         if st.retired:
             return                      # removed from the watchlist
-        if not self.in_session(now_et):
+        if not self.in_session(now_et, st.strategy):
             return
         if st.last_bar_ts == last_ts:
             return                      # already evaluated this bar
@@ -1085,14 +1140,21 @@ class MCLPaperTrader:
         # symbol; this is the only check that looks at the account as a whole.
         # The bar is already marked evaluated above, which is correct: the
         # signal fired and we declined it, so it should not be reconsidered.
+        # ACROSS EVERY STRATEGY. A cap that counted only its own would be two
+        # caps of two on an account sized for two -- and the account is shared,
+        # so the second strategy would be spending buying power the first
+        # already committed.
         open_now = sum(1 for s in self.states.values() if s.position is not None)
         if open_now >= MAX_CONCURRENT_POSITIONS:
-            LOG.info("%s entry signal declined — %d position(s) already open "
-                     "(cap %d): %s", st.symbol, open_now,
+            LOG.info("%s %s entry signal declined — %d position(s) already open "
+                     "(cap %d): %s", st.strategy.name, st.symbol, open_now,
                      MAX_CONCURRENT_POSITIONS,
-                     ", ".join(sorted(s.symbol for s in self.states.values()
-                                      if s.position is not None)))
+                     ", ".join(sorted(
+                         f"{s.strategy.name}:{s.symbol}"
+                         for s in self.states.values()
+                         if s.position is not None)))
             self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                           strategy=self._name_of(st),
                            symbol=st.symbol, action="BUY",
                            reason="entry_signal", ref_close=round(sig.close, 4),
                            ref_kind="signal_close",
@@ -1114,20 +1176,23 @@ class MCLPaperTrader:
         # live-vs-backtest comparison a comparison of two different universes.
         #
         # This is a RESTRICTION on what live may buy, never an expansion.
-        if S.ENFORCE_PRICE_BAND and not (S.PRICE_MIN <= sig.close <= S.PRICE_MAX):
-            LOG.info("%s entry signal declined — %.4f outside the $%.2f-%.2f "
-                     "band", st.symbol, sig.close, S.PRICE_MIN, S.PRICE_MAX)
+        if not st.strategy.in_band(sig.close):
+            LOG.info("%s %s entry signal declined — %.4f outside the $%.2f-%.2f "
+                     "band", st.strategy.name, st.symbol, sig.close,
+                     st.strategy.price_min, st.strategy.price_max)
             self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                           strategy=self._name_of(st),
                            symbol=st.symbol, action="BUY",
                            reason="entry_signal", ref_close=round(sig.close, 4),
                            ref_kind="signal_close",
                            status="SKIPPED_PRICE_BAND",
                            reject_reason=f"{sig.close:.4f} outside "
-                                         f"{S.PRICE_MIN:.2f}-{S.PRICE_MAX:.2f}",
+                                         f"{st.strategy.price_min:.2f}-"
+                                         f"{st.strategy.price_max:.2f}",
                            **detail)
             return
 
-        qty = self.size_for(sig.close)
+        qty = self.size_for(sig.close, st.strategy)
         if qty < 1:
             LOG.info("%s signal but size 0 (equity %.2f, price %.2f)",
                      st.symbol, self.equity, sig.close)
@@ -1144,10 +1209,10 @@ class MCLPaperTrader:
             # the day one of them changes.
             st.position = Position(symbol=st.symbol, qty=filled, entry_price=avg,
                                    entry_time=now_et, peak=max(avg, sig.close),
-                                   trail_pct=S.TRAIL_PCT)
+                                   trail_pct=st.strategy.trail_pct)
 
     def notify_fill(self, symbol: str, action: str, price: float,
-                    filled: int, rt: dict) -> None:
+                    filled: int, rt: dict, strategy: str = STRATEGY_NAME) -> None:
         """Push a fill to Telegram. Commission is recomputed from the SAME
         schedule the P/L used (common/commissions.py), per leg, so the message
         can never quote a different number from the fill log.
@@ -1160,7 +1225,7 @@ class MCLPaperTrader:
                 comm = order_cost(filled, price, False, COMMISSION_PLAN)
                 self.tg.send(
                     notify.buy_filled(symbol, price, filled, comm,
-                                      strategy=STRATEGY_NAME),
+                                      strategy=strategy),
                     force=True)
             else:
                 comm = order_cost(filled, price, True, COMMISSION_PLAN)
@@ -1172,7 +1237,7 @@ class MCLPaperTrader:
                     return
                 self.tg.send(
                     notify.sell_filled(symbol, price, filled, comm, pnl,
-                                       strategy=STRATEGY_NAME),
+                                       strategy=strategy),
                     force=True)
         except Exception as e:                              # noqa: BLE001
             LOG.warning("notification failed (%s: %s) — trading unaffected",
@@ -1184,15 +1249,17 @@ class MCLPaperTrader:
         LOG.info("entering main loop — %s", "DRY RUN" if self.dry_run else "LIVE PAPER ORDERS")
         while not self._stop:
             now_et = datetime.now(ET)
-            if now_et.time() >= S.SESSION_END and not any(s.position for s in self.states.values()):
-                LOG.info("09:30 ET reached and flat — stopping")
+            last_end = max(a.session_end for a in self.strategies)
+            if now_et.time() >= last_end and not any(
+                    s.position for s in self.states.values()):
+                LOG.info("%s ET reached and flat — stopping", last_end)
                 break
             # picks up edits to watchlist.txt mid-session, no restart needed
             try:
                 await self.sync_watchlist()
                 live = sum(1 for s in self.states.values()
                            if not s.retired and not s.blocked)
-                if live == 0 and self.in_session(now_et):
+                if live == 0 and self.any_session_open(now_et):
                     if time.monotonic() - self._empty_warned_at >= EMPTY_WARN_S:
                         self._empty_warned_at = time.monotonic()
                         LOG.warning("still watching nothing — %s is empty. Add "
@@ -1285,7 +1352,11 @@ async def main_async(args):
     # credential in this project. A lazy resolve mid-session can block on a
     # 1Password prompt with a position open.
     tg = notify.Notifier() if args.no_telegram else notify.Notifier.from_env()
-    trader = MCLPaperTrader(ib, wl, log, args.dry_run, tg=tg)
+    strategies = SA.build_all(getattr(args, "strategy", ["mcl"]))
+    LOG.info("strategies: %s (one book, cap %d across all of them)",
+             ", ".join(a.name for a in strategies), MAX_CONCURRENT_POSITIONS)
+    trader = MCLPaperTrader(ib, wl, log, args.dry_run, tg=tg,
+                            strategies=strategies)
 
     for s in (_signal.SIGINT, _signal.SIGTERM):
         try:
@@ -1385,6 +1456,12 @@ def main(argv: list[str] | None = None):
                    help="4002 IB Gateway paper (default) or 7497 TWS paper")
     p.add_argument("--client-id", type=int, default=17)
     p.add_argument("--out", default=f"var/fills/mcl_fills_{datetime.now(ET):%Y%m%d}.csv")
+    p.add_argument("--strategy", nargs="+", default=["mcl"],
+                   help="one or more strategies to run in THIS process, in "
+                        "priority order. They share one position book and one "
+                        "MAX_CONCURRENT_POSITIONS cap, because they share one "
+                        "account -- and the earlier one takes the last free "
+                        "slot. Two processes would each see half the account.")
     p.add_argument("--no-telegram", action="store_true",
                    help="run without notifications even if configured")
     p.add_argument("--dry-run", action="store_true",

@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from brokers.ibkr import trader as M
+from common import strategy_adapter as SA
 from tests.brokers.ibkr.test_dryrun_roundtrip import FakeTicker, find_firing_series
 from tests.brokers.ibkr.test_live_paths import FakeIB, FakeTrade
 
@@ -43,10 +44,10 @@ def build(tag, symbols, outcomes, cap=None):
     tr.equity = 22290.96
     states = {}
     for s in symbols:
-        st = M.SymbolState(symbol=s)
+        st = M.SymbolState(symbol=s, strategy=SA.mcl_adapter())
         st.contract = object()
         st.ticker = FakeTicker()
-        tr.states[s] = st
+        tr.states[(st.strategy.name, s)] = st
         states[s] = st
     return tr, states, ib, log, out
 

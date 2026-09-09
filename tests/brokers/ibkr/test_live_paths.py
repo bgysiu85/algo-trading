@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from brokers.ibkr import trader as M
+from common import strategy_adapter as SA
 from tests.brokers.ibkr.test_dryrun_roundtrip import FakeTicker, find_firing_series
 
 
@@ -58,10 +59,10 @@ def build(tag, outcomes):
     tr = M.MCLPaperTrader(ib, Path(tempfile.gettempdir()) / "wl.txt",
                           log, dry_run=False)
     tr.equity = 22290.96
-    st = M.SymbolState(symbol="TEST")
+    st = M.SymbolState(symbol="TEST", strategy=SA.mcl_adapter())
     st.contract = object()
     st.ticker = FakeTicker()
-    tr.states["TEST"] = st
+    tr.states[(st.strategy.name, "TEST")] = st
     return tr, st, ib, log, out
 
 

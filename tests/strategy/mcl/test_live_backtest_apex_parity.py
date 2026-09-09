@@ -76,14 +76,23 @@ def test_the_live_default_is_the_shipped_flag():
 
 
 def test_the_trader_calls_it_with_no_override():
-    """If trader.py ever passes use_apex itself, the constant stops governing
-    the live path and this file stops meaning anything."""
-    import inspect
+    """If anything between the trader and the strategy passes use_apex itself,
+    the constant stops governing the live path and this file stops meaning
+    anything.
 
-    import brokers.ibkr.trader as T
-    src = inspect.getsource(T)
-    assert "evaluate(df)" in src, \
-        "trader.py no longer calls evaluate(df) plainly -- re-check the gating"
+    Rewritten 2026-09-09: the trader no longer calls evaluate(df) directly, it
+    goes through a StrategyAdapter so a second strategy can be run. Asserting
+    on trader.py's source text would now pass while the adapter quietly
+    overrode the flag, so the check moved to the adapter -- the last hop before
+    the strategy -- and is made by CALLING it rather than by reading source.
+    """
+    from common import strategy_adapter as SA
+
+    df = a_frame_whose_last_bar_is_past_an_apex()
+    through_adapter = SA.mcl_adapter().evaluate(df, df.index[-1])
+    assert through_adapter.exit_signal is S.USE_APEX_EXIT, (
+        "the adapter is overriding the shipped apex flag")
+    assert through_adapter.exit_signal is S.evaluate_last_bar(df).exit_signal
 
 
 def test_backtest_and_live_agree_bar_for_bar():
