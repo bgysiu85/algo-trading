@@ -151,3 +151,51 @@ def test_it_refuses_a_port_that_is_merely_unknown():
     with pytest.raises(SystemExit) as e:
         H.main(["--symbols", "AAPL", "--port", "9999"])
     assert "not a known paper port" in str(e.value)
+
+
+# --- what the probe decided --------------------------------------------------
+
+def test_the_trader_asks_for_enough_history_for_its_hungriest_strategy():
+    """MEASURED, not chosen. common/history_probe.py at 06:22 ET on four live
+    names: "1 D" returned ~143 bars starting 04:00 -- this session so far, so
+    NO warm-up at the open -- and "2 D" returned ~1,100.
+
+    MC5 needs 40 five-minute buckets, so it is blind for 200 minutes of a
+    330-minute session on "1 D". The duration belongs to the FEED, which is
+    shared per symbol, so there is one of them and it must satisfy the
+    hungriest strategy.
+    """
+    from brokers.ibkr import trader as T
+
+    assert T.HISTORY_DURATION == "2 D"
+    worst = max(getattr(a.module, "MIN_BARS_REQUIRED", 0) * a.bar_minutes
+                for a in SA.build_all(list(SA.BUILDERS)))
+    assert worst == 200, "MC5 is the hungriest at 40 x 5m"
+    # "1 D" measured at ~2.4 hours into the session and starting AT the open,
+    # so it cannot cover a 200-minute warm-up under any reading.
+    assert worst > 143, (
+        "if a strategy's warm-up ever fits inside a '1 D' response, re-run "
+        "the probe before assuming this constant still needs to be '2 D'")
+
+
+def test_the_duration_is_used_and_not_merely_defined():
+    """A constant nothing reads is a comment. Asserted by calling the fetch
+    with a stub and reading back what it asked for."""
+    import asyncio
+
+    from brokers.ibkr import trader as T
+
+    asked = {}
+
+    class Stub:
+        async def reqHistoricalDataAsync(self, contract, **kw):
+            asked.update(kw)
+            return []
+
+    tr = T.MCLPaperTrader.__new__(T.MCLPaperTrader)
+    tr.ib = Stub()
+    st = T.SymbolState(symbol="X")
+    st.contract = object()
+    asyncio.run(T.MCLPaperTrader._fetch_bars(tr, st))
+    assert asked.get("durationStr") == T.HISTORY_DURATION
+    assert asked.get("useRTH") is False, "pre-market or the warm-up is moot"

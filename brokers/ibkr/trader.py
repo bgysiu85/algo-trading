@@ -149,6 +149,32 @@ INELIGIBLE_MARKERS = (
     "compliance restriction",
 )
 
+# How much 1-minute history to request per symbol.
+#
+# MEASURED 2026-09-09 with common/history_probe.py, at 06:22 ET, on four live
+# watchlist names (YMAT, FGL, SUNE, DPU):
+#
+#     "1 D"    ~143 bars, 04:00 -> 06:22   i.e. THIS SESSION SO FAR, only
+#     "2 D"   ~1100 bars, 26 hours
+#
+# So "1 D" provides NO warm-up at all at the open -- it starts at 04:00, the
+# same minute the strategy does. Every backtest in this project computes
+# indicators over the whole three-day cached frame and only then restricts to
+# the session date, so every backtest figure assumes a warm start. Live has
+# been starting cold this entire time, and nothing said so.
+#
+# What that cost, per strategy:
+#   MCL needs 40 one-minute bars   -> blind until ~04:40, 10.8% of its
+#                                     backtested trades
+#   MC5 needs 40 FIVE-minute bars  -> blind until ~07:20, 45.9% of MC5's
+#
+# The duration belongs to the FEED, not to a strategy: SymbolFeed shares one
+# bar cache per symbol precisely so two strategies cost one request, so there
+# is one duration and it has to satisfy the hungriest of them. "2 D" covers
+# both with room to spare and costs no extra REQUESTS -- IB paces on request
+# count, and this is still one per symbol per minute. It costs response size.
+HISTORY_DURATION = "2 D"
+
 PROBE_TIMEOUT_S = 6         # tradability whatIf probe; normally answers in <1s
 LOOP_SLEEP_S = 1.0          # fast loop: trailing stop, off streaming quotes
 BAR_MIN_INTERVAL_S = 20.0   # hard floor between history requests per symbol
@@ -711,7 +737,7 @@ class MCLPaperTrader:
             data = await self.ib.reqHistoricalDataAsync(
                 st.contract,
                 endDateTime="",
-                durationStr="1 D",
+                durationStr=HISTORY_DURATION,
                 barSizeSetting="1 min",
                 whatToShow="TRADES",
                 useRTH=False,          # include pre-market
