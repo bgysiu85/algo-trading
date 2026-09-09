@@ -55,6 +55,7 @@ unambiguous -- see tv_feed's --heartbeat.
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import logging
 import queue
@@ -297,8 +298,8 @@ def _order_head(strategy: str, side: str, ticker: str) -> list[str]:
     """
     lines = []
     if strategy:
-        lines.append(f"<b>{strategy}</b>")
-    lines.append(f"<b>{side} {ticker}</b>")
+        lines.append(f"<b>{_esc(strategy)}</b>")
+    lines.append(f"<b>{side} {_esc(ticker)}</b>")
     return lines
 
 
@@ -344,6 +345,25 @@ def _kmb(x, dp_m: int = 1) -> str:
     return f"{x:,.0f}"
 
 
+def _esc(x) -> str:
+    """Escape a value for parse_mode=HTML.
+
+    THE BUG THIS EXISTS FOR, 2026-09-09. drop_reason() renders a threshold as
+    "pm vol 62k < 100k". Telegram reads the message as HTML, saw "< 100k", and
+    refused the whole thing with HTTP 400 -- so the watchlist alert died every
+    time a name dropped on a numeric clause, while fills kept arriving. It
+    failed in the worst place: the message that reports something disappearing
+    is the one that disappears, and the only trace is a WARNING line in a log
+    nobody reads mid-session.
+
+    So every value interpolated into a message is escaped HERE, at the point
+    it becomes a message, and the <b> tags are the only markup that survives.
+    Escaping at the point a string is BUILT would be wrong -- drop_reason() is
+    also read by tests and logs -- and doing it in both places yields "&amp;lt;".
+    """
+    return html.escape(str(x), quote=False)
+
+
 def _money(x: float) -> str:
     return f"${x:,.2f}"
 
@@ -362,7 +382,7 @@ def _trigger_line(r: dict) -> str:
     # only the first is what the screen actually filters on: how much has
     # traded pre-market (the clause), how that compares with a normal day
     # (relvol), and how much of the company can trade at all (float).
-    return (f"    {r.get('ticker','?')}  "
+    return (f"    {_esc(r.get('ticker', '?'))}  "
             f"{num('premarket_change', '+.1f', '%')}  {px}  "
             f"pmvol {_kmb(r.get('premarket_volume'))}  "
             f"relvol {num('relative_volume_10d_calc', '.1f')}  "
@@ -429,7 +449,7 @@ def watchlist_change(added: list[str], removed: list[str],
     reasons = reasons or {}
     lines = [header(now), f"<b>Watchlist</b>  {_ts(now)}"]
     if added:
-        lines.append(f"➕ added: <b>{', '.join(added)}</b>")
+        lines.append(f"➕ added: <b>{_esc(', '.join(added))}</b>")
         for t in added:
             if t in by_ticker:
                 lines.append(_trigger_line(by_ticker[t]))
@@ -437,11 +457,12 @@ def watchlist_change(added: list[str], removed: list[str],
         lines.append("➖ no longer screening:")
         for t in removed:
             why = reasons.get(t)
-            lines.append(f"    {t}" + (f"  —  {why}" if why else ""))
+            lines.append(f"    {_esc(t)}"
+                         + (f"  —  {_esc(why)}" if why else ""))
     lines.append("")
-    lines.append(f"🔥 HOT ({len(hot)}): {', '.join(hot) if hot else '—'}")
-    lines.append(f"🟡 WARM ({len(warm)}): {', '.join(warm) if warm else '—'}")
-    lines.append(f"🧊 COLD ({len(cold)}): {', '.join(cold) if cold else '—'}")
+    lines.append(f"🔥 HOT ({len(hot)}): {_esc(', '.join(hot)) if hot else '—'}")
+    lines.append(f"🟡 WARM ({len(warm)}): {_esc(', '.join(warm)) if warm else '—'}")
+    lines.append(f"🧊 COLD ({len(cold)}): {_esc(', '.join(cold)) if cold else '—'}")
     return "\n".join(lines)
 
 
@@ -453,7 +474,7 @@ def heartbeat(scanned: int, hot: int, warm: int, cold: int,
     crashed feed is invisible."""
     line = (f"{header(now)}\n💓 <b>feed alive</b> — screened {scanned}, "
             f"hot {hot} / warm {warm} / cold {cold}")
-    return line + (f"\n<i>{stats}</i>" if stats else "")
+    return line + (f"\n<i>{_esc(stats)}</i>" if stats else "")
 
 
 def buy_filled(ticker: str, price: float, qty: int, commission: float,
@@ -519,19 +540,27 @@ def main() -> int:
         # its job and swallows two of the three -- which is correct behaviour
         # and a useless test, since the point here is to SEE all three
         # formats arrive. Live callers already force fills and heartbeats.
-        for msg in (watchlist_change(["AOUT"], ["OLDNAME"], ["AOUT"],
-                                     ["EXPENSIVE"], ["OLDNAME"],
-                                     rows=[{"ticker": "AOUT",
-                                            "premarket_change": 27.47,
-                                            "premarket_close": 12.76,
-                                            "premarket_volume": 271_202.0,
-                                            "relative_volume_10d_calc": 65.46,
-                                            "float_shares_outstanding": 10_589_237.0}],
-                                     reasons={"OLDNAME": "pm vol 62k < 100k"}),
-                    buy_filled("AOUT", 12.76, 100, 0.35, strategy="MCL"),
-                    sell_filled("AOUT", 13.40, 100, 0.35, 63.30,
-                                strategy="MCL")):
+        samples = [
+            ("watchlist", watchlist_change(
+                ["AOUT"], ["OLDNAME"], ["AOUT"], ["EXPENSIVE"], ["OLDNAME"],
+                rows=[{"ticker": "AOUT", "premarket_change": 27.47,
+                       "premarket_close": 12.76, "premarket_volume": 271_202.0,
+                       "relative_volume_10d_calc": 65.46,
+                       "float_shares_outstanding": 10_589_237.0}],
+                reasons={"OLDNAME": "pm vol 62k < 100k"})),
+            ("buy", buy_filled("AOUT", 12.76, 100, 0.35, strategy="MCL")),
+            ("sell", sell_filled("AOUT", 13.40, 100, 0.35, 63.30,
+                                 strategy="MCL")),
+        ]
+        # ONE AT A TIME, flushed between, so a failure names the message that
+        # failed. The first version printed "sent=2 failed=1" and left the
+        # reader to work out which of three it was -- on the day one of them
+        # was refused for a bare "<", that was the whole diagnostic.
+        for label, msg in samples:
+            before = n.failed
             n.send(msg, force=True)
+            n.flush()
+            print(f"  {label:<10} {'FAILED' if n.failed > before else 'ok'}")
             time.sleep(MIN_INTERVAL_S / 2)
         n.flush()
         print(n.stats())

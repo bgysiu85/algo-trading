@@ -15,6 +15,8 @@ from __future__ import annotations
 import time
 from datetime import datetime
 
+import re
+
 import pytest
 
 from common import notify as N
@@ -406,4 +408,67 @@ def test_no_reason_is_reported_rather_than_a_guessed_one():
 def test_a_reason_reaches_the_message_when_there_is_one():
     msg = N.watchlist_change([], ["GONE"], [], [], ["GONE"], now=NOW,
                              reasons={"GONE": "pm vol 62k < 100k"})
-    assert "GONE  —  pm vol 62k < 100k" in msg
+    # Escaped, because the message is sent with parse_mode=HTML and a bare
+    # "<" is what made Telegram reject the whole thing on 2026-09-09.
+    assert "GONE  —  pm vol 62k &lt; 100k" in msg
+
+
+# --- Telegram HTML safety (the 2026-09-09 HTTP 400) -------------------------
+
+ALLOWED_TAGS = re.compile(
+    r"</?(b|strong|i|em|u|ins|s|strike|del|a|code|pre|blockquote|tg-spoiler)"
+    r"(\s[^<>]*)?>")
+
+
+def telegram_html_ok(msg: str) -> bool:
+    """Would Telegram's HTML parser accept this?
+
+    Its rule is narrow: only a listed set of tags, and every other '<' or '&'
+    must be escaped. Anything else is HTTP 400 for the WHOLE message -- not a
+    stripped tag, a refusal.
+    """
+    stripped = ALLOWED_TAGS.sub("", msg)
+    if "<" in stripped or ">" in stripped:
+        return False
+    # An '&' that is not the start of an entity is also a parse error.
+    return re.search(r"&(?!(amp|lt|gt|quot|#\d+);)", stripped) is None
+
+
+def test_the_message_that_caused_the_http_400_is_now_accepted():
+    """REGRESSION. drop_reason renders "pm vol 62k < 100k"; sent as HTML that
+    is an unclosed tag, and Telegram refused the whole message. Fills kept
+    arriving and the watchlist alert died silently -- the message reporting
+    that something disappeared was the one that disappeared."""
+    msg = N.watchlist_change(["AOUT"], ["OLDNAME"], ["AOUT"], [], ["OLDNAME"],
+                             now=NOW, rows=[row()],
+                             reasons={"OLDNAME": "pm vol 62k < 100k"})
+    assert telegram_html_ok(msg), msg
+
+
+def test_no_message_this_module_builds_can_be_refused_as_html():
+    """The general guard, not just the one case. Every builder, with values
+    chosen to break an HTML parser."""
+    nasty = "A<B>&C"
+    messages = [
+        N.buy_filled(nasty, 1.0, 1, 0.1, now=NOW, strategy=nasty),
+        N.sell_filled(nasty, 1.0, 1, 0.1, -1.0, now=NOW, strategy=nasty),
+        N.heartbeat(1, 1, 0, 0, stats=nasty, now=NOW),
+        N.watchlist_change([nasty], [nasty], [nasty], [nasty], [nasty],
+                           now=NOW,
+                           rows=[{"ticker": nasty, "premarket_change": 1.0,
+                                  "premarket_close": 2.0,
+                                  "premarket_volume": 3.0,
+                                  "relative_volume_10d_calc": 4.0,
+                                  "float_shares_outstanding": 5.0}],
+                           reasons={nasty: "pm vol 1k < 100k & falling"}),
+    ]
+    for msg in messages:
+        assert telegram_html_ok(msg), msg
+
+
+def test_the_guard_itself_rejects_what_telegram_rejects():
+    """A checker that passes everything proves nothing."""
+    assert telegram_html_ok("<b>fine</b>")
+    assert not telegram_html_ok("pm vol 62k < 100k")
+    assert not telegram_html_ok("a & b")
+    assert telegram_html_ok("a &amp; b")
