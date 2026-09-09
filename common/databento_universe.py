@@ -39,13 +39,14 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import json
 
 from common.databento_fetch import (_key, _scrub, conditions, write_manifest,
                                     default_archive, require_databento)
+from common.databento_probe import day_bounds
 from common.dbn_io import symbology_path
 
 # EQUS.MINI reaches back to 2023-03-28 and is a blended tape rather than one
@@ -67,6 +68,34 @@ def month_chunks(start: str, end: str) -> list[tuple[str, str, str]]:
         if lo < hi:
             out.append((f"{cur:%Y-%m}", lo.isoformat(), hi.isoformat()))
         cur = nxt
+    return out
+
+
+def day_chunks(start: str, end: str, window: str) -> list[tuple[str, str, str]]:
+    """[(label, start, end_exclusive)] one per WEEKDAY, covering `window` in ET.
+
+    Month chunks cannot express a time of day: a request from 04:00 on the 1st
+    to 09:30 on the 31st spans everything in between, which for ohlcv-1m is the
+    whole 24-hour tape and many times the data the screener simulation needs.
+
+    THE LABEL CARRIES THE WINDOW, and that is not cosmetic. Chunks are skipped
+    when the file already exists, so a later pull with a different window would
+    otherwise silently reuse bars covering different hours -- a corruption that
+    produces a plausible screen rather than an error.
+
+    Weekends are dropped because they are empty and every chunk costs a metadata
+    round trip. Holidays are NOT dropped here: they cannot be known from the
+    calendar alone, and they fall out for free as a zero billable size, which
+    the caller already asks for.
+    """
+    tag = window.replace(":", "").replace("-", "_")
+    s, e = date.fromisoformat(start), date.fromisoformat(end)
+    out, cur = [], s
+    while cur < e:
+        if cur.weekday() < 5:
+            lo, hi = day_bounds(cur.isoformat(), window)
+            out.append((f"{cur:%Y-%m-%d}_{tag}", lo, hi))
+        cur += timedelta(days=1)
     return out
 
 
@@ -134,6 +163,12 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Pull the full universe, daily bars")
     ap.add_argument("--dataset", default=DEFAULT_DATASET)
     ap.add_argument("--schema", default="ohlcv-1d")
+    ap.add_argument("--window", default=None,
+                    help="HH:MM-HH:MM in ET, e.g. 04:00-09:30. Switches "
+                         "chunking from monthly to per-weekday and pulls only "
+                         "that slice of each day -- what the screener "
+                         "simulation needs. Without it a minute schema would "
+                         "pull the whole 24-hour tape.")
     ap.add_argument("--start", default=DEFAULT_START)
     ap.add_argument("--end", default=date.today().isoformat())
     ap.add_argument("--archive", default=str(default_archive()),
@@ -175,12 +210,17 @@ def main(argv=None) -> int:
     if clamped:
         print()
 
-    chunks = month_chunks(a.start, a.end)
+    if a.window:
+        chunks = day_chunks(a.start, a.end, a.window)
+        kind = f"weekday chunk(s) covering {a.window} ET"
+    else:
+        chunks = month_chunks(a.start, a.end)
+        kind = "monthly chunk(s)"
     print(f"{a.dataset}  {a.schema}  {a.start} -> {a.end}   "
-          f"{len(chunks)} monthly chunk(s)\narchive {root}/\n")
+          f"{len(chunks)} {kind}\narchive {root}/\n")
 
     client = client_probe
-    todo, usd, nbytes, skipped = [], 0.0, 0, 0
+    todo, usd, nbytes, skipped, empty = [], 0.0, 0, 0, 0
     for label, lo, hi in chunks:
         out = chunk_path(root, a.dataset, a.schema, label)
         if out.exists():
@@ -194,12 +234,21 @@ def main(argv=None) -> int:
         except Exception as e:  # noqa: BLE001
             print(f"  {label}  ESTIMATE FAILED: {_scrub(e)}")
             continue
+        if b == 0:
+            # A market holiday inside a weekday chunk, or a symbol-day the
+            # dataset simply does not cover. Downloading it produces an empty
+            # file that then fails symbology resolution and lands in the
+            # archive looking like a real but empty session.
+            empty += 1
+            continue
         usd += c
         nbytes += b
         todo.append((label, lo, hi, out, c, b))
-        print(f"  {label}  {b/1e6:>9.1f} MB   ${c:>8.4f}")
+        if not a.window:
+            print(f"  {label}  {b/1e6:>9.1f} MB   ${c:>8.4f}")
 
     print(f"\nalready on disk, skipped : {skipped}")
+    print(f"empty (holiday/no data)  : {empty}")
     print(f"to download              : {len(todo)}")
     print(f"ESTIMATED SIZE           : {nbytes/1e6:,.1f} MB")
     print(f"ESTIMATED COST           : ${usd:,.4f}")
@@ -234,7 +283,9 @@ def main(argv=None) -> int:
                   "-- run --resymbolize before analysing")
         # Per-day conditions for the whole month, so a degraded session inside
         # an otherwise fine chunk is still recorded.
-        cond = conditions(client, a.dataset, [lo, hi])
+        # Date-only: with --window these bounds are UTC timestamps, and
+        # get_dataset_condition takes dates.
+        cond = conditions(client, a.dataset, [lo[:10], hi[:10]])
         bad = sorted(d for d, c in cond.items() if c not in ("available", ""))
         entries[f"{a.schema}/{label}"] = {
             "chunk": label, "schema": a.schema, "start": lo, "end": hi,
