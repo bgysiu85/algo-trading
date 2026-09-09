@@ -655,6 +655,127 @@ class MCLPaperTrader:
                 st.retired = False
                 LOG.info("%s re-added to watchlist", sym)
 
+    # -- restarting into an account that is not flat ----------------------
+
+    def open_at_broker(self) -> list:
+        """What IBKR says this account is holding, right now.
+
+        THE GAP THIS CLOSES, found 2026-09-09 when Ben asked whether he should
+        restart a live session that was holding two positions.
+
+        Until now the trader NEVER asked. `prepare()` did the watchlist and the
+        equity and nothing else, and a Position existed in self.states only
+        because THIS process had filled the buy that created it. So restarting
+        mid-session did three things, all silent:
+
+          * both positions lost their trailing stop -- it is software-managed
+            in this process, and outside RTH there is no broker-side stop, so
+            killing the process just leaves the shares sitting there;
+          * the new process could not see them, so the concurrency cap read 0
+            open rather than 2;
+          * and with `st.position is None` for those names, the entry path was
+            free to BUY THEM AGAIN.
+
+        The module docstring already warned that a crash with a position open
+        leaves it unprotected. The restart case -- where it silently doubles
+        down -- was covered nowhere.
+        """
+        try:
+            return [p for p in self.ib.positions() if p.position]
+        except Exception as e:                                # noqa: BLE001
+            LOG.error("could not read positions from IBKR: %s", e)
+            raise
+
+    def _held_row(self, symbol: str) -> dict | None:
+        """The BUY that opened this position, from today's fill log.
+
+        IBKR knows the symbol, the size and the average cost. It does not know
+        which STRATEGY opened it, when, or what the trail is measured from --
+        and those are exactly what managing the position requires. The fill log
+        is the only place they exist.
+        """
+        try:
+            rows = list(csv.DictReader(self.log.path.open(newline="")))
+        except OSError:
+            return None
+        buys = [r for r in rows
+                if r.get("symbol") == symbol and r.get("action") == "BUY"
+                and r.get("status") in ("FILLED", "PARTIAL_FILL", "DRY_RUN")]
+        return buys[-1] if buys else None
+
+    async def adopt_open_positions(self, held) -> list[str]:
+        """Rebuild in-process Positions for what the broker is holding.
+
+        ALL OR NOTHING. Any position that cannot be reconstructed faithfully
+        aborts the whole adoption, because a half-managed account is worse than
+        an unmanaged one: some positions would have a trailing stop and others
+        would not, and nothing on screen would say which.
+
+        The PEAK is the dangerous field. The trail is measured from the highest
+        price since entry, and that is not recorded anywhere -- so it is
+        rebuilt from the bars between the entry time and now. Guessing it low
+        makes the trail too tight and stops the position out instantly;
+        guessing it high makes the trail too loose and it gives back more than
+        the rule allows. Neither is acceptable, so it is READ rather than
+        assumed, and a symbol whose bars cannot be fetched is a refusal.
+        """
+        problems: list[str] = []
+        plans = []
+        for p in held:
+            symbol = getattr(p.contract, "symbol", "?")
+            qty = int(p.position)
+            if qty < 0:
+                problems.append(f"{symbol}: SHORT {qty} — this trader is "
+                                f"long-only and will not manage a short")
+                continue
+            row = self._held_row(symbol)
+            if row is None:
+                problems.append(f"{symbol}: no BUY row in {self.log.path.name}, "
+                                f"so the entry time and strategy are unknown")
+                continue
+            name = (row.get("strategy") or "").strip()
+            adapter = next((a for a in self.strategies if a.name == name), None)
+            if adapter is None:
+                problems.append(
+                    f"{symbol}: fill row names strategy {name!r}, which is not "
+                    f"running (have {[a.name for a in self.strategies]})")
+                continue
+            try:
+                entry_price = float(row["fill_price"])
+                entry_time = datetime.strptime(
+                    row["ts_et"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=ET)
+            except (KeyError, TypeError, ValueError) as e:
+                problems.append(f"{symbol}: fill row unusable ({e})")
+                continue
+            plans.append((symbol, qty, entry_price, entry_time, adapter))
+
+        if problems:
+            for pr in problems:
+                LOG.error("cannot adopt %s", pr)
+            return problems
+
+        for symbol, qty, entry_price, entry_time, adapter in plans:
+            if not await self._subscribe(symbol):
+                return [f"{symbol}: could not subscribe, so it cannot be managed"]
+            st = self.states[(adapter.name, symbol)]
+            df = await self.bars(st)
+            if df is None or df.empty:
+                return [f"{symbol}: no bars, so the peak since entry cannot be "
+                        f"read and the trail would be a guess"]
+            since = df[df.index >= entry_time]
+            peak = max(entry_price,
+                       float(since["high"].max()) if len(since) else entry_price)
+            st.position = Position(symbol=symbol, qty=qty,
+                                   entry_price=entry_price,
+                                   entry_time=entry_time, peak=peak,
+                                   trail_pct=adapter.trail_pct)
+            LOG.warning("ADOPTED %s %s %d @ %.4f (entered %s), peak %.4f from "
+                        "%d bar(s) since entry, trail %.1f%% -> %.4f",
+                        adapter.name, symbol, qty, entry_price,
+                        entry_time.strftime("%H:%M:%S"), peak, len(since),
+                        adapter.trail_pct, st.position.trail_level())
+        return []
+
     async def prepare(self):
         await self.sync_watchlist(first=True)
         await asyncio.sleep(2)
@@ -1384,6 +1505,39 @@ async def main_async(args):
     trader = MCLPaperTrader(ib, wl, log, args.dry_run, tg=tg,
                             strategies=strategies)
 
+    # BEFORE the watchlist, the equity, or a single bar request. A trader that
+    # starts into a non-flat account and does not know it is the failure this
+    # check exists for -- see open_at_broker().
+    held = trader.open_at_broker()
+    if held:
+        lines = ", ".join(
+            f"{getattr(p.contract, 'symbol', '?')} {int(p.position)} @ "
+            f"{float(getattr(p, 'avgCost', 0)):.4f}" for p in held)
+        LOG.warning("IBKR reports %d open position(s): %s", len(held), lines)
+        if getattr(args, "on_open_positions", "refuse") == "adopt":
+            problems = await trader.adopt_open_positions(held)
+            if problems:
+                ib.disconnect()
+                sys.exit(
+                    "REFUSING TO RUN: could not adopt every open position, and "
+                    "adopting some would leave the rest unmanaged with nothing "
+                    "on screen saying which.\n  "
+                    + "\n  ".join(problems))
+        else:
+            ib.disconnect()
+            sys.exit(
+                f"REFUSING TO RUN: IBKR is holding {len(held)} position(s) "
+                f"({lines}).\n"
+                "  This trader manages a position only if THIS process opened "
+                "it: the trailing stop lives in here, and outside RTH there is "
+                "no broker-side stop.\n"
+                "  Starting anyway would leave those shares with no stop, "
+                "report 0 of the concurrency cap as used, and allow a SECOND "
+                "entry in the same name.\n"
+                "  Either let the running session finish and close them, or "
+                "restart with --on-open-positions adopt to rebuild them from "
+                f"{log.path.name}.")
+
     for s in (_signal.SIGINT, _signal.SIGTERM):
         try:
             asyncio.get_event_loop().add_signal_handler(s, trader.stop)
@@ -1473,7 +1627,10 @@ def suspend_machine(delay_min: int, flat: bool) -> None:
                    check=False)
 
 
-def main(argv: list[str] | None = None):
+def build_parser() -> argparse.ArgumentParser:
+    """The trader's arguments, as a function so a test can read the real
+    defaults instead of rebuilding them. A test that constructs its own parser
+    and asserts on that is asserting about itself."""
     p = argparse.ArgumentParser(description="MCL pre-market paper trader (IBKR)")
     p.add_argument("--watchlist", default="var/watchlist.txt",
                    help="file with today's qualifying tickers, one per line")
@@ -1482,6 +1639,13 @@ def main(argv: list[str] | None = None):
                    help="4002 IB Gateway paper (default) or 7497 TWS paper")
     p.add_argument("--client-id", type=int, default=17)
     p.add_argument("--out", default=f"var/fills/mcl_fills_{datetime.now(ET):%Y%m%d}.csv")
+    p.add_argument("--on-open-positions", choices=["refuse", "adopt"],
+                   default="refuse",
+                   help="what to do if IBKR is already holding something at "
+                        "startup. refuse (default) stops before touching "
+                        "anything and tells you what is held; adopt rebuilds "
+                        "the positions from today's fill log and manages them, "
+                        "and aborts unless EVERY one can be reconstructed.")
     p.add_argument("--strategy", nargs="+", default=["mcl"],
                    help="one or more strategies to run in THIS process, in "
                         "priority order. They share one position book and one "
@@ -1506,6 +1670,11 @@ def main(argv: list[str] | None = None):
     p.add_argument("--sleep-delay-min", type=int, default=20,
                    help="minutes to wait after the session before sleeping (default 20, "
                         "which leaves time to read the log or for Claude to review it)")
+    return p
+
+
+def main(argv: list[str] | None = None):
+    p = build_parser()
     args = p.parse_args(argv)
 
     logging.basicConfig(
