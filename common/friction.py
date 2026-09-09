@@ -134,6 +134,29 @@ def exit_mix_warning(rows, shares):
                   "-- larger than any parameter question.")
 
 
+def usable_reference(row: dict) -> bool:
+    """Can this row's slippage_vs_ref be believed?
+
+    Fill rows written before 2026-09-09 have no `ref_kind`, and on those the
+    fast-path exit measured a trailing stop against the position's ENTRY price
+    -- so the "slippage" is the trade's whole per-share P/L. See
+    brokers/ibkr/trader._exit_reference.
+
+    Buys were always measured against the signal bar's close and are kept. So
+    are pre-fix bar-path exits (window_close, apex_reversal), which had a real
+    bar close as their reference -- that is what keeps the published $4.26,
+    measured on 2026-09-03 when 84% of exits were apex, standing.
+
+    Only the pre-fix TRAILING-STOP sells are dropped. Dropping them is not
+    tidiness: leaving them in mixes a P/L into a slippage average, and the
+    result looks entirely plausible.
+    """
+    if row.get("ref_kind"):
+        return True
+    return not (row.get("action") == "SELL"
+                and row.get("reason") == "trailing_stop")
+
+
 def load(session: str | None, fills_dir: Path):
     """Rows that represent a real fill, grouped by session date."""
     if not fills_dir.exists():
@@ -143,6 +166,7 @@ def load(session: str | None, fills_dir: Path):
         sys.exit(f"no mcl_fills_*.csv in {fills_dir}/")
 
     by_session = collections.OrderedDict()
+    excluded = collections.Counter()
     for f in files:
         # mcl_fills_20260903.csv, and the rolled-aside mcl_fills_20260902_pre180819.csv
         stem = f.stem[len("mcl_fills_"):]
@@ -165,9 +189,20 @@ def load(session: str | None, fills_dir: Path):
                 continue
             if r["_qty"] <= 0:
                 continue
+            if not usable_reference(r):
+                excluded[day] += 1
+                continue
             keep.append(r)
         if keep:
             by_session.setdefault(day, []).extend(keep)
+    if excluded:
+        total = sum(excluded.values())
+        print(f"  ! EXCLUDED {total} sell row(s) written before 2026-09-09: "
+              f"{', '.join(f'{d} ({n})' for d, n in sorted(excluded.items()))}")
+        print("    Those rows measured a trailing-stop exit against the ENTRY")
+        print("    price, so their slippage_vs_ref is the trade's whole P/L, not")
+        print("    slippage. Averaging them in would have produced a friction")
+        print("    figure several times too large, and a believable one.")
     if not by_session:
         sys.exit("no filled rows found" + (f" for session {session}" if session else ""))
     return by_session

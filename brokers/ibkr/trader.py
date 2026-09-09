@@ -273,11 +273,16 @@ def parse_watchlist(path: Path) -> list[str]:
 
 FIELDS = [
     "ts_et", "symbol", "action", "reason",
-    "ref_close",            # what the backtest would have filled at
+    "ref_close",            # the price this order was measured against
+    "ref_kind",             # WHICH price that is -- see _exit_reference()
     "bid", "ask", "spread", "spread_pct",
     "limit_sent", "qty",
     "fill_price", "filled_qty", "status",
     "slippage_vs_ref",      # fill - ref_close  (negative = worse for a buy)
+                            # ON A SELL, only meaningful with ref_kind set:
+                            # rows written before 2026-09-09 used the ENTRY
+                            # price as the reference on every fast-path exit,
+                            # so their "slippage" is the trade's whole P/L.
     "seconds_to_fill",
     # -- round-trip result, written on the SELL row only --------------------
     "entry_price", "exit_price", "trade_pnl", "trade_pct", "hold_minutes",
@@ -609,7 +614,8 @@ class MCLPaperTrader:
 
     async def marketable_limit(self, st: SymbolState, action: str, qty: int,
                                ref_close: float, reason: str, detail: dict,
-                               closing: "Position | None" = None):
+                               closing: "Position | None" = None,
+                               ref_kind: str = ""):
         """Send a marketable limit order, outsideRth, and record what happened.
 
         IBKR does not accept market orders outside RTH for US stocks, so a
@@ -644,7 +650,8 @@ class MCLPaperTrader:
         if base != base or base <= 0:
             LOG.warning("%s no quote — skipping %s", st.symbol, action)
             self.log.write(ts_et=now_et_str(), symbol=st.symbol, action=action,
-                           reason=reason, ref_close=ref_close, bid=bid, ask=ask,
+                           reason=reason, ref_close=ref_close,
+                           ref_kind=ref_kind, bid=bid, ask=ask,
                            spread=spread, spread_pct=spread_pct, qty=qty,
                            status="NO_QUOTE", **detail)
             return None
@@ -654,8 +661,9 @@ class MCLPaperTrader:
         limit = round_to_tick(raw, action, st.min_tick)
 
         row = dict(ts_et=now_et_str(), symbol=st.symbol, action=action, reason=reason,
-                   ref_close=ref_close, bid=bid, ask=ask, spread=spread,
-                   spread_pct=spread_pct, limit_sent=limit, qty=qty, **detail)
+                   ref_close=ref_close, ref_kind=ref_kind, bid=bid, ask=ask,
+                   spread=spread, spread_pct=spread_pct, limit_sent=limit,
+                   qty=qty, **detail)
 
         if self.dry_run:
             # Assume the marketable limit fills at its own price. That is the
@@ -828,17 +836,57 @@ class MCLPaperTrader:
 
     # -- position management ----------------------------------------------
 
+    @staticmethod
+    def _exit_reference(pos: "Position", reason: str,
+                        bar_close: float | None,
+                        last_price: float) -> tuple[float, str]:
+        """The price this exit should be MEASURED against, and its name.
+
+        THE DEFECT THIS REPLACES, found 2026-09-08 and fixed on its own so it
+        can be attributed. manage_position took one `ref_close` that did two
+        unrelated jobs: a fallback price when the ask is NaN, and the fill
+        log's measurement reference. The fast loop needs the first and has no
+        bar, so it passed pos.entry_price -- which then became the second. On
+        every trailing-stop exit the log's `slippage_vs_ref` was therefore the
+        trade's WHOLE per-share P/L, not slippage. Both rows of the 2026-09-08
+        session show it exactly: -0.39 = 5.43 - 5.82.
+
+        It is not cosmetic. common/friction.py reads slippage_vs_ref straight
+        out of these rows, and friction is the number this project turns on.
+        The published $4.26 survives -- it was measured on 2026-09-03, when 84%
+        of exits were apex_reversal, and those come from the BAR path where the
+        reference was a real bar close. But apex was disabled on 2026-09-05, so
+        roughly 95% of exits since are trailing stops, and running friction.py
+        over yesterday's session would have reported a sell-side slippage of
+        39c and 22c a share: enormous, plausible, and entirely the trade's P/L.
+
+        A trailing stop is triggered by a LEVEL, so the level is what the fill
+        should be judged against -- "how far below the trigger did we actually
+        get out" is the question friction needs answered. A window or apex exit
+        is triggered by a BAR, so the bar's close is its reference.
+        """
+        if reason == "trailing_stop":
+            return pos.trail_level(), "trail_level"
+        if bar_close is not None:
+            return bar_close, "bar_close"
+        # Only reachable if a bar-triggered exit is retried from the fast loop,
+        # where there is no bar. Named rather than silently substituted, so a
+        # row measured against a quote is never averaged in as if it were
+        # measured against a bar.
+        return last_price, "quote"
+
     async def manage_position(self, st: SymbolState, now_et: datetime,
-                              ref_close: float, detail: dict,
+                              bar_close: float | None, detail: dict,
                               bar_high: float | None = None,
                               exit_signal: bool = False) -> None:
         """Trail / window / apex exit for an open position.
 
         Called from two places, deliberately:
           * the fast loop, every second, off the streaming quote — this is the
-            trailing stop, and it costs no API request;
+            trailing stop, and it costs no API request. `bar_close` is None
+            there: that path has no bar, and saying so is the point.
           * the bar path, once a minute, which additionally supplies the apex
-            exit signal and the bar high.
+            exit signal, the bar high, and the bar's close.
 
         Pine's `strategy.exit(stop=)` fills intrabar at the stop price. Nothing
         outside a backtest can do that, but a 1-second poll on live quotes is far
@@ -849,7 +897,11 @@ class MCLPaperTrader:
             return
 
         bid, ask = self.quote(st)
-        last_price = ask if ask == ask else ref_close
+        # The FALLBACK price, when the ask is NaN. Deliberately not the same
+        # variable as the measurement reference below -- conflating the two is
+        # what produced the defect _exit_reference documents.
+        fallback = bar_close if bar_close is not None else pos.entry_price
+        last_price = ask if ask == ask else fallback
         candidates = [pos.peak, last_price]
         if bar_high is not None:
             candidates.append(bar_high)
@@ -879,8 +931,10 @@ class MCLPaperTrader:
             LOG.warning("%s exit retry #%d (%s) — still holding %d",
                         st.symbol, pos.exit_attempts, reason, pos.qty)
 
-        res = await self.marketable_limit(st, "SELL", pos.qty, ref_close,
-                                          reason, detail, closing=pos)
+        ref, ref_kind = self._exit_reference(pos, reason, bar_close, last_price)
+        res = await self.marketable_limit(st, "SELL", pos.qty, ref,
+                                          reason, detail, closing=pos,
+                                          ref_kind=ref_kind)
         if not res:
             return
 
@@ -933,7 +987,7 @@ class MCLPaperTrader:
             bar_high = None
             if last_ts > st.position.entry_time:
                 bar_high = float(df["high"].iloc[-1])
-            await self.manage_position(st, now_et, ref_close=sig.close,
+            await self.manage_position(st, now_et, bar_close=sig.close,
                                        detail=detail, bar_high=bar_high,
                                        exit_signal=sig.exit_signal)
             return
@@ -964,6 +1018,7 @@ class MCLPaperTrader:
             self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
                            symbol=st.symbol, action="BUY",
                            reason="entry_signal", ref_close=round(sig.close, 4),
+                           ref_kind="signal_close",
                            status="SKIPPED_CONCURRENCY_CAP",
                            reject_reason=f"{open_now} open, cap "
                                          f"{MAX_CONCURRENT_POSITIONS}",
@@ -988,6 +1043,7 @@ class MCLPaperTrader:
             self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
                            symbol=st.symbol, action="BUY",
                            reason="entry_signal", ref_close=round(sig.close, 4),
+                           ref_kind="signal_close",
                            status="SKIPPED_PRICE_BAND",
                            reject_reason=f"{sig.close:.4f} outside "
                                          f"{S.PRICE_MIN:.2f}-{S.PRICE_MAX:.2f}",
@@ -1001,7 +1057,8 @@ class MCLPaperTrader:
             return
 
         res = await self.marketable_limit(st, "BUY", qty, sig.close,
-                                          "entry_signal", detail)
+                                          "entry_signal", detail,
+                                          ref_kind="signal_close")
         if res:
             avg, filled = res
             st.position = Position(symbol=st.symbol, qty=filled, entry_price=avg,
@@ -1073,9 +1130,7 @@ class MCLPaperTrader:
                 if st.position is not None:
                     try:
                         await self.manage_position(
-                            st, now_et,
-                            ref_close=st.position.entry_price,
-                            detail={})
+                            st, now_et, bar_close=None, detail={})
                     except Exception as e:  # noqa: BLE001
                         LOG.exception("%s trail check failed: %s", st.symbol, e)
                 try:
