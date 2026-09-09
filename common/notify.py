@@ -280,15 +280,26 @@ def _ts(now: datetime | None = None) -> str:
     return (now or datetime.now(ET)).strftime("%H:%M:%S ET")
 
 
-def _tag(strategy: str) -> str:
-    """Which strategy fired this. Empty when unknown rather than guessing a
-    default -- a fill labelled with the wrong strategy is worse than one
-    labelled with none, and there is more than one trader in this repo."""
-    # "MCL BUY WYHG", not "MCL · BUY WYHG": Ben asked on 2026-09-09 for the
-    # second line to be "Strategy BUY/SELL". The ticker stays on it -- his spec
-    # did not mention it, and a fill notification without the symbol is not a
-    # fill notification.
-    return f"{strategy} " if strategy else ""
+def _order_head(strategy: str, side: str, ticker: str) -> list[str]:
+    """The two lines under the timestamp:
+
+        MCL
+        BUY WYHG
+
+    Ben, 2026-09-09, second revision: the strategy gets its own line. The
+    ticker stays with the side -- his example shows "BUY WYHG" together, and a
+    fill notification without the symbol is not a fill notification.
+
+    An unknown strategy produces NO line rather than a blank one. Empty when
+    unknown is deliberate and predates this: a fill labelled with the wrong
+    strategy is worse than one labelled with none, and there is more than one
+    trader in this repo. An empty line would read as a rendering fault.
+    """
+    lines = []
+    if strategy:
+        lines.append(f"<b>{strategy}</b>")
+    lines.append(f"<b>{side} {ticker}</b>")
+    return lines
 
 
 def header(now: datetime | None = None) -> str:
@@ -450,7 +461,7 @@ def buy_filled(ticker: str, price: float, qty: int, commission: float,
     cost = price * qty
     return "\n".join([
         header(now),
-        f"<b>{_tag(strategy)}BUY {ticker}</b>",
+        *_order_head(strategy, "BUY", ticker),
         f"price      {_money(price)}",
         f"shares     {qty:,}",
         f"cost       {_money(cost)}",
@@ -469,7 +480,7 @@ def sell_filled(ticker: str, price: float, qty: int, commission: float,
     sign = "🟢" if net_profit >= 0 else "🔴"
     return "\n".join([
         header(now),
-        f"<b>{_tag(strategy)}SELL {ticker}</b>",
+        *_order_head(strategy, "SELL", ticker),
         f"price      {_money(price)}",
         f"shares     {qty:,}",
         f"proceeds   {_money(proceeds)}",

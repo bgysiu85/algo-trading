@@ -159,16 +159,18 @@ def test_fill_messages_name_the_strategy():
     """With MCL, MC5 and VW9 in the repo, a fill on a phone has to say which
     one fired it."""
     assert N.buy_filled("AOUT", 12.76, 100, 0.35, now=NOW,
-                        strategy="MCL").splitlines()[1] == "<b>MCL BUY AOUT</b>"
+                        strategy="MCL").splitlines()[1] == "<b>MCL</b>"
     assert N.sell_filled("AOUT", 13.4, 100, 0.35, 63.3, now=NOW,
-                         strategy="VW9").splitlines()[1] == "<b>VW9 SELL AOUT</b>"
+                         strategy="VW9").splitlines()[1] == "<b>VW9</b>"
 
 
 def test_an_unknown_strategy_is_left_blank_not_guessed():
     """A fill labelled with the WRONG strategy is worse than one labelled with
     none, so there is no default."""
-    assert N.buy_filled("A", 1.0, 1, 0.1,
-                        now=NOW).splitlines()[1] == "<b>BUY A</b>"
+    lines = N.buy_filled("A", 1.0, 1, 0.1, now=NOW).splitlines()
+    assert lines[1] == "<b>BUY A</b>", (
+        "no strategy means NO line, not a blank one -- an empty line reads as "
+        "a rendering fault")
 
 
 def test_the_trader_reads_the_name_from_its_strategy_module():
@@ -341,11 +343,26 @@ def test_every_message_type_carries_the_header():
         assert msg.splitlines()[0] == N.header(NOW)
 
 
-def test_the_second_line_of_an_order_is_strategy_then_side():
-    """Ben, 2026-09-09: '2nd line - Strategy BUY/SELL'. The ticker stays on it
-    -- a fill notification without the symbol is not a fill notification."""
+def test_the_strategy_and_the_side_are_on_separate_lines():
+    """Ben, 2026-09-09 (second revision): strategy on its own line, side and
+    ticker on the next. The ticker stays with the side -- his example shows
+    "BUY WYHG" together, and a fill without the symbol is not a fill."""
     buy = N.buy_filled("WYHG", 5.82, 100, 0.35, now=NOW, strategy="MCL")
-    assert buy.splitlines()[1] == "<b>MCL BUY WYHG</b>"
+    assert buy.splitlines()[:3] == [N.header(NOW), "<b>MCL</b>",
+                                    "<b>BUY WYHG</b>"]
+    sell = N.sell_filled("WYHG", 5.43, 100, 0.35, -40.37, now=NOW,
+                         strategy="MCL")
+    assert sell.splitlines()[:3] == [N.header(NOW), "<b>MCL</b>",
+                                     "<b>SELL WYHG</b>"]
+
+
+def test_an_order_message_never_contains_a_blank_line():
+    """Every line carries a value. A blank one is how a missing field looks."""
+    for msg in (N.buy_filled("A", 1.0, 1, 0.1, now=NOW, strategy="MCL"),
+                N.buy_filled("A", 1.0, 1, 0.1, now=NOW),
+                N.sell_filled("A", 1.0, 1, 0.1, 0.5, now=NOW, strategy="MC5"),
+                N.sell_filled("A", 1.0, 1, 0.1, 0.5, now=NOW)):
+        assert "" not in msg.splitlines()
 
 
 def test_share_counts_are_abbreviated_and_money_never_is():
