@@ -209,7 +209,7 @@ async def main_async(args) -> int:
     return 0
 
 
-def main(argv=None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--symbols", nargs="*", default=None)
     p.add_argument("--watchlist", default="var/watchlist.txt")
@@ -222,8 +222,11 @@ def main(argv=None) -> int:
                    help="not the trader's 17 — this is meant to run alongside "
                         "a live session, and two clients cannot share an id")
     p.add_argument("--out", default="var/reports/history_probe.txt")
-    a = p.parse_args(argv)
-    return asyncio.run(main_async(a))
+    return p
+
+
+def main(argv=None) -> int:
+    return asyncio.run(main_async(build_parser().parse_args(argv)))
 
 
 if __name__ == "__main__":

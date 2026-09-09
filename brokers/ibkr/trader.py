@@ -343,6 +343,24 @@ for _f in _FEED_FIELDS:
 del _f
 
 
+def drop_forming_bar(df: "pd.DataFrame") -> "pd.DataFrame":
+    """Hand back only bars that have closed.
+
+    Every strategy here acts on a CLOSED bar, so the minute in progress must
+    not reach evaluate_last_bar: acting on a partial bar is H1 in
+    claude/multi_strategy_trader_spec.md and shows up in a backtest as an
+    edge that does not exist live.
+
+    THIS IS A FUNCTION AND NOT ONE INLINE LINE because it embeds an assumption
+    about IB that nothing had ever checked -- that the response INCLUDES the
+    forming minute. If IB instead returns only completed bars, this discards a
+    good one and every entry is a minute late. common/bar_freshness.py measures
+    which it is, and measures it by calling THIS, so the probe cannot drift
+    from what the trader really does.
+    """
+    return df.iloc[:-1] if len(df) > 1 else df
+
+
 def parse_watchlist(path: Path) -> list[str]:
     """One ticker per line. Blank lines and # comments ignored, including
     trailing comments — `UPC  # added 05:55, rank 1` yields `UPC`, so the file
@@ -875,8 +893,7 @@ class MCLPaperTrader:
         df = df.rename(columns=str.lower)
         df["date"] = pd.to_datetime(df["date"], utc=True)
         df = df.set_index("date").sort_index()
-        # drop the still-forming bar so we only ever act on closed bars
-        return df.iloc[:-1] if len(df) > 1 else df
+        return drop_forming_bar(df)
 
     # -- order placement --------------------------------------------------
 
