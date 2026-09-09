@@ -193,5 +193,28 @@ def main():
     return 0 if ok else 1
 
 
+# --- pytest entry point -----------------------------------------------------
+#
+# ADDED 2026-09-09, AND THE REASON IS THE POINT. This file is a print-style
+# script: it defines main() and reports each check with PASS/FAIL, but it
+# declares no test_* function, so `pytest` collected ZERO tests from it and
+# ran none of these checks. Seven files in this suite were in that state,
+# every one of them covering the live trader or an engine, while the suite
+# reported hundreds of passes.
+#
+# Two of the seven were FAILING and said nothing: this pattern does not just
+# fail to catch a regression, it hides one that has already happened.
+#
+# The wrapper below is deliberately thin -- it runs the existing checks and
+# fails the suite if any of them failed. Splitting each check into its own
+# test would report better, and is worth doing; rewriting seven files of
+# control logic in the same pass that relies on them as a control is not.
+
+
+def test_mc5_strategy_checks_all_pass():
+    assert main() == 0, (
+        "see the FAIL lines in captured stdout above")
+
+
 if __name__ == "__main__":
     sys.exit(main())

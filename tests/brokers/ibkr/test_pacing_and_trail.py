@@ -73,7 +73,7 @@ async def main():
     # trail level = 26.69 * 0.95 = 25.3555; ask 24.00 is below it -> must exit
     now = datetime(2026, 9, 2, 4, 2, tzinfo=M.ET)
 
-    await tr.manage_position(st, now, ref_close=24.00, detail={})
+    await tr.manage_position(st, now, bar_close=24.00, detail={})
     log.close()
 
     if st.position is None:
@@ -98,7 +98,7 @@ async def main():
     st.position = M.Position(symbol="TEST", qty=100, entry_price=21.14,
                              entry_time=datetime(2026, 9, 2, 4, 1, tzinfo=M.ET),
                              peak=26.69)
-    await tr.manage_position(st, now, ref_close=26.00, detail={})
+    await tr.manage_position(st, now, bar_close=26.00, detail={})
     log.close()
     if st.position is not None and not ib.placed:
         print("PASS  no exit while price is above the trail level")
@@ -108,6 +108,29 @@ async def main():
 
     print("\n" + ("ALL PACING/TRAIL CHECKS PASSED" if ok else "FAILURES ABOVE"))
     return 0 if ok else 1
+
+
+# --- pytest entry point -----------------------------------------------------
+#
+# ADDED 2026-09-09, AND THE REASON IS THE POINT. This file is a print-style
+# script: it defines main() and reports each check with PASS/FAIL, but it
+# declares no test_* function, so `pytest` collected ZERO tests from it and
+# ran none of these checks. Seven files in this suite were in that state,
+# every one of them covering the live trader or an engine, while the suite
+# reported hundreds of passes.
+#
+# Two of the seven were FAILING and said nothing: this pattern does not just
+# fail to catch a regression, it hides one that has already happened.
+#
+# The wrapper below is deliberately thin -- it runs the existing checks and
+# fails the suite if any of them failed. Splitting each check into its own
+# test would report better, and is worth doing; rewriting seven files of
+# control logic in the same pass that relies on them as a control is not.
+
+
+def test_pacing_and_trail_checks_all_pass():
+    assert asyncio.run(main()) == 0, (
+        "see the FAIL lines in captured stdout above")
 
 
 if __name__ == "__main__":

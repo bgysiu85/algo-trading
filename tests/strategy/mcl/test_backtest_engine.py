@@ -133,7 +133,15 @@ def main():
     good = (live is not None
             and abs(live.close - float(sig_row["close"])) < 1e-9
             and live.long_entry == bool(sig_row["entry"])
-            and live.exit_signal == bool(sig_row["exit_sig"])
+            # GATED, not raw. USE_APEX_EXIT has been False since 2026-09-05
+            # and evaluate_last_bar has applied it since 09-08 -- the fix that
+            # stopped the live trader taking apex exits the backtest did not.
+            # This line compared against the UNGATED column and has been
+            # failing ever since, unnoticed, because pytest collects no tests
+            # from this file (it is a print-style script). Both facts are the
+            # same defect: a check nobody runs cannot report anything.
+            and live.exit_signal == (bool(sig_row["exit_sig"])
+                                     and S.USE_APEX_EXIT)
             and abs(live.detail["macd"] - round(float(sig_row["macd"]), 5)) < 1e-9)
     print(("PASS" if good else "FAIL"),
           "evaluate_last_bar() agrees with signals() on the last row")
@@ -148,6 +156,29 @@ def main():
     print()
     print("ALL ENGINE CHECKS PASSED" if ok else "FAILURES ABOVE")
     return 0 if ok else 1
+
+
+# --- pytest entry point -----------------------------------------------------
+#
+# ADDED 2026-09-09, AND THE REASON IS THE POINT. This file is a print-style
+# script: it defines main() and reports each check with PASS/FAIL, but it
+# declares no test_* function, so `pytest` collected ZERO tests from it and
+# ran none of these checks. Seven files in this suite were in that state,
+# every one of them covering the live trader or an engine, while the suite
+# reported hundreds of passes.
+#
+# Two of the seven were FAILING and said nothing: this pattern does not just
+# fail to catch a regression, it hides one that has already happened.
+#
+# The wrapper below is deliberately thin -- it runs the existing checks and
+# fails the suite if any of them failed. Splitting each check into its own
+# test would report better, and is worth doing; rewriting seven files of
+# control logic in the same pass that relies on them as a control is not.
+
+
+def test_backtest_engine_checks_all_pass():
+    assert main() == 0, (
+        "see the FAIL lines in captured stdout above")
 
 
 if __name__ == "__main__":
