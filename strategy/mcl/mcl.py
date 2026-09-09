@@ -354,7 +354,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      seed_peak_with_bar_high: bool = False,
                      trail_on_close: bool = False,
                      trail_confirm_bars: int = 0,
-                     max_adds: int | None = None) -> list[Trade]:
+                     max_adds: int | None = None,
+                     entry_delay_bars: int = 0) -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -468,6 +469,27 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
 
         if pos is None:
             if row["entry"]:
+                # ENTRY LATENCY. entry_delay_bars=0 is the rule as backtested:
+                # the signal bar closes and we are filled at that close. LIVE,
+                # measured 2026-09-09, the order leaves SIXTY SECONDS after the
+                # bar closes -- three signals out of three -- so the price
+                # actually paid belongs to the NEXT bar. Delaying by a bar
+                # prices that minute instead of assuming it away.
+                #
+                # The signal is deliberately NOT re-tested at the delayed bar.
+                # A live order already sent is not withdrawn because the next
+                # bar looked worse, and re-testing here would measure a
+                # different and flattering strategy.
+                if entry_delay_bars:
+                    j = i + entry_delay_bars
+                    # Must land with at least one bar LEFT to manage on. An
+                    # entry on the final bar could never be exited, and the
+                    # trade would be silently dropped from the results -- the
+                    # same failure the trail_confirm_bars comment below
+                    # records, arriving through a different door.
+                    if j >= idx[-1]:
+                        continue
+                    i, row = j, rows.iloc[j]
                 px = float(row["close"]) + SLIPPAGE_TICKS * TICK
                 if ENFORCE_PRICE_BAND and not (PRICE_MIN <= px <= PRICE_MAX):
                     continue
@@ -513,6 +535,15 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
             continue
 
         # --- managing a position -------------------------------------------
+        # NEVER MANAGE THE ENTRY BAR. With no delay the loop already moves past
+        # it, so this is a no-op; with a delay the entry was taken at a bar the
+        # loop has not reached yet, and without this the trail would be tested
+        # against the very bar we bought on -- a same-bar lookahead that stops
+        # trades out at the instant of entry and would make the delay look far
+        # worse than it is.
+        if i <= pos["entry_i"]:
+            continue
+
         # Trail is derived from the peak as of the PREVIOUS bar, then tested
         # against this bar's low. No same-bar lookahead.
         trail = pos["peak"] * (1.0 - trail_pct / 100.0)
