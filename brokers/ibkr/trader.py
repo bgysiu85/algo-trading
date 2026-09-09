@@ -229,25 +229,85 @@ class Position:
     entry_price: float
     entry_time: datetime
     peak: float
+    # Per POSITION, not read from a module at exit time. The default is MCL's
+    # so that every existing caller -- the suite that is this refactor's
+    # control -- behaves exactly as before; the live entry path passes the
+    # value explicitly, and stage 4 removes the default once every caller is
+    # strategy-aware.
+    trail_pct: float = S.TRAIL_PCT
     exiting: str | None = None      # sticky: once we decide to exit, keep trying
     exit_attempts: int = 0
     def trail_level(self) -> float:
-        return self.peak * (1.0 - S.TRAIL_PCT / 100.0)
+        return self.peak * (1.0 - self.trail_pct / 100.0)
+
+
+@dataclass
+class SymbolFeed:
+    """Everything about a SYMBOL that must not be duplicated per strategy.
+
+    Split out of SymbolState 2026-09-09, stage 3 of
+    claude/multi_strategy_trader_spec.md. Both of these are scarce:
+
+      * qualifying a contract is an IB request, and IB paces them account-wide
+        at ~60 per 10 minutes -- signalling the limit by returning EMPTY LISTS
+        rather than errors, so exhausting it makes a strategy go blind without
+        saying so;
+      * a streaming market-data line is one of ~100 an account carries.
+
+    Two strategies watching WYHG want one of each, not two. `blocked` lives
+    here too: IBKR refusing to trade a name is a fact about the name, and
+    rediscovering it per strategy would spend a rejected order to learn it
+    twice.
+
+    The bar cache is here for the same reason and one more: MC5 and MCL both
+    consume 1-MINUTE bars (MC5 resamples its own), so one fetch serves both. A
+    per-strategy cache would double the history requests for identical data.
+    """
+    symbol: str
+    contract: object = None
+    ticker: object = None
+    min_tick: float = 0.0           # from IB ContractDetails; 0 = fall back on price
+    blocked: bool = False           # set after a hard error; stops trading this name
+    bars_df: object = None          # cached history (see bars(): IB paces requests)
+    bars_minute: tuple | None = None
+    bars_fetched_at: float = 0.0
+
+
+# The shared fields, delegated below. Named once so the property pairs and the
+# test that checks them cannot drift apart.
+_FEED_FIELDS = ("contract", "ticker", "min_tick", "blocked",
+                "bars_df", "bars_minute", "bars_fetched_at")
 
 
 @dataclass
 class SymbolState:
+    """One strategy's view of one symbol.
+
+    Holds only what is per-strategy: the position, which bar has been
+    evaluated, and whether this strategy still wants the name. Everything
+    shared reaches it through `feed`, and is exposed as a property of the same
+    name so every existing caller -- including the whole test suite, which is
+    the control for this refactor -- keeps working unchanged.
+    """
     symbol: str
-    contract: object = None
-    ticker: object = None
+    feed: SymbolFeed | None = None
     position: Position | None = None
     last_bar_ts: datetime | None = None
-    blocked: bool = False           # set after a hard error; stops trading this name
     retired: bool = False           # removed from the watchlist; no new entries
-    bars_df: object = None          # cached history (see bars(): IB paces requests)
-    bars_minute: tuple | None = None
-    bars_fetched_at: float = 0.0
-    min_tick: float = 0.0           # from IB ContractDetails; 0 = fall back on price
+
+    def __post_init__(self):
+        if self.feed is None:
+            self.feed = SymbolFeed(symbol=self.symbol)
+
+
+def _delegate(name: str):
+    return property(lambda self: getattr(self.feed, name),
+                    lambda self, v: setattr(self.feed, name, v))
+
+
+for _f in _FEED_FIELDS:
+    setattr(SymbolState, _f, _delegate(_f))
+del _f
 
 
 def parse_watchlist(path: Path) -> list[str]:
@@ -348,6 +408,8 @@ class MCLPaperTrader:
         self.log = log
         self.dry_run = dry_run
         self.states: dict[str, SymbolState] = {}
+        # Per SYMBOL, shared across strategies. See SymbolFeed.
+        self.feeds: dict[str, SymbolFeed] = {}
         self.equity = 0.0
         self.session_pnl = 0.0
         self.session_trades = 0
@@ -366,8 +428,23 @@ class MCLPaperTrader:
 
     # -- setup ------------------------------------------------------------
 
+    def feed_for(self, symbol: str) -> SymbolFeed:
+        """The one feed for this symbol, created on first ask.
+
+        Pulled out of _subscribe so the invariant is testable NOW rather than
+        at stage 4. With a single strategy _subscribe runs once per symbol, so
+        a version that built a fresh feed every call would be indistinguishable
+        from this one -- and would then quietly duplicate the contract
+        qualification and the market-data line the moment a second strategy
+        arrived.
+        """
+        feed = self.feeds.get(symbol)
+        if feed is None:
+            feed = self.feeds[symbol] = SymbolFeed(symbol=symbol)
+        return feed
+
     async def _subscribe(self, symbol: str) -> bool:
-        st = SymbolState(symbol=symbol)
+        st = SymbolState(symbol=symbol, feed=self.feed_for(symbol))
         self.states[symbol] = st
         c = Stock(symbol, "SMART", "USD", primaryExchange="NASDAQ")
         try:
@@ -1061,8 +1138,13 @@ class MCLPaperTrader:
                                           ref_kind="signal_close")
         if res:
             avg, filled = res
+            # The trail travels with the POSITION, not with whichever strategy
+            # module happens to be imported. H2 in the spec: MCL and MC5 are
+            # both at 5.0 today, so reading the wrong one is invisible until
+            # the day one of them changes.
             st.position = Position(symbol=st.symbol, qty=filled, entry_price=avg,
-                                   entry_time=now_et, peak=max(avg, sig.close))
+                                   entry_time=now_et, peak=max(avg, sig.close),
+                                   trail_pct=S.TRAIL_PCT)
 
     def notify_fill(self, symbol: str, action: str, price: float,
                     filled: int, rt: dict) -> None:
