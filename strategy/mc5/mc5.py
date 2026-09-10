@@ -103,20 +103,37 @@ STRATEGY_NAME = "MC5"
 # module default, so the cost of NOT having it can be measured rather than
 # asserted -- see claude/mc5_first_results.md.
 PRICE_MIN, PRICE_MAX = 2.0, 20.0
-# GRADIENT-REVERSAL EXIT -- a switch as of 2026-09-10, and ON only because that
-# is what MC5 has always done, NOT because it has been measured here.
+# GRADIENT-REVERSAL EXIT -- TURNED OFF 2026-09-11, measured.
 #
-# It is the same mechanic MCL calls the apex exit, and MCL's was switched OFF on
-# 2026-09-05 after a 2x2 sweep: net -$544 over 213 exits at a 27% win rate,
-# closing positions while the trail was still intact. MC5 never got the switch,
-# so it never got the measurement.
+# It is the same mechanic MCL calls the apex exit, and MCL's was switched off on
+# 2026-09-05 for the same reason. MC5 never had the switch, so it never had the
+# measurement, until the 2026-09-10 paper session made the case worth checking:
+# MC5's six signal exits lost $109.24 of its $166.94 gross loss that night.
 #
-# The 2026-09-10 paper session is what prompted this. MC5's six signal exits
-# lost $109.24 of its $166.94 gross loss -- two thirds of the night from one
-# rule, on n=6, which is a reason to MEASURE and not yet a reason to flip.
-# common/mc5_apex_sweep.py does that; until it reports, the default stays at
-# today's behaviour so no published MC5 figure moves underneath us.
-USE_APEX_EXIT = True
+# common/mc5_apex_sweep.py over 373 cached sessions, 5-minute bars, 100 shares,
+# net of tiered commission and $4.26/RT friction:
+#
+#   apex ON    762 trades  +$2,794  +$3.67/trade  30.4% win  drop-top-3   +$765
+#   apex OFF   671 trades  +$5,971  +$8.90/trade  34.9% win  drop-top-3 +$3,718
+#
+# Turning it off is worth +$3,177, or +$5.23 a trade, and it is positive in BOTH
+# halves (+$2.97 early, +$7.07 late) and improves drop-top-3 nearly fivefold --
+# the concentration check, which is the one that has killed most things here.
+#
+# THE DIRECT MEASUREMENT, and it is the reason rather than the total: the signal
+# exits themselves were **138 exits, -$1,687, -$12.23 each**, against +$7.30 a
+# trade for every trailing-stop cut. The rule was closing positions the trail
+# had not stopped, and losing $12 a time doing it. That is what MCL's sweep
+# found in 2026-09-05, on a strategy with five times the bar resolution.
+#
+# STILL IN-SAMPLE. MC5's parameters were fitted on these 373 hindsight-selected
+# sessions, so this beats a rule tuned here rather than generalising. It does
+# not rescue MC5, which is -$8.93/trade on the screened XNAS universe; it makes
+# a closed candidate less bad on the set it was fitted to.
+#
+# Pass use_apex explicitly to backtest_session() to sweep it; this is only the
+# default. Set it back to True to reproduce every MC5 figure before 2026-09-11.
+USE_APEX_EXIT = False
 
 # The label this strategy gives that exit, read by BOTH the backtest below and
 # brokers/ibkr/trader.py through the adapter.

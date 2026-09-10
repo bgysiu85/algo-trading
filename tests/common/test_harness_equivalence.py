@@ -112,7 +112,15 @@ def mc5_rules(mod):
     return H.Rules(
         session_start=mod.SESSION_START,
         session_end=mod.SESSION_END,
-        exits=H.Exits(trail_pct=mod.TRAIL_PCT, use_exit_signal=True,
+        # use_exit_signal comes OFF THE MODULE, like everything else here.
+        # It was a hard-coded True until 2026-09-11 -- the one literal in a
+        # function whose docstring warns against exactly that -- and it broke
+        # the moment MC5's USE_APEX_EXIT was measured and turned off. The
+        # harness is a second implementation of this strategy; a constant it
+        # does not follow is a silent divergence, which is what this whole
+        # test exists to catch.
+        exits=H.Exits(trail_pct=mod.TRAIL_PCT,
+                      use_exit_signal=mod.USE_APEX_EXIT,
                       flat_at_session_end=True),
         price_min=mod.PRICE_MIN, price_max=mod.PRICE_MAX,
         enforce_price_band=mod.ENFORCE_PRICE_BAND,

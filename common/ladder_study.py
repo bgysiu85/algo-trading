@@ -183,7 +183,14 @@ def render(name, base, lad, lin, split, n_sessions) -> list[str]:
         L += ["  BETTER on the total, in both halves, and after drop-top-3 —",
               "  and against a registered expectation that it would lose. That",
               "  is the strongest form available in-sample, and it is still",
-              "  in-sample. Register it and spend the holdout on it.", ""]
+              "  in-sample.", "",
+              "  DO NOT SPEND THE HOLDOUT ON THIS FROM bar_cache. An earlier",
+              "  version of this line said to, and it was wrong: holdout.json",
+              "  was cut over the SCREENED universe, so a locked slice does not",
+              "  apply to a bar_cache result. Spending it here is the",
+              "  dataset-mixing error caught in consolidation_filter_test.md",
+              "  and again in prior_spike_result.md. Re-run on bar_cache_xnas",
+              "  first, where the holdout is meaningful.", ""]
     elif d > 0:
         why = [] if de * dl > 0 else ["the sign flips between halves"]
         if b["dropped"] <= a["dropped"]:
