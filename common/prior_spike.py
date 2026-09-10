@@ -70,7 +70,6 @@ from common.report_io import emit
 from strategy.mcl import mcl as MCL
 
 ET = ZoneInfo("America/New_York")
-SPLIT = "2026-03-20"
 QTY = 100
 
 LOOKBACK_SESSIONS = 60
@@ -193,7 +192,9 @@ def stats(reals: list[float], drop: int = 3) -> dict:
 
 
 def render(groups: dict[str, list], n_trades: int, n_sessions: int,
-           side: str = "all", set_aside: int = 0) -> list[str]:
+           side: str = "all", set_aside: int = 0,
+           split: str = "", how: str = "") -> list[str]:
+    SPLIT = split
     L = ["PRIOR-SPIKE RETENTION -- does a name's history predict its trades?",
          "",
          f"  {n_sessions} cached sessions, {n_trades} MCL trades, {QTY} shares "
@@ -212,6 +213,7 @@ def render(groups: dict[str, list], n_trades: int, n_sessions: int,
          f"  a spike is a run of +{SPIKE_MIN * 100:.0f}% peak-over-base",
          f"  former runner >= {RETAINED_HIGH:.0%} retained, pump and dump "
          f"< {RETAINED_LOW:.0%}",
+         f"  halves split at {SPLIT or '(none)'} — {how}",
          "  All pinned before running. A sweep over them would be fitting.", "",
          f"  {'group':<18}{'trades':>7}{'net':>10}{'per':>9}{'win%':>7}"
          f"{'drop top 3':>12}{'early':>10}{'late':>10}"]
@@ -231,12 +233,35 @@ def render(groups: dict[str, list], n_trades: int, n_sessions: int,
         # by 4x in size, so comparing their half TOTALS compares how many
         # trades each had and not how they did.
         got[name] = dict(s, early=early, late=late,
+                         # COUNTS, not just means. A mean of 0.0 is ambiguous
+                         # between "no trades this half" and "trades averaging
+                         # exactly zero", and the emptiness check must not
+                         # depend on a value that a real group can produce.
+                         early_n=len(e), late_n=len(l),
                          early_per=(sum(e) / len(e)) if e else 0.0,
                          late_per=(sum(l) / len(l)) if l else 0.0)
         L.append(f"  {name:<18}{s['n']:>7}${s['net']:>9,.0f}${s['per']:>8.2f}"
                  f"{s['win']:>6.1f}%${s['dropped']:>11,.0f}"
                  f"${early:>9,.0f}${late:>9,.0f}")
     L.append("")
+
+    # THE CONTROL MUST ACTUALLY CONTROL. If a group has no trades on one side
+    # of the split, its half-comparison is a comparison with zero -- which
+    # reads as "the sign flips" and is indistinguishable, in the output, from a
+    # real regime disagreement. On 2026-09-10 that produced two confident
+    # verdicts from a split that divided nothing.
+    inert = [n for n, s_ in got.items()
+             if s_["n"] and (s_["early_n"] == 0 or s_["late_n"] == 0)]
+    if inert:
+        L += ["THE HALVES CONTROL DID NOT DIVIDE THIS RUN", "",
+              f"  {', '.join(inert)} " +
+              ("has" if len(inert) == 1 else "have") +
+              f" no trades on one side of {SPLIT}.",
+              "  A half-comparison against an empty half is not a regime test,",
+              "  and it reads in the output exactly like a sign flip. NO",
+              "  VERDICT is drawn below — the totals stand, the controls do",
+              "  not.", ""]
+        return L + tail()
 
     # --- the cruder split, which the first run showed matters more --------
     spiked = [r for k in ("former runner", "partial hold", "pump and dump")
@@ -343,6 +368,32 @@ def tail() -> list[str]:
             "  pump-and-dump group toward looking better than it was."]
 
 
+def halves_split(dates: list[str]) -> tuple[str, str]:
+    """(split date, how it was chosen) for the both-halves control.
+
+    DERIVED FROM THE RUN, not a constant. A hard-coded 2026-03-20 -- the
+    midpoint of bar_cache -- put 100% of the screened universe's TRAINING side
+    (everything before 2026-01-12) into the early half on 2026-09-10. Every
+    "late" figure was 0.00, so `(early_a - early_b) * (late_a - late_b)` was
+    zero, which is not > 0, and the report announced "the sign flips between
+    halves" about a control that had tested nothing.
+
+    Preference order: the registered `both_halves_split` from holdout.json when
+    it actually divides this run, otherwise the calendar midpoint of the dates
+    present. Both are chosen once and neither depends on the outcome.
+    """
+    ds = sorted(set(dates))
+    if not ds:
+        return "", "no sessions"
+    try:
+        reg = json.loads(HOLDOUT.read_text())["both_halves_split"]
+        if ds[0] < reg <= ds[-1]:
+            return reg, "registered in holdout.json"
+    except Exception:                                       # noqa: BLE001
+        pass
+    return ds[len(ds) // 2], "calendar midpoint of this run"
+
+
 def lock_from() -> str | None:
     """The first locked session date, or None if there is no committed cut."""
     try:
@@ -419,7 +470,9 @@ def main(argv=None) -> int:
             groups[key].append({"symbol": sym, "date": d,
                                 "real": t.net - MEASURED_FRICTION})
 
-    emit("\n".join(render(groups, n, len(sessions), side, set_aside)), a.out,
+    split, how = halves_split([d for _, d, _ in sessions])
+    emit("\n".join(render(groups, n, len(sessions), side, set_aside,
+                          split, how)), a.out,
          header=f"common.prior_spike  cache={a.cache} dataset={a.dataset} "
                 f"side={side}")
     return 0

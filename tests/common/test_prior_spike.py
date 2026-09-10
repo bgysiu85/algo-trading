@@ -165,8 +165,16 @@ def g(n, per, date_="2026-01-01"):
     return [{"symbol": "X", "date": date_, "real": per} for _ in range(n)]
 
 
-def report(groups):
-    return "\n".join(P.render(groups, 100, 373))
+def both(n, per):
+    """Half the trades either side of the split. Several fixtures here were
+    single-sided, which trips the inert-control guard for the same reason the
+    2026-09-10 screened run did — a half-comparison against an empty half."""
+    return g(n // 2, per, "2020-01-01") + g(n - n // 2, per, "2030-01-01")
+
+
+def report(groups, split="2026-03-20"):
+    return "\n".join(P.render(groups, 100, 373, "all", 0, split,
+                              "fixed, for the test"))
 
 
 def test_a_clean_pass_is_called_supported_but_not_adoptable():
@@ -190,6 +198,7 @@ def test_a_sign_flip_between_halves_is_not_supported():
 def test_a_result_carried_by_three_trades_is_not_supported():
     groups = {"former runner": [{"symbol": "X", "date": "2020-01-01",
                                  "real": v} for v in (500, 500, 500)]
+                               + g(15, -1.0, "2020-01-01")
                                + g(30, -1.0, "2030-01-01"),
               "pump and dump": g(30, -0.5, "2020-01-01") + g(30, -0.5, "2030-01-01")}
     text = report(groups)
@@ -199,29 +208,29 @@ def test_a_result_carried_by_three_trades_is_not_supported():
 def test_the_inverted_case_says_what_it_costs_the_warrior_docs():
     """Three rules across two documents rest on the opposite. A null that did
     not say so would leave them quoted as live candidates."""
-    groups = {"former runner": g(20, -5.0), "pump and dump": g(20, 5.0)}
+    groups = {"former runner": both(20, -5.0), "pump and dump": both(20, 5.0)}
     text = report(groups)
     assert "INVERTED" in text
     assert "§7.1" in text and "rubric" in text
 
 
 def test_an_empty_group_stops_the_comparison_rather_than_faking_one():
-    text = report({"former runner": g(20, 5.0)})
+    text = report({"former runner": both(20, 5.0)})
     assert "nothing to" in text and "change nothing" in text
 
 
 def test_the_no_spike_population_is_reported_not_dropped():
     """It may well be the majority here, and a filter that silently discards
     most of the universe is a different filter from the one described."""
-    text = report({"former runner": g(5, 1.0), "pump and dump": g(5, -1.0),
-                   "no prior spike": g(300, 0.1)})
+    text = report({"former runner": both(5, 1.0), "pump and dump": both(5, -1.0),
+                   "no prior spike": both(300, 0.1)})
     assert "no prior spike" in text and "300" in text
 
 
 def test_the_report_warns_about_split_adjustment():
     """A reverse split follows a price collapse — exactly these names — and an
     adjusted history can turn a collapse into a flat line."""
-    text = report({"former runner": g(5, 1.0), "pump and dump": g(5, -1.0)})
+    text = report({"former runner": both(5, 1.0), "pump and dump": both(5, -1.0)})
     assert "SPLIT-ADJUSTED" in text
 
 
@@ -279,15 +288,15 @@ def test_the_any_spike_split_respects_both_halves():
 
 
 def test_no_separation_is_said_plainly():
-    groups = {"former runner": g(20, -5.0), "pump and dump": g(5, -5.0),
-              "no prior spike": g(30, 5.0)}
+    groups = {"former runner": both(20, -5.0), "pump and dump": both(20, -5.0),
+              "no prior spike": both(30, 5.0)}
     assert "No separation" in report(groups)
 
 
 def test_a_group_too_small_for_drop_top_three_gets_no_verdict():
     """On 4 trades, dropping the top 3 removes 75% of the group and the
     control decides the answer by itself."""
-    groups = {"former runner": g(40, 5.0), "pump and dump": g(4, -5.0)}
+    groups = {"former runner": both(40, 5.0), "pump and dump": both(4, -5.0)}
     text = report(groups)
     assert "FEWER THAN" in text and "no verdict drawn" in text
     assert "SUPPORTED" not in text
@@ -337,20 +346,20 @@ def test_reading_the_holdout_is_announced_in_the_report():
     """A locked read that looked like any other run is how a holdout gets
     spent twice without anyone noticing."""
     text = "\n".join(P.render({"former runner": g(20, 1.0)}, 20, 100,
-                              "LOCKED, from 2026-01-12", 300))
+                              "LOCKED, from 2026-01-12", 300, "2026-03-20", "x"))
     assert "THIS READ THE LOCKED HOLDOUT" in text
     assert "spent for this filter" in text
 
 
 def test_an_ordinary_run_carries_no_such_banner():
     text = "\n".join(P.render({"former runner": g(20, 1.0)}, 20, 100,
-                              "training, before 2026-01-12", 164))
+                              "training, before 2026-01-12", 164, "2026-03-20", "x"))
     assert "LOCKED HOLDOUT" not in text
 
 
 def test_the_side_is_stated_on_every_report():
     text = "\n".join(P.render({"former runner": g(20, 1.0)}, 20, 100,
-                              "training, before 2026-01-12", 164))
+                              "training, before 2026-01-12", 164, "2026-03-20", "x"))
     assert "SIDE: training" in text and "164 session(s) set aside" in text
 
 
@@ -382,3 +391,60 @@ def test_main_actually_applies_the_split(monkeypatch, tmp_path):
     assert seen["dates"] == ["2025-06-01"], (
         "the 2026-06-01 session is past lock_from and must not be read")
     assert "SIDE: training" in seen["text"]
+    # And the split reaches the report. Deriving it correctly and then not
+    # passing it leaves the old constant in place — which is exactly the
+    # 2026-09-10 defect, and its only symptom is a control that silently
+    # stops dividing.
+    assert "halves split at 2025-06-01" in seen["text"], seen["text"][:400]
+
+
+# --- the control that did not control, 2026-09-10 ---------------------------
+
+def test_a_split_outside_the_data_is_announced_not_silently_failed():
+    """THE DEFECT THIS CATCHES. On the screened universe the split was
+    hard-coded to bar_cache's midpoint, which sat AFTER the whole training
+    side. Every 'late' figure was 0.00, so (early_a - early_b) * (0 - 0) was
+    zero — not > 0 — and the report announced 'the sign flips between halves'
+    about a control that had divided nothing. Two confident verdicts came out
+    of it."""
+    groups = {"former runner": g(40, 5.0, "2020-01-01"),
+              "pump and dump": g(40, -5.0, "2020-01-01")}
+    text = report(groups, split="2030-01-01")
+    assert "DID NOT DIVIDE THIS RUN" in text
+    assert "NO" in text and "VERDICT" in text
+    assert "sign flips" not in text
+    assert "SUPPORTED" not in text
+
+
+def test_a_group_averaging_exactly_zero_is_not_mistaken_for_an_empty_half():
+    """The guard counts trades rather than reading the mean, because a mean of
+    0.0 is ambiguous between 'no trades' and 'trades that netted zero' — and a
+    real group can produce the latter."""
+    groups = {"former runner": g(20, 1.0, "2020-01-01") + g(20, 1.0, "2030-01-01"),
+              "pump and dump": g(20, 0.0, "2020-01-01") + g(20, 0.0, "2030-01-01")}
+    text = report(groups)
+    assert "DID NOT DIVIDE" not in text
+
+
+def test_the_split_is_derived_from_the_run_not_hard_coded():
+    """A constant chosen for one cache is wrong for every other one."""
+    inside = ["2024-08-01", "2025-06-01", "2026-01-05"]
+    got, how = P.halves_split(inside)
+    assert got == "2025-04-08" and "holdout" in how
+
+    late_only = ["2026-05-01", "2026-06-01", "2026-07-01"]
+    got, how = P.halves_split(late_only)
+    assert late_only[0] < got <= late_only[-1]
+    assert "midpoint" in how
+
+
+def test_the_registered_split_is_not_used_when_it_divides_nothing():
+    """holdout.json's split is right for the screened universe and wrong for a
+    cache that starts after it."""
+    got, how = P.halves_split(["2026-05-01", "2026-06-01"])
+    assert got != "2025-04-08"
+
+
+def test_the_report_states_which_split_it_used_and_why():
+    text = report({"former runner": both(20, 1.0), "pump and dump": both(20, -1.0)})
+    assert "halves split at 2026-03-20" in text
