@@ -156,6 +156,7 @@ TICK = 0.01
 # in the repo. Change a constant above and every call here follows.
 
 from common import profit_ladder as PL  # noqa: E402
+from common import target_exit as TE  # noqa: E402
 from common.commissions import order_cost  # noqa: E402
 from common.indicators import (  # noqa: E402
     ema, rma,
@@ -388,7 +389,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      max_adds: int | None = None,
                      entry_delay_bars: int = 0,
                      max_hold_bars: int | None = None,
-                     ladder: "PL.LadderConfig | None" = None) -> list[Trade]:
+                     ladder: "PL.LadderConfig | None" = None,
+                     target_exit: "TE.TargetExit | None" = None) -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -533,7 +535,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                 q = size_for(px) if entry_shares is None else entry_shares
                 if q >= 1:
                     pos = dict(entry_i=i, entry_px=px, qty=q, init_qty=q,
-                               ladder_done=0,
+                               ladder_done=0, target_taken=False,
                                # SEEDING THE PEAK. The default takes the entry
                                # bar's HIGH -- but that high happened BEFORE
                                # the close we bought at, so it is a move the
@@ -593,6 +595,19 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         # tighter than the percentage one it replaces; it can never widen a
         # stop, which would be a different change wearing the same name.
         trail = stop_level(pos["peak"], trail_pct, trail_cents)
+        # CAMERON'S EXIT, rule 1 of warrior_0 §5.3: once the target is reached
+        # the stop moves to BREAKEVEN and the trail is off. This is the piece
+        # the ladder did not test -- it left the 5% trail on the remainder --
+        # and it is the piece the 71%-vs-32% win-rate argument rests on.
+        #
+        # The trail stays in force BEFORE the target. His own initial stop is
+        # min(structure, 10-20c) and that was measured and rejected on
+        # 2026-09-10; substituting a rejected stop into a test of the exit
+        # would confound the question with a settled answer. Our stop until the
+        # target, his after it, and the report calls it a hybrid.
+        if (target_exit is not None and target_exit.breakeven
+                and pos.get("target_taken")):
+            trail = pos["avg_px"]
         exit_px = exit_reason = None
 
         # HOW THE TRAIL IS TESTED, which is a separate question from how wide
@@ -699,6 +714,31 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                 adds=pos["adds"], max_qty=pos["max_qty"]))
             pos = None
         else:
+            # --- target exit: half off, then breakeven ------------------------
+            # AFTER the full-exit block for the same reason the ladder is: a bar
+            # that reaches the target AND trips the stop resolves as the stop.
+            #
+            # Tested against the CLOSE. A target tagged only by the bar's high
+            # is a target reached intrabar at a price the strategy could not
+            # have acted on -- and this rule is far more sensitive to that than
+            # the trail is, because the target is a level price runs THROUGH
+            # rather than one it settles below.
+            if (target_exit is not None and pos is not None
+                    and not pos.get("target_taken")
+                    and float(row["close"]) >= target_exit.target_price(pos["avg_px"])):
+                sell_q = target_exit.qty_at_target(pos["qty"])
+                # The flag is set even when nothing is sold. take_frac=0 is the
+                # cell that isolates the STOP change from the partial, and it
+                # only means anything if the breakeven still arms.
+                pos["target_taken"] = True
+                if sell_q > 0:
+                    px_out = float(row["close"]) - SLIPPAGE_TICKS * TICK
+                    pos["realised"] += (px_out - pos["avg_px"]) * sell_q
+                    pos["commission"] += order_cost(sell_q, px_out, True,
+                                                    commission_plan)
+                    pos["qty"] -= sell_q
+                    pos["shares_traded"] += sell_q
+
             # --- take-profit ladder, only when enabled -----------------------
             # Ben, 2026-09-10. Sells half on every +10% (compounding from the
             # last rung), down to a 20-share floor where the remainder goes at
