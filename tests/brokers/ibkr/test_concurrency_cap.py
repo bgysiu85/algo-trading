@@ -39,8 +39,12 @@ def build(tag, symbols, outcomes, cap=None):
         out.unlink()
     log = M.FillLog(out)
     ib = FakeIB(outcomes)
+    # `cap` was accepted and IGNORED before 2026-09-10 -- a caller passing
+    # cap=1 would have got the default and the test would have passed while
+    # measuring nothing. Now it reaches the trader; None keeps the module
+    # default, which is what the monkeypatching below relies on.
     tr = M.MCLPaperTrader(ib, Path(tempfile.gettempdir()) / "wl.txt",
-                          log, dry_run=False)
+                          log, dry_run=False, max_positions=cap)
     tr.equity = 22290.96
     states = {}
     for s in symbols:

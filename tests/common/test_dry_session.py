@@ -14,6 +14,9 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import pytest
 
+from collections import Counter
+
+from brokers.ibkr import trader as T
 from common import dry_session as D
 
 ET = ZoneInfo("America/New_York")
@@ -176,3 +179,50 @@ def test_the_breach_detector_counts_across_strategies():
     assert D.open_positions(states) == 3, (
         "three positions are open; a per-strategy count would read 2 and call "
         "a cap of 2 respected")
+
+
+# --- the cap is a parameter now, 2026-09-10 ---------------------------------
+#
+# Ben raised the live cap to 3 to run MCL and MC5 together. A dry run at a
+# different cap from the live session is not a rehearsal of it, so the cap has
+# to travel all the way through -- and the two places that read the module
+# constant instead would each have failed in a way that reads as information.
+
+def test_the_breach_detector_uses_the_cap_in_force():
+    """Against the constant, a run at cap 3 flags every legitimate third
+    position as a breach -- the detector failing in the ALARMING direction,
+    which is how a working session gets abandoned on the night it matters."""
+    import inspect
+    src = inspect.getsource(D.replay)
+    i = src.index("breaches.append")
+    near = src[max(0, i - 400):i + 200]
+    assert "tr.max_positions" in near
+    assert "T.MAX_CONCURRENT_POSITIONS" not in near
+
+
+def test_the_header_reports_the_cap_in_force_and_says_when_overridden():
+    """A report that prints 'cap 2' on a session that ran at 3 is worse than
+    one that prints nothing: it is the number that gets quoted."""
+    out = "\n".join(D.render(["mcl", "mc5"], 3, {}, [], Counter(), cap=3))
+    assert "cap          3" in out
+    assert "OVERRIDDEN" in out
+    plain = "\n".join(D.render(["mcl"], 3, {}, [], Counter()))
+    assert f"cap          {T.MAX_CONCURRENT_POSITIONS}" in plain
+    assert "OVERRIDDEN" not in plain
+
+
+def test_replay_accepts_the_cap_and_passes_it_to_the_trader():
+    import inspect
+    assert "max_positions" in inspect.signature(D.replay).parameters
+    src = inspect.getsource(D.replay)
+    assert "max_positions=max_positions" in src
+
+
+def test_the_solo_comparison_runs_at_the_same_cap():
+    """Comparing a capped joint run against an uncapped solo one would
+    attribute the CAP's effect to the added strategy -- exactly the question
+    the comparison exists to answer."""
+    import inspect
+    src = inspect.getsource(D.main)
+    solo = src[src.index("compare_with and"):]
+    assert "max_positions=a.max_positions" in solo

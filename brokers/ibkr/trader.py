@@ -454,8 +454,22 @@ class FillLog:
 
 class MCLPaperTrader:
     def __init__(self, ib: IB, watchlist: Path, log: FillLog, dry_run: bool,
-                 tg: "notify.Notifier | None" = None, strategies=None):
+                 tg: "notify.Notifier | None" = None, strategies=None,
+                 max_positions: int | None = None):
         self.ib = ib
+        # The cap is an INSTANCE value, not the module constant, so a session
+        # can run at a different size without editing a constant that the dry
+        # runs, the tests and every previous session's semantics depend on.
+        # MAX_CONCURRENT_POSITIONS stays the default and stays the documented
+        # number; passing this is a deliberate per-session choice that appears
+        # in the command line, in the startup log, and in every declined-entry
+        # row -- so a later reader of the fill log can tell which cap produced
+        # it rather than assuming the constant.
+        #
+        # `is None`, not `or`: max_positions=0 must mean "take no new entries"
+        # (a way to run flat and still record signals), not "use the default".
+        self.max_positions = (MAX_CONCURRENT_POSITIONS if max_positions is None
+                              else max_positions)
         # Default to a DISABLED notifier rather than resolving credentials
         # here. Constructing one per test, or per dry run, must not touch
         # 1Password or spawn a thread; main() passes a live one in.
@@ -1309,10 +1323,10 @@ class MCLPaperTrader:
         # so the second strategy would be spending buying power the first
         # already committed.
         open_now = sum(1 for s in self.states.values() if s.position is not None)
-        if open_now >= MAX_CONCURRENT_POSITIONS:
+        if open_now >= self.max_positions:
             LOG.info("%s %s entry signal declined — %d position(s) already open "
                      "(cap %d): %s", st.strategy.name, st.symbol, open_now,
-                     MAX_CONCURRENT_POSITIONS,
+                     self.max_positions,
                      ", ".join(sorted(
                          f"{s.strategy.name}:{s.symbol}"
                          for s in self.states.values()
@@ -1324,7 +1338,7 @@ class MCLPaperTrader:
                            ref_kind="signal_close",
                            status="SKIPPED_CONCURRENCY_CAP",
                            reject_reason=f"{open_now} open, cap "
-                                         f"{MAX_CONCURRENT_POSITIONS}",
+                                         f"{self.max_positions}",
                            **detail)
             return
 
@@ -1518,10 +1532,16 @@ async def main_async(args):
     tg = (notify.Notifier() if args.no_telegram
           else notify.Notifier.from_env(args.telegram_batch_min))
     strategies = SA.build_all(getattr(args, "strategy", ["mcl"]))
-    LOG.info("strategies: %s (one book, cap %d across all of them)",
-             ", ".join(a.name for a in strategies), MAX_CONCURRENT_POSITIONS)
     trader = MCLPaperTrader(ib, wl, log, args.dry_run, tg=tg,
-                            strategies=strategies)
+                            strategies=strategies,
+                            max_positions=getattr(args, "max_positions", None))
+    # Read the cap back OFF THE TRADER rather than off the constant or the
+    # argument. Those can drift from what is running; this cannot.
+    LOG.info("strategies: %s (one book, cap %d across all of them)%s",
+             ", ".join(a.name for a in strategies), trader.max_positions,
+             "" if trader.max_positions == MAX_CONCURRENT_POSITIONS
+             else f"  [OVERRIDDEN from the default "
+                  f"{MAX_CONCURRENT_POSITIONS}]")
 
     # BEFORE the watchlist, the equity, or a single bar request. A trader that
     # starts into a non-flat account and does not know it is the failure this
@@ -1705,6 +1725,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "anything and tells you what is held; adopt rebuilds "
                         "the positions from today's fill log and manages them, "
                         "and aborts unless EVERY one can be reconstructed.")
+    p.add_argument("--max-positions", type=int, default=None,
+                   help="open positions allowed ACROSS ALL strategies "
+                        f"(default {MAX_CONCURRENT_POSITIONS}). Raising this "
+                        "makes the session's trades not directly comparable "
+                        "with previous ones, so it is recorded in the startup "
+                        "log and in every SKIPPED_CONCURRENCY_CAP row.")
     p.add_argument("--strategy", nargs="+", default=["mcl"],
                    help="one or more strategies to run in THIS process, in "
                         "priority order. They share one position book and one "
