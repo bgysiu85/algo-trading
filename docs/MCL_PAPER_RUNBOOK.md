@@ -174,9 +174,26 @@ logging it as a no-fill, so you'll know within a minute if you forgot.
 .\run_paper.ps1
 ```
 
-It asks you to type `PAPER` to confirm, then trades. The port and `DU` guards still apply
-and cannot be bypassed from the script. Add `-AllowEmpty` to start before the watchlist
-is ready.
+It asks you to type `PAPER` to confirm, then trades.
+
+**The prompt is in `main.py`, not in this script** (moved there 2026-09-10). It fires
+however you start the trader, including `python main.py --mode paper` directly. Pass
+`--yes` to skip it for a scheduled run; without a terminal and without `--yes` the run
+is REFUSED rather than assumed either way.
+
+The prompt is not the protection and should never be read as it. The port allowlist
+(4001/7496 refused *by name* as LIVE) and the `DU`-prefix account check live in
+`trader.main_async` and cannot be bypassed from any entry point. Add `-AllowEmpty` to
+start before the watchlist is ready.
+
+For more than one strategy:
+
+```powershell
+.\run_paper.ps1 -Strategy mcl,mc5 -MaxPositions 3
+```
+
+`--strategy` takes ONE comma-separated value. `--strategy mcl mc5` with a space is
+refused, because it would otherwise run MCL alone while looking like it ran both.
 
 It exits on its own at 09:30 ET once flat. Ctrl-C is handled cleanly.
 

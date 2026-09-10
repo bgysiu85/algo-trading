@@ -1,6 +1,8 @@
 # MCL - PLACE REAL ORDERS against the IBKR PAPER account.
 #
-#   .\run_paper.ps1                  normal run
+#   .\run_paper.ps1                  normal run (MCL only)
+#   .\run_paper.ps1 -Strategy mcl,mc5 -MaxPositions 3
+#                                    two strategies, one book, cap 3
 #   .\run_paper.ps1 -SleepWhenDone   sleep the PC ~20 min after the 09:30 close
 #   .\run_paper.ps1 -NoArchive       keep the watchlist instead of clearing it
 #
@@ -19,7 +21,10 @@ param(
     [switch]$SleepWhenDone,          # put the PC to sleep after the session ends
     [switch]$NoArchive,              # keep the watchlist instead of clearing it
     [int]$SleepDelayMin = 20,
-    [int]$Port = 4002
+    [int]$Port = 4002,
+    [string]$Strategy = "mcl",       # comma-separated for more than one: "mcl,mc5"
+    [int]$MaxPositions = 0,          # 0 = leave the trader's default alone
+    [int]$TelegramBatchMin = 0       # 0 = send immediately
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,20 +60,22 @@ Write-Host "  ORDERS WILL BE PLACED  " -ForegroundColor Black -BackgroundColor Y
 Write-Host ""
 Write-Host "  Port      : $Port  (paper only - live ports are refused)" -ForegroundColor Yellow
 Write-Host "  Watchlist : $(if ($tickers.Count) { $tickers -join ', ' } else { '(empty)' })" -ForegroundColor Yellow
-Write-Host "  Size      : up to 100 shares per name, 5% trailing stop" -ForegroundColor Yellow
+Write-Host "  Strategy  : $Strategy" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "  The trailing stop lives in this script, not at IBKR." -ForegroundColor Yellow
 Write-Host "  If this window closes with a position open, that position is unprotected." -ForegroundColor Yellow
 Write-Host ""
 
-$confirm = Read-Host "Type PAPER to continue"
-if ($confirm -ne "PAPER") {
-    Write-Host "Cancelled." -ForegroundColor Cyan
-    exit 0
-}
+# The "Type PAPER" prompt USED to live here, and only here. On 2026-09-10 Ben
+# ran `python main.py` directly for the first time and found it missing --
+# nothing had removed it; this wrapper was simply no longer in the path. It now
+# lives in main.py, so it fires however the trader is started. Do not add a
+# second one here: two prompts train people to type through both.
 
-$argsList = @("main.py", "--mode", "paper", "--strategy", "mcl",
+$argsList = @("main.py", "--mode", "paper", "--strategy", "$Strategy",
               "--watchlist", ".\var\watchlist.txt", "--port", "$Port")
+if ($MaxPositions -gt 0)    { $argsList += @("--max-positions", "$MaxPositions") }
+if ($TelegramBatchMin -gt 0) { $argsList += @("--telegram-batch-min", "$TelegramBatchMin") }
 if ($NoArchive)      { $argsList += "--no-archive" }
 if ($SleepWhenDone)  {
     $argsList += @("--sleep-on-exit", "--sleep-delay-min", "$SleepDelayMin")
