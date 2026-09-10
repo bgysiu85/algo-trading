@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import os
 import json
 import logging
 import queue
@@ -80,6 +81,9 @@ LOCAL = ZoneInfo("Australia/Sydney")
 
 TOKEN_VAR = "TELEGRAM_BOT_TOKEN"
 CHAT_VAR = "TELEGRAM_CHAT_ID"
+# Minutes. Read from the environment rather than passed in, so turning
+# batching on needs no change to the trader or to any other caller.
+BATCH_VAR = "TELEGRAM_BATCH_MIN"
 
 API = "https://api.telegram.org/bot{token}/sendMessage"
 
@@ -197,19 +201,44 @@ class Notifier:
     # -- construction ---------------------------------------------------
 
     @classmethod
-    def from_env(cls, batch_interval_s: float = 0.0) -> "Notifier":
+    @staticmethod
+    def batch_from_env() -> float:
+        """Seconds, from TELEGRAM_BATCH_MIN. Unset, blank or unparseable is
+        OFF -- a typo must not silently hold every message for an hour, so it
+        says so and sends immediately."""
+        raw = (os.environ.get(BATCH_VAR) or "").strip()
+        if not raw:
+            return 0.0
+        try:
+            mins = float(raw)
+        except ValueError:
+            LOG.warning("%s=%r is not a number — batching stays OFF",
+                        BATCH_VAR, raw)
+            return 0.0
+        if mins <= 0:
+            return 0.0
+        return mins * 60.0
+
+    @classmethod
+    def from_env(cls) -> "Notifier":
         """Resolve at startup, per the project's credential discipline. Absent
         configuration disables notifications rather than stopping the run."""
         got = S.preload_optional({TOKEN_VAR: "Telegram bot token",
                                   CHAT_VAR: "Telegram chat id"})
         if {TOKEN_VAR, CHAT_VAR} <= got:
             n = cls(S.get(TOKEN_VAR), S.get(CHAT_VAR),
-                    batch_interval_s=batch_interval_s)
+                    batch_interval_s=cls.batch_from_env())
             if n.problems:
                 for p in n.problems:
                     LOG.error("Telegram not started: %s", p)
                 return n
-            LOG.info("Telegram notifications ON (chat %s)", S.mask(n.chat_id))
+            if n.batch_interval_s > 0:
+                LOG.info("Telegram notifications ON (chat %s), BATCHED every "
+                         "%.0f min — messages are held and sent joined; "
+                         "trading is unaffected",
+                         S.mask(n.chat_id), n.batch_interval_s / 60.0)
+            else:
+                LOG.info("Telegram notifications ON (chat %s)", S.mask(n.chat_id))
             return n
         LOG.info("Telegram notifications OFF — set %s and %s to enable",
                  TOKEN_VAR, CHAT_VAR)
@@ -228,7 +257,7 @@ class Notifier:
             return False
         if not force and not self._allow(text):
             return False
-        if not force and self.batch_interval_s > 0:
+        if self.batch_interval_s > 0:
             with self._lock:
                 self._pending.append(text)
                 self._batched += 1

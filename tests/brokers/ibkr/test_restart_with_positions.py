@@ -235,23 +235,3 @@ def test_adopt_is_the_only_other_choice():
     meaning anything."""
     with pytest.raises(SystemExit):
         M.build_parser().parse_args(["--on-open-positions", "ignore"])
-
-
-# --- notification options, added 2026-09-10 ---------------------------------
-
-def test_batching_is_off_by_default():
-    """Read off the TRADER's own parser. Immediate is the safe default: the
-    option exists to reduce watchlist noise, not to delay anything."""
-    assert M.build_parser().parse_args([]).telegram_batch_min == 0.0
-
-
-def test_the_batch_interval_is_taken_in_minutes():
-    """Ben asked for '15 mins or 30 mins'. Seconds would make 15 a quarter of
-    a minute and the mistake would look like batching not working."""
-    a = M.build_parser().parse_args(["--telegram-batch-min", "15"])
-    assert a.telegram_batch_min == 15.0
-
-
-def test_the_summary_is_on_by_default_and_can_be_turned_off():
-    assert M.build_parser().parse_args([]).no_summary is False
-    assert M.build_parser().parse_args(["--no-summary"]).no_summary is True

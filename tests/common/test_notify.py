@@ -499,32 +499,34 @@ def test_batching_holds_ordinary_messages_instead_of_sending_them(monkeypatch):
     assert n._batched == 2
 
 
-def test_a_forced_message_is_never_batched(monkeypatch):
-    """THE SAFETY PROPERTY. force=True already means 'must not be swallowed',
-    and its three call sites are fills and the heartbeat -- the two things a
-    15-minute delay would break. A delayed fill means not knowing you are
-    holding; a delayed heartbeat cannot prove the process is alive."""
-    n = N.Notifier(TOKEN, CHAT, batch_interval_s=3600)
-    got = sent_texts(monkeypatch, n)
-    n.send("a fill", force=True)
-    time.sleep(0.2)
-    assert got == ["a fill"]
-    assert n._pending == []
-
-
 @pytest.mark.parametrize("msg", [
     N.buy_filled("AOUT", 12.76, 100, 0.35, strategy="MCL"),
     N.sell_filled("AOUT", 13.40, 100, 0.35, 63.30, strategy="MCL"),
     N.heartbeat(40, 3, 1, 0, stats="x"),
 ])
-def test_the_messages_that_must_not_wait_are_the_ones_that_force(msg, monkeypatch):
-    """Asserted through the real formatters rather than a string, so a call
-    site that stopped forcing would show up here."""
+def test_batching_holds_every_kind_of_message_including_fills(msg, monkeypatch):
+    """Ben, 2026-09-10: batch the Telegram messages, all of them. Batching
+    delays the NOTIFICATION and nothing else -- the order is placed, filled
+    and managed by the trader either way, and this queue sits downstream of
+    all of it. Asserted through the real formatters so a fill cannot quietly
+    acquire an exemption."""
     n = N.Notifier(TOKEN, CHAT, batch_interval_s=3600)
     got = sent_texts(monkeypatch, n)
     n.send(msg, force=True)
     time.sleep(0.2)
-    assert len(got) == 1
+    assert got == [], "nothing goes out until the interval"
+    assert len(n._pending) == 1
+
+
+def test_force_still_bypasses_the_two_guards_while_batching(monkeypatch):
+    """`force` keeps its original meaning -- skip the rate limit and the
+    de-duplicator -- and simply no longer decides what waits."""
+    n = N.Notifier(TOKEN, CHAT, batch_interval_s=3600)
+    sent_texts(monkeypatch, n)
+    n.send("same", force=True)
+    n.send("same", force=True)
+    assert n.suppressed == 0
+    assert len(n._pending) == 2
 
 
 def test_the_batch_goes_out_on_the_interval(monkeypatch):
@@ -744,3 +746,59 @@ def test_a_buy_row_is_not_a_round_trip_even_if_it_carries_pl_fields():
                trade_pnl="-16.37")
     assert N._round_trips([odd]) == []
     assert len(N._round_trips([odd, sell_row()])) == 1
+
+
+# --- configured from the environment, not from the trader -------------------
+# Ben, 2026-09-10: keep it out of the trader entirely.
+
+def test_batching_is_off_when_the_variable_is_unset(monkeypatch):
+    monkeypatch.delenv(N.BATCH_VAR, raising=False)
+    assert N.Notifier.batch_from_env() == 0.0
+
+
+@pytest.mark.parametrize("raw,secs", [("15", 900.0), ("30", 1800.0),
+                                      ("0.5", 30.0)])
+def test_the_variable_is_read_in_minutes(raw, secs, monkeypatch):
+    """Ben asked for '15 mins or 30 mins'. Seconds would make 15 a quarter of
+    a minute and the mistake would look like batching not working."""
+    monkeypatch.setenv(N.BATCH_VAR, raw)
+    assert N.Notifier.batch_from_env() == secs
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "0", "-5"])
+def test_blank_or_non_positive_means_off(raw, monkeypatch):
+    monkeypatch.setenv(N.BATCH_VAR, raw)
+    assert N.Notifier.batch_from_env() == 0.0
+
+
+def test_a_typo_stays_off_and_says_so(monkeypatch, caplog):
+    """Silently holding every message for an hour because of a mistyped value
+    is the worst reading of an ambiguous setting."""
+    monkeypatch.setenv(N.BATCH_VAR, "fifteen")
+    with caplog.at_level("WARNING"):
+        assert N.Notifier.batch_from_env() == 0.0
+    assert N.BATCH_VAR in caplog.text
+
+
+def test_from_env_takes_no_batch_argument():
+    """The trader must not have to pass anything. A signature that still
+    accepted one would invite the caller-side wiring back."""
+    import inspect
+    sig = inspect.signature(N.Notifier.from_env)
+    assert list(sig.parameters) == []
+
+
+def test_from_env_actually_applies_the_variable(monkeypatch):
+    """THE TEST THE FEATURE HANGS ON. Reading the variable correctly and then
+    not passing it to the Notifier leaves batching silently off, and the only
+    symptom is messages arriving immediately -- which looks exactly like not
+    having set it."""
+    monkeypatch.setattr(N.S, "preload_optional",
+                        lambda spec: {N.TOKEN_VAR, N.CHAT_VAR})
+    monkeypatch.setattr(N.S, "get",
+                        lambda k: TOKEN if k == N.TOKEN_VAR else CHAT)
+    monkeypatch.setenv(N.BATCH_VAR, "15")
+    assert N.Notifier.from_env().batch_interval_s == 900.0
+
+    monkeypatch.delenv(N.BATCH_VAR)
+    assert N.Notifier.from_env().batch_interval_s == 0.0
