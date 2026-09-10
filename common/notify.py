@@ -200,7 +200,6 @@ class Notifier:
 
     # -- construction ---------------------------------------------------
 
-    @classmethod
     @staticmethod
     def batch_seconds(batch_min: float | None = None) -> float:
         """Seconds to batch for. The ARGUMENT wins when given, including 0.

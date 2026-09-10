@@ -879,3 +879,22 @@ def test_from_env_applies_an_explicit_batch_argument(monkeypatch):
     assert N.Notifier.from_env(15).batch_interval_s == 900.0
     assert N.Notifier.from_env(0).batch_interval_s == 0.0
     assert N.Notifier.from_env().batch_interval_s == 1800.0
+
+
+def test_the_batch_helpers_are_plain_static_methods():
+    """A REGRESSION GUARD FOR A VERSION-DEPENDENT BUG, 2026-09-10.
+
+    A scripted edit left `@classmethod` stacked over `@staticmethod` on
+    batch_seconds. Chaining those was added in Python 3.9, deprecated in 3.11
+    and REMOVED in 3.13 -- so it worked on the 3.11 this was written against
+    and raised TypeError on Ben's newer interpreter, on every call. The whole
+    feature was dead on his machine and green on mine.
+
+    Asserted on the descriptor rather than the call, because the CALL works on
+    3.11 either way: a test that only exercised behaviour could not have
+    caught it here.
+    """
+    for name in ("batch_seconds", "batch_from_env"):
+        got = N.Notifier.__dict__[name]
+        assert isinstance(got, staticmethod), (
+            f"{name} is {type(got).__name__}, not a plain staticmethod")
