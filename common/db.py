@@ -471,6 +471,72 @@ holdout_cut = Table(
 )
 
 
+# --- the paper sessions ----------------------------------------------------
+
+paper_fill = Table(
+    "paper_fill", META,
+    # KEYED BY THE SESSION, NOT BY A RUN ID, and this is the one thing about
+    # this table that is deliberately unlike the others.
+    #
+    # Every other artefact here is the OUTPUT OF A RUN: re-running a backtest
+    # produces a genuinely different result worth keeping beside the old one,
+    # so run_id carries the source mtime and a changed file becomes a new run.
+    #
+    # A fill log is not that. It is an APPEND-ONLY JOURNAL of one session and it
+    # GROWS WHILE THE SESSION IS LIVE. Keyed on path+mtime, loading it at 06:00
+    # and again at 09:35 would produce two overlapping run_ids -- the second
+    # containing every row of the first -- and delete-before-insert would clear
+    # neither, because they are different keys. Every fill from the first half
+    # of the session would then be counted twice, the table would be valid, the
+    # queries would return, and the P/L would simply be wrong. That is the exact
+    # failure the run_id design exists to prevent, and applying that design here
+    # is what would cause it.
+    #
+    # So the key is the fill itself and a load DELETES THE WHOLE SESSION before
+    # inserting it. Loading twice is a true no-op; loading mid-session and again
+    # at the end is correct rather than merely tolerable.
+    Column("session_date", Date, primary_key=True),
+    Column("ts_et", DateTime, primary_key=True),
+    # In the key because two strategies now share one log and can act on the
+    # same symbol in the same minute -- MCL and MC5 both entering WYHG at 06:21
+    # is two rows, not one that overwrites the other.
+    Column("strategy", String(24), primary_key=True),
+    Column("symbol", String(SYM), primary_key=True),
+    Column("action", String(8), primary_key=True),
+    Column("status", String(32), primary_key=True),
+
+    Column("reason", String(32)),
+    # The price the order was measured against, and WHICH price that is. Rows
+    # written before 2026-09-09 used the ENTRY price as the reference on every
+    # fast-path exit, so their slippage_vs_ref is the trade's whole per-share
+    # P/L rather than slippage. ref_kind is how a query tells the two apart;
+    # without it every pre-09-09 exit row silently poisons an average.
+    Column("ref_close", Float), Column("ref_kind", String(24)),
+    Column("bid", Float), Column("ask", Float),
+    Column("spread", Float), Column("spread_pct", Float),
+    Column("limit_sent", Float), Column("qty", Integer),
+    Column("fill_price", Float), Column("filled_qty", Integer),
+    Column("slippage_vs_ref", Float), Column("seconds_to_fill", Float),
+
+    # Round-trip result, on the SELL row only. Null on every BUY and on every
+    # SKIPPED_* row -- those are decisions, not trades.
+    Column("entry_price", Float), Column("exit_price", Float),
+    Column("trade_pnl", Float), Column("trade_pct", Float),
+    Column("hold_minutes", Float),
+
+    Column("reject_reason", String(255)),
+    # Indicator state at the moment of the decision. Kept because "why did it
+    # take that one" is unanswerable afterwards without it -- the bars it was
+    # computed from are not retained per decision.
+    Column("macd", Float), Column("macd_sig", Float),
+    Column("mfi", Float), Column("rsi", Float),
+    Column("vol", Float), Column("prev_vol", Float), Column("trail_avg", Float),
+
+    Column("source_file", String(255)),
+    Column("loaded_at", DateTime),
+)
+
+
 # --- provenance ------------------------------------------------------------
 
 load_run = Table(

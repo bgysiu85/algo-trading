@@ -41,6 +41,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 LOCK_PATH = Path("var/state/session.lock")
+
+# ONE WRITER FOR THE WATCHLIST, 2026-09-10.
+#
+# common/tv_feed.py and brokers/ibkr/scanner.py both write var/watchlist.txt.
+# Until now that rule existed only as a sentence in each file's header -- "Run
+# one or the other, never both, or they overwrite each other every few
+# seconds" -- and nothing enforced it. Two writers do not error: they take
+# turns, the trader sees the watchlist flip between two answers every few
+# seconds, and names appear and vanish for no visible reason.
+#
+# It became load-bearing when main.py gained --mode paper starting the feed
+# itself: the obvious mistake is now to run the combined command AND leave
+# run_tv_feed.ps1 up in the other terminal, which is exactly the shape a person
+# repeats out of habit.
+#
+# Same file format, same staleness rules, same Windows-safe liveness check --
+# every function here already takes `path`.
+WRITER_LOCK_PATH = Path("var/state/watchlist_writer.lock")
+
 MAX_AGE_H = 24.0
 
 

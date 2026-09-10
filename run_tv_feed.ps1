@@ -1,5 +1,11 @@
 # Poll the TradingView screen and keep watchlist.txt current.
 #
+# SINCE 2026-09-10 YOU USUALLY DO NOT NEED THIS. main.py --mode paper starts the
+# feed in its own process, so one command runs everything. This script remains
+# for running the feed ALONE -- to watch the screen without trading, or with
+# --mode paper --no-feed. Starting both is refused by the writer lock rather
+# than silently producing two writers.
+#
 # Run this in its OWN terminal, started before .\run_paper.ps1, and leave it
 # up for the session. It writes the file; the trader reads it.
 #
@@ -8,6 +14,7 @@
 # every few seconds.
 #
 #   .\run_tv_feed.ps1                 # 10s poll, 04:00-09:30 ET, writes the file
+#   .\run_tv_feed.ps1 -TelegramBatchMin 15   # hold notifications, send every 15 min
 #   .\run_tv_feed.ps1 -DryRun         # prints what it would write, writes nothing
 #   .\run_tv_feed.ps1 -Once -DryRun   # one call -- use this first, to check
 #                                     #   the endpoint is reachable from here
@@ -25,7 +32,8 @@ param(
     [switch]$DryRun,
     [switch]$Once,
     [switch]$AllHours,
-    [switch]$NoTelegram
+    [switch]$NoTelegram,
+    [int]$TelegramBatchMin = 0       # 0 = send immediately
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,6 +51,7 @@ if ($DryRun)     { $args += "--dry-run" }
 if ($Once)       { $args += "--once" }
 if ($AllHours)   { $args += "--all-hours" }
 if ($NoTelegram) { $args += "--no-telegram" }
+if ($TelegramBatchMin -gt 0) { $args += @("--telegram-batch-min", "$TelegramBatchMin") }
 
 Write-Host "tv_feed: $($args -join ' ')" -ForegroundColor Cyan
 & $py @args

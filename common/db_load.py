@@ -529,6 +529,117 @@ def load_orb_preflight(conn, path: Path, dataset: str) -> int:
     return len(rows)
 
 
+# --- the paper sessions ----------------------------------------------------
+
+def _et_naive(v):
+    """A fill log's ts_et: an ET WALL CLOCK, stored naive.
+
+    Deliberately NOT _ts(), which normalises to UTC. Passing an ET string
+    through a UTC normaliser is harmless only while the string stays naive --
+    the moment one carries an offset it would be converted and stored, under a
+    column called ts_et, on a different clock from every row beside it. Two
+    clocks in one column is not a thing a query can detect, so this refuses
+    instead.
+    """
+    if not v:
+        return None
+    try:
+        t = datetime.strptime(str(v).strip(), "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return None
+    return t
+
+
+def load_paper_fills(conn, paths) -> tuple[int, list[str]]:
+    """The live trader's own fill logs -- var/fills/*_fills_YYYYMMDD.csv.
+
+    THE SESSION IS THE UNIT, NOT THE FILE. See db.paper_fill's own note: a fill
+    log grows while the session is live, so keying on path+mtime the way every
+    other loader does would double-count every row of a mid-session load. This
+    deletes each session_date it is about to write and then writes it.
+
+    session_date comes from the ROWS, not the filename. The filename is the
+    trader's convention and nothing enforces it; ts_et is what the row actually
+    happened at. A file holding two dates -- a log that was appended across a
+    restart -- then lands each row in its own session instead of all of them
+    under whichever date the filename claimed.
+    """
+    rows, seen, files = [], set(), []
+    now = datetime.now()
+    for path in paths:
+        path = Path(path)
+        if not path.exists():
+            continue
+        files.append(path.name)
+        with path.open(newline="") as fh:
+            for r in csv.DictReader(fh):
+                ts = _et_naive(r.get("ts_et"))
+                if ts is None:
+                    # A row with no usable timestamp cannot be keyed and cannot
+                    # be de-duplicated. Dropping it is right; dropping it
+                    # SILENTLY is not, so it is counted and reported.
+                    continue
+                d = ts.date()
+                seen.add(d)
+                rows.append({
+                    "session_date": d, "ts_et": ts,
+                    "strategy": (r.get("strategy") or "MCL")[:24],
+                    "symbol": (r.get("symbol") or "")[:24],
+                    "action": (r.get("action") or "")[:8],
+                    "status": (r.get("status") or "")[:32],
+                    "reason": (r.get("reason") or "")[:32],
+                    "ref_close": _f(r.get("ref_close")),
+                    "ref_kind": (r.get("ref_kind") or "")[:24],
+                    "bid": _f(r.get("bid")), "ask": _f(r.get("ask")),
+                    "spread": _f(r.get("spread")),
+                    "spread_pct": _f(r.get("spread_pct")),
+                    "limit_sent": _f(r.get("limit_sent")),
+                    "qty": _i(r.get("qty")),
+                    "fill_price": _f(r.get("fill_price")),
+                    "filled_qty": _i(r.get("filled_qty")),
+                    "slippage_vs_ref": _f(r.get("slippage_vs_ref")),
+                    "seconds_to_fill": _f(r.get("seconds_to_fill")),
+                    "entry_price": _f(r.get("entry_price")),
+                    "exit_price": _f(r.get("exit_price")),
+                    "trade_pnl": _f(r.get("trade_pnl")),
+                    "trade_pct": _f(r.get("trade_pct")),
+                    "hold_minutes": _f(r.get("hold_minutes")),
+                    "reject_reason": (r.get("reject_reason") or "")[:255],
+                    "macd": _f(r.get("macd")), "macd_sig": _f(r.get("macd_sig")),
+                    "mfi": _f(r.get("mfi")), "rsi": _f(r.get("rsi")),
+                    "vol": _f(r.get("vol")), "prev_vol": _f(r.get("prev_vol")),
+                    "trail_avg": _f(r.get("trail_avg")),
+                    "source_file": path.name[:255], "loaded_at": now})
+
+    # DE-DUPLICATE WITHIN THE BATCH, on the primary key. Two files can overlap:
+    # FillLog rolls a log aside as <name>_preHHMMSS.csv when its header changes,
+    # and a glob picks up both. Inserting a duplicate key is an IntegrityError
+    # that aborts the whole load -- after the DELETE has already run, which
+    # would leave the session EMPTY rather than unchanged.
+    KEY = ("session_date", "ts_et", "strategy", "symbol", "action", "status")
+    unique, dropped = {}, 0
+    for r in rows:
+        k = tuple(r[c] for c in KEY)
+        if k in unique:
+            dropped += 1
+        unique[k] = r
+    rows = list(unique.values())
+
+    for d in sorted(seen):
+        conn.execute(delete(D.paper_fill)
+                     .where(D.paper_fill.c.session_date == d))
+    for i in range(0, len(rows), BATCH):
+        conn.execute(insert(D.paper_fill), rows[i:i + BATCH])
+    if files:
+        newest = max((Path(p) for p in paths if Path(p).exists()),
+                     key=lambda p: p.stat().st_mtime)
+        note_load(conn, run_id("paper", "fills", newest), "paper_fill",
+                  newest, len(rows),
+                  f"{len(seen)} session(s), {len(files)} file(s)"
+                  + (f", {dropped} duplicate row(s) collapsed" if dropped else ""))
+    return len(rows), sorted(str(d) for d in seen)
+
+
 # --- which flag fills which table ------------------------------------------
 
 # THE POINT OF THIS MAP IS THE TEST THAT READS IT. Three tables shipped that
@@ -553,6 +664,7 @@ FILLED_BY = {
     "compound_sweep": "--compound",
     "leak_control": "--leak",
     "holdout_cut": "--holdout",
+    "paper_fill": "--paper-fills",
     "load_run": "--screen",     # written by note_load on every load     # written by note_load on every load
 }
 
@@ -566,6 +678,10 @@ def parser() -> argparse.ArgumentParser:
                     help="the raw IBKR Flex EXECUTION-level report(s)")
     ap.add_argument("--tz", default=None,
                     help="force the Flex report timezone (see common.flex --tz-report)")
+    ap.add_argument("--paper-fills", nargs="+", metavar="FILLS.csv",
+                    help="the live trader's own fill logs, var/fills/*.csv. "
+                         "Safe to run mid-session and again at the end: the "
+                         "SESSION is replaced, not appended.")
     ap.add_argument("--compound", nargs="+", metavar="CSV",
                     help="compound_run.csv and/or compound_sweep.csv")
     ap.add_argument("--leak", metavar="LEAK_CONTROL.csv")
@@ -602,6 +718,10 @@ def main(argv=None) -> int:
             n = load_flex_executions(conn, [Path(p) for p in a.flex_executions],
                                      tz=a.tz)
             print(f"executions    {n:,} fills")
+        if a.paper_fills:
+            n, days = load_paper_fills(conn, [Path(x) for x in a.paper_fills])
+            print(f"paper fills   {n:,} rows over {len(days)} session(s)"
+                  + (f"   {days[0]}..{days[-1]}" if days else ""))
         if a.compound:
             for p in a.compound:
                 kind, rid, n = load_compound(conn, Path(p))

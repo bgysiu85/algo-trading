@@ -59,6 +59,8 @@ try:
 except ImportError:
     sys.exit("ib_async not installed.  Run:  pip install ib_async")
 
+from common import session_lock
+
 ET = ZoneInfo("America/New_York")
 
 PAPER_PORTS = {4002: "IB Gateway paper", 7497: "TWS paper"}
@@ -294,8 +296,25 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)-7s %(message)s",
                         datefmt="%H:%M:%S")
+    # ONE WRITER. --preview writes nothing, so it is not a writer: it must
+    # neither take the lock nor be refused by one, or checking what the scanner
+    # WOULD pick becomes impossible while a feed is running.
+    if not args.preview:
+        held = session_lock.active(session_lock.WRITER_LOCK_PATH)
+        if held:
+            print("scanner: another watchlist writer is running -- "
+                  + session_lock.describe(held)
+                  + "\n  Two writers take turns and the trader sees the "
+                    "watchlist flip between two answers every few seconds.",
+                  file=sys.stderr)
+            return 2
     try:
-        return asyncio.run(main_async(args))
+        if args.preview:
+            return asyncio.run(main_async(args))
+        with session_lock.held("watchlist-writer", "scanner",
+                               session_lock.WRITER_LOCK_PATH,
+                               out=str(args.watchlist)):
+            return asyncio.run(main_async(args))
     except KeyboardInterrupt:
         return 0
 
