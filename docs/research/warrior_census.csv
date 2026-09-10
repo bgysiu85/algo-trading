@@ -1,0 +1,402 @@
+pos,videoId,kind,day_result,pnl_usd,account,trades_n,symbols,setups,mistakes,market,first_et,last_et,max_loss_hit,notable
+2,VZjai9BpRWU,recap,green,620,?,1,TN,micro_pullback,none,cold,?,?,?,"Traded wrong account so capped at 5,000 shares"
+4,x1RLtnF2To4,recap,green,120.71,main,1,WYHG,micro_pullback,none,cold,?,?,?,"Cold-market daily goal $5,000 vs $20,000 hot-market goal"
+6,wB6ObQt__uI,watchlist,?,?,?,?,?,?,?,cold,?,?,?,"YTD +$2.1M, 66% accuracy, $5k avg winner vs $3k avg loser"
+9,sp533QHi-58,recap,green,27813.61,main,?,ACAN,flat_top,added_to_loser;didnt_bank_green;oversized,cold,?,?,?,Says +$27.8k did not justify risking about $100k
+11,dun36aWBpxg,recap,red,-8200,both,1,AEHL,micro_pullback,traded_low_quality;stop_widened,cold,?,?,Y,"Small account also -$8,400, dropping from $99.4k to $91.5k"
+12,nB5g2GFvBxU,recap,red,-5000,main,2,PBBT,first_pullback;half_whole_dollar,didnt_bank_green,cold,?,?,N,Successful red day: stopped at -$5k after +$10k; 120 green vs 20 red YTD
+14,Wd_iUsteoaw,recap,notrade,?,?,0,?,?,none,cold,?,?,?,August netted $211k despite -$74k and -$66k days; loses money after 10am
+15,6XWWdmOkOPs,recap,green,975.63,main,1,AEHL,half_whole_dollar,none,?,?,?,?,"One 9,000-share AEHL trade; passed on RDHL, XAIR, WETO as too fast or backside"
+16,76gAPVfe-Uo,recap,green,84.91,?,1,?,?,?,cold,?,?,?,Sunday watchlist AEHL and COOT; Friday a single trade for +$84.91
+19,bd16G3KZJ7s,recap,green,47000,both,?,LGPS;PPCB;YMT,micro_pullback;half_whole_dollar,back_side;divided_attention,?,?,?,?,Nearly $50k on PPCB in main but lost on its backside in the small account
+21,M2x5LGI3LIY,recap,red,-15000,both,?,DAIC;CRE;VCIG,other,chased_extended;reentry_after_stop,cold,?,?,?,Main -$15k while small account made +$3.4k on same names
+23,hs87P5GNEac,recap,green,10598,both,4,ARCON;GRML;DAIC;AMIX,micro_pullback;half_whole_dollar,chased_extended;didnt_bank_green;divided_attention,mixed,?,?,?,Gave back half a $17k ARCON win with an instant -$8k on GRML
+25,50jWVs1bM3Y,recap,green,2500,small,2,XP,micro_pullback;half_whole_dollar,didnt_bank_green;slippage;chased_extended,?,?,?,?,Gave back $6k of a $9k green day
+29,6N5OdC3zl0c,recap,green,37000,both,4,JUNS,micro_pullback;half_whole_dollar;dip_buy,slippage;chased_extended,?,?,?,?,"Small account +$2,372.44; shelved big account after locking gains"
+31,EvaLoKjzKqY,recap,green,19323,small,2,SGLY;HUIZ,micro_pullback;dip_buy,none,?,07:00,?,?,Recovered all of yesterday's -$18k in one day
+33,Q6oWxbuvoqA,recap,red,-18000,small,5,YJ;VRAX;RDAC;CISS,micro_pullback;half_whole_dollar;halt_resumption;dip_buy,chased_extended;oversized;didnt_bank_green;ignored_own_filter,hot,?,?,?,"Third emotional-hijack blowup in 2 weeks; last trade -$10,000"
+35,qNTugIPRrP8,recap,green,10291,both,7,PFSA;SXTC;SLE;GNPX,vwap_break;dip_buy;micro_pullback;half_whole_dollar,didnt_bank_green,?,?,?,?,"Gave back $7,129 on SLE false breakout"
+37,OzLePbEE5nE,recap,green,52920.96,both,6,IPST;WETO,vwap_break;flat_top,oversized;didnt_bank_green,?,?,?,?,Went from -$12k to +$62k on one IPST trade
+38,7D3k0Ui_cPY,recap,green,?,both,6,IPST,vwap_break;flat_top,slippage,?,?,?,?,"Big-acct first IPST trade -$12,000 on slippage"
+39,yHrlQ5_Sc6c,watchlist,?,?,?,?,?,?,?,?,?,?,?,Rule: watch sub-$1 stocks that squeeze and hold above $1
+41,kIZS4bU2Jpo,recap,red,-64000,both,6,WETO;STKH;ONFO,flat_top;abcd;halt_resumption;micro_pullback,oversized;chased_extended;didnt_bank_green;divided_attention;ignored_own_filter,?,?,?,Y,"Was +$32k then impulsive 45,000-share STKH entry at highs"
+42,2BMJ5DjTeUo,recap,red,?,both,4,WETO;STKH;ONFO,first_pullback;abcd;half_whole_dollar,ignored_own_filter;traded_low_quality;divided_attention,?,?,?,Y,Small acct -$879.73; big account hit max loss same day
+44,Rd8nj1NCBS4,recap,green,13632.60,main,3,XHG,dip_buy;reversal,reentry_after_stop;didnt_bank_green,hot,?,?,?,Up $37k intraday then gave back $25k
+46,9x5ww56Ls7U,recap,green,17617,main,4,OFAL;RMCF;SPRC,flat_top;other,oversized;didnt_bank_green,?,?,?,?,"Added back 60,000 OFAL shares into a rejection, flipping that stock red"
+48,FOPRLEllotk,recap,green,19000,?,?,FRTT,other;dip_buy,chased_extended;oversized,mixed,?,?,?,Averaged too high adding into FRTT after FOMO from missed WXM and AIHS
+49,5x9xdpFBfNo,recap,green,84000,both,?,JWEL;SCKT,bull_flag;first_pullback,none,hot,07:00,?,?,"Erased Friday's -$73k in one day: +$61k JWEL, +$22k SCKT"
+50,mCfoMFY9vJE,recap,green,?,both,?,JWEL;SCKT,dip_buy;half_whole_dollar,none,?,?,?,?,"Small acct +$2,925.50 to $68k on day 32"
+51,l7Z5aqS4zpk,watchlist,?,?,?,?,?,?,?,hot,?,?,?,Plans quarter-size until half of the -$73k drawdown is recouped
+53,cZcprj_8wEM,recap,red,-73000,both,?,MB;CLRO;NAMI;DSY,vwap_break;half_whole_dollar;other,chased_extended;oversized;no_cushion;divided_attention;didnt_bank_green,hot,07:00,?,Y,"Lost $52,000 on one DSY VWAP-break trade"
+55,coqONALABpo,recap,red,?,both,?,NAMI;DSY,vwap_break;half_whole_dollar,didnt_bank_green;oversized,mixed,?,?,Y,Small acct +$203.38 while main account hit max loss on same setup
+56,ofCxvrijsss,recap,green,37000,main,?,CLRO;WYHG,micro_pullback;bull_flag;vwap_break,none,hot,07:01,?,?,Stopped before the 9:30 open to avoid halt risk
+61,kew1-rBx4kk,recap,notrade,0,?,0,?,?,none,?,?,?,?,"AMIX ran 500% but its move came 11:30-12:31, outside his window"
+63,bcn3-gerSsQ,recap,green,20000,both,?,FCUV;HYFM;EZRA,micro_pullback;half_whole_dollar,divided_attention,hot,?,?,?,Prioritising small acct made his main HYFM entries later
+64,50iICFBL5kA,watchlist,?,?,?,?,?,?,?,?,?,?,?,July review shows losses came from trading 10-11am outside his window
+67,ns2SKNDnbZI,recap,green,62000,both,?,FCUV,half_whole_dollar;other,chased_extended,?,?,?,?,Power cut took his desktop down as FCUV started an 800% run
+68,LN-eW6OPddw,recap,green,?,both,?,FCUV,half_whole_dollar,none,hot,09:30,09:30,?,"Small acct +$4,129.25 on one trade at the open after two no-trade days"
+70,Ctp_STuX_l4,recap,green,20000,main,?,NUWE;PN,other,chased_extended;didnt_bank_green;traded_low_quality,hot,?,?,?,"Hot-market daily goal is $20,000 and he finished at exactly 1x it"
+72,SuY-q_OWMHw,recap,green,22000,main,?,NCRA;DFNS,micro_pullback;vwap_break;halt_resumption,didnt_bank_green;chased_extended;reentry_after_stop,mixed,?,?,?,Peaked +$56k on NCRA then gave back over half
+73,1ml6zHikpsE,recap,red,-32384.82,both,1,INLF,halt_resumption,broke_ice_boredom;chased_extended;added_to_loser;outside_window,cold,?,?,Y,One post-open INLF trade cost -$32k main and -$7k small; should have been no-trade
+75,Zj0DYfQilso,recap,red,-7332.81,small,2,INLF,micro_pullback;halt_resumption,broke_ice_boredom;chased_extended;reentry_after_stop;outside_window,cold,?,?,?,Lost ~20% of a $38k small account in 2 trades; best window 7:00-9:30
+76,Ht5j4VMdRMo,recap,green,32000,both,?,EDBL;VTIX,vwap_break;micro_pullback,?,?,?,?,?,News stocks failing while no-news Chinese stocks squeeze
+78,83Yuliq1vHA,recap,green,4000,small,1,VTIX,micro_pullback,none,?,?,?,?,"Risked ~40c/share on 4,000 doubled to 8,000 for ~2:1"
+79,xtslg3eW2tU,watchlist,?,?,?,?,?,?,?,?,?,?,?,"Last week +$103k in the Roth IRA, July month-to-date +$214k"
+81,p73Vmwgg64c,recap,green,?,both,2,EXYN;MSS,other;micro_pullback,ignored_own_filter;didnt_bank_green;slippage,mixed,?,?,?,Blames dispersed attention and ThinkorSwim slippage for a choppy day
+83,b-iczURZwJY,recap,green,50.11,small,2,EXYN;MSS,other;vwap_break,ignored_own_filter;traded_low_quality,cold,?,?,?,Rule: if he gives back more than half the day's profit he has to walk away
+84,CA8i4Rc2bUY,recap,green,29000,both,4,ZCMD;GEM;EHGO,micro_pullback;flat_top,no_cushion;reentry_after_stop;chased_extended,?,07:00,?,?,Swung from -$12.5k on ZCMD to +$41k on the EHGO flat-top break
+86,Ts7C0flv-1g,recap,green,1868.92,small,2,EHGO,flat_top,chased_extended,hot,?,?,?,"Small account to $34,677, up about 1,600% in 24 days"
+87,YkEOx0ZWlWc,recap,green,40000,both,?,LABT,micro_pullback;dip_buy,none,hot,08:05,08:15,?,Whole $40k came from LABT between 8:05 and 8:15
+89,-QZ8buLplck,recap,green,2242.11,small,2,LABT,micro_pullback,stop_widened,?,?,?,?,"Small acct ~$32k, +1,500% from $2,000; 52 trades, 78% accuracy"
+90,q-ywzhtkeY8,recap,notrade,?,?,0,?,?,none,mixed,?,?,?,"ZYBT and CPHI both Chinese no-news squeezes over 1,000%, no trades taken"
+92,mDQEtmG0PCw,recap,green,26000,main,3,BIYA,dip_buy;other,none,?,?,?,?,One winner two losers (33% accuracy) but winner was 5x the daily goal
+94,x0qg5eGF7zc,recap,green,?,both,1,BIYA,micro_pullback,none,?,07:41,07:41,?,"50 trades in 22 days, 78% accuracy, +1,400%"
+95,otCqRWCJ2uA,watchlist,?,?,?,?,?,?,?,cold,?,?,?,July at ~$111k with no trades Thu or Fri
+97,PMNTB2WAiww,recap,notrade,?,?,0,?,?,none,cold,?,?,?,Passed on STACK 4.50 flat top; cites market headwind and fearful sentiment
+100,2UpK6vs0MVQ,recap,green,587.78,small,1,RUBI,other,slippage,cold,?,?,?,Only trade of the day; 49 trades at 77% accuracy
+101,TzpOIMOrU7I,recap,green,19689.57,both,?,VIVS;ERNA,other,chased_extended,mixed,?,?,?,"Stated daily goal is $20,000"
+102,8IYunlNOVmM,recap,green,3652.96,small,3,ERNA;VIVS,micro_pullback;other,chased_extended,?,?,?,?,"Walked away after 3rd trade lost, to preserve profit"
+103,ut9nmRP3ENY,recap,green,13200.70,both,5,NXTC;JTI;UBXG,micro_pullback,reentry_after_stop,hot,07:15,?,?,"NXTC +$19,000 on reverse-merger news"
+105,ChLgwLS9eJY,recap,green,?,both,2,NXTC;UBXG,micro_pullback;other,none,?,?,?,?,"Small acct +$1,400 NXTC and +$741 UBXG"
+106,RZbM0qXOFbc,recap,green,8430,both,?,PLSM;VEEE,first_pullback;micro_pullback;vwap_break;dip_buy,back_side;oversized;stop_widened;divided_attention,?,?,?,?,"Lost $26k in one 30,000-share PLSM trade after FOMO; VEEE +$34k recovery"
+108,S2sOq-stPgA,recap,green,?,both,3,PLSM;VEEE,dip_buy;micro_pullback,back_side;traded_low_quality;divided_attention;didnt_bank_green,mixed,?,?,?,Gave back PLSM profit on backside curl while toggling two accounts
+109,MjrwaD9WeCg,watchlist,?,?,?,?,?,?,?,mixed,?,?,?,"July accuracy only 45%, avg winner $6,600 vs avg loser $1,300 over 31 trades"
+112,uTyfk4UvsUw,recap,green,18000,main,4,GMM,flat_top;micro_pullback;dip_buy,didnt_bank_green,?,?,?,?,Peaked +$29k and gave back $11k
+113,49ykxodJcFc,recap,green,24359.40,both,?,VRX,micro_pullback;other,didnt_bank_green;reentry_after_stop,?,?,?,?,Peaked $28.8k and gave back about $4k
+115,miyJZq-5uIg,recap,green,?,both,1,VRX,micro_pullback,slippage,?,?,?,?,"20c entry slippage so he cut it quick; acct now +1,000%"
+117,0smkAvTc4AY,recap,notrade,0,both,0,?,?,none,cold,?,?,?,Leading gainer only up 48% at 6:45 so he stood down
+118,Dpba4GF0KhY,recap,green,?,both,5,CLRO,flat_top;other,reentry_after_stop;stop_widened;outside_window,cold,?,?,?,Red on 4 of 5 CLRO trades but recovered; should have walked away at 9:07
+120,550XNdh4y5k,recap,green,?,both,2,SILO;CLRO,micro_pullback,added_to_loser,?,?,?,?,"Small acct +$216.80: SILO +$476, CLRO -$259 after adding to a partial fill"
+122,4T2x29K1TDk,recap,green,8000,main,?,LHSW;GMEX,bull_flag;other,didnt_bank_green,?,?,?,?,"LHSW +$9,157.59 after peaking near $12k; GMEX round-tripped green to red"
+123,I0aTxFJWAD0,watchlist,?,?,?,?,?,?,?,cold,?,?,?,Skips setups that retrace more than half of the prior move
+125,BZwJFPk3cBM,training,green,2943.22,small,?,?,?,?,?,?,?,?,Uses DAS Trader at $150/mo to place pre-market orders on Schwab
+126,zxzE4I3Iig8,recap,green,2943.22,small,2,CLRO,flat_top,didnt_bank_green,?,?,?,?,"Day 15, 2nd biggest of challenge; added back after selling and gave some back"
+128,3dXvK41dpd4,recap,green,8917,main,3,CX,micro_pullback;dip_buy,chased_extended,cold,?,?,?,Wildcard effect: when nothing else moves the one squeezing stock draws all attention
+129,iZ-mXl0ga3U,recap,green,7298,both,5,TC;CF;GEM;DXST,dip_buy;vwap_break;micro_pullback,?,cold,07:00,?,?,First trade taken in the wrong account for a -$394 loss
+131,HTgOZI8GOV0,recap,green,1068,small,2,DXST;CANF,dip_buy;vwap_break,?,?,09:18,?,?,"Small acct up 772% in 14 days; 35 trades, 80% accuracy"
+132,PnuyhYGHuUY,recap,green,72872,both,?,SVRE;JEM,dip_buy;micro_pullback;half_whole_dollar,divided_attention;slippage,hot,?,?,?,"June over $500k; avg winner $6,500 vs avg loser $4,600, accuracy 68%"
+134,b1pOO_bkbdA,recap,green,616,small,3,SVRE,micro_pullback;dip_buy,divided_attention,hot,?,?,?,Small acct up 719% in 13 days
+135,rhOjs_8rh6w,recap,green,28107,both,?,UPC,vwap_break;micro_pullback,didnt_bank_green,cold,08:45,?,?,"Peaked +$39k, gave back $11k on the last trade and quit"
+136,tQ7cYcI2tNk,recap,green,2951,small,2,UPC,vwap_break,chased_extended,cold,?,?,?,Skipped a setup below VWAP: under VWAP means sellers are in control
+137,S6AyP-2ziFc,watchlist,?,?,?,?,?,?,?,?,?,?,?,Hunting SpaceX-treasury and biotech catalysts into Monday
+139,hUb-n3kzqjI,recap,red,-22580,both,?,ZDAI;SHPH;S,micro_pullback;vwap_break,oversized;no_cushion;didnt_bank_green;divided_attention,cold,?,?,?,First trade -$25k: big size with no cushion on a no-news Chinese stock
+141,P5qdiBNct1c,recap,green,1300,small,8,ZDAI;S,micro_pullback;vwap_break,chased_extended,?,?,?,?,Gave back 40% of the day's profit on the last trade - his cue to stop
+143,A7Gnw1CMExI,recap,green,5302,both,?,MIMI;ANY;ILLR,vwap_break;half_whole_dollar;micro_pullback;halt_resumption,didnt_bank_green;reentry_after_stop,?,?,?,?,Risked $15k to make $5k; ILLR SpaceX headline saved a red day
+144,P5Sn_mWJdy0,recap,green,1319,small,4,MIMI;FCUV,vwap_break;other,?,cold,?,?,?,Rule: he will not take a trade once the MACD has turned red
+145,tfTdAbm9oTI,recap,green,9487.09,main,?,PLSM;FRTT,other,none,?,?,?,?,PLSM float shown as 50M shares but actually 3.5M - check filings on recent IPOs
+147,D8Guwf84eAA,recap,green,1513.69,small,1,FRTT,micro_pullback,none,?,?,?,?,Skipped PLSM in small acct as too expensive; blue sky + recent IPO + low volume parabolic
+149,8KQmIREGX6E,recap,red,-36000,both,?,ICCM;FCUV,dip_buy;halt_resumption,reentry_after_stop;oversized;didnt_bank_green,?,?,?,Y,Lost 8.1k on ICCM then -28k on FCUV re-entering after stops; small acct was a small winner
+150,10ogBWqgprI,recap,green,614.47,small,1,ICCM,micro_pullback,slippage,?,?,?,?,Limit order underfilled on ICCM; accepted smaller size rather than chase; acct +332% in 8 days
+151,wxcUcYbUtDw,recap,green,15687.94,main,12,NXTS,micro_pullback,none,?,?,?,?,NXTS worked on 3rd attempt because nothing else competed for trader attention that morning
+152,W6AErTREKHw,recap,green,1372,small,4,NXTS,micro_pullback;vwap_break,none,?,?,?,?,Small acct +300% in 7 days to $8k; position only 400-500 shares; also traded NXTS in main acct
+153,oRX-scXUU0U,watchlist,?,?,?,?,?,?,?,hot,?,?,?,Watching SAGT and LFS for Monday; main account +$700k over the last 30 days
+154,L1mi5ENCn98,recap,green,2900,both,?,CDT;WOK;CRVO;ATPC,micro_pullback;halt_resumption;dip_buy,traded_low_quality;slippage,mixed,?,?,?,"Down $3,600 midday then ATPC gave +$10k; small acct red about -$1,000 the same day"
+155,Zf2p9c1qHjg,recap,red,-915.13,small,4,CDTI;WOK,micro_pullback,ignored_own_filter;reentry_after_stop;oversized,?,?,?,?,"Broke own price filter on $1.50 CDTI; 5,000 shares was biggest position of the challenge"
+156,9aVNE3mJJBk,recap,green,?,main,?,CLWT;UTSI;WYHG;ICCM;EHGO,micro_pullback;dip_buy;abcd,didnt_bank_green;outside_window,hot,?,?,?,Peaked +$74k then gave back about 40%; final net not stated; -$20k on EHGO after the open
+157,ZVM1OzsCRcc,recap,red,-17561.30,both,3,OPTX;TDIC,dip_buy;micro_pullback,oversized;didnt_bank_green,cold,?,?,N,"Sets daily max loss equal to his trailing two-week average daily gain, now about $53k"
+159,c814DtTOGDg,recap,green,2374.70,small,1,UPC,micro_pullback,none,hot,?,?,?,"Won't take a setup unless the stock can move 50c to $1 per share; 1 trade, acct +295%"
+161,KlIE5mjS2dM,recap,green,44729,main,?,JRSH;CUPR,micro_pullback;first_pullback,chased_extended;slippage;didnt_bank_green,hot,08:25,?,?,"Roth IRA began the year at $96k, came in today at $1.4M; no trades taken in the small account"
+163,2hVojBIp5Zc,recap,green,84000,main,?,SPACEX,?,?,hot,?,?,?,SpaceX day trades gave $39k of the $84k Friday; also holds IPO-allocated shares bought at $135
+167,a_sPocQnr4g,news,?,?,?,?,?,?,?,?,?,?,?,"Requested ~4,250 SpaceX IPO shares via Schwab and affirmed, but none posted to his account yet"
+168,vcfpJWEqaTU,recap,green,62000,both,?,FGL;EDHL;QH,micro_pullback;first_pullback,added_to_loser;traded_low_quality,hot,?,08:57,N,"Lost $17,291 on FGL but was already +$65k; never takes full risk before building a cushion"
+171,5UBYoh6J2e0,recap,green,1200,small,2,EDHL;FGL,micro_pullback,none,hot,?,?,?,"Small account day 4: $4,200 to $5,500, +176% in 4 days over 5 trades; profits donated to charity"
+172,YDCycC3xVMA,recap,green,141921,both,?,VSME;GCDT;KIDZ;DSY;CLWT,micro_pullback;first_pullback;vwap_break;halt_resumption;dip_buy;half_whole_dollar,none,hot,?,?,?,"Biggest green day of 2026; 201 order tickets on DSY alone; small account added $1,000"
+174,ltdLO7sAzow,recap,green,1014,small,1,DSY,micro_pullback;first_pullback,none,hot,?,?,?,"Small account day 3: +$1,014.69 to $4,247, +112% on just three trades; main account recap separate"
+177,znf0QIW8KRE,recap,green,42000,both,?,AZI;CCTG,micro_pullback;first_pullback;abcd,?,hot,?,?,?,"Small account +$816 (day 2, +61%); missed a second setup when his order was rejected for wrong share size"
+179,udYfAMxK8GI,news,?,?,?,?,?,?,?,?,?,?,?,"Plans to trade SpaceX IPO day one only, not invest; requested 2,500 shares at $135 through Schwab"
+181,RMxnG64WuLc,recap,green,416,small,1,NPT,first_pullback,none,hot,?,?,?,"Day 1 of the $2,000 Schwab challenge: one afternoon trade, 237 shares of NPT at $8.29, out at $10.04"
+187,A7acrZyX9VU,recap,green,75683,main,?,STI,flat_top,chased_extended,?,?,?,?,"Stops only after his first bigger loss, not at a profit target; peaked +$87k, ended +$75.7k"
+190,hQCwquA6O7E,recap,green,1723,main,?,BJDX,dip_buy,chased_extended,cold,?,07:19,?,"Roth IRA up 10x from a $96k January reset, $1M profit YTD; says lack of catalysts is the limit"
+191,eMRYIeDWZkQ,recap,green,4400,main,3,MTEK;HKIT;MASK,micro_pullback;vwap_break;other,didnt_bank_green,cold,?,?,?,"Passed on TGHL +750% for discipline; $4,400 green vs $5,000 cold-market daily goal"
+196,g9sIkD_FqLk,recap,green,20000,main,7,OLOX;CMND,micro_pullback;half_whole_dollar,none,hot,?,?,?,"Hot-market daily goal 3 days running: 38k Wed, 32k Thu, 20k today, near $100k in 3 days"
+197,88u1mSNoFl4,recap,green,32000,main,7,NCT;WGRX;SPRC,micro_pullback;dip_buy;half_whole_dollar,none,hot,?,?,?,"NCT +$14k, SPRC +$16k, WGRX +$1.7k; over $70k in two days; donated yesterday's profits"
+200,kA7fE1T90Uc,recap,notrade,0,main,0,?,?,none,?,?,?,?,"No-trade day: refused to capitulate into CODX +1,000% in 4 days on shelf-registration offering risk"
+201,FvAUfj6z2oE,watchlist,?,?,?,?,?,?,?,cold,?,?,?,"Watch AKTX above $16, plus PCLA and ARTL; near $100k on month vs $150k cold-market monthly goal"
+203,r88nmkORXBg,training,?,?,?,?,?,?,?,?,?,?,?,SpaceX IPO float only about 4% of 15B shares; 30% of float reserved for retail; he'll trade not invest
+206,5AV2OLWD1gc,training,?,?,?,?,?,?,?,cold,?,?,?,"Five failure causes: overestimating skill, misreading market, no discipline, ignoring stats, no experimenting"
+207,wGBY2Gi6vWg,recap,notrade,?,main,0,?,?,none,?,?,?,?,Sat out HCWB +270% because the move came after the open where halt levels cap the upside
+209,wEszUmPYSvU,recap,green,7720,main,1,RUBY,bull_flag;first_pullback,none,cold,?,?,?,"One trade for $7,719.95, just over cold-market daily goal; up $18k Monday, about $25k on week"
+211,2RA9A-IOlvo,recap,green,18630,main,7,LABT;SBFM;GOVX,micro_pullback;dip_buy;half_whole_dollar,back_side,hot,?,?,?,"Banked $18,630 before the open and stopped, after giving back 90% of a $20k day last Monday"
+212,O5sOQy66kic,watchlist,?,?,?,?,?,?,?,cold,?,?,?,"May so far: 5 no-trade days, 6 trading days, 2 red, +$64k; 56% accuracy with 2:1 profit/loss"
+214,EL5Atr1MP0I,recap,green,7425,main,?,SLE,dip_buy;half_whole_dollar,didnt_bank_green,mixed,07:45,?,N,"Max loss is -$5,000; peaked +$8k, dropped to -$2k, finished +$7,424.60"
+216,jw23r-zI0dw,recap,red,-7164,?,3,AEHL;MOBX,micro_pullback;flat_top,oversized;no_cushion;traded_low_quality;broke_ice_boredom,cold,?,?,Y,Traded from his car on Starlink; broke ice after two no-trade days with 40k shares on a low-quality grinder
+219,lbWlr8Ddzr0,recap,notrade,0,?,0,?,?,none,cold,?,?,?,Needs 40c of profit potential to justify 20k shares: 10c stop plus 10c slippage
+222,F0xGlUENtU4,recap,green,2800,?,?,ODYS,abcd;half_whole_dollar,didnt_bank_green;oversized;slippage,cold,?,?,?,"Lost about 17k on one 20k-share ODYS trade after being up 20k; finished up 2,800"
+223,3ahSvIsvlXo,watchlist,?,?,?,?,?,?,?,mixed,?,?,?,Watching MTAX over its 7.50 200EMA and APHI; small caps lag while the S&P sits at all-time highs
+225,qImrunVUKus,recap,notrade,0,?,0,?,?,none,cold,?,?,?,Zero trades; needs 4 of 5 pillars to trade; YTD +868k on 437 trades vs 1300 by this date last year
+227,iiypasQmXdw,recap,notrade,0,?,0,?,?,none,mixed,?,?,?,"Passed on ATRA: easy-to-borrow, sitting at the daily 200EMA, volume declining while price rose"
+230,rbLIgI5zddA,recap,green,?,?,?,ERNA,half_whole_dollar;bull_flag,chased_extended,mixed,?,?,?,Added too high into the 6-dollar breakout on ERNA; the day's profit shown in his Roth IRA account
+232,1Zsjn4SltGQ,recap,red,-3447,?,1,CLRB,micro_pullback;half_whole_dollar,none,?,?,?,N,"Successful red day: one trade, cut fast, versus the 57k and 20k red days earlier in the year"
+234,ckj7lewBPAs,recap,green,46967,?,?,CNSP,micro_pullback;half_whole_dollar;dip_buy,none,?,?,?,?,"CNSP 4-5 trades all winners; first entry 6.20 on a pullback; 731k float, private placement catalyst"
+235,jvtFwwK2Zmo,watchlist,?,?,?,?,?,?,?,mixed,?,?,?,"April was his worst month of the year at +92k with 3 red days, 5 no-trade days and 65% accuracy"
+237,hLn6LrlXgAE,training,?,?,?,?,?,first_pullback,?,?,?,?,?,"Entry is the first candle to make a new high after a pullback holding the 50% retrace, 2:1 target"
+240,8Rc8v_kOu1w,recap,green,15749,?,3,?,half_whole_dollar;other,ignored_own_filter,?,?,?,?,Ticker never named; no-news Chinese low float traded with reduced size; April ended near +100k
+242,PHitAfGrmtY,recap,green,3152,both,?,AXIL;XTLB,micro_pullback,chased_extended,mixed,08:00,?,?,"Retirement acct +$8,300 vs margin (main) +$3,152; added too high on XTLB and gave back $700"
+244,j1lWQV40H_E,recap,red,-3500,small,?,NEXR,half_whole_dollar;dip_buy;first_pullback;vwap_break,didnt_bank_green;reentry_after_stop;ignored_own_filter;oversized,cold,?,?,N,"Was +$20,000 then gave it all back; stock was renamed JFBR, which he says he would not have traded"
+246,dVPqLvo_X9k,recap,notrade,0,?,0,?,?,none,cold,?,?,?,"Refused to break the ice on HTCO's 100% squeeze: no catalyst, light volume, wide spreads, unmanageable risk"
+247,wq1ecBF4M8o,watchlist,?,?,?,?,?,?,?,?,?,?,?,Monthly goal $150k and about $75k shy; would need $20k a day for four days; avoids sub-$1 leading gainers
+250,hrZJKJ9NGbk,recap,green,2306.8,?,2,ELPW;NTIP,flat_top;first_pullback,ignored_own_filter,cold,?,08:35,?,"Made only $92.82 on ELPW after a double-top failure; $85k week, best week of the month"
+252,atHr4cLbtI0,recap,green,8426.92,small,?,AUUD;CPIX,vwap_break;dip_buy;flat_top;first_pullback,none,?,?,?,?,"Nearly a no-trade day; sat out AUUD's whole run and took only the VWAP break, +$6,500 of the $8,427"
+257,1g4FOzXvlpw,recap,notrade,0,?,0,?,?,none,cold,?,?,?,Sat out XRTX's 65% squeeze because the only catalyst was regaining listing compliance via reverse split
+259,TV3rb-Tl_kM,recap,green,21690,?,4,ENVB;ARTL;JTAI;WLDS,first_pullback;abcd;half_whole_dollar;other,didnt_bank_green,hot,?,?,?,"Up about $20k unrealized on ENVB but closed it at $8,870; green on all four stocks traded"
+260,T_EgRZO3IkM,watchlist,?,?,?,?,?,?,?,mixed,?,?,?,"Trader rehab rules: 10,000-share cap and $6,000 max loss until half the drawdown is recovered"
+261,TZkQiVOR5vc,recap,green,21193.77,?,?,PBM;EFOI,half_whole_dollar;first_pullback,none,hot,07:00,?,?,Stopped trading EFOI to protect $21k; says post-open $1 swings were too big to manage risk
+263,9Q48uYDUPjg,recap,green,1436.71,?,?,MYSE;ATXG;BTOG,first_pullback;half_whole_dollar;dip_buy,didnt_bank_green;chased_extended,mixed,?,?,N,"Peaked at +$5,000 and gave back most on one BTOG add; passed on WSHP which ran $18 to $42"
+265,B_6yuh7YY2g,recap,green,18000,small,?,BIRD,vwap_break;micro_pullback;flat_top;other,none,hot,?,?,?,"Trader rehab day 7: 10,000-share cap until a $5,000 cushion, then sized up to about 22,000 shares"
+266,cnoJ9DkWPVM,news,?,?,?,?,?,?,?,?,?,?,?,SEC cut PDT minimum from $25k to $2k effective in 45 days; his cold-market daily goal is 1/4 to 1/5 of hot
+268,CVBv8tPpyxA,recap,green,2331,?,1,ROR,micro_pullback,none,?,?,?,?,"One trade only, 10,000 shares for 23c on ROR curl; in drawdown so chipping base hits, get in get green get out"
+269,POMf8yNOhk4,recap,notrade,0,?,0,?,?,none,cold,?,?,?,Refused to re-trade SKYQ where he lost $57k a week earlier; rather a no-trade day than another red day
+270,5qB-2P8iQjI,watchlist,?,?,?,?,?,?,?,cold,?,?,?,"Guard rails after two red days: 10,000-share max position and $6,000 account max loss until half the loss is back"
+271,aSTNRYUQZE8,recap,green,5641,?,9,BENF,dip_buy;vwap_break,none,cold,?,?,?,"Green $5,641 in his Roth IRA on BENF only, hunting a curl back over VWAP that never came"
+274,qfReXP_lpQE,recap,notrade,0,?,0,?,?,none,cold,?,?,?,Skipped SKYQ because relative volume was only 1.23 versus his 5x minimum; bar is 95% conviction after losses
+276,wSSOmCN1DZY,recap,green,3900,?,4,BBGI,abcd;dip_buy,none,cold,?,?,?,"ABCD on BBGI 6.65 to 7.05 produced most of the $3,900 on a 10,000-share cap; one good trade a day is enough"
+278,Lrg5pGOH6_c,recap,green,3500,?,2,SKYQ,micro_pullback,none,cold,?,?,?,"Two trades on SKYQ, +$3,600 and -$70; halved max size to 5,000 shares once green to protect the day"
+280,6BgCNjfhLag,recap,red,-20752,?,?,MLEC;FCUV;IOTR;LNKS,half_whole_dollar;vwap_break;dip_buy;other,chased_extended;reentry_after_stop;ignored_own_filter;oversized;didnt_bank_green,cold,?,?,Y,"Found his hard max loss had been off the Lightspeed account for months; re-added it at $6,000"
+281,9osEhbytsF0,watchlist,?,?,?,?,?,?,?,?,?,?,?,After -$57k on SKYQ he self-regulates to a $100k max position rather than withdrawing cash from the account
+282,HrWHwpuz7E4,training,?,?,?,?,?,?,?,?,?,?,?,Trades only in a Roth IRA now; on ~$6M last year he would owe ~47% in MA but paid zero tax
+285,S1p2ht0UcpI,recap,red,-57000,?,?,SKYQ,half_whole_dollar;other,chased_extended;oversized;reentry_after_stop;stop_widened;didnt_bank_green,cold,?,09:00,Y,"Red $57k on SKYQ though it closed up 118%; was at 75,000 shares at 6.50 when oil dropped at 9am"
+287,t793KtZcfyE,recap,green,5498,?,?,CYCN;RENX,flat_top,none,mixed,?,?,?,"Made $7,400 on CYCN but lost on RENX; flipped red to green and stopped at high of day"
+289,jZwBOwfSMhk,recap,red,-6700,?,2,NPT;KIDZ,half_whole_dollar,traded_low_quality;oversized,cold,?,09:45,Y,"Shut the broker down after max loss to avoid revenge trading; account near $800k, up 8x YTD"
+291,unYS8e-5JAw,recap,green,744,?,1,UGRO,micro_pullback;half_whole_dollar,chased_extended,mixed,?,?,?,Passed on ELAB up 179% and BFRG: too thickly traded and too cheap for his tape-reading edge
+294,3hmDWJfZ0_0,training,?,?,?,?,?,?,?,?,?,?,?,"Candlestick class: 11 shapes, no indicators, buy the instant price breaks the prior candle high"
+295,w9byEpm5IQE,recap,green,20869,?,?,ONCS;ARTL,micro_pullback;dip_buy;half_whole_dollar,none,mixed,?,?,?,"$57k in two days (37k Thu, 20.9k Fri); walked at high of day, month at about $171k gross"
+299,Mt4bM0l13J0,recap,green,37860,?,?,TGL;EEIQ,dip_buy;halt_resumption,slippage;outside_window,cold,?,?,?,"Turned a -$323 start into +$37.9k on EEIQ; one entry made $24k on about 30,000 shares"
+302,tptW_GUZTTM,recap,red,-96,?,2,UGRO;QNRX,flat_top;half_whole_dollar,traded_low_quality;ignored_own_filter;chased_extended,cold,09:00,?,?,"Gross +$78 but -$96 net after $170 fees; +$4,500 QNRX cancelled by -$4,400 UGRO"
+304,g5SkZVMPD6Q,recap,red,-6434,?,?,ELAB;ANNA;UGRO,flat_top;dip_buy,traded_low_quality;oversized,cold,07:25,?,Y,"Sets max loss from his average gain over the last 7 days, so it tightens in a cold market"
+308,NSIVY9rExmM,recap,green,7605,?,?,UGRO,dip_buy;micro_pullback;half_whole_dollar,none,cold,07:10,?,?,81 tickets all on UGRO; skipped AHMA at 9:15 as too near the open with commissions already high
+310,Yy53xTZ4zo0,watchlist,?,?,?,?,?,?,?,cold,?,?,?,Watching ANNA; 30-day metrics show his edge in foreign-listed sub-5M-float names above $5
+313,hAipShFNYh0,other,?,?,?,?,?,?,?,?,?,?,?,Puerto Rico Act 60 means 0% tax on trading gains; he trades in a retirement account so has not moved
+314,nM2MxYk6Eo0,recap,green,6021,?,8,ARTL,half_whole_dollar;dip_buy;other,traded_low_quality,cold,09:00,?,?,"Quit after giving back 15% off a $7,300 high; ARTL continuation, sub-1M float, reverse split"
+317,YRxry3l0aLE,recap,green,2050.56,main,?,CHNR,micro_pullback;vwap_break,didnt_bank_green;oversized,cold,?,?,?,"Peaked at $5,000 then gave back half; 279,000 shares over 66 tickets cost about $400 in fees"
+321,grVwxjck5I8,recap,green,9653.03,main,?,ARTL,half_whole_dollar;dip_buy;vwap_break,none,cold,?,?,?,First entry anticipated break of $7 whole dollar; 7:41 news made it the market's leading gapper
+322,FlkrnF04qgY,recap,notrade,0,?,0,?,?,none,cold,?,?,?,No-trade day; skipped YDDL; treats 1-min MACD negative as a no-trade zone marking the back side
+324,BGbnYupfTyk,recap,green,3000,main,?,?,?,none,?,?,?,?,Skipped WNW's 500% run: no cushion and outside his best time-of-day window; 2.1M float Chinese stock
+326,qmj9lJDB5QU,recap,green,3374.62,main,?,MSRX,micro_pullback;dip_buy,none,cold,?,?,?,"Started the year with $100,000, account now over $700,000; day fell shy of his cold-market goal"
+327,WMuwB3mXwHQ,watchlist,?,?,?,?,?,?,?,cold,?,?,?,"Watching CLIK, a 980k-float Hong Kong stock with no news, for Monday continuation"
+329,_MV6pw3WKh4,recap,green,2202.69,main,4,KIDZ,micro_pullback;other,none,cold,?,?,?,Four for four on KIDZ but only about 5c a share; $292 of fees ate over 10% of the profit
+331,0VjBl1ZwQVU,recap,green,9972.72,main,?,ATPC,micro_pullback;half_whole_dollar,none,cold,?,?,?,"Traded ATPC, a B-quality sub-1M float continuation with no news catalyst; one 3-cent loser"
+333,trcKOZnoPPs,training,?,?,?,?,?,?,?,cold,?,?,?,"Bear-market steps: cut share size, fewer trades, A setups only, bank profits fast, exit if no move"
+335,ZjkmBX7fgqI,recap,green,1302.55,main,?,INKT;VTAK;APVO;ATPC,micro_pullback;half_whole_dollar,added_to_loser;didnt_bank_green,cold,07:05,?,?,"Capped size at 10,000 shares with no cushion; recovered from -$5,500 on three losers via ATPC"
+337,2IpOnPGuD2o,recap,green,2703.02,main,3,OPTX;FGL;LRHC,dip_buy;vwap_break;micro_pullback,added_to_loser,cold,?,?,?,"Three trades 100% accuracy; held OPTX through a flush that risked a $5,000 loss before bouncing"
+338,JALBu5vI6tE,watchlist,?,?,?,?,?,?,?,?,?,?,?,Oil up 17-19% since Friday; hunting low-float energy or defense names with elevated short interest
+341,tORBGTNTOUo,recap,green,1760,main,5,BATL;PRSO;INDO;SYNX,half_whole_dollar;dip_buy,didnt_bank_green,cold,07:05,?,?,"Walked away up $1,760 after giving back half the day; week ~$70K in Roth IRA"
+343,KnpatDLAxjY,recap,green,5828,main,4,MTEK,micro_pullback;dip_buy,didnt_bank_green,cold,09:15,?,?,First trade not until 9:15; peaked +$10K on MTEK then gave back $5K on a high-volume rejection
+345,ZsrvXHcfc8s,recap,green,52503,main,?,CANF;VCIG;ADVB,micro_pullback;flat_top,chased_extended;didnt_bank_green,hot,?,?,?,Peaked +$72K and quit after giving back ~30%; hard stop is giving back half the day
+347,3s9fnCvdWMo,recap,green,8312,main,?,NPT,half_whole_dollar,didnt_bank_green,cold,?,?,?,"All trades on NPT, a no-news Chinese stock meeting 4 of 5 pillars; kept size under 10,000 shares"
+348,WqLUp4QTCQY,recap,green,6831,main,?,BATL,micro_pullback;half_whole_dollar,chased_extended;didnt_bank_green,?,?,07:10,N,"Max loss set at $5,000; says 80% chance of doubling a loss if he trades past max loss"
+349,3zGW52hzP6c,watchlist,?,?,?,?,?,?,?,cold,?,?,?,"Watching INDO, MXC, RBNE on a 12% oil futures gap; Feb ~$150K, YTD $548K, 72% accuracy"
+350,Ch8J7gwrrJg,recap,red,-6700,both,?,BATL,dip_buy;micro_pullback,oversized;traded_low_quality,cold,?,?,Y,"Forgot to save a 10,000-share max size; 30,000 shares made the loss $6,700"
+352,3ovOiVIJ_aM,recap,green,?,main,?,ALBT;NDRA,gap_and_go;half_whole_dollar,added_to_loser;broke_ice_boredom;oversized,cold,?,?,?,"Smallest green day: +$48.76 ALBT, +$13.15 NDRA, red net of commissions; set 10,000-share cap"
+354,BiCYyGaTteE,recap,green,546,main,1,AIDS,half_whole_dollar,traded_low_quality,cold,09:00,09:00,?,"Deliberately traded only 1,000 shares in a cold market; 54c/share = $546, smallest green day of year"
+356,xrRXxtRTiMA,recap,notrade,0,?,0,?,?,none,cold,?,?,?,Second straight no-trade day; would take a no-trade day over a red day; Feb ~$155K vs $400K January
+358,5n24P_MtUEg,recap,notrade,0,?,0,?,?,none,cold,?,?,?,Snow-day no-trade day with P&L of $0.00; left volatile Chinese stock NCI alone as too risky
+360,p5JkC4K8upc,watchlist,?,?,?,?,?,?,?,cold,?,?,?,"Watchlist NCI, PBM, MLEC, SNSE; Feb +$152K at 53% accuracy vs January +$400K at 80%"
+362,K1Zvoes1SNQ,recap,green,5500,?,2,EDHL;MLEC,dip_buy;other,traded_low_quality,cold,?,?,?,"MLEC low-float reverse-split squeeze +$5,612; EDHL stop -$111.78; says cold market, batten down the hatches"
+364,PPJLNKFS224,recap,green,?,?,1,ENVB,micro_pullback;half_whole_dollar,none,cold,?,?,?,"Skipped Ruby (no news, crowded level 2); ENVB reversed on a spoofer cancel-replace wall on the ask"
+366,hxIw63KWMZI,recap,green,9373,main,?,SNSE,halt_resumption;first_pullback;micro_pullback,none,cold,?,?,?,"Halt scanner caught SNSE T1 halt 7:55, resumed ~8:50 at $15; bought first pullback at $27.53 in Roth IRA"
+368,NA90q8dBJkI,recap,green,1600,?,1,VHUB,first_pullback,none,cold,07:30,07:30,?,"Icebreaker rule: small first winner means foot off the gas; VHUB 20,000 shares in and out for $1,600"
+369,57G729mDHTs,watchlist,?,?,?,?,?,?,?,mixed,?,?,?,"Plan: break ice cautiously, size up on trades 2-4 only if trade 1 is green; watching RIME up 475% Friday"
+372,AfxuHHa_sFY,recap,green,43000,?,1,MLEC,micro_pullback,chased_extended,cold,08:11,08:12,?,"Kept broker software closed to avoid getting sucked in; MLEC made $43,000 in 3 minutes between 8:11 and 8:12"
+374,5yS8i0-aMvI,recap,green,4426,?,2,PMI,halt_resumption;dip_buy;micro_pullback;half_whole_dollar,traded_low_quality,cold,08:30,?,?,"PMI micro pullback +$9,959 flipped a -$5,500 halt-resumption dip-buy loss; halted stock ticker not named"
+376,HYK2eKkViJs,recap,green,6000,?,2,BNRG;PRFX,vwap_break;micro_pullback;half_whole_dollar,chased_extended;added_to_loser;didnt_bank_green,cold,07:00,?,?,"PRFX: added up to $7.82, sell order would not fill, kept only $5,970 of a 100% move; MEMX spoof orders"
+378,5Xbf_JuO-mE,recap,red,-12657,main,2,EVMN;VLO,micro_pullback;dip_buy;half_whole_dollar,ignored_own_filter;traded_low_quality;added_to_loser;slippage,cold,?,?,N,Stopped after two losers; says hard stop is one average day (~$20k) so $12.6k was under it; 75c exit slippage
+379,gOi55ufRFDc,recap,green,4700,?,?,MNTTS;SXTC;UKA,micro_pullback;dip_buy;half_whole_dollar;halt_resumption,traded_low_quality;reentry_after_stop;didnt_bank_green,cold,08:00,?,?,"Was up about $10,000 and gave back half; SXTC, a no-news Chinese stock, cost $5,000 across two entries"
+381,2DGfDknxTlg,watchlist,?,?,?,?,?,?,?,cold,?,?,?,Last week 30% accuracy yet +$75k on NPT alone ($9 to $30); warns of market-maker spoof orders on the ask
+383,Z5D8nhEtzOo,recap,green,5500,?,?,FLE;RDIB,micro_pullback;half_whole_dollar;dip_buy;vwap_break,didnt_bank_green;traded_low_quality,cold,?,?,?,"Was up $13,000 and gave back half after buying back the dip; FLE squeezed $2/share, RDIB VWAP curl +$700"
+384,HGATds95-p4,recap,red,-9300,?,?,BNAI;ARNA;RVSN,reversal;flat_top;other,broke_ice_boredom;didnt_bank_green;slippage;ignored_own_filter,cold,07:07,08:45,N,Walked away at -9.3k rather than push on; blames crypto selloff correlation for slow small caps
+387,eGai4gYuo0Y,recap,green,81000,both,?,NPT,micro_pullback;half_whole_dollar;dip_buy;other,chased_extended;didnt_bank_green,?,?,?,?,Down 10k then NPT blue-sky squeeze $9 to $30 flipped him to +81k; $869 made in taxable account
+388,RvwG_Dyfgms,recap,notrade,0,?,0,?,?,none,cold,?,?,?,"No-trade day; watched IPW, FUSE, ACCL, SWVL but no cushion and no real news catalysts kept him out"
+389,GJd6CkCw-hQ,watchlist,?,?,?,?,?,?,?,?,?,?,?,"January: account $100k to just under $500k, 123 trades, 80% accuracy, avg win $4,400 vs avg loss $1,700"
+391,016ibIK58t0,recap,green,31076.62,?,?,LRHC,vwap_break,added_to_loser;didnt_bank_green;reentry_after_stop,?,?,?,?,Peaked ~$39-40k realized on LRHC VWAP break then gave back 25% adding into resistance at $7
+392,plxlYGblHoA,recap,green,6268.28,?,?,DCX,abcd,none,cold,?,?,?,Hit cold-market daily goal of $5k with one DCX ABCD break; skipped TCGL's 11-halt 700% squeeze
+393,WYB5jmTDBO4,recap,green,?,?,?,SXTP;GRRI,half_whole_dollar;micro_pullback;dip_buy;other,didnt_bank_green;reentry_after_stop,hot,08:01,?,?,"Green ~$33k off a $45k high, gave back 25%; GRRI heavy from HC Wainwright $7M offering selling"
+395,RAJXknk-VI4,recap,green,59752.51,?,?,BCTX;HIND,micro_pullback;first_pullback;half_whole_dollar;vwap_break;dip_buy;reversal,didnt_bank_green;reentry_after_stop,mixed,?,?,?,"Went all-in on HIND break of $7 with ~50k shares, rejected for more buying power"
+397,8h9Qk9W-9ik,recap,green,11734.61,?,?,NVVE,micro_pullback;dip_buy,back_side,?,09:00,?,?,Missed BATL's 385% move fetching his glasses; only trade was NVVE after 9am breaking news
+398,hQtGnlLS4Yo,watchlist,?,?,?,?,?,?,?,hot,?,?,?,"Account +$270k (about 270%) in January off a $100k reset; watching BNAI, NVNO, ASPB for Monday"
+399,WImLVayOwRo,recap,green,16918.51,?,3,REYA;MOVE;SLE,vwap_break;micro_pullback;other,chased_extended;didnt_bank_green,hot,?,09:11,?,Peaked ~$18.5k vs $20k hot-market goal; sized down to 5k shares on MOVE to protect Friday green
+402,Vd3ztXAFRRo,news,?,?,?,?,?,?,?,?,?,?,?,ThinkorSwim will lift small-cap trading restrictions if you phone in and accept a verbal risk disclosure
+404,tnazRI3e3WY,recap,green,43950,main,?,BNAI;AQMS;PAVM,micro_pullback,didnt_bank_green,mixed,?,?,?,Reverse-split stocks are the tell; maxed buying power on PAVM; +$240k on month since $100k reset
+406,Uft2BuJpap8,recap,green,20790.97,main,?,TWG,vwap_break,none,mixed,07:00,?,?,Hot-market daily goal is $20k vs $5k cold; stopped after one failed push instead of chasing it back
+407,91PIW03yuvg,watchlist,?,?,?,?,?,?,?,?,?,?,?,Market closed for MLK; plan is to scan at 6:30 and focus on recent reverse splits and sub-5M floats
+408,-jSYkNsGwcc,training,?,?,?,?,?,?,?,?,?,?,?,"YTD +$179k on $100k reset, 80% accuracy; edge stats 5x rel vol, $5-10, sub-5M float, 25M+ day volume"
+411,ZKsNP11rU1Y,recap,green,20000,main,?,TNMG;GWAV;VERU;LCFY,dip_buy;half_whole_dollar,none,mixed,?,?,?,Four base-hit trades; peaked at $22k and finished $20k; account $100k to $250k YTD
+412,W91hDuTXxw8,recap,green,?,both,?,CJMBB;SPHL,first_pullback,slippage,?,?,?,?,"Robinhood $2,000 challenge day 1: one CJMBB trade +$369.87 (+18%); also traded SPHL in main account"
+414,0kC1DPUycE0,recap,green,24000,both,?,SPHL;BNKK;CJMBB,micro_pullback,oversized;added_to_loser;reentry_after_stop;slippage,hot,?,?,?,"Took 30,000 shares of SPHL out of the gate, went red, then missed the $2 to $12 move; +$15k on BNKK"
+416,lneGXw0sxzo,recap,green,85000,main,?,ROLR,micro_pullback;dip_buy;half_whole_dollar;vwap_break,slippage,?,?,?,?,"ROLR crypto.com prediction-market headline at 8:18; +$52k in first five minutes, blue sky over $8 ATH"
+417,cXp-i4wM4eQ,recap,green,4000,main,?,AHMA;IOTR,vwap_break;other,chased_extended;reentry_after_stop;stop_widened,mixed,07:00,?,?,AHMA and IOTR both blocked at Schwab; AHMA had no news and ran 10.50 to 15 right after he stopped out
+418,EbsPz8WfNAY,recap,green,1600,main,3,OM;SOGP,micro_pullback;dip_buy,broke_ice_boredom;traded_low_quality,cold,?,09:00,?,"3 trades, 100% accuracy, +$1,600 vs $5k cold-market goal; skipped EVTV which ran 600% from under $1"
+420,BNU-Xe9D59Y,watchlist,?,?,?,?,?,?,?,cold,?,?,?,"Week 1 +$42k on 16 trades, 75% accuracy; reverse-split watchlist PAVM, COODX, RVYL, MLEC"
+423,BUJQPzYCtJ0,recap,red,-4921.37,main,?,APVO;AMPA,micro_pullback;dip_buy,ignored_own_filter;didnt_bank_green,cold,?,?,N,"Lost $11,000 on 2,000 shares of a $55 Chinese stock, biggest loss of the year; quit while down $4.9k"
+425,vKjnG1YKXfY,recap,green,14024.98,main,5,ACON;FLYX,gap_and_go;micro_pullback,none,cold,07:00,?,?,Up 46K on week after Jan 1 reset to 100K; quits near high of day to carry momentum into next session
+426,eYwFYoL6kDE,recap,notrade,0,main,0,?,?,none,cold,?,?,?,Passed on NVVE MNTS AZI LUCY GLUE; skips anything without 50c potential; rather no-trade day than red day
+428,cgIghGaQtY4,training,?,?,?,?,?,?,?,?,?,?,?,"PDT-rule case study: cash acct 1760 in 10 trades, settlement margin 4168 in 31, 6x leverage 57176 in 31"
+429,tDb0WPsRZT4,recap,green,7549.61,main,4,ALMS;OPTX;ELAB,dip_buy;micro_pullback,none,cold,?,?,?,Reset main account to 100K for 2026; chose to undertrade a slow day rather than force size
+430,pKHzgYSBCEc,recap,green,139.44,small,1,OPTX,micro_pullback;half_whole_dollar,slippage,?,?,?,?,"Webull day 10 of 2K cash account: account at 3700, up 88 pct, 10 trades, 90 pct accuracy"
+431,E0u1KKDsQ5Q,recap,green,25986.40,both,4,MNTS;RDHL,dip_buy;micro_pullback,none,?,?,?,?,"Buying power capped him: 20k-share adds denied, says it cost about half the profit; small acct RDHL -134"
+432,_2Wplp-aNr4,recap,red,-134.75,small,1,RDHL,first_pullback,none,?,?,?,?,Stopped out 5.5c on RDHL then it ran to 1.60; cash account settlement blocked any re-entry
+433,2T3cZs-LSeY,watchlist,notrade,0,main,0,?,?,none,hot,?,?,?,Themes to watch: low-float biotech with news and SPACs; main account reset to 100K with no leverage
+435,dSiAML8v7Ng,other,?,?,?,?,?,?,?,?,?,?,?,Career episode: chose remote work over double office pay to buy time for the trading side hustle
+437,jpPgEAAVMxY,recap,green,15113.96,main,3,ESHA;INBS,dip_buy;halt_resumption,none,?,?,?,?,Stopped trading once account hit the 100K balance he wanted for his January reset
+438,0Uj8k9PlBhE,recap,green,?,both,2,DRMA,dip_buy,none,?,?,?,?,"Small acct +185.68 on DRMA day 8, up 87 pct; same stock in main account made only about 85 dollars"
+440,oHGXH8JnGS4,recap,green,7228.44,main,4,WOK,micro_pullback;dip_buy,reentry_after_stop;oversized;no_cushion;didnt_bank_green,cold,?,?,?,Says 4th WOK trade was a mistake: 25k shares while up only 900; stock blocked at Webull and Schwab
+442,f-iUyIhc3NI,watchlist,?,?,?,?,?,?,?,cold,?,?,?,"Rule: first trade red is a warning, three red trades means accept a red day; use ice-breaker size"
+444,IKwm-KdCqpg,recap,green,5000,main,1,AMCI,bull_flag,didnt_bank_green,cold,?,?,?,Hit the $5k cold-market daily goal on one stock; added 1040/1050/1075 for a 1057 average
+445,O5eR2z1_DSc,recap,green,800,main,1,TNMG,dip_buy,none,cold,?,?,?,"One trade, 12,000 shares for about $800, under 10 cents a share; a base hit not a home run"
+446,iG3wkTqsRdU,recap,notrade,0,?,0,?,?,none,cold,?,?,?,No-trade day; refused to break the ice at 10am on a low-quality setup before the Christmas holiday
+448,xzwNfGm2OWY,recap,green,10806,main,1,CMCT,micro_pullback,none,cold,?,?,?,"Only stock CMCT: started 5,000 shares, scaled past 40,000, average just over 20 cents a share"
+449,DLhI6XtBSwc,watchlist,?,?,?,?,?,?,?,cold,?,?,?,Top 10% of trades made $5.4M of $8.4M gross wins; worst 10% lost $1.8M; year to date +$6.4M
+452,vRG7rEDDBXw,recap,green,1600,main,1,AZI,halt_resumption;dip_buy,none,cold,?,?,?,"Hit-or-miss week: Mon +71k, Tue +1.1k, Wed +12k, Thu +8k, today +1.6k on one halt resumption"
+453,tMmGnVAVDSE,recap,green,8000,both,5,ATHA;LHAI;PAVS,dip_buy;micro_pullback,slippage,cold,07:05,?,?,Hotel wifi lag delayed fills so he cut size; $4.7k in taxable account plus $3.3k in retirement
+455,PcKxDURCjww,recap,green,12500,main,4,MBRX;PCSA,flat_top;micro_pullback,none,mixed,08:30,?,?,"Four trades, three winners, one $50 loss; PCSA order for 6,000 shares filled only 350 at +$2"
+456,XDyZNlvvyzQ,recap,green,1100,main,2,AMCI,vwap_break;micro_pullback,none,cold,?,?,?,Stopped after two AMCI trades with no cushion built; his money-making window closes at 10:00am
+457,-E4GFWozCtM,recap,green,72000,main,6,?,dip_buy;micro_pullback,none,?,?,?,?,"Short clip, ticker never named; scaled a $7k first trade into a $72k peak on a 5.73M-float biotech"
+458,TljZgneCPV4,recap,green,71495,main,8,RADX,dip_buy;micro_pullback,divided_attention,?,07:00,07:15,?,Made $71k in about 15 minutes between 7:00 and 7:15; December now +$270k on a $190k account
+459,QPOKQt70KAs,watchlist,?,?,?,?,?,?,?,?,?,?,?,"Best window 7-10am, sweet spot $5-10 stocks; $6.4M YTD at 71pct accuracy but only 57pct in December"
+461,PjCOraTuBNw,recap,green,14689,main,2,JZXN,micro_pullback;dip_buy,none,?,?,?,?,"Only traded JZXN, which Schwab ThinkorSwim blocked; two dip buys of 12k then 20k shares"
+464,9Q5y_PhZfig,recap,green,42846,main,?,AXIL;CRBP;MIGI;BTTC,vwap_break;half_whole_dollar;micro_pullback,chased_extended,mixed,07:00,?,?,"$41k of the $42.8k came from BTTC; five pillars are price, float, news, relative volume, pct change"
+466,K-Nf5ls9edA,recap,green,46000,main,?,BBGI;ASPC,dip_buy;halt_resumption;micro_pullback,slippage,cold,?,?,?,"Held 20k BBGI shares into a halt without banking $10k, it resumed higher and he sold for $25k"
+467,LTTI4MCJVeQ,recap,green,8000,main,2,MBRX;ATMV,half_whole_dollar;other,none,cold,08:07,?,?,"Day one of recovery after -$38k: get in, get green, get out on a $10k max loss budget"
+469,1gADIhkJ1Jw,recap,red,-38000,main,5,ELAB;RUBY;MBRX;WKHS;WVE,half_whole_dollar;flat_top;other,chased_extended;didnt_bank_green;added_to_loser;ignored_own_filter,cold,07:30,?,Y,Dog woke him three times overnight; first trade lost $22k on ELAB and gave back Friday's $37k
+470,v-D3N9UL9hI,watchlist,?,?,?,?,?,?,?,?,?,?,?,"Theme is recent reverse splits with sub-1M float and 100pct+ short interest; December +$137k, $27k avg day"
+471,3K7pbMtZzj8,recap,green,40000,both,?,ADTX;WHLR,first_pullback;other,slippage,?,?,?,?,Small account +$456 on ADTX for day 7; Webull 98pct-of-buying-power hotkey misfired twice
+472,bZjbsbpRwnE,recap,green,38000,main,5,QCLS;WHLR;ADTX,half_whole_dollar;micro_pullback,none,hot,07:00,07:50,?,Skipped SMX at $480 a share because the spread was $13; December sitting at +$137k
+474,te09kY-FTMc,recap,green,6300,main,2,PLRZ,micro_pullback,none,cold,?,?,?,Passed on QCLS because the halt band was only 33c above entry and 10-20k share sellers sat on the ask
+475,bD7xAMdj4vg,recap,green,?,both,3,HTO;ARTL,half_whole_dollar;dip_buy,didnt_bank_green;chased_extended,?,?,?,?,"Small account +$217 on HTO; main account +$14k on ARTL and -$1.3k on HTO, no day total stated"
+477,1ZM1u762e8U,recap,green,?,both,3,SBEV;PLRZ,micro_pullback,none,?,?,?,?,"Small account +$197 on SBEV; main account +$45,373 on the PLRZ micro pullback, no day total stated"
+482,pxbEPQ51RzQ,recap,green,39290,main,?,QTTB;AHMA,other,none,hot,?,?,?,"YTD over $6M profit at 71.5% accuracy, avg winner $3,400 vs loser $2,000; big account up 20% in one day"
+483,H34--Upw0Do,watchlist,?,?,?,?,?,?,?,?,?,?,?,"SMX profile to hunt: sub-1M float, recent reverse split, price $5-10, news, rel vol above 5x; Nov +$115,000"
+485,PtrSd1I9Z50,recap,green,?,both,?,SPRC;AMBR,?,slippage,cold,?,?,?,"Same SPRC trade: +$11.70 at Webull vs -$2,600 in main account from slippage and commissions"
+486,udVzNg8FWvg,recap,green,1000,main,1,CY,?,none,cold,?,?,?,"Only trade: 30,000 shares of CY for about 3 cents, $1,000 gross before fees; small account no trades, +55%"
+487,cWph88qKZ0w,recap,green,?,both,?,AT,micro_pullback,none,cold,?,?,?,"AT micro pullback filled 3.64 with no slippage, sold 4.03 with 4c price improvement, +$291.56 small account"
+488,HpUIGaOfzj0,training,?,?,?,?,?,micro_pullback,?,?,?,?,?,Buys the instant price breaks the prior candle high; exits before it breaks that candle low; ~70% accuracy
+489,GfbJUq8IHwE,watchlist,?,?,?,?,?,?,?,?,?,?,?,"Small account +40% in two days; wants $1.50-$2.80 stocks to buy 1,000 shares; MNDR and FOXX the only maybes"
+490,ErNhmL7i6oI,recap,green,930.22,main,1,SMX,?,none,cold,?,?,?,"Red on the week: -$6,000 Wed, -$6,000 Thu, +$930 Fri; no small-account trades, passed on IVDA at $1"
+491,B6YWrSY4E3U,recap,green,49.77,small,1,PBM,micro_pullback,?,cold,?,?,?,"Five pillars: price $2-20, up 10%, 5x rel volume, news, float under 20M; his avg winner is 18 cents/share"
+493,FuDhJrtboDE,recap,red,-8393.16,both,?,EPWK;KZIA,?,chased_extended;ignored_own_filter;reentry_after_stop;divided_attention,cold,?,?,?,"Missed EPWK was a Chinese company; small account +$759.42 (37%) while main account lost $8,393.16"
+494,mk0qg2TKnJk,recap,notrade,?,?,0,?,?,none,?,?,?,?,Cloudflare outage killed his scanners; took no trades and hosted a 2-hour Q&A instead; OMA ran 300%
+498,jqwMSYjRoIU,recap,notrade,0,both,0,?,?,none,cold,?,?,?,"No-trade day by choice, 7:00 to 10:30 at the desk; passed AMIX micro pullback at $1; last week +$97,000"
+499,UGw2F3eIswU,watchlist,?,?,?,?,?,?,?,cold,?,?,?,"Resets Webull acct to $2,000 for small-acct challenge; goal 10%/day, one trade a day, $2-5 stocks"
+501,-6gIqlVhxeI,training,?,?,?,?,?,?,?,?,?,?,?,"Cash-acct plan: one trade a day, 10% daily goal and 10% max loss, $2-20, float under 20M, MACD positive"
+502,Khxza62tZmc,recap,green,2291,main,2,LRHC;SGBX,dip_buy;red_to_green,didnt_bank_green;broke_ice_boredom,mixed,09:05,?,?,"Lost $4,446 on LRHC at 9:05 then +$6,737 on SGBX red-to-green; quit early to stay green"
+504,Gc_6YvoFOuA,recap,green,9818,main,?,CMCT,micro_pullback,didnt_bank_green;traded_low_quality,cold,07:30,?,?,"+$9,817.91 on CMCT; gave back $4k off the top; REIT sector stopped it pulling away"
+505,YB1Khg7D23k,recap,green,20000,main,?,TURB;QNRX;RAIN,vwap_break;micro_pullback,oversized;slippage;didnt_bank_green,hot,?,?,?,Was up $50k then lost $31k on RAIN adding 15k shares into hidden seller at $10; net +$20k
+509,a7ONxKojI4E,watchlist,notrade,?,?,0,?,?,?,cold,?,?,?,Friday no-trade day; Nov +$18k so far; battening down hatches with smaller size until cushion built
+513,dOtgt3fHQf8,recap,green,2824,main,?,NUAI;FTEL,first_pullback;micro_pullback,didnt_bank_green,cold,08:00,?,?,"+$2,823.92; was up $8k on FTEL then gave it back adding into a failed retest of $5"
+515,7MuijbbKkLA,recap,red,-5000,main,4,LNAI;CCTG,micro_pullback,ignored_own_filter;reentry_after_stop;traded_low_quality,cold,09:15,?,Y,"4 trades 3 losers, says he is at max loss; LNAI failed five pillars, CCTG a Chinese pump"
+517,ef4ncWKYBkM,recap,green,134,main,2,ARTL;ABP,micro_pullback;half_whole_dollar,broke_ice_boredom,cold,?,?,?,"Only +$134.15 on 2 trades; refuses to short, fears one squeeze wiping out career profit"
+519,czJxKq1GIsM,recap,green,11698,main,?,PHIO;NCRA;THAR,abcd;micro_pullback,didnt_bank_green;reentry_after_stop;oversized,?,?,?,?,"Up $25k then gave back to +$11,697.67 re-entering THAR full size after rejections"
+520,oB-LJHoVyqg,watchlist,notrade,?,?,0,?,?,?,cold,?,?,?,Thu and Fri no-trade days; October his worst month of the year; delaying small-acct challenge
+521,kxCAA21duKs,recap,notrade,0,?,0,?,?,none,cold,?,?,?,No-trade day; skipped HKD +200% because 124M float fails five pillars; flat is better than red
+524,CdTm3CJ3tkY,recap,notrade,?,?,0,?,?,none,cold,?,?,?,"No-trade day in a cold market; cuts share size and trades less when cold, expects a hot cycle before year end"
+525,mcCj0QJoqg4,recap,red,-6200,?,3,PPBT;SMX;ERNA,micro_pullback,traded_low_quality,cold,?,?,?,Worst month of the year; -6000 on sub-$1 PPBT; back to bread-and-butter A-quality setups tomorrow
+527,VgYKWmod5TA,recap,red,-6600,?,4,VSEE;IPDN;OP,dip_buy;micro_pullback;half_whole_dollar,slippage,cold,09:00,09:12,N,"Successful red day: shut broker down at 9:15 after third trade flipped him red, nowhere near max loss"
+529,XM_sBC6u_L8,recap,green,20000,?,?,RECCT;KITT,dip_buy;micro_pullback;half_whole_dollar,chased_extended,mixed,08:00,?,?,"Up $20k, half of last week's total; only filled 677 of a 5,000-share order on first RECCT entry"
+530,AY4XES-fL-g,watchlist,?,?,?,?,?,?,?,cold,?,?,?,CLIK is the top pick for Monday; +$190k over 3 weeks since the -$172k Oct 7 loss at 75% accuracy
+533,AuSHflRILjU,recap,green,6598,?,8,NEUP,dip_buy,didnt_bank_green,cold,07:00,?,?,"Daily goal is $5k in a cold market vs $20k in a hot one; was +$8k on one NEUP trade, exited for +$500"
+535,qtOdkPKiEgw,recap,green,2400,?,3,AREB,micro_pullback,none,?,?,?,?,"Rule: walk away if you give back half the day's gain, and only size up after building a cushion"
+537,ivTadedOL7M,recap,green,11103,?,?,SHMD;FLWS;BNBX,micro_pullback;dip_buy,didnt_bank_green,?,?,?,?,"Trader rehab complete: 9 days to recover -$172k, 78% accuracy, $4.7k avg winner, $694 avg loser"
+538,Zdr4n8RSOmQ,recap,green,?,?,?,NERV,first_pullback;dip_buy,none,?,?,?,?,Made over $11k on NERV; stops trading the leg when 1-min MACD goes negative; news hit at 8:00 ET
+539,qgKH38psE2s,recap,green,11013,main,3,GNLN,micro_pullback;dip_buy,none,?,08:30,?,?,"Skipped GSIT's 200% run on 21M float plus easy-to-borrow; daily goal $20k, locked $11k instead"
+541,OWjjmR0VTdc,watchlist,?,?,?,?,?,?,?,?,?,?,?,"Still $24k in drawdown from the -$172k day; plan is build a cushion first then size up, quality over quantity"
+542,BlBUug5XNlI,recap,red,-73.88,small,?,?,?,?,cold,?,?,?,"Leg 2 no leverage: 31 trades, +$4,168, 214% growth in 12 days, 74% accuracy; first red day of the leg"
+544,0Zh105lq9Rk,recap,green,730,small,2,CY;ELWS,micro_pullback;dip_buy,none,cold,09:15,09:42,N,"Account $1,940 to $6,212 (+220%) in 11 days over 29 trades; caps daily drawdown at 10%"
+545,q_ZliMvD8yc,recap,green,37745,both,4,COOT;IBG,dip_buy;vwap_break;half_whole_dollar,divided_attention,cold,?,?,N,Small account +$551 on 4 trades (+184% over 27 trades); punched order for wrong of two same-price tickers
+546,YHPg5_HCRKU,recap,green,480,small,1,CYN,dip_buy;micro_pullback,none,cold,07:02,07:02,N,"One trade only: bought CYN dip on 7am news, +$480 = +10% of account, off five-pillars scan"
+548,7sqElDnklB8,other,?,?,?,?,?,?,?,?,?,?,?,PSA on comment-section crypto pump bots and AI impostor scams; no trading content
+550,0jZhavzGYJQ,recap,green,18668,main,?,STI;ATON;CHNR;NDRA,micro_pullback;half_whole_dollar;flat_top,didnt_bank_green,?,?,?,N,No small-account trades; gave back half of a ~$10K gain on CHNR; lost $188K on one stock last Tuesday
+551,ELoPES2rUeM,watchlist,?,?,?,?,?,?,?,cold,?,?,?,"Still down $83K since drawdown began; watching biotech theme, passes on GWH, SGBX and YHGJ for Monday"
+553,QT0cDA5k9IQ,recap,green,20000,both,?,QNRX;GWH;GRV,micro_pullback;first_pullback,didnt_bank_green;divided_attention,?,?,?,N,Small account +$754 (+20%); YTD $5.6M on $2-20 stocks at 72% accuracy vs only $130K above $20
+555,Rk_4f_lO1mE,recap,green,42000,both,?,BJDX,dip_buy;half_whole_dollar;micro_pullback,none,mixed,06:45,?,N,Traded only BJDX; refused GLTO (the -$188K stock) and all names over $20; recovered ~half the drawdown
+557,1stvZWKwSwk,recap,green,26000,both,?,UPC;AT;ARNA;MYNZ,dip_buy;first_pullback;micro_pullback,none,?,?,?,N,"Pre-set $15,000 max risk for the day after -$172K; says his sweet spot is $2-20 stocks at 72% accuracy"
+561,2QVGIGDjrM0,recap,green,204,both,2,LIITM;APDN;SPB,micro_pullback;half_whole_dollar,none,?,07:23,08:00,N,Skipped SPB (+400%) in small account: 50-70c spreads vs his 18c average winner; traded it in big account
+562,ZCn5huxksQQ,watchlist,?,?,?,?,?,?,?,cold,?,?,?,"Monday filter: $2-10 price, float under 10M, has news, top-3 leading gainer; calls the market cold"
+564,7e52n1veFwE,recap,green,375,both,3,ASTC;SMX,micro_pullback;first_pullback,none,cold,09:15,?,N,"Day 3 +$375 (+15%); four market stages cold-spark-hot-exhausted; red on SMX in main, green in small"
+568,LE8YtxuwZRo,recap,green,454.51,small,3,VCIG;EPSM,micro_pullback;dip_buy,none,mixed,?,?,?,"Avg winner only 18 cents/share this year; no-leverage leg, could afford just 231 shares of VCIG"
+570,n5tWaS3u9Ks,recap,green,5000,main,1,SLXN,dip_buy,?,mixed,?,?,?,"Crypto-treasury private placement theme fading; skipped no-news IBG on bias, MSS and POAI both faded"
+571,ZRRCyIoZnHE,recap,green,34541,small,?,MSS;POAI,micro_pullback;first_pullback,chased_extended,?,08:30,?,?,"MSS +$8,900 and POAI +$25,000; 30k-share order rejected so only filled 4,000; BQ ran without him"
+572,SUXNhTshjLA,watchlist,?,?,?,?,?,?,?,mixed,?,?,?,"Last week 20 trades 18 winners 90% accuracy avg winner $1,300; watching JFB, STKH, SHFS Monday"
+574,Xy3SeJcUYew,interview,?,?,?,?,?,?,?,?,?,?,?,"FINRA approved cutting PDT minimum from $25,000 to $2,000; argues margin and leverage should be decoupled"
+576,AxDvV-Q0NM8,recap,green,842.96,small,2,SPRC;EVAX,dip_buy;half_whole_dollar,chased_extended;slippage,cold,07:12,?,?,"Smallest green day, took scraps instead of a no-trade day; SPRC +$647 filled only 1,800 of 7,000 shares"
+577,FXpltGCWfuY,recap,green,7521.28,small,2,SHFS;TNFA,vwap_break;dip_buy;half_whole_dollar,none,cold,09:15,?,?,Sat 2 hours with no news; skipped JZXN after filings showed $900k cash behind a $1B crypto claim
+578,TvvZ2KQdJ_A,news,?,?,?,?,?,?,?,?,?,?,?,"FINRA voted to amend PDT rule from $25,000 to $2,000; now goes to SEC for approval"
+579,SIW2sEdaQFA,recap,green,5962.75,small,1,FLD,micro_pullback,none,?,?,?,?,One entry one exit on FLD Bitcoin rewards card news; account $2k to $11k in two days
+581,78I0DsTmZOA,recap,green,3149,small,4,AGRI;QLGN;BOXL,micro_pullback;half_whole_dollar;dip_buy;other,none,hot,?,?,?,"Day 1 of $2k challenge, 4 trades 100% accuracy, 6x leverage offshore broker, 10% risk 10% goal"
+583,vNm7txYf7HA,recap,green,232000,main,?,AGMH;ZOZ,micro_pullback;abcd;dip_buy,oversized;added_to_loser;no_cushion,hot,?,?,?,Down $15k early on AGMH then +$232k on ZOZ $100M private placement Bitcoin treasury headline
+585,tJvPy0TEXCY,recap,green,10854.63,main,5,BCDA;TURB;LC;APVO,dip_buy;half_whole_dollar;other,reentry_after_stop,cold,07:00,?,?,"Accidental shift+enter sent 20,000 shares of BCDA for -$8k; TURB +$20k flipped the day green"
+586,zXYKuEIBhsQ,recap,green,24971,main,?,HIND;QNRX;CWD;LITM,micro_pullback;dip_buy,didnt_bank_green,mixed,07:30,?,?,Hit +$22k on first trade then gave back $19k; up $540k over the last 8 days
+587,STtOeOeip7s,recap,green,50869,main,7,FGI;AIHS;NUKK;STSS;SNTG;APVO;TURB,micro_pullback;vwap_break;half_whole_dollar;dip_buy,none,hot,?,?,?,Green on 7 of 7 stocks; up $147k on the week and over $500k on the month
+589,5hMvCtmVFyQ,recap,green,97195,main,5,EVTV;CHK;NAOV;FRGT,micro_pullback;vwap_break;dip_buy,none,hot,?,?,?,Five trades five winners; month went from $374k to $470k in one day
+590,93GWZHDS974,watchlist,?,?,?,?,?,?,?,hot,?,?,?,Trades the 7-10am window; uses full account on one trade but never risks over 10% of account in a day
+591,4rhcLRzQJdg,recap,green,63785,main,?,GCTK;WLDS;UKA;COCP,micro_pullback;flat_top;half_whole_dollar;dip_buy,none,hot,07:00,08:35,?,Green on 4 of 4 stocks; average daily gain $77k; up about $370k on the month
+593,b_yYtICYmXE,recap,green,169394,main,?,AMST;SLXN;VNCE;KZIA;MOGU,micro_pullback;vwap_break;dip_buy,ignored_own_filter,hot,?,?,?,Biggest day since July 14; over $300k on the week; rule to trade only the most obvious stock
+594,toPPxbAD0iY,recap,green,25630,main,?,ASST;CAMP;GLE;CWD;PTNM;WLDS;RBNE,vwap_break;bull_flag;micro_pullback;half_whole_dollar,divided_attention;chased_extended;didnt_bank_green,hot,?,?,?,Peaked at $86k then lost about $65k chasing WLDS after being distracted by RBNE
+597,SLpD6pVlpT8,recap,green,86647,main,?,DSY;ZONE;MMA;GIBO;CWD,micro_pullback;vwap_break;dip_buy;half_whole_dollar,oversized;added_to_loser;ignored_own_filter;didnt_bank_green,hot,07:00,09:30,?,Peaked $186k gave back $100k; called it a day after giving back over 50% of peak profit
+599,vvXX2ycveuw,training,green,31000,main,?,OCTO,micro_pullback;first_pullback;dip_buy,none,hot,06:58,?,?,"Only trades when MACD 12-26-9 is positive or crossing positive, with 5x relative volume"
+600,MEwW0PSDUmY,watchlist,?,?,?,?,?,?,?,cold,?,?,?,"Down $1,400 to start September; plans small size and 7-10am only until momentum returns"
+601,C2bb5mQ0wSs,training,green,24000,main,?,?,?,?,?,?,?,?,"Mentions being up over $24,000 that day in passing; early goal was $200 a day on 1,000 shares"
+602,JU6x5oNCc1A,recap,red,-300,main,?,INHD;CRO;PAPL;MSPR;HOUR,dip_buy;half_whole_dollar;halt_resumption,reentry_after_stop,cold,07:05,?,N,"Daily max loss is -$25,000; recovered from -$10k thanks to PAPL dip and rip after the halt"
+604,Wlce2tMNDOI,recap,red,-12000,?,?,BBLG;PPBT;NAOV;CIGL;HW,micro_pullback;abcd,added_to_loser;oversized;ignored_own_filter;chased_extended,cold,?,?,?,Lifted his 25k max share cap out of frustration and lost $23k on CIGL at 80k shares
+605,IdMB7bYp_D4,recap,green,?,?,?,STI;SN;IPDN;AIHS;BAOS;LCFY,dip_buy;micro_pullback;flat_top;half_whole_dollar,chased_extended,cold,07:00,?,N,"First trade -$3,500 on STI was his biggest trade of the day; avg losers bigger than avg winners"
+607,_KyMhv3ACuc,recap,green,9943,?,2,SHFS;ADN,micro_pullback,none,?,07:00,08:00,?,Only 2 trades both green; skipped UU and SSKN because easy-to-borrow status invites shorts
+608,_kR_bzxVEGQ,watchlist,?,?,?,?,?,?,?,cold,?,?,?,August was his worst month of the year at $118k; YTD $5.025M with $31k average daily gain
+610,6Wwdpd62m2c,training,?,?,?,?,BSLK,first_pullback,?,hot,?,?,?,Sizes up in hot markets; after first outsized loss cuts size 50% until half the loss is recovered
+612,qdA8YfQCbU8,recap,green,?,?,?,SOGP;YAI;NUKK;YDES;IPDN,dip_buy;micro_pullback;half_whole_dollar;halt_resumption,added_to_loser;chased_extended;slippage,cold,07:00,?,?,"Down $13,500 early then recovered to green; -$7k SOGP, -$5.7k YAI, +$5.5k NUKK"
+613,d-0NNb1XvhA,training,?,?,?,?,?,?,?,?,?,?,?,Trades only 7-10am from a Sprinter van in Canada; warns counter-trend shorting risks unlimited loss
+615,brtFX7HGt5I,recap,green,12175,?,8,SPRC;STSS,dip_buy;micro_pullback,didnt_bank_green,cold,06:57,?,?,Cold-market daily goal $5k vs hot-market $20k; 6 of 8 trades green after two no-trade days
+616,BtezoKJQsRk,recap,notrade,0,?,0,?,?,none,cold,?,?,?,"Second no-trade day in a row, likely a career first; sat from 7:00 to 9:30 with nothing tradable"
+619,SoQT48tw7VI,recap,notrade,0,?,0,?,?,none,cold,?,?,?,"No-trade day; skipped ALR, HKPD and FOD for wide spreads, low price and high float"
+620,r4fGR6Y52Zs,recap,green,7983,?,11,ASST;HCWB,vwap_break;micro_pullback;dip_buy,none,cold,07:13,?,?,Watch-list name THR ran 68% but he skipped it with no cushion; 11 trades at 100% accuracy
+622,QmTfyp8m2-8,watchlist,?,?,?,?,?,?,?,mixed,?,?,?,Crypto-treasury catalyst overplayed so those headlines no longer move stocks; TH is top watch
+624,ELxwQ3r0JUs,training,?,?,?,?,?,?,?,?,?,?,?,"10 skills by month 1/year 1/decade; 2:1 profit-loss ratio, 71% accuracy, ~$20M career gross"
+626,eHwRAALDrNQ,recap,green,5000,?,?,EIQ;ELAB;ZNB,micro_pullback;dip_buy,back_side,cold,?,?,?,Hit cold-market $5k goal not hot-market goal; ZNB round-tripped $2.50 to $6 back to $2.30
+628,OyhGtb86F8U,recap,green,2400,?,4,PTIX,dip_buy;half_whole_dollar,none,cold,08:13,?,?,4 trades all winners avg ~$600; puzzled PTIX 500k float and 86M volume only up 150%
+630,97ydughh3Dw,recap,green,8098,?,7,SISI,first_pullback;micro_pullback;vwap_break,slippage,cold,07:00,?,?,7 trades 7 winners; ~$100k MTD vs over $1M last month; MTD avg win and avg loss both $3k
+631,ZY_GJSl4nWk,recap,green,3000,?,?,PRFX;LASE,micro_pullback;red_to_green,none,cold,07:13,?,?,"Down $3,200 after two stopped-out entries then finished +$3,000 on PRFX red-to-green at $3.18"
+633,9Rp6V0eMuew,recap,red,-2869,?,?,SNGX;VTA;PPCB,dip_buy;micro_pullback;half_whole_dollar;vwap_break,traded_low_quality;reentry_after_stop,cold,07:30,?,?,Traded quarter of full size all day; quit at 10am with no cushion to avoid emotional spiral
+634,2B0AunXf908,watchlist,?,?,?,?,?,?,?,mixed,?,?,?,Only BTAI a maybe off continuation scan; needs $500k over next 2 weeks for $3M summer goal
+636,KohkZJx7iG8,training,green,25000,?,?,M,?,none,?,?,?,?,"Five beginner tools: laptop, three monitors, scanners, candlestick charts with 10s, hotkey broker"
+638,ptcb6O_PWYA,recap,green,24118,?,?,VMAR;PGEN;TIVC,micro_pullback;dip_buy;half_whole_dollar;vwap_break,chased_extended,cold,?,?,?,Peaked +$25k gave back ~$1k; account back at all-time highs after $50k drawdown
+640,uhJszOo4eTk,recap,green,16000,?,?,SOA;XOS;XP,dip_buy;half_whole_dollar,didnt_bank_green,cold,07:00,?,?,"Peaked +$19,900 then gave back ~$3,500 on XP; stopped over repeated $1-a-share red candles"
+642,nohqMp6PXtc,recap,green,19967,?,4,ATNF;BSLK,dip_buy;micro_pullback,none,cold,?,?,?,"4 trades 4 winners; BSLK 10k shares at 3.52 stop 3.45 for $700 risk made $5,669"
+643,FmzHex3IzW0,recap,green,4323,?,?,ATNF,dip_buy;halt_resumption,none,mixed,?,?,?,Afternoon trades at reduced size; bought halt-resumption dip and sold 80% into the next halt
+644,ntM09DJj15E,recap,notrade,?,?,0,?,?,none,cold,?,?,?,Second no-trade day in a row; pulled buying power out of account after -$44k Aug 1; passed on ATNF +72%
+646,glDujVuXiiI,recap,notrade,?,?,0,?,?,none,cold,?,?,?,Second no-trade day of 2025; would not even open trading platform; quit at 10:15 after 7am start
+647,8evKaa5xhOQ,watchlist,?,?,?,?,?,?,?,cold,?,?,?,"Watchlist ZBAI HTCO ACXP AUD, all recent reverse splits; rule: colder market, reduce share size"
+648,ROz7q2ZzZ3k,recap,green,1100,?,4,SPRU;ATNF;BTI;PAPL,flat_top;first_pullback,chased_extended;traded_low_quality,cold,?,?,?,"Only +$1,100; August MTD $14,970 against a $1M month goal; no cushion so staying defensive"
+650,5pz-CSYpEGw,recap,green,2500,?,?,CMCT,vwap_break,chased_extended,cold,?,?,?,"Made $2,500 on CMCT; better to lock up green than get aggressive on low-quality setups when cold"
+651,OcPYKZH9-fc,recap,green,17024,?,?,GV;AIMD;MLGO,half_whole_dollar;other,traded_low_quality,cold,?,?,?,"Peak +$20k which is the daily goal, gave back 10% and quit; still in drawdown from -$45k day"
+654,f7Wi_8VGtPs,recap,green,5789.8,?,3,AUD;NWE,dip_buy;first_pullback,none,mixed,?,08:15,?,Rule: needs a cushion built between 7am and 9am before taking risk; red on the month after -$44k
+656,WEg63zxZ42s,recap,green,25000,?,10,HCTI;ARTL;VERB;BTBD,dip_buy;halt_resumption;other,none,cold,?,?,?,"About 10 trades and one loser; +$21,142 on HCTI in first 10 min; build cushion before sizing up"
+657,a_ogMnihcIU,watchlist,?,?,?,?,?,?,?,?,?,?,?,"Friday -$44k after doubling 30k to 60k shares with no cushion; rule: small size, build cushion first"
+659,N7o5FxlBT0I,training,?,?,?,?,?,?,?,?,?,?,?,"Five truths: copy a proven strategy, obsess over metrics, emotional control, learn to lose, size up slowly"
+660,nZfFe4EnWXw,recap,red,-44000,?,2,MSW;MWYN,micro_pullback;flat_top,broke_ice_boredom;traded_low_quality;didnt_bank_green;ignored_own_filter,cold,08:30,?,N,"Max loss is $50k and stopped at -$44k; -$36,744 on MSW in 90 seconds on 60k shares, no real news"
+663,fgA7-UKLfac,recap,green,32015,?,?,YMAT;PAPL;PBM;SNGX;SLXN,first_pullback;halt_resumption;other,chased_extended;reentry_after_stop;didnt_bank_green;no_cushion,?,?,?,?,SLXN halt dip-and-rip +$16k he says in hindsight he should not have taken; PBM -$15k over 3-4 tries
+665,YKYQa0hxz0Q,recap,green,13512,?,?,BGLC;IMN,dip_buy;other,traded_low_quality,cold,?,?,?,Down 38k on the week; quit at +13k because his best time-of-day window had closed
+667,0VhQKQwyd9A,recap,green,7400,?,?,AGRI;NTHI,half_whole_dollar;dip_buy,didnt_bank_green;traded_low_quality,cold,?,?,?,Peaked +24k gave back to +7.4k; won't size up again until he has recouped about half the drawdown
+669,-N7FApYrl5c,recap,red,-58000,?,3,VAPE;ATHE;CRVO,reversal;other,chased_extended;back_side;oversized;didnt_bank_green,hot,?,08:30,Y,Max loss set at 50k; rule is never lose more than he can make in one good day
+670,dEEisa2i7fA,watchlist,?,?,?,?,?,?,?,hot,?,?,?,Top pick MCVT plus IMN and TWWG; expects MCVT to squeeze between 4am and 7am and go without him
+671,JVn6RVaDH5Y,other,?,?,?,?,?,?,?,?,?,?,?,Short clip; says he missed LHAI squeezing over 300% while out for a medical procedure
+673,MZ99FWF9xoE,news,?,?,?,?,HTO,?,?,?,?,?,?,Proposed PDT rule change from 25000 to 2000 minimum; 8-12 months out even if approved
+674,_0YVEB5qsYk,recap,green,?,?,?,LHAI;SWG;PHIO;ATNF;MCVT,micro_pullback;dip_buy;reversal;half_whole_dollar,chased_extended;oversized;reentry_after_stop;didnt_bank_green,mixed,?,?,?,FOMO from missing LHAI the prior day drove oversized entries; 30k of losses against 45-50k of wins
+677,hHdplVBpfNs,recap,green,90000,?,?,PAPL;BULL,micro_pullback;dip_buy;flat_top,chased_extended,hot,06:58,?,?,Made 77000 in four minutes on PAPL; only about 30 of 180 minutes were actually spent in trades
+678,k2lxnmaNKYk,recap,green,59596,?,?,IVF;GVH;IPDN;HTO;KSS,micro_pullback;dip_buy;reversal;flat_top;vwap_break;halt_resumption;half_whole_dollar,chased_extended;ignored_own_filter;reentry_after_stop;didnt_bank_green,mixed,07:00,?,?,Peaked +71k and quit at +59.6k; lost 10k on Kohls buying the break of 20 into hidden sellers
+680,PbhLEGv4mlQ,recap,green,55000,?,?,GCTK;HSDT;SABS;MEIP,micro_pullback;dip_buy;half_whole_dollar,didnt_bank_green,hot,06:55,?,?,43k of the 55k came from HSDT on 7am biotech news; gave back 15k adding on a late micro pullback
+681,Wy-1sNUVwhw,watchlist,?,?,?,?,?,?,?,hot,?,?,?,Watching GCTK HCWB and CYC; cautious on no-news moves after suspected front-running on VLCN and MEIP
+682,8UBQoGFF87c,recap,green,57489,?,?,KMRK;LWR;MEIP,dip_buy;vwap_break;reversal,none,cold,?,?,?,Prior day peaked at +250k on VLCN and still closed red; today deliberately small and selective
+683,5VrXkd7PsgQ,recap,red,-3000,?,?,VLCN;MRKR,first_pullback;dip_buy;halt_resumption,didnt_bank_green;slippage;oversized;stop_widened,?,08:30,?,Y,Up 200k on 20k shares of VLCN then -55k in under a minute; hit max loss and had Lightspeed raise it to 35k
+685,0yFYtidECwk,recap,green,38513,?,?,NWE;MLEC;QLGN,first_pullback;dip_buy,divided_attention,?,?,08:04,?,"Made 47k on NWE first pullbacks, lost 9,850 on MLEC; PC blue-screened pre-open and he felt unwell so skipped the open"
+687,37Iod_kBzxw,recap,green,22000,?,?,HTOO;NWE;XAGX;LRHC;CYCC,flat_top;half_whole_dollar;halt_resumption;dip_buy,traded_low_quality;reentry_after_stop;didnt_bank_green,cold,?,?,N,"Daily goal 20k vs 25k max loss; started -6k, made 14,676 on XAGX after giving back 10k of a 25k peak"
+689,cipbQ5yQKH0,recap,green,129000,?,?,SQFT;ALBT;DARE;SLE;LGHL,dip_buy;first_pullback;micro_pullback;abcd,chased_extended;didnt_bank_green,hot,07:00,?,?,SQFT gave 58k of the 129k day; missed SN's 6-to-30 spike at 6am while his laptop was still loading
+690,2MdgpVCzPdo,watchlist,?,?,?,?,?,?,?,?,?,?,?,"Five pillars of stock selection - find the most obvious leading gainer first, then trade whatever pattern it gives"
+691,pyDzzEq8tSU,recap,green,78000,?,?,INKT;CVM;HOLO;SGN;ABVE,micro_pullback;halt_resumption;dip_buy,didnt_bank_green;reentry_after_stop,hot,?,?,?,60k of the 78k came from INKT (+578%); peaked at 88k then lost 13k on one CVM trade
+693,unT7zASfboE,recap,green,156000,?,?,BTCM;AI;SAFX;KWM,micro_pullback;first_pullback;dip_buy,didnt_bank_green;slippage,mixed,06:57,08:30,?,BTCM alone made 79k of the 156k; icebreaker trade at 06:57 was a 600 loss before he scaled up
+694,0JyLV9PNuQo,recap,green,33465,?,?,BMGL;SCA;BCTX;PRLD;KZIA;SBET;EVOK,dip_buy;first_pullback;half_whole_dollar,oversized;didnt_bank_green,hot,06:53,09:30,Y,"Lost 24,930 on 60,000 shares of BMGL at 07:00, right at his 25k max loss; EVOK dragged him back to green"
+695,4f9q09peamY,recap,green,219000,?,?,NDRA;ASST;MMK;IR,first_pullback;micro_pullback;dip_buy,added_to_loser;didnt_bank_green,hot,07:00,?,?,"179k of the 219k from NDRA; lost 35k adding 12,000 shares into a bounce that never came, off a 235k peak"
+696,J_PVXyzn70Q,recap,green,67523,?,?,SVRE;ARTL;LGPS;SN;MBIO;EJH;CYCC,first_pullback;dip_buy;vwap_break,oversized;didnt_bank_green,hot,07:30,?,?,Peaked at 71k; took his biggest position of the day into MBIO's high-volume red candle and gave back over half
+697,k2X1iBTrEaI,watchlist,?,?,?,?,?,?,?,hot,?,?,?,A 4am spike on no news is often an institution buying to create liquidity so it can sell all day - treat it as a short
+701,W5zBRB9xTw0,recap,green,17913,?,?,CYN;VCIG;MOGO,half_whole_dollar;red_to_green;flat_top,didnt_bank_green,mixed,07:04,09:30,?,Slowest day of the week; MOGO's Bitcoin-treasury headline was believed while ATXG's term-sheet version reversed
+703,1cI_qgeTH0g,recap,green,51000,main,?,CLRO;BGLC;BMNR;SNGX;TRNR;VVOS;WETO,first_pullback;micro_pullback;vwap_break;dip_buy,didnt_bank_green;reentry_after_stop;ignored_own_filter;divided_attention,mixed,07:00,?,?,Peaked +63k then gave back a third; -22k on TRNR; says attention was dispersed across 7 stocks
+704,6nagXyTwYyc,recap,green,99000,main,?,BMNR;WBUY;ARTL;XCUR,micro_pullback;vwap_break;halt_resumption;dip_buy,none,?,06:45,?,?,"Green on 4 of 4 stocks; closed June +$1.3M vs $1M goal, trading a Roth IRA so profits are tax-free"
+705,3UHvbiVDfCE,recap,green,67000,main,?,LCFY,?,?,mixed,?,?,?,Sunday game plan; Friday +67k off an 82k peak; warns China small caps can retrace the whole squeeze
+708,ZzQpcP_xWhw,recap,green,67300,main,?,CYN;BBLG;LCFY;HCWB,micro_pullback;dip_buy;vwap_break,didnt_bank_green,hot,?,?,?,"Peaked +82k, gave back 15k; LCFY +41k, BBLG +33k, CYN -9k after two secondary offerings in 2 days"
+710,RUuJzmz5jCg,recap,green,4610,main,?,CYN;KWE;JFBR;ASI,micro_pullback;dip_buy,reentry_after_stop;ignored_own_filter;oversized,?,07:06,?,?,Quit small green while CYN ran 250%; -12k there after scaling to 30k shares past his own 3-strikes rule
