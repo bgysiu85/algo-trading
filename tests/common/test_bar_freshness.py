@@ -261,3 +261,67 @@ def test_the_default_request_budget_is_small():
     per_symbol = a.seconds / a.interval
     assert a.limit * per_symbol <= 15, (
         "default run must stay well inside a quarter of IB's 10-minute budget")
+
+
+# --- the tape-is-live guard, added 2026-09-10 after a run at 23:30 ET -------
+#
+# Ben ran the probe seven hours before the session. It failed on a refused
+# socket, which was legible. Had IB Gateway been up it would have produced a
+# full report whose verdict read "no clear majority -- re-run with more
+# samples", and the next run would have been longer and equally empty.
+
+@pytest.mark.parametrize("when,live", [
+    ("2026-09-10 03:59:00", False),   # one minute before the tape opens
+    ("2026-09-10 04:00:00", True),    # pre-market open, MCL's own start
+    ("2026-09-10 06:21:00", True),    # the BNC signal this probe exists for
+    ("2026-09-10 19:59:00", True),    # last minute of extended hours
+    ("2026-09-10 20:00:00", False),   # the close is exclusive
+    ("2026-09-10 23:30:00", False),   # the hour Ben actually ran it
+    ("2026-09-12 06:21:00", False),   # Saturday, mid-session hour
+    ("2026-09-13 06:21:00", False),   # Sunday, mid-session hour
+])
+def test_the_tape_window_admits_only_hours_that_print_bars(when, live):
+    now = datetime.strptime(when, "%Y-%m-%d %H:%M:%S").replace(tzinfo=ET)
+    assert B.tape_is_live(now) is live
+
+
+def test_the_boundaries_are_open_closed_not_something_else():
+    """A half-open interval either end would still pass the parametrised cases
+    above if both boundaries moved together, so pin the asymmetry directly."""
+    assert B.tape_is_live(datetime(2026, 9, 10, 4, 0, 0, tzinfo=ET))
+    assert not B.tape_is_live(datetime(2026, 9, 10, 20, 0, 0, tzinfo=ET))
+
+
+def test_a_stale_majority_is_reported_as_uninformative_not_inconclusive():
+    """THE POINT OF THE WHOLE GUARD. A holiday clears tape_is_live() -- it is a
+    weekday inside the window -- so render() is the only thing standing between
+    a dead tape and a verdict that blames the sample size."""
+    now = datetime(2026, 9, 10, 6, 21, 30, tzinfo=ET)
+    rows = [{"now": now, "raw_last": now - timedelta(hours=9),
+             "acted": now - timedelta(hours=9), "kind": "stale",
+             "edge": False, "raw_lag_s": 32400.0, "acted_lag_s": 32400.0}
+            for _ in range(10)]
+    text = "\n".join(B.render({"BNC": rows}, 180, 15))
+    assert "THE TAPE WAS NOT PRINTING" in text
+    assert "This is not an inconclusive" in text
+    assert "no clear majority" not in text, (
+        "a dead tape must not read as an inconclusive measurement")
+
+
+def test_a_forming_majority_still_reaches_its_real_verdict():
+    """The guard must not swallow the answer it was added to protect. Same
+    render(), a feed that DOES include the minute in progress."""
+    now = datetime(2026, 9, 10, 6, 21, 30, tzinfo=ET)
+    rows = [{"now": now, "raw_last": now - timedelta(seconds=30),
+             "acted": now - timedelta(seconds=90), "kind": "forming",
+             "edge": False, "raw_lag_s": 30.0, "acted_lag_s": 90.0}
+            for _ in range(10)]
+    text = "\n".join(B.render({"BNC": rows}, 180, 15))
+    assert "trim is correct and the second minute is somewhere else" in text
+    assert "THE TAPE WAS NOT PRINTING" not in text
+
+
+def test_the_override_exists_and_is_off_by_default():
+    a = B.build_parser().parse_args([])
+    assert a.anyway is False
+    assert B.build_parser().parse_args(["--anyway"]).anyway is True

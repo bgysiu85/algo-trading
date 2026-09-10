@@ -51,7 +51,7 @@ import asyncio
 import statistics
 import sys
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, time as dtime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -88,6 +88,32 @@ def classify(now: datetime, raw_last: pd.Timestamp) -> str:
 
 
 EDGE_S = 5
+
+# The tape has to be printing for any of this to mean anything. 04:00-20:00 ET
+# is the extended session; MCL's own window is the narrower 04:00-09:30.
+TAPE_OPEN = dtime(4, 0)
+TAPE_CLOSE = dtime(20, 0)
+
+
+def tape_is_live(now: datetime) -> bool:
+    """Is a live tape printing minute bars right now?
+
+    WHY THIS IS A HARD REFUSAL AND NOT A WARNING. Outside the session the last
+    bar in every response is hours old, so classify() returns 'stale' for every
+    sample and render()'s verdict falls through to "no clear majority, re-run
+    with more samples". That sentence is wrong in a specific and expensive way:
+    it blames the sample size and invites a longer run, when the defect is the
+    clock and no number of samples fixes it. An uninformative run that reads as
+    an inconclusive measurement is the same failure shape as a control that
+    divides nothing — the output cannot be told apart from the real answer.
+
+    Weekends and the overnight gap only. Market holidays are NOT checked, so a
+    holiday still produces the stale-majority run this guard exists to prevent;
+    the render-side check below is the backstop for that.
+    """
+    if now.weekday() >= 5:
+        return False
+    return TAPE_OPEN <= now.time() < TAPE_CLOSE
 
 
 def at_minute_edge(now: datetime) -> bool:
@@ -211,6 +237,18 @@ def render(by_symbol: dict, seconds: int, interval: int) -> list[str]:
               "  trim is correct and the second minute is somewhere else --",
               "  the once-a-minute fetch cadence and BAR_MIN_INTERVAL_S are",
               "  the next places to look.", ""]
+    elif total and kinds.get("stale", 0) > total * 0.5:
+        # The backstop for a market holiday, a halted name, or a dead feed —
+        # cases tape_is_live() cannot see from the clock alone. Say the run was
+        # uninformative, NOT that the result was inconclusive: more samples
+        # cannot fix a tape that is not printing, and telling Ben to re-run
+        # longer would waste a session.
+        L += ["  NO VERDICT — THE TAPE WAS NOT PRINTING. Most responses ended",
+              "  in a bar more than two minutes old, so there was no minute in",
+              "  progress to classify. A market holiday, a halted symbol or a",
+              "  dead feed all look like this. This is not an inconclusive",
+              "  measurement; it is a run that could not have concluded",
+              "  anything, and more samples will not change it.", ""]
     else:
         L += ["  VERDICT: no clear majority. Re-run with more samples inside a",
               "  session before concluding anything.", ""]
@@ -229,6 +267,21 @@ async def main_async(a) -> int:
     if a.port not in PAPER_PORTS:
         sys.exit(f"REFUSING TO RUN: port {a.port} is not a known paper port "
                  f"{sorted(PAPER_PORTS)}.")
+    now = datetime.now(ET)
+    if not (a.anyway or tape_is_live(now)):
+        sys.exit(
+            f"REFUSING TO RUN: it is {now:%a %H:%M} ET and the tape is closed "
+            f"({TAPE_OPEN:%H:%M}-{TAPE_CLOSE:%H:%M} ET, weekdays).\n"
+            "This probe asks whether the LAST bar of a response is the minute "
+            "in progress.\n"
+            "With no tape there is no minute in progress, every sample reads "
+            "'stale', and the\n"
+            "report says 'no clear majority' — which looks like an "
+            "inconclusive measurement\n"
+            "rather than a run that could never have concluded anything.\n"
+            "\n"
+            "Run it inside the session, alongside the trader. --anyway "
+            "overrides this.")
     symbols = a.symbols or parse_watchlist(Path(a.watchlist))
     if not symbols:
         sys.exit("no symbols: pass --symbols or fill the watchlist")
@@ -260,6 +313,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=4002)
     p.add_argument("--client-id", type=int, default=24,
                    help="not the trader's 17 nor the history probe's 23")
+    p.add_argument("--anyway", action="store_true",
+                   help="run outside the session anyway. The report will be "
+                        "all-stale and will say so; there is no reason to "
+                        "pass this except to test the plumbing")
     p.add_argument("--out", default="var/reports/bar_freshness.txt")
     return p
 
