@@ -550,6 +550,44 @@ def _et_naive(v):
     return t
 
 
+def expand_paths(patterns) -> list[Path]:
+    """Resolve arguments that may be globs, and REFUSE to return nothing.
+
+    POWERSHELL DOES NOT EXPAND WILDCARDS. `--paper-fills var\\fills\\*.csv`
+    reaches Python as one literal string that is not a file. The first version
+    of this loader skipped a non-existent path silently and printed
+    "0 rows over 0 session(s)" -- a load that did nothing, reported success,
+    and left an empty table indistinguishable from a session that had no fills.
+    That is the failure this whole module's FILLED_BY map exists to prevent,
+    reintroduced one layer down.
+
+    So: patterns are expanded here, and anything that matches nothing raises.
+    A loader that finds no input has failed; it has not succeeded quietly.
+    """
+    import glob as _glob
+
+    out, missing = [], []
+    for pat in patterns:
+        pat = str(pat)
+        if any(ch in pat for ch in "*?["):
+            hits = sorted(Path(p) for p in _glob.glob(pat))
+            (out.extend(hits) if hits else missing.append(pat))
+        elif Path(pat).exists():
+            out.append(Path(pat))
+        else:
+            missing.append(pat)
+    if missing:
+        raise SystemExit(
+            "db_load: no file matched " + ", ".join(missing)
+            + "\n  PowerShell does not expand wildcards -- the pattern is "
+              "passed through literally and this module expands it, so check "
+              "the path rather than the shell.")
+    # One file named twice (a literal AND a glob that covers it) would be read
+    # twice; the batch de-duplicator downstream would collapse the rows, but
+    # the file count in the load note would be wrong.
+    return sorted(set(out))
+
+
 def load_paper_fills(conn, paths) -> tuple[int, list[str]]:
     """The live trader's own fill logs -- var/fills/*_fills_YYYYMMDD.csv.
 
@@ -564,12 +602,11 @@ def load_paper_fills(conn, paths) -> tuple[int, list[str]]:
     restart -- then lands each row in its own session instead of all of them
     under whichever date the filename claimed.
     """
+    paths = expand_paths(paths)
     rows, seen, files = [], set(), []
     now = datetime.now()
     for path in paths:
         path = Path(path)
-        if not path.exists():
-            continue
         files.append(path.name)
         with path.open(newline="") as fh:
             for r in csv.DictReader(fh):
@@ -631,8 +668,7 @@ def load_paper_fills(conn, paths) -> tuple[int, list[str]]:
     for i in range(0, len(rows), BATCH):
         conn.execute(insert(D.paper_fill), rows[i:i + BATCH])
     if files:
-        newest = max((Path(p) for p in paths if Path(p).exists()),
-                     key=lambda p: p.stat().st_mtime)
+        newest = max((Path(p) for p in paths), key=lambda p: p.stat().st_mtime)
         note_load(conn, run_id("paper", "fills", newest), "paper_fill",
                   newest, len(rows),
                   f"{len(seen)} session(s), {len(files)} file(s)"
