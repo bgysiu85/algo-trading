@@ -293,6 +293,29 @@ def evaluate_last_bar(df: pd.DataFrame,
     )
 
 
+def stop_level(peak: float, trail_pct: float,
+               trail_cents: float | None = None) -> float:
+    """Where the trailing stop sits, given the peak so far.
+
+    PERCENTAGE OR CENTS, and they are not two tunings of one rule. Every stop
+    in this project is a percentage; every stop Ross Cameron states is 10-20
+    cents (warrior_0_universe_and_risk.md §5.1). Across a $2-20 band 15c is
+    7.5% at $2 and 0.75% at $20 -- a factor of ten.
+
+    A FUNCTION rather than one line inside the walk, because the walk is only
+    reachable through a full backtest and three separate mutations of that
+    line survived a synthetic-frame test that could not tell the two rules
+    apart. The arithmetic is the claim; it should be assertable directly.
+
+    `trail_cents=0` means a stop AT the peak, not "fall back to percent" --
+    `is not None`, deliberately. A zero that silently reverted would make the
+    tightest cell in a sweep secretly the loosest.
+    """
+    if trail_cents is not None:
+        return peak - trail_cents
+    return peak * (1.0 - trail_pct / 100.0)
+
+
 # --- backtest -------------------------------------------------------------
 
 @dataclass
@@ -340,6 +363,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      max_position_shares: int | None = None,
                      rebuy_slip_bps: float = 0.0,
                      trail_pct: float | None = None,
+                     trail_cents: float | None = None,
                      max_cycles: int | None = None,
                      commission_plan: str | None = None,
                      rebuy_trigger: str = "peak",
@@ -546,7 +570,19 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
 
         # Trail is derived from the peak as of the PREVIOUS bar, then tested
         # against this bar's low. No same-bar lookahead.
-        trail = pos["peak"] * (1.0 - trail_pct / 100.0)
+        # PERCENTAGE OR CENTS, and they are not two tunings of one rule.
+        #
+        # Every stop in this project is a percentage; every stop Ross Cameron
+        # states is 10-20 cents (warrior_0_universe_and_risk.md §5.1, and he
+        # calls the cap calibrated to his own average loser rather than to the
+        # chart). Across a $2-20 band 15c is 7.5% at $2 and 0.75% at $20 -- a
+        # factor of TEN, so this is a structural difference and not a
+        # parameter to sweep between.
+        #
+        # The cap is applied to the DISTANCE, so a cent stop is always at or
+        # tighter than the percentage one it replaces; it can never widen a
+        # stop, which would be a different change wearing the same name.
+        trail = stop_level(pos["peak"], trail_pct, trail_cents)
         exit_px = exit_reason = None
 
         # HOW THE TRAIL IS TESTED, which is a separate question from how wide
