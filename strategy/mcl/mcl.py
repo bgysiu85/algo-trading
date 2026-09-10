@@ -379,7 +379,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      trail_on_close: bool = False,
                      trail_confirm_bars: int = 0,
                      max_adds: int | None = None,
-                     entry_delay_bars: int = 0) -> list[Trade]:
+                     entry_delay_bars: int = 0,
+                     max_hold_bars: int | None = None) -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -652,6 +653,23 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
             exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "window_close"
         elif exit_px is None and use_apex and bool(row["exit_sig"]):
             exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "apex_reversal"
+        elif (exit_px is None and max_hold_bars is not None
+                and i - pos["entry_i"] >= max_hold_bars):
+            # TIME CAP. Ben, 2026-09-10: "the position should not be held for
+            # more than 5 mins."
+            #
+            # LAST in the exit order, deliberately. The trail is protection and
+            # must win when both land on the same bar; window_close is the
+            # session forcing the issue and is not a decision this rule gets to
+            # relabel. A cap that outranked either would silently re-attribute
+            # exits that already had a cause, and the exit mix is how this
+            # project reads what a strategy is doing.
+            #
+            # `is not None`, not truthiness: max_hold_bars=0 must mean "the
+            # tightest cap" and not "no cap". The same trap was live in
+            # trail_cents, where a zero that fell back to the default would have
+            # made the tightest cell of a sweep secretly the loosest.
+            exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "hold_cap"
 
         if exit_px is not None:
             q = pos["qty"]
