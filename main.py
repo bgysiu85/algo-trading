@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from contextlib import contextmanager
 
 from common import session_lock
 
@@ -78,6 +79,74 @@ def _flag_value(argv: list[str], name: str, default: str) -> str:
         return argv[argv.index(name) + 1]
     except (ValueError, IndexError):
         return default
+
+
+@contextmanager
+def _feed_beside(mode: str, want_feed: bool, forwarded: list[str]):
+    """Run common.tv_feed in a thread for the life of the trader.
+
+    WHY A THREAD AND NOT THE EVENT LOOP. tv_feed is a synchronous urllib loop
+    with time.sleep in it. Dropping that into the trader's asyncio loop would
+    stall order management for the length of every HTTP call -- and the feed
+    backs off to 60s on an error, which is 60 seconds of a trailing stop not
+    being checked. A thread keeps them genuinely independent; they already
+    communicate only through var/watchlist.txt, which the trader re-reads every
+    five seconds.
+
+    WHY IT CANNOT TAKE THE TRADER DOWN. Every exception is caught here. A feed
+    that dies costs a stale watchlist, which is visible and survivable. A feed
+    that kills the process leaves an OPEN POSITION WITH NO TRAILING STOP,
+    because the stop lives in this process and not at IBKR. Those two outcomes
+    are not close enough to trade one risk for the other, so the feed is
+    strictly subordinate: it may fail, it may not take anything with it.
+
+    daemon=True so Ctrl-C ends the process rather than waiting on a thread
+    sleeping 10 seconds. The feed writes a file and holds no broker state;
+    there is nothing it must finish.
+    """
+    if mode != "paper" or not want_feed:
+        if mode == "paper":
+            print("main.py: --no-feed, watchlist will not be updated by this "
+                  "process. Start run_tv_feed.ps1 separately or the trader "
+                  "watches a stale list.")
+        yield
+        return
+
+    import threading
+    from common import tv_feed
+
+    # Pass through only what the feed shares with the trader. Its parser knows
+    # nothing about --port or --strategy, and forwarding those would kill the
+    # thread on an unrecognized argument the moment it started.
+    feed_argv = []
+    batch = _flag_value(forwarded, "--telegram-batch-min", "")
+    if batch:
+        feed_argv += ["--telegram-batch-min", batch]
+    if "--no-telegram" in forwarded:
+        feed_argv.append("--no-telegram")
+
+    def _run():
+        try:
+            rc = tv_feed.main(feed_argv)
+            print(f"main.py: watchlist feed exited rc={rc}. The trader "
+                  f"continues; the watchlist is now STALE.", file=sys.stderr)
+        except BaseException as e:                              # noqa: BLE001
+            # BaseException, not Exception: a KeyboardInterrupt delivered to
+            # this thread must not escape into the trader's shutdown either.
+            print(f"main.py: watchlist feed died ({type(e).__name__}: {e}). "
+                  f"The trader continues; the watchlist is now STALE.",
+                  file=sys.stderr)
+
+    t = threading.Thread(target=_run, name="tv_feed", daemon=True)
+    t.start()
+    print("main.py: watchlist feed started in this process "
+          "(--no-feed to disable).")
+    try:
+        yield
+    finally:
+        # Nothing to join: daemon, holds no broker state, and the writer lock
+        # it took is released by its own context manager or reaped as stale.
+        pass
 
 
 def _confirmed(wanted: list[str], forwarded: list[str]) -> bool:
@@ -125,6 +194,12 @@ def run(argv: list[str] | None = None) -> int:
     p.add_argument("--mode", required=True,
                    choices=["paper", "dry", "backtest", "scan", "report",
                             "probe-window"])
+    p.add_argument("--no-feed", dest="feed", action="store_false",
+                   help="do NOT run the TradingView watchlist feed in this "
+                        "process. --mode paper runs it by default so one "
+                        "command starts everything; use this when "
+                        "run_tv_feed.ps1 or the IB scanner is already "
+                        "writing the watchlist from elsewhere.")
     p.add_argument("--strategy", default="mcl",
                    help="strategy to run, COMMA-separated for more than one "
                         "(default: mcl; e.g. --strategy mcl,mc5). A space "
@@ -190,7 +265,8 @@ def run(argv: list[str] | None = None) -> int:
         if args.mode == "paper" and not _confirmed(wanted, forwarded):
             return _fail("cancelled at the confirmation prompt.")
         with session_lock.held(args.mode, args.strategy):
-            return trader.main(forwarded) or 0
+            with _feed_beside(args.mode, args.feed, forwarded):
+                return trader.main(forwarded) or 0
 
     if args.mode == "backtest":
         if args.strategy not in BACKTEST_STRATEGIES:

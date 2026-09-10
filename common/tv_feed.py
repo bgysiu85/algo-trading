@@ -68,7 +68,7 @@ from datetime import datetime, time as dtime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from common import notify
+from common import notify, session_lock
 from common.tv_screener import (CHANGE_COLUMN, COLUMNS, FILTERS, MARKET,
                                 PRICE_MAX, PRICE_MIN, check_response,
                                 failing_clauses)
@@ -298,9 +298,15 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Poll the screen and keep the watchlist current.
+
+    Takes argv so main.py can run this in a thread beside the trader rather
+    than only as its own process. Without it the embedded call would read
+    sys.argv and pick up the TRADER's flags.
+    """
     ap = build_parser()
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
@@ -314,6 +320,25 @@ def main() -> int:
     prev_screening: set[str] = set()
     last_beat = time.monotonic()
 
+    # ONE WRITER. --dry-run writes nothing, so it is not a writer and must
+    # neither take the lock nor be blocked by one -- the whole point of
+    # --dry-run is to check the endpoint while a real feed is running.
+    if a.dry_run:
+        return _loop(a, rank, tg, prev_screening, last_beat, backoff)
+    held = session_lock.active(session_lock.WRITER_LOCK_PATH)
+    if held:
+        LOG.error("another watchlist writer is running -- %s",
+                  session_lock.describe(held))
+        LOG.error("Two writers take turns and the trader sees the watchlist "
+                  "flip between two answers every few seconds. Stop that one "
+                  "first.")
+        return 2
+    with session_lock.held("watchlist-writer", "tv_feed",
+                           session_lock.WRITER_LOCK_PATH, out=str(a.out)):
+        return _loop(a, rank, tg, prev_screening, last_beat, backoff)
+
+
+def _loop(a, rank, tg, prev_screening, last_beat, backoff) -> int:
     while True:
         now = datetime.now(ET)
         if not a.all_hours and not a.once and not in_session(now):

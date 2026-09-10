@@ -8,11 +8,19 @@ import main as M
 def _paper(monkeypatch, argv, answer=None, tty=True):
     import contextlib, io
     seen = {}
-    monkeypatch.setattr(M.session_lock, "active", lambda: None)
+    # *args: session_lock.active is called with no argument for the SESSION
+    # lock and with a path for the WRITER lock. A zero-arg stub let the real
+    # tv_feed thread start and die on a TypeError -- contained, correctly, but
+    # a test must not depend on the containment it is not testing.
+    monkeypatch.setattr(M.session_lock, "active", lambda *a, **k: None)
     monkeypatch.setattr(M.session_lock, "held",
-                        lambda *a: contextlib.nullcontext())
+                        lambda *a, **k: contextlib.nullcontext())
     import brokers.ibkr.trader as T
+    from common import tv_feed
     monkeypatch.setattr(T, "main", lambda a: seen.update(argv=a) or 0)
+    # These tests are about argument handling, not the feed. Stub it so no
+    # thread reaches the network.
+    monkeypatch.setattr(tv_feed, "main", lambda argv=None: 0)
     if answer is not None:
         monkeypatch.setattr("builtins.input", lambda _p="": answer)
 
@@ -136,3 +144,107 @@ def test_an_absent_flag_says_so_rather_than_guessing(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "trader default" in out
     assert "4002 (default)" in out
+
+
+# --- the feed beside the trader, 2026-09-10 --------------------------------
+#
+# Ben: "is it possible to include the run_tv_feed into main.py? so every night
+# i just run one command." Yes -- but the feed is strictly subordinate to the
+# trader, because a dead feed costs a stale watchlist and a dead TRADER leaves
+# an open position with no trailing stop.
+
+def _paper_feed(monkeypatch, argv, feed=None, answer="PAPER"):
+    """As _paper, but with common.tv_feed.main replaced."""
+    import contextlib, io
+    seen = {}
+    monkeypatch.setattr(M.session_lock, "active", lambda *a, **k: None)
+    monkeypatch.setattr(M.session_lock, "held",
+                        lambda *a, **k: contextlib.nullcontext())
+    import brokers.ibkr.trader as T
+    from common import tv_feed
+    monkeypatch.setattr(T, "main", lambda a: seen.update(argv=a) or 0)
+    if feed is not None:
+        monkeypatch.setattr(tv_feed, "main", feed)
+    monkeypatch.setattr("builtins.input", lambda _p="": answer)
+
+    class _Stdin(io.StringIO):
+        def isatty(self): return True
+    monkeypatch.setattr(sys, "stdin", _Stdin())
+    return M.run(argv), seen
+
+
+def test_paper_starts_the_feed_by_default(monkeypatch):
+    import threading
+    started = threading.Event()
+    def fake(argv=None):
+        started.set()
+        return 0
+    rc, seen = _paper_feed(monkeypatch, ["--mode", "paper", "--strategy", "mcl"],
+                           feed=fake)
+    assert rc == 0
+    assert started.wait(2), "the feed was never started"
+
+
+def test_no_feed_skips_it(monkeypatch):
+    import threading
+    started = threading.Event()
+    rc, _ = _paper_feed(monkeypatch,
+                        ["--mode", "paper", "--strategy", "mcl", "--no-feed"],
+                        feed=lambda argv=None: started.set() or 0)
+    assert rc == 0
+    assert not started.is_set()
+
+
+def test_dry_mode_never_starts_the_feed(monkeypatch):
+    """--mode dry places no orders and is used to inspect behaviour. Writing
+    the real watchlist from it would change what a LIVE session then trades."""
+    import threading
+    started = threading.Event()
+    rc, _ = _paper_feed(monkeypatch, ["--mode", "dry", "--strategy", "mcl"],
+                        feed=lambda argv=None: started.set() or 0)
+    assert rc == 0
+    assert not started.is_set()
+
+
+def test_a_feed_that_raises_does_not_stop_the_trader(monkeypatch, capsys):
+    """THE POINT. A stale watchlist is survivable and visible. A killed process
+    leaves an open position with no trailing stop, because the stop lives here
+    and not at IBKR."""
+    def boom(argv=None):
+        raise RuntimeError("screener unreachable")
+    rc, seen = _paper_feed(monkeypatch, ["--mode", "paper", "--strategy", "mcl"],
+                           feed=boom)
+    assert rc == 0
+    assert "argv" in seen, "the trader did not run"
+    import time
+    for _ in range(50):
+        if "feed died" in capsys.readouterr().err:
+            break
+        time.sleep(0.02)
+
+
+def test_the_feed_gets_only_flags_its_parser_knows(monkeypatch):
+    """Forwarding --port or --strategy would kill the thread on an
+    unrecognized argument the moment it started -- and the trader would carry
+    on with a watchlist nobody was updating."""
+    got = {}
+    def fake(argv=None):
+        got["argv"] = list(argv or [])
+        return 0
+    _paper_feed(monkeypatch,
+                ["--mode", "paper", "--strategy", "mcl,mc5",
+                 "--port", "7497", "--max-positions", "3",
+                 "--telegram-batch-min", "15"], feed=fake)
+    import time
+    for _ in range(50):
+        if "argv" in got:
+            break
+        time.sleep(0.02)
+    assert got.get("argv") == ["--telegram-batch-min", "15"]
+
+
+def test_the_writer_lock_path_is_not_the_session_lock():
+    """Sharing one file would make the trader's own lock block the feed it
+    starts, and the combined command could never run at all."""
+    from common import session_lock as L
+    assert L.WRITER_LOCK_PATH != L.LOCK_PATH

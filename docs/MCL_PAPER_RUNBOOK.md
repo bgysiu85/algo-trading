@@ -192,6 +192,20 @@ For more than one strategy:
 .\run_paper.ps1 -Strategy mcl,mc5 -MaxPositions 3
 ```
 
+### The watchlist feed runs in the same process (2026-09-10)
+
+`--mode paper` starts `common.tv_feed` in a thread, so ONE command starts
+everything. **Do not also run `run_tv_feed.ps1`** — a writer lock refuses the
+second one rather than letting two processes overwrite `watchlist.txt` every few
+seconds. The same lock covers the IB scanner (`--mode scan`).
+
+The feed is strictly subordinate to the trader. If it dies, the process prints
+`watchlist feed died ...`, the watchlist goes stale, and **trading continues** — a
+stale watchlist is survivable, whereas a killed process leaves an open position
+with no trailing stop, because the stop lives in this process and not at IBKR.
+
+`--no-feed` turns it off when something else is writing the watchlist.
+
 `--strategy` takes ONE comma-separated value. `--strategy mcl mc5` with a space is
 refused, because it would otherwise run MCL alone while looking like it ran both.
 

@@ -1,6 +1,9 @@
 # MCL - PLACE REAL ORDERS against the IBKR PAPER account.
 #
-#   .\run_paper.ps1                  normal run (MCL only)
+#   .\run_paper.ps1                  normal run (MCL only). Starts the
+#                                    TradingView watchlist feed IN THIS PROCESS
+#                                    -- do not also run .\run_tv_feed.ps1, and
+#                                    if you do, the second one refuses.
 #   .\run_paper.ps1 -Strategy mcl,mc5 -MaxPositions 3
 #                                    two strategies, one book, cap 3
 #   .\run_paper.ps1 -SleepWhenDone   sleep the PC ~20 min after the 09:30 close
