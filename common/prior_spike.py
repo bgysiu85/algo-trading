@@ -78,6 +78,18 @@ SPIKE_MIN = 1.00
 RETAINED_HIGH = 0.50
 RETAINED_LOW = 0.20
 
+# Below this many daily bars we cannot say a name "never ran" -- we can only
+# say we could not look. Conflating the two puts every recently listed name in
+# the same bucket as every quiet one, and on this universe recent listings and
+# reverse splits are a large part of the population.
+MIN_HISTORY_SESSIONS = 20
+
+# Drop-top-3 must remove less than a fifth of a group for the comparison to
+# mean anything: on 4 trades it removes 75% and the "control" decides the
+# verdict by itself. Set from that principle, not from the group sizes this
+# happened to produce.
+MIN_GROUP_FOR_VERDICT = 15
+
 
 def prior_spike(closes: pd.Series) -> dict | None:
     """The largest prior run in this window, and how much of it was held.
@@ -121,7 +133,17 @@ def prior_spike(closes: pd.Series) -> dict | None:
     return best
 
 
-def label(spike: dict | None) -> str:
+def label(spike: dict | None, history: pd.Series | None = None) -> str:
+    """The rubric's categories, plus the one it does not have.
+
+    "no spike found" and "not enough history to look" are DIFFERENT ANSWERS
+    and the first version of this collapsed them. A name that has 8 daily bars
+    in the archive has not been shown to be quiet; it has been shown to be
+    new. Since recent listings and reverse splits are a large part of this
+    universe, that distinction decides how a whole bucket reads.
+    """
+    if history is None or len(history) < MIN_HISTORY_SESSIONS:
+        return "too new to judge"
     if spike is None:
         return "no prior spike"
     if spike["retained"] >= RETAINED_HIGH:
@@ -155,6 +177,10 @@ def stats(reals: list[float], drop: int = 3) -> dict:
     top = sorted(reals, reverse=True)[:drop]
     return {"n": len(reals), "net": net, "per": net / len(reals),
             "dropped": net - sum(top),
+            # PER TRADE as well as net. Comparing two groups' drop-top-3
+            # NETS compares how many trades each had -- the same size
+            # dependence that made the halves check wrong on the first run.
+            "dropped_per": (net - sum(top)) / len(reals),
             "win": 100.0 * sum(1 for r in reals if r > 0) / len(reals)}
 
 
@@ -174,20 +200,67 @@ def render(groups: dict[str, list], n_trades: int, n_sessions: int) -> list[str]
          f"  {'group':<18}{'trades':>7}{'net':>10}{'per':>9}{'win%':>7}"
          f"{'drop top 3':>12}{'early':>10}{'late':>10}"]
 
-    order = ["former runner", "partial hold", "pump and dump", "no prior spike"]
+    order = ["former runner", "partial hold", "pump and dump",
+             "no prior spike", "too new to judge"]
     got = {}
     for name in order:
         rows = groups.get(name, [])
         if not rows:
             continue
         s = stats([r["real"] for r in rows])
-        early = sum(r["real"] for r in rows if r["date"] < SPLIT)
-        late = sum(r["real"] for r in rows if r["date"] >= SPLIT)
-        got[name] = dict(s, early=early, late=late)
+        e = [r["real"] for r in rows if r["date"] < SPLIT]
+        l = [r["real"] for r in rows if r["date"] >= SPLIT]
+        early, late = sum(e), sum(l)
+        # PER TRADE for the comparison, totals for the table. The groups differ
+        # by 4x in size, so comparing their half TOTALS compares how many
+        # trades each had and not how they did.
+        got[name] = dict(s, early=early, late=late,
+                         early_per=(sum(e) / len(e)) if e else 0.0,
+                         late_per=(sum(l) / len(l)) if l else 0.0)
         L.append(f"  {name:<18}{s['n']:>7}${s['net']:>9,.0f}${s['per']:>8.2f}"
                  f"{s['win']:>6.1f}%${s['dropped']:>11,.0f}"
                  f"${early:>9,.0f}${late:>9,.0f}")
     L.append("")
+
+    # --- the cruder split, which the first run showed matters more --------
+    spiked = [r for k in ("former runner", "partial hold", "pump and dump")
+              for r in groups.get(k, [])]
+    quiet = groups.get("no prior spike", [])
+    if (spiked and quiet
+            and min(len(spiked), len(quiet)) >= MIN_GROUP_FOR_VERDICT):
+        a, b = stats([r["real"] for r in spiked]), stats([r["real"] for r in quiet])
+
+        def halves(rows):
+            e = [r["real"] for r in rows if r["date"] < SPLIT]
+            l = [r["real"] for r in rows if r["date"] >= SPLIT]
+            return ((sum(e) / len(e)) if e else 0.0,
+                    (sum(l) / len(l)) if l else 0.0)
+
+        ae, al = halves(spiked)
+        be, bl = halves(quiet)
+        L += ["HAS THIS NAME EVER RUN AT ALL — a cruder split than the rubric",
+              "",
+              f"  any prior spike  {a['n']:>4} trades  ${a['net']:>7,.0f}  "
+              f"{a['per']:+.2f}/trade   drop-top-3 ${a['dropped']:>7,.0f}",
+              f"  no prior spike   {b['n']:>4} trades  ${b['net']:>7,.0f}  "
+              f"{b['per']:+.2f}/trade   drop-top-3 ${b['dropped']:>7,.0f}",
+              f"  per trade, early {ae:+.2f} vs {be:+.2f}   "
+              f"late {al:+.2f} vs {bl:+.2f}", ""]
+        agree = (ae - be) * (al - bl) > 0
+        if a["per"] > b["per"] and agree and a["dropped_per"] > b["dropped_per"]:
+            L += ["  SEPARATES, in both halves and after drop-top-3, on a",
+                  "  larger sample than the rubric's own split. Requiring ANY",
+                  "  prior run is a cruder rule than his and it is the one this",
+                  "  tape supports. Register it and spend the holdout on THIS,",
+                  "  not on the runner-vs-pump distinction.", ""]
+        elif a["per"] > b["per"]:
+            why = [] if agree else ["the sign flips between halves"]
+            if a["dropped_per"] <= b["dropped_per"]:
+                why.append("it does not survive drop-top-3")
+            L += [f"  Points the right way but {' and '.join(why)}.", ""]
+        else:
+            L += ["  No separation. Having run before does not distinguish",
+                  "  these trades either.", ""]
 
     hi, lo = got.get("former runner"), got.get("pump and dump")
     if not hi or not lo:
@@ -197,14 +270,22 @@ def render(groups: dict[str, list], n_trades: int, n_sessions: int) -> list[str]
               "  Report the counts, change nothing.", ""]
         return L + tail()
 
+    if min(hi["n"], lo["n"]) < MIN_GROUP_FOR_VERDICT:
+        L += [f"  ONE GROUP HAS FEWER THAN {MIN_GROUP_FOR_VERDICT} TRADES, so "
+              f"drop-top-3 would remove",
+              "  most of it and decide the verdict by itself. Counts reported,",
+              "  no verdict drawn.", ""]
+        return L + tail()
+
     gap = hi["per"] - lo["per"]
     L += ["THE RUBRIC'S OWN CLAIM: former runners beat pump-and-dumps", "",
           f"  former runner  {hi['per']:+.2f}/trade over {hi['n']} trades",
           f"  pump and dump  {lo['per']:+.2f}/trade over {lo['n']} trades",
           f"  gap            {gap:+.2f}/trade", ""]
 
-    halves_agree = (hi["early"] - lo["early"]) * (hi["late"] - lo["late"]) > 0
-    survives = hi["dropped"] > lo["dropped"]
+    halves_agree = ((hi["early_per"] - lo["early_per"])
+                    * (hi["late_per"] - lo["late_per"])) > 0
+    survives = hi["dropped_per"] > lo["dropped_per"]
 
     if gap > 0 and halves_agree and survives:
         L += ["  SUPPORTED. Former runners beat pump-and-dumps on the total,",
@@ -281,8 +362,8 @@ def main(argv=None) -> int:
             continue
         if not trades:
             continue
-        spike = prior_spike(history_for(daily, sym, d))
-        key = label(spike)
+        hist = history_for(daily, sym, d)
+        key = label(prior_spike(hist), hist)
         for t in trades:
             n += 1
             groups[key].append({"symbol": sym, "date": d,

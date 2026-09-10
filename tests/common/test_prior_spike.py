@@ -43,7 +43,7 @@ def test_no_spike_is_None_rather_than_a_zero():
     rubric's own categories, not a retention of 0.0 — and scoring it as one
     would file every quiet name with the pump-and-dumps."""
     assert P.prior_spike(closes([5.0] * 40)) is None
-    assert P.label(None) == "no prior spike"
+    assert P.label(None, closes([1.0] * 40)) == "no prior spike"
 
 
 def test_the_base_must_precede_the_peak():
@@ -69,21 +69,21 @@ def test_the_largest_run_in_the_window_wins():
 def test_a_fully_held_run_retains_everything():
     got = P.prior_spike(closes([1.0, 3.0, 3.0]))
     assert got["retained"] == pytest.approx(1.0)
-    assert P.label(got) == "former runner"
+    assert P.label(got, closes([1.0] * 40)) == "former runner"
 
 
 def test_a_fully_retraced_run_retains_nothing():
     """His own example: up 300% two weeks earlier, fully retraced."""
     got = P.prior_spike(closes([1.0, 4.0, 1.0]))
     assert got["retained"] == pytest.approx(0.0)
-    assert P.label(got) == "pump and dump"
+    assert P.label(got, closes([1.0] * 40)) == "pump and dump"
 
 
 def test_half_held_is_neither_category():
     got = P.prior_spike(closes([1.0, 3.0, 2.0]))
     assert got["retained"] == pytest.approx(0.5)
-    assert P.label(got) == "former runner"     # >= 0.50 is the boundary
-    assert P.label({"retained": 0.35}) == "partial hold"
+    assert P.label(got, closes([1.0] * 40)) == "former runner"   # >= 0.50 is the boundary
+    assert P.label({"retained": 0.35}, closes([1.0] * 40)) == "partial hold"
 
 
 def test_retention_below_the_base_is_floored_at_zero():
@@ -223,3 +223,71 @@ def test_the_report_warns_about_split_adjustment():
     adjusted history can turn a collapse into a flat line."""
     text = report({"former runner": g(5, 1.0), "pump and dump": g(5, -1.0)})
     assert "SPLIT-ADJUSTED" in text
+
+
+# --- corrections after the first run, 2026-09-10 -----------------------------
+
+def test_a_name_with_almost_no_history_is_not_called_quiet():
+    """"We found no spike" and "we could not look" are different answers, and
+    the first version collapsed them. On this universe recent listings and
+    reverse splits are a large slice, so that bucket was carrying names that
+    had never had a chance to run."""
+    short = closes([1.0] * 5)
+    assert P.label(None, short) == "too new to judge"
+    assert P.label(None, closes([1.0] * 40)) == "no prior spike"
+
+
+def test_a_real_spike_is_still_labelled_even_with_long_history():
+    got = P.prior_spike(closes([1.0] * 30 + [3.0] * 30))
+    assert P.label(got, closes([1.0] * 60)) == "former runner"
+
+
+def test_halves_are_compared_per_trade_not_on_totals():
+    """THE BUG THE FIRST RUN EXPOSED. The groups differed 137 to 30, so
+    comparing their half TOTALS compared how many trades each had. Here the
+    small group wins per trade in both halves and loses on both totals."""
+    # The small group wins PER TRADE in both halves (+1.00 vs +0.50), but the
+    # early-half TOTALS run the other way (10 vs 30) because the other group
+    # has six times the trades there. Compared on totals the sign flips and
+    # the verdict inverts; compared per trade it does not. A fixture where
+    # both halves agree either way cannot tell the two apart -- the first
+    # version of this test could not, and the mutation survived it.
+    groups = {
+        "former runner": g(10, 1.0, "2020-01-01") + g(10, 1.0, "2030-01-01"),
+        "pump and dump": g(60, 0.5, "2020-01-01") + g(5, 0.5, "2030-01-01"),
+    }
+    text = report(groups)
+    assert "SUPPORTED" in text and "NOT SUPPORTED" not in text
+
+
+def test_the_any_spike_split_is_reported():
+    groups = {"former runner": g(20, 5.0, "2020-01-01") + g(20, 5.0, "2030-01-01"),
+              "pump and dump": g(5, 1.0, "2020-01-01") + g(5, 1.0, "2030-01-01"),
+              "no prior spike": g(30, -5.0, "2020-01-01") + g(30, -5.0, "2030-01-01")}
+    text = report(groups)
+    assert "HAS THIS NAME EVER RUN AT ALL" in text
+    assert "SEPARATES" in text
+    assert "spend the holdout on THIS" in text
+
+
+def test_the_any_spike_split_respects_both_halves():
+    groups = {"former runner": g(20, 9.0, "2020-01-01") + g(20, -1.0, "2030-01-01"),
+              "no prior spike": g(20, 1.0, "2020-01-01") + g(20, 1.0, "2030-01-01")}
+    text = report(groups)
+    assert "SEPARATES" not in text
+    assert "sign flips between halves" in text
+
+
+def test_no_separation_is_said_plainly():
+    groups = {"former runner": g(20, -5.0), "pump and dump": g(5, -5.0),
+              "no prior spike": g(30, 5.0)}
+    assert "No separation" in report(groups)
+
+
+def test_a_group_too_small_for_drop_top_three_gets_no_verdict():
+    """On 4 trades, dropping the top 3 removes 75% of the group and the
+    control decides the answer by itself."""
+    groups = {"former runner": g(40, 5.0), "pump and dump": g(4, -5.0)}
+    text = report(groups)
+    assert "FEWER THAN" in text and "no verdict drawn" in text
+    assert "SUPPORTED" not in text
