@@ -187,9 +187,42 @@ def test_a_row_with_no_timestamp_is_dropped_not_stored(tmp_path, conn):
     assert n == 1
 
 
-def test_a_missing_file_is_skipped_quietly(tmp_path, conn):
-    n, days = L.load_paper_fills(conn, [tmp_path / "nope.csv"])
-    assert (n, days) == (0, [])
+def test_a_missing_file_is_refused_not_skipped(tmp_path, conn):
+    """THIS TEST USED TO ASSERT THE OPPOSITE, and the opposite was the bug.
+
+    Ben ran `--paper-fills var\\fills\\*.csv` from PowerShell, which does not
+    expand wildcards, so Python got one literal string that is not a file. The
+    loader skipped it in silence and printed "0 rows over 0 session(s)" -- a
+    load that did nothing, reported success, and left a table that reads
+    identically to a session with no fills.
+
+    A loader that finds no input has FAILED. It has not succeeded quietly.
+    """
+    with pytest.raises(SystemExit, match="no file matched"):
+        L.load_paper_fills(conn, [tmp_path / "nope.csv"])
+
+
+def test_a_glob_is_expanded_here_because_powershell_will_not(tmp_path, conn):
+    """The shell Ben actually uses passes `*.csv` through untouched."""
+    fills_csv(tmp_path, [row("2026-09-09 06:21:00")], "mcl_fills_20260909.csv")
+    fills_csv(tmp_path, [row("2026-09-10 06:21:00")], "mcl_fills_20260910.csv")
+    n, days = L.load_paper_fills(conn, [str(tmp_path / "*.csv")])
+    assert n == 2
+    assert days == ["2026-09-09", "2026-09-10"]
+
+
+def test_a_glob_that_matches_nothing_is_refused(tmp_path, conn):
+    """The case that would otherwise look exactly like an empty session."""
+    with pytest.raises(SystemExit, match="no file matched"):
+        L.load_paper_fills(conn, [str(tmp_path / "no_such_*.csv")])
+
+
+def test_the_same_file_named_twice_is_read_once(tmp_path, conn):
+    """A literal AND a glob covering it. The row de-duplicator downstream would
+    collapse the duplicates, but the file count in the load note would be
+    wrong -- and that note is the provenance record."""
+    p = fills_csv(tmp_path, [row("2026-09-10 06:21:00")])
+    assert L.expand_paths([str(p), str(tmp_path / "*.csv")]) == [p]
 
 
 def test_ts_et_is_stored_as_the_et_wall_clock(tmp_path, conn):
