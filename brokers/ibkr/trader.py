@@ -1515,7 +1515,8 @@ async def main_async(args):
     # Resolved once, here, at startup -- the same discipline as every other
     # credential in this project. A lazy resolve mid-session can block on a
     # 1Password prompt with a position open.
-    tg = notify.Notifier() if args.no_telegram else notify.Notifier.from_env()
+    tg = (notify.Notifier() if args.no_telegram
+          else notify.Notifier.from_env(args.telegram_batch_min))
     strategies = SA.build_all(getattr(args, "strategy", ["mcl"]))
     LOG.info("strategies: %s (one book, cap %d across all of them)",
              ", ".join(a.name for a in strategies), MAX_CONCURRENT_POSITIONS)
@@ -1576,6 +1577,19 @@ async def main_async(args):
         log.close()
         ib.disconnect()
         LOG.info("disconnected. fill log: %s", args.out)
+        # THE ONLY PLACE THIS CAN LIVE, and it is deliberately the last thing.
+        # After log.close() so the file is complete, and after ib.disconnect()
+        # so nothing here can touch the broker. Read back off the FILE rather
+        # than the trader's own state: a summary built from memory agrees with
+        # itself by construction, one read off the ledger can disagree, and
+        # that disagreement is the thing worth seeing.
+        #
+        # Wrapped whole. This runs on the shutdown path, including the one
+        # after a crash, and a broken summary must never mask why the session
+        # ended.
+        finish_session(tg, log.path,
+                       [a.name for a in trader.strategies],
+                       no_summary=args.no_summary)
         if not args.no_archive:
             trader.archive_watchlist(force=args.force_archive)
         if args.sleep_on_exit:
@@ -1609,6 +1623,34 @@ def _unique_path(path: Path) -> Path:
         if not alt.exists():
             return alt
     return path
+
+
+def finish_session(tg, log_path, strategy_names, no_summary: bool = False) -> None:
+    """Everything the notifier owes once trading has stopped.
+
+    A FUNCTION, not four lines inside main()'s finally block, because that is
+    unreachable from a test -- and both halves of it fail silently. A summary
+    that never sends and a batch that is dropped both look exactly like a quiet
+    session from the phone.
+
+    Called after log.close() and ib.disconnect(), so nothing here can touch the
+    broker, and the file it reads is complete.
+    """
+    if not no_summary:
+        try:
+            rows = notify.read_fills(log_path)
+            if rows:
+                tg.send(notify.session_summary(
+                    rows, strategy=",".join(strategy_names)), force=True)
+        except Exception as e:                              # noqa: BLE001
+            # The shutdown path runs after a crash too, and a broken summary
+            # must never mask why the session ended.
+            LOG.warning("session summary failed (%s: %s) — the fill log is "
+                        "unaffected, run `python -m common.notify --summary "
+                        "%s`", type(e).__name__, e, log_path)
+    # Sends anything still waiting in a batch. Without it, ending a session on
+    # a 30-minute cadence discards most of the last half hour.
+    tg.flush()
 
 
 def suspend_machine(delay_min: int, flat: bool) -> None:
@@ -1669,6 +1711,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "MAX_CONCURRENT_POSITIONS cap, because they share one "
                         "account -- and the earlier one takes the last free "
                         "slot. Two processes would each see half the account.")
+    notify.add_batch_arg(p)
+    p.add_argument("--no-summary", action="store_true",
+                   help="skip the end-of-session Telegram summary")
     p.add_argument("--no-telegram", action="store_true",
                    help="run without notifications even if configured")
     p.add_argument("--dry-run", action="store_true",

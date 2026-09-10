@@ -235,3 +235,93 @@ def test_adopt_is_the_only_other_choice():
     meaning anything."""
     with pytest.raises(SystemExit):
         M.build_parser().parse_args(["--on-open-positions", "ignore"])
+
+
+# --- end-of-session summary, Ben 2026-09-10 ---------------------------------
+
+def test_the_summary_is_on_by_default():
+    """"a summary to be sent at the end of the trading session" — sent, not
+    fetched. Read off the trader's own parser."""
+    assert M.build_parser().parse_args([]).no_summary is False
+
+
+def test_the_summary_can_be_turned_off():
+    assert M.build_parser().parse_args(["--no-summary"]).no_summary is True
+
+
+def test_the_batch_flag_reaches_the_trader():
+    a = M.build_parser().parse_args(["--telegram-batch-min", "15"])
+    assert a.telegram_batch_min == 15.0
+    assert M.build_parser().parse_args([]).telegram_batch_min is None
+
+
+class FakeTg:
+    def __init__(self):
+        self.sent, self.flushed = [], 0
+
+    def send(self, text, force=False):
+        self.sent.append(text)
+        return True
+
+    def flush(self, timeout=5.0):
+        self.flushed += 1
+
+
+def a_session(tmp_path):
+    log = tmp_path / "f.csv"
+    write_log(log, [buy_row("BNC"), {
+        "ts_et": "2026-09-09 07:45:38", "strategy": "MCL", "symbol": "BNC",
+        "action": "SELL", "reason": "trailing_stop", "status": "FILLED",
+        "filled_qty": "100", "qty": "100", "entry_price": "5.41",
+        "exit_price": "5.26", "trade_pnl": "-16.37", "hold_minutes": "82.8"}])
+    return log
+
+
+def test_the_summary_actually_goes_out_at_shutdown(tmp_path):
+    """THE FAILURE THIS CATCHES. A summary that never sends looks exactly like
+    a quiet session from the phone — there is no error to notice."""
+    tg = FakeTg()
+    M.finish_session(tg, a_session(tmp_path), ["MCL"])
+    assert len(tg.sent) == 1
+    assert "BNC" in tg.sent[0] and "NET" in tg.sent[0]
+
+
+def test_no_summary_suppresses_it_but_still_flushes(tmp_path):
+    """The batch must go out regardless: --no-summary turns off one message,
+    not the queue behind it."""
+    tg = FakeTg()
+    M.finish_session(tg, a_session(tmp_path), ["MCL"], no_summary=True)
+    assert tg.sent == []
+    assert tg.flushed == 1
+
+
+def test_the_pending_batch_is_always_flushed(tmp_path):
+    """Ending a session on a 30-minute cadence would otherwise discard most of
+    the last half hour."""
+    tg = FakeTg()
+    M.finish_session(tg, a_session(tmp_path), ["MCL"])
+    assert tg.flushed == 1
+
+
+def test_a_session_with_no_fill_file_sends_nothing_and_does_not_raise(tmp_path):
+    tg = FakeTg()
+    M.finish_session(tg, tmp_path / "never_written.csv", ["MCL"])
+    assert tg.sent == [] and tg.flushed == 1
+
+
+def test_a_broken_summary_never_masks_why_the_session_ended(tmp_path):
+    """This runs on the crash path too. An exception here would replace the
+    real reason for the shutdown with a notification bug."""
+    class Exploding(FakeTg):
+        def send(self, text, force=False):
+            raise RuntimeError("telegram is on fire")
+
+    tg = Exploding()
+    M.finish_session(tg, a_session(tmp_path), ["MCL"])   # must not raise
+    assert tg.flushed == 1, "and the batch still goes out"
+
+
+def test_the_summary_names_the_strategies_that_ran(tmp_path):
+    tg = FakeTg()
+    M.finish_session(tg, a_session(tmp_path), ["MCL", "MC5"])
+    assert "MCL,MC5" in tg.sent[0]

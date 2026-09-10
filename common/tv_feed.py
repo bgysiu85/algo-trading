@@ -280,7 +280,7 @@ def in_session(now: datetime) -> bool:
     return SESSION_START <= now.timetz().replace(tzinfo=None) < SESSION_END
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="TradingView screen -> watchlist.txt")
     ap.add_argument("--interval", type=float, default=DEFAULT_INTERVAL)
     ap.add_argument("--out", type=Path, default=WATCHLIST)
@@ -290,17 +290,24 @@ def main() -> int:
                     help="never write the file")
     ap.add_argument("--all-hours", action="store_true",
                     help="ignore the 04:00-09:30 ET window")
+    notify.add_batch_arg(ap)
     ap.add_argument("--no-telegram", action="store_true",
                     help="run without notifications even if configured")
     ap.add_argument("--heartbeat", type=float, default=3600.0,
                     help="seconds between 'feed alive' messages; 0 disables")
+    return ap
+
+
+def main() -> int:
+    ap = build_parser()
     a = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     rank = Ranking(a.max_symbols)
     backoff = 0.0
-    tg = notify.Notifier() if a.no_telegram else notify.Notifier.from_env()
+    tg = (notify.Notifier() if a.no_telegram
+          else notify.Notifier.from_env(a.telegram_batch_min))
     # Previous poll's HOT+WARM set. Changes are reported against what was
     # SCREENING, not against the file: the file only ever grows, so diffing it
     # would report an "add" once and never a "remove".

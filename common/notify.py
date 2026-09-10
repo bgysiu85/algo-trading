@@ -202,6 +202,19 @@ class Notifier:
 
     @classmethod
     @staticmethod
+    def batch_seconds(batch_min: float | None = None) -> float:
+        """Seconds to batch for. The ARGUMENT wins when given, including 0.
+
+        Given-and-zero has to beat the environment, or a session that meant to
+        turn batching off for one run would silently inherit it -- and the only
+        symptom is messages not arriving, which looks like a broken notifier
+        rather than a setting.
+        """
+        if batch_min is not None:
+            return max(0.0, float(batch_min) * 60.0)
+        return Notifier.batch_from_env()
+
+    @staticmethod
     def batch_from_env() -> float:
         """Seconds, from TELEGRAM_BATCH_MIN. Unset, blank or unparseable is
         OFF -- a typo must not silently hold every message for an hour, so it
@@ -220,14 +233,18 @@ class Notifier:
         return mins * 60.0
 
     @classmethod
-    def from_env(cls) -> "Notifier":
+    def from_env(cls, batch_min: float | None = None) -> "Notifier":
         """Resolve at startup, per the project's credential discipline. Absent
-        configuration disables notifications rather than stopping the run."""
+        configuration disables notifications rather than stopping the run.
+
+        `batch_min` is the command-line value when the caller offers one (see
+        add_batch_arg). None means "not specified", and the environment decides.
+        """
         got = S.preload_optional({TOKEN_VAR: "Telegram bot token",
                                   CHAT_VAR: "Telegram chat id"})
         if {TOKEN_VAR, CHAT_VAR} <= got:
             n = cls(S.get(TOKEN_VAR), S.get(CHAT_VAR),
-                    batch_interval_s=cls.batch_from_env())
+                    batch_interval_s=cls.batch_seconds(batch_min))
             if n.problems:
                 for p in n.problems:
                     LOG.error("Telegram not started: %s", p)
@@ -416,6 +433,27 @@ class Notifier:
                      f"every={self.batch_interval_s:.0f}s")
         return (f"telegram sent={self.sent} failed={self.failed} "
                 f"dropped={self.dropped} suppressed={self.suppressed}{extra}")
+
+
+def add_batch_arg(parser) -> None:
+    """Add --telegram-batch-min to an entry point that sends notifications.
+
+    Shared rather than written out per program so the flag cannot drift
+    between them: the trader and tv_feed both construct a Notifier the same
+    way, and two copies of a numeric option are two chances for one of them to
+    be in seconds.
+
+    NOTE ON WHERE THIS MATTERS. The watchlist messages -- by far the most
+    numerous -- come from common/tv_feed.py, not from the trader. The trader
+    sends a handful of fills a session. If batching is only wanted in one
+    place, tv_feed is that place.
+    """
+    parser.add_argument(
+        "--telegram-batch-min", type=float, default=None, metavar="MIN",
+        help=f"hold Telegram messages and send them joined every MIN minutes "
+             f"(e.g. 15 or 30). 0 sends immediately. Delays the NOTIFICATION "
+             f"only — orders are placed, filled and managed regardless. "
+             f"Falls back to ${BATCH_VAR} when not given")
 
 
 # --- message formatting -----------------------------------------------------

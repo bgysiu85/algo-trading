@@ -780,12 +780,14 @@ def test_a_typo_stays_off_and_says_so(monkeypatch, caplog):
     assert N.BATCH_VAR in caplog.text
 
 
-def test_from_env_takes_no_batch_argument():
-    """The trader must not have to pass anything. A signature that still
-    accepted one would invite the caller-side wiring back."""
+def test_from_env_still_works_with_no_argument():
+    """A caller that does not offer the flag must not have to pass anything:
+    the environment decides and the call site is unchanged. (An earlier
+    version of this test asserted from_env took NO argument at all; Ben asked
+    for a command-line parameter on 2026-09-10, which reverses that.)"""
     import inspect
     sig = inspect.signature(N.Notifier.from_env)
-    assert list(sig.parameters) == []
+    assert sig.parameters["batch_min"].default is None
 
 
 def test_from_env_actually_applies_the_variable(monkeypatch):
@@ -802,3 +804,78 @@ def test_from_env_actually_applies_the_variable(monkeypatch):
 
     monkeypatch.delenv(N.BATCH_VAR)
     assert N.Notifier.from_env().batch_interval_s == 0.0
+
+
+# --- the flag, Ben 2026-09-10 -----------------------------------------------
+# "can it be a parameter passed into the program rather than an environment
+# variable?" Both, with the flag winning: PowerShell environment variables have
+# to be re-set in every new terminal, which is a trap for a setting whose only
+# failure symptom is messages not arriving.
+
+def parser_with_flag():
+    import argparse
+    ap = argparse.ArgumentParser()
+    N.add_batch_arg(ap)
+    return ap
+
+
+def test_not_passing_the_flag_leaves_the_environment_in_charge(monkeypatch):
+    monkeypatch.setenv(N.BATCH_VAR, "30")
+    a = parser_with_flag().parse_args([])
+    assert a.telegram_batch_min is None
+    assert N.Notifier.batch_seconds(a.telegram_batch_min) == 1800.0
+
+
+def test_the_flag_overrides_the_environment(monkeypatch):
+    monkeypatch.setenv(N.BATCH_VAR, "30")
+    a = parser_with_flag().parse_args(["--telegram-batch-min", "15"])
+    assert N.Notifier.batch_seconds(a.telegram_batch_min) == 900.0
+
+
+def test_passing_zero_turns_batching_off_against_the_environment(monkeypatch):
+    """Given-and-zero must beat the environment. Otherwise a run that meant to
+    disable batching silently inherits it, and the only symptom is messages
+    not arriving — which reads as a broken notifier, not a setting."""
+    monkeypatch.setenv(N.BATCH_VAR, "30")
+    a = parser_with_flag().parse_args(["--telegram-batch-min", "0"])
+    assert N.Notifier.batch_seconds(a.telegram_batch_min) == 0.0
+
+
+def test_the_flag_is_in_minutes():
+    a = parser_with_flag().parse_args(["--telegram-batch-min", "15"])
+    assert a.telegram_batch_min == 15.0
+    assert N.Notifier.batch_seconds(15.0) == 900.0
+
+
+def test_a_negative_flag_means_off_rather_than_a_negative_interval():
+    assert N.Notifier.batch_seconds(-5) == 0.0
+
+
+@pytest.mark.parametrize("module", ["brokers.ibkr.trader", "common.tv_feed"])
+def test_both_senders_accept_the_flag(module):
+    """One shared helper rather than a copy per program: two copies of a
+    numeric option are two chances for one to end up in seconds.
+
+    Read off each program's REAL parser. tv_feed built its inside main(), so
+    it grew a build_parser() to be checkable -- the same shape trader.py and
+    history_probe.py already use, and for the same reason: a test that
+    rebuilds the parser is asserting about itself."""
+    import importlib
+    m = importlib.import_module(module)
+    a = m.build_parser().parse_args(["--telegram-batch-min", "15"])
+    assert a.telegram_batch_min == 15.0
+    assert m.build_parser().parse_args([]).telegram_batch_min is None
+
+
+def test_from_env_applies_an_explicit_batch_argument(monkeypatch):
+    """Accepting the flag and then not forwarding it leaves batching silently
+    off — and the only symptom is messages arriving immediately, which looks
+    exactly like not having passed it."""
+    monkeypatch.setattr(N.S, "preload_optional",
+                        lambda spec: {N.TOKEN_VAR, N.CHAT_VAR})
+    monkeypatch.setattr(N.S, "get",
+                        lambda k: TOKEN if k == N.TOKEN_VAR else CHAT)
+    monkeypatch.setenv(N.BATCH_VAR, "30")
+    assert N.Notifier.from_env(15).batch_interval_s == 900.0
+    assert N.Notifier.from_env(0).batch_interval_s == 0.0
+    assert N.Notifier.from_env().batch_interval_s == 1800.0
