@@ -474,3 +474,273 @@ def test_the_guard_itself_rejects_what_telegram_rejects():
     assert not telegram_html_ok("pm vol 62k < 100k")
     assert not telegram_html_ok("a & b")
     assert telegram_html_ok("a &amp; b")
+
+
+# --- batching ---------------------------------------------------------------
+# Ben, 2026-09-10: "an option where the messages will be sent in batches in
+# specified intervals, such as every 15 mins or 30 mins".
+#
+# The safety property is the one worth defending: batching must never delay a
+# fill. His machine restarted mid-session the night before, and anything
+# sitting in a batch at that moment is gone.
+
+def sent_texts(monkeypatch, n):
+    got = []
+    monkeypatch.setattr(n, "_post", got.append)
+    return got
+
+
+def test_batching_holds_ordinary_messages_instead_of_sending_them(monkeypatch):
+    n = N.Notifier(TOKEN, CHAT, batch_interval_s=3600)
+    got = sent_texts(monkeypatch, n)
+    assert n.send("one") is True and n.send("two") is True
+    time.sleep(0.1)
+    assert got == [], "nothing should have gone out yet"
+    assert n._batched == 2
+
+
+def test_a_forced_message_is_never_batched(monkeypatch):
+    """THE SAFETY PROPERTY. force=True already means 'must not be swallowed',
+    and its three call sites are fills and the heartbeat -- the two things a
+    15-minute delay would break. A delayed fill means not knowing you are
+    holding; a delayed heartbeat cannot prove the process is alive."""
+    n = N.Notifier(TOKEN, CHAT, batch_interval_s=3600)
+    got = sent_texts(monkeypatch, n)
+    n.send("a fill", force=True)
+    time.sleep(0.2)
+    assert got == ["a fill"]
+    assert n._pending == []
+
+
+@pytest.mark.parametrize("msg", [
+    N.buy_filled("AOUT", 12.76, 100, 0.35, strategy="MCL"),
+    N.sell_filled("AOUT", 13.40, 100, 0.35, 63.30, strategy="MCL"),
+    N.heartbeat(40, 3, 1, 0, stats="x"),
+])
+def test_the_messages_that_must_not_wait_are_the_ones_that_force(msg, monkeypatch):
+    """Asserted through the real formatters rather than a string, so a call
+    site that stopped forcing would show up here."""
+    n = N.Notifier(TOKEN, CHAT, batch_interval_s=3600)
+    got = sent_texts(monkeypatch, n)
+    n.send(msg, force=True)
+    time.sleep(0.2)
+    assert len(got) == 1
+
+
+def test_the_batch_goes_out_on_the_interval(monkeypatch):
+    n = N.Notifier(TOKEN, CHAT, batch_interval_s=0.15)
+    got = sent_texts(monkeypatch, n)
+    n.send("one")
+    n.send("two")
+    time.sleep(0.6)
+    assert len(got) == 1, "both parts arrive as ONE message"
+    assert "one" in got[0] and "two" in got[0]
+
+
+def test_flush_sends_the_pending_batch_before_shutting_down(monkeypatch):
+    """Ending a session on a 30-minute cadence would otherwise discard most of
+    the last half hour."""
+    n = N.Notifier(TOKEN, CHAT, batch_interval_s=3600)
+    got = sent_texts(monkeypatch, n)
+    n.send("held")
+    n.flush(timeout=2.0)
+    assert got and "held" in got[0]
+
+
+def test_batching_off_by_default_is_the_old_behaviour(monkeypatch):
+    n = N.Notifier(TOKEN, CHAT)
+    got = sent_texts(monkeypatch, n)
+    n.send("straight through")
+    time.sleep(0.2)
+    assert got == ["straight through"]
+
+
+# --- the 4096-character limit -----------------------------------------------
+
+def test_a_batch_is_split_to_fit_telegrams_limit():
+    """A message over 4096 chars is REFUSED WHOLE, not truncated -- so without
+    splitting, one busy interval loses every message in it and the failure
+    looks like a quiet market."""
+    n = N.Notifier(TOKEN, CHAT, batch_interval_s=3600)
+    parts = ["x" * 1000] * 10
+    chunks = n._chunks(parts)
+    assert len(chunks) > 1
+    assert all(len(c) <= N.TELEGRAM_MAX_CHARS for c in chunks)
+
+
+def test_splitting_loses_nothing():
+    n = N.Notifier(TOKEN, CHAT, batch_interval_s=3600)
+    parts = [f"part{i}" for i in range(200)]
+    joined = "".join(n._chunks(parts))
+    for p in parts:
+        assert p in joined
+
+
+def test_a_single_oversized_part_is_passed_through_rather_than_cut():
+    """Cutting mid-tag produces invalid HTML, which Telegram refuses anyway.
+    Splitting one message is a formatting decision for the caller."""
+    n = N.Notifier(TOKEN, CHAT, batch_interval_s=3600)
+    big = "y" * (N.TELEGRAM_MAX_CHARS + 500)
+    assert n._chunks([big]) == [big]
+
+
+def test_a_small_batch_stays_one_message():
+    n = N.Notifier(TOKEN, CHAT, batch_interval_s=3600)
+    assert len(n._chunks(["a", "b", "c"])) == 1
+
+
+# --- which guard applies while batching -------------------------------------
+
+def test_the_rate_limit_is_skipped_while_batching(monkeypatch):
+    """The interval exists so a burst cannot hit Telegram's API limits, which
+    batching already solves. Enforcing both would throw most of a batch away
+    before it was assembled -- making a digest QUIETER than sending live."""
+    n = N.Notifier(TOKEN, CHAT, batch_interval_s=3600)
+    sent_texts(monkeypatch, n)
+    for i in range(5):
+        assert n.send(f"burst {i}") is True
+    assert n.suppressed == 0
+    assert len(n._pending) == 5
+
+
+def test_the_de_duplicator_still_applies_while_batching(monkeypatch):
+    """A stuck loop repeating one message is exactly what a batch would
+    otherwise pile up unseen."""
+    n = N.Notifier(TOKEN, CHAT, batch_interval_s=3600)
+    sent_texts(monkeypatch, n)
+    n.send("same")
+    n.send("same")
+    assert n.suppressed == 1
+    assert len(n._pending) == 1
+
+
+def test_stats_reports_what_is_waiting(monkeypatch):
+    """Silence on a 30-minute cadence is ambiguous; the count disambiguates."""
+    n = N.Notifier(TOKEN, CHAT, batch_interval_s=1800)
+    sent_texts(monkeypatch, n)
+    n.send("held")
+    s = n.stats()
+    assert "batched=1" in s and "waiting=1" in s and "every=1800s" in s
+
+
+def test_stats_says_nothing_about_batching_when_it_is_off():
+    assert "batched" not in N.Notifier(TOKEN, CHAT).stats()
+
+
+# --- the end-of-session summary ---------------------------------------------
+# Ben, 2026-09-10: "a summary ... at the end of the trading session ... the P&L
+# of every trade made - Time, share size, buy/sell prices, gross profit,
+# commission, net profit ... Total of all the trades".
+
+def sell_row(symbol="BNC", entry=5.41, exit_=5.26, qty=100, pnl=None,
+             ts="2026-09-09 07:45:38", status="FILLED", hold="82.8"):
+    if pnl is None:
+        from common.commissions import order_cost
+        pnl = ((exit_ - entry) * qty
+               - order_cost(qty, entry, False, "ibkr_tiered")
+               - order_cost(qty, exit_, True, "ibkr_tiered"))
+    return {"ts_et": ts, "strategy": "MCL", "symbol": symbol, "action": "SELL",
+            "reason": "trailing_stop", "status": status,
+            "filled_qty": str(qty), "qty": str(qty),
+            "entry_price": str(entry), "exit_price": str(exit_),
+            "trade_pnl": f"{pnl:.2f}", "hold_minutes": hold}
+
+
+def buy_row(symbol="BNC", ts="2026-09-09 06:23:01", status="FILLED"):
+    return {"ts_et": ts, "strategy": "MCL", "symbol": symbol, "action": "BUY",
+            "reason": "entry_signal", "status": status, "filled_qty": "100",
+            "qty": "100", "fill_price": "5.41"}
+
+
+def test_a_round_trip_is_read_off_the_sell_row():
+    """The log writes entry, exit and P/L on the sell row only, so a sell row
+    IS a completed trade and a lone buy row is an open position."""
+    got = N._round_trips([buy_row(), sell_row()])
+    assert len(got) == 1
+    t = got[0]
+    assert t["symbol"] == "BNC" and t["qty"] == 100
+    assert t["gross"] == pytest.approx(-15.00)
+    assert t["net"] == pytest.approx(t["gross"] - t["commission"])
+
+
+def test_every_field_ben_asked_for_is_in_the_message():
+    text = N.session_summary([buy_row(), sell_row()], now=NOW, strategy="MCL")
+    assert "07:45" in text                      # time
+    assert "100 sh" in text                     # share size
+    assert "$5.41" in text and "$5.26" in text   # buy / sell prices
+    assert "gross" in text and "comm" in text and "net" in text
+
+
+def test_the_totals_are_the_sum_of_the_rows():
+    rows = [sell_row("AAA", 10.00, 11.00), sell_row("BBB", 5.00, 4.50)]
+    text = N.session_summary(rows, now=NOW)
+    trades = N._round_trips(rows)
+    assert f"{sum(t['gross'] for t in trades):,.2f}" in text.replace("$", "")
+    assert "2 trade(s)   1 up / 1 down" in text
+
+
+def test_a_trade_that_does_not_reconcile_is_flagged_not_printed_quietly():
+    """THE CHECK THAT MAKES THIS TRUSTWORTHY. Commission is not in the log, so
+    it is recomputed -- and then verified against the log's own trade_pnl. A
+    summary that silently disagreed with the ledger would be worse than none."""
+    bad = sell_row(pnl=999.99)
+    assert N._round_trips([bad])[0]["reconciles"] is False
+    text = N.session_summary([bad], now=NOW)
+    assert "do not reconcile" in text and "⚠️" in text
+
+
+def test_a_reconciling_session_carries_no_warning():
+    text = N.session_summary([sell_row()], now=NOW)
+    assert "do not reconcile" not in text
+
+
+def test_an_unclosed_position_is_called_out():
+    """A total that silently covers only closed trades, on a session still
+    holding something, is a wrong number presented as a right one."""
+    text = N.session_summary([buy_row("AAA"), buy_row("BBB"), sell_row("AAA")],
+                             now=NOW)
+    assert "still open" in text
+
+
+def test_a_session_with_no_round_trips_says_so():
+    text = N.session_summary([buy_row()], now=NOW)
+    assert "no completed round trips" in text
+    assert "opened and not closed" in text
+
+
+def test_rows_that_never_filled_are_not_trades():
+    """The log records rejects and cap-skips too. Scoring one as a trade would
+    invent P/L from a position that never existed."""
+    skipped = dict(buy_row(), status="SKIPPED_CONCURRENCY_CAP")
+    assert N._round_trips([skipped, dict(sell_row(), status="CANCELLED")]) == []
+
+
+def test_a_malformed_row_is_skipped_rather_than_crashing_the_summary():
+    """This runs at session end. A summary that raises loses the whole
+    report over one bad row."""
+    junk = dict(sell_row(), entry_price="", trade_pnl="oops")
+    assert N._round_trips([junk, sell_row()]) == N._round_trips([sell_row()])
+
+
+def test_read_fills_treats_a_missing_file_as_empty(tmp_path):
+    """A session that placed no orders never creates the file."""
+    assert N.read_fills(tmp_path / "nope.csv") == []
+
+
+def test_the_summary_escapes_what_it_interpolates():
+    """A bare '<' in HTML parse mode is rejected for the WHOLE message -- the
+    2026-09-09 defect, arriving through a new door."""
+    text = N.session_summary([sell_row(symbol="A<B")], now=NOW)
+    assert "A<B" not in text and "&lt;" in text
+
+
+def test_a_buy_row_is_not_a_round_trip_even_if_it_carries_pl_fields():
+    """The SELL guard, tested for what it MEANS rather than incidentally.
+    Buy rows are currently excluded anyway because they have no entry/exit
+    columns — so the guard looks redundant until the schema changes. A
+    scale-out or a partial fill that populated those fields on the buy leg
+    would otherwise double-count the trade."""
+    odd = dict(buy_row(), entry_price="5.41", exit_price="5.26",
+               trade_pnl="-16.37")
+    assert N._round_trips([odd]) == []
+    assert len(N._round_trips([odd, sell_row()])) == 1

@@ -95,11 +95,31 @@ QUEUE_MAX = 200
 MIN_INTERVAL_S = 2.0
 DEDUPE_WINDOW_S = 120.0
 
+# Telegram refuses a message over 4096 characters. Batching is the only thing
+# here that can produce one, and the refusal is an API error rather than a
+# truncation -- so a batch that grows past the limit loses the WHOLE batch.
+TELEGRAM_MAX_CHARS = 4096
+BATCH_SEP = "\n\n– – –\n\n"
+
 
 class Notifier:
     """Fire-and-forget Telegram sender. Safe to construct unconfigured."""
 
-    def __init__(self, token: str = "", chat_id: str = "", enabled: bool = True):
+    def __init__(self, token: str = "", chat_id: str = "", enabled: bool = True,
+                 batch_interval_s: float = 0.0):
+        """batch_interval_s > 0 holds NON-FORCED messages and sends them
+        joined, on that cadence.
+
+        WHAT IS NEVER BATCHED, and why the rule is `force` rather than a new
+        category list: `force=True` already means "must not be swallowed", and
+        the three call sites that use it are the ones a delay would break —
+        buy_filled and sell_filled (a position changed; Ben needs to know he is
+        holding) and the heartbeat (whose entire job is proving the process is
+        alive, which a queue cannot do). Batching those would turn a 15-minute
+        interval into a 15-minute window in which a crash is indistinguishable
+        from a quiet market. Ben's machine restarted mid-session on 2026-09-09;
+        anything sitting in a batch at that moment is gone.
+        """
         # Strip first. A trailing newline or a stray space from a copy-paste
         # is otherwise carried into the URL and fails at request time, in an
         # exception that used to quote the token.
@@ -118,10 +138,20 @@ class Notifier:
         self._lock = threading.Lock()
         self._q: queue.Queue[str] = queue.Queue(maxsize=QUEUE_MAX)
         self._thread: threading.Thread | None = None
+        self.batch_interval_s = max(0.0, float(batch_interval_s))
+        self._pending: list[str] = []
+        self._batched = 0
+        self._stop = threading.Event()
+        self._batcher: threading.Thread | None = None
         if self.enabled:
             self._thread = threading.Thread(target=self._drain, daemon=True,
                                             name="telegram")
             self._thread.start()
+            if self.batch_interval_s > 0:
+                self._batcher = threading.Thread(target=self._batch_loop,
+                                                 daemon=True,
+                                                 name="telegram-batch")
+                self._batcher.start()
 
     def _validate(self) -> list[str]:
         """Catch a malformed token or chat id HERE, where it can be explained,
@@ -167,13 +197,14 @@ class Notifier:
     # -- construction ---------------------------------------------------
 
     @classmethod
-    def from_env(cls) -> "Notifier":
+    def from_env(cls, batch_interval_s: float = 0.0) -> "Notifier":
         """Resolve at startup, per the project's credential discipline. Absent
         configuration disables notifications rather than stopping the run."""
         got = S.preload_optional({TOKEN_VAR: "Telegram bot token",
                                   CHAT_VAR: "Telegram chat id"})
         if {TOKEN_VAR, CHAT_VAR} <= got:
-            n = cls(S.get(TOKEN_VAR), S.get(CHAT_VAR))
+            n = cls(S.get(TOKEN_VAR), S.get(CHAT_VAR),
+                    batch_interval_s=batch_interval_s)
             if n.problems:
                 for p in n.problems:
                     LOG.error("Telegram not started: %s", p)
@@ -197,6 +228,11 @@ class Notifier:
             return False
         if not force and not self._allow(text):
             return False
+        if not force and self.batch_interval_s > 0:
+            with self._lock:
+                self._pending.append(text)
+                self._batched += 1
+            return True
         try:
             self._q.put_nowait(text)
             return True
@@ -208,13 +244,22 @@ class Notifier:
 
     def _allow(self, text: str) -> bool:
         """The rate limit and de-duplicator, per the guidance in
-        claude/messaging_alert_channels.md. Counted, not silent."""
+        claude/messaging_alert_channels.md. Counted, not silent.
+
+        THE RATE LIMIT IS SKIPPED WHEN BATCHING and the de-duplicator is not.
+        They defend different things. The interval exists so a burst cannot hit
+        Telegram's API limits -- which batching already solves, and enforcing
+        both would throw away most of a batch before it was ever assembled,
+        making a 15-minute digest quieter than sending immediately. The
+        de-duplicator defends against a stuck loop repeating one message, and
+        a batch is exactly where that would otherwise pile up unseen.
+        """
         now = time.monotonic()
         with self._lock:
             if text == self._last_text and now - self._last_text_at < DEDUPE_WINDOW_S:
                 self.suppressed += 1
                 return False
-            if now - self._last_send < MIN_INTERVAL_S:
+            if self.batch_interval_s <= 0 and now - self._last_send < MIN_INTERVAL_S:
                 self.suppressed += 1
                 return False
             self._last_send = now
@@ -256,10 +301,77 @@ class Notifier:
         if not body.get("ok"):
             raise RuntimeError(f"telegram refused: {body}")
 
+    def _chunks(self, parts: list[str]) -> list[str]:
+        """Join `parts` into as few messages as fit under Telegram's limit.
+
+        A batch that grows past 4096 characters is REFUSED WHOLE, not
+        truncated, so without this an unusually busy interval loses every
+        message in it -- the failure would look like a quiet market.
+
+        A single part longer than the limit is passed through unsplit: cutting
+        a message mid-tag would produce invalid HTML and be refused anyway, and
+        splitting one is a formatting decision the caller should make.
+        """
+        out: list[str] = []
+        cur = ""
+        for part in parts:
+            if not cur:
+                cur = part
+            elif len(cur) + len(BATCH_SEP) + len(part) <= TELEGRAM_MAX_CHARS:
+                cur += BATCH_SEP + part
+            else:
+                out.append(cur)
+                cur = part
+        if cur:
+            out.append(cur)
+        return out
+
+    def _take_pending(self) -> list[str]:
+        with self._lock:
+            parts, self._pending = self._pending, []
+        return parts
+
+    def flush_batch(self) -> int:
+        """Send whatever has accumulated. Returns the number of messages sent."""
+        parts = self._take_pending()
+        if not parts:
+            return 0
+        n = 0
+        for chunk in self._chunks(parts):
+            try:
+                self._q.put_nowait(chunk)
+                n += 1
+            except queue.Full:
+                self.dropped += 1
+                LOG.warning("telegram queue full, dropped a batch of %d",
+                            len(parts))
+        return n
+
+    def _batch_loop(self) -> None:
+        # wait() rather than sleep() so shutdown is immediate rather than
+        # taking up to a full interval -- at 30 minutes that is the difference
+        # between a clean exit and one that looks hung.
+        while not self._stop.wait(self.batch_interval_s):
+            try:
+                self.flush_batch()
+            except BaseException as e:                      # noqa: BLE001
+                # Same reasoning as _drain: if this thread dies every later
+                # batched message is lost silently for the rest of the session.
+                self.failed += 1
+                LOG.warning("telegram batch failed (%s: %s)",
+                            type(e).__name__, self._scrub(str(e)))
+
     def flush(self, timeout: float = 5.0) -> None:
-        """Best-effort drain, for shutdown. Never blocks forever."""
+        """Best-effort drain, for shutdown. Never blocks forever.
+
+        Sends the pending batch FIRST. Without that, ending a session with
+        batching on discards everything accumulated since the last interval --
+        which on a 30-minute cadence is most of the last half hour.
+        """
         if not self.enabled:
             return
+        self._stop.set()
+        self.flush_batch()
         end = threading.Event()
         t = threading.Thread(target=lambda: (self._q.join(), end.set()),
                              daemon=True)
@@ -267,8 +379,14 @@ class Notifier:
         end.wait(timeout)
 
     def stats(self) -> str:
+        extra = ""
+        if self.batch_interval_s > 0:
+            with self._lock:
+                waiting = len(self._pending)
+            extra = (f" batched={self._batched} waiting={waiting} "
+                     f"every={self.batch_interval_s:.0f}s")
         return (f"telegram sent={self.sent} failed={self.failed} "
-                f"dropped={self.dropped} suppressed={self.suppressed}")
+                f"dropped={self.dropped} suppressed={self.suppressed}{extra}")
 
 
 # --- message formatting -----------------------------------------------------
@@ -510,10 +628,140 @@ def sell_filled(ticker: str, price: float, qty: int, commission: float,
     ])
 
 
+# --- end-of-session summary -------------------------------------------------
+
+def _round_trips(rows: list[dict], plan: str = "ibkr_tiered") -> list[dict]:
+    """One entry per completed round trip, read off the SELL rows.
+
+    The fill log writes the round-trip result on the sell row only
+    (entry_price, exit_price, trade_pnl), so a sell row IS a completed trade
+    and a buy row on its own is an open position.
+
+    COMMISSION IS NOT IN THE LOG. It is recomputed here from the same schedule
+    the trader used, and then CHECKED: gross - commission must equal the
+    logged trade_pnl. When it does not, the row is flagged rather than
+    silently printed, because the alternative is a summary that quietly
+    disagrees with the ledger it was built from.
+    """
+    from common.commissions import order_cost
+
+    out = []
+    for r in rows:
+        if (r.get("action") or "").upper() != "SELL":
+            continue
+        if (r.get("status") or "") != "FILLED":
+            continue
+        try:
+            entry = float(r["entry_price"])
+            exit_ = float(r["exit_price"])
+            qty = int(float(r.get("filled_qty") or r.get("qty") or 0))
+            net_logged = float(r["trade_pnl"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if qty <= 0:
+            continue
+        gross = (exit_ - entry) * qty
+        comm = (order_cost(qty, entry, False, plan)
+                + order_cost(qty, exit_, True, plan))
+        out.append({
+            "ts": r.get("ts_et", ""),
+            "symbol": r.get("symbol", ""),
+            "strategy": r.get("strategy", ""),
+            "qty": qty, "entry": entry, "exit": exit_,
+            "gross": gross, "commission": comm, "net": gross - comm,
+            "net_logged": net_logged,
+            "reason": r.get("reason", ""),
+            "hold": r.get("hold_minutes", ""),
+            # A cent of drift is rounding in the log; more is a real
+            # disagreement and the reader has to be told.
+            "reconciles": abs((gross - comm) - net_logged) <= 0.01,
+        })
+    return out
+
+
+def session_summary(rows: list[dict], now: datetime | None = None,
+                    strategy: str = "", plan: str = "ibkr_tiered") -> str:
+    """The end-of-session message: every round trip, then the totals.
+
+    Built from the fill log rather than from in-memory state on purpose. A
+    summary assembled from the trader's own objects agrees with itself by
+    construction; one read back off the ledger can disagree, and that
+    disagreement is the thing worth seeing.
+    """
+    trades = _round_trips(rows, plan)
+    L = [header(now), f"<b>{_esc(strategy or 'SESSION')} SUMMARY</b>", ""]
+
+    if not trades:
+        opens = sum(1 for r in rows
+                    if (r.get("action") or "").upper() == "BUY"
+                    and (r.get("status") or "") == "FILLED")
+        L.append("no completed round trips")
+        if opens:
+            L.append(f"⚠️ {opens} position(s) opened and not closed")
+        return "\n".join(L)
+
+    for t in trades:
+        sign = "🟢" if t["net"] >= 0 else "🔴"
+        flag = "" if t["reconciles"] else "  ⚠️"
+        L += [f"{sign} <b>{_esc(t['symbol'])}</b>  {_esc(t['ts'][11:16])}"
+              f"  {t['qty']:,} sh{flag}",
+              f"   {_money(t['entry'])} → {_money(t['exit'])}"
+              + (f"   {_esc(t['hold'])}m" if t["hold"] else ""),
+              f"   gross {_money(t['gross'])}   comm {_money(t['commission'])}"
+              f"   <b>net {_money(t['net'])}</b>"]
+    L.append("")
+
+    gross = sum(t["gross"] for t in trades)
+    comm = sum(t["commission"] for t in trades)
+    net = sum(t["net"] for t in trades)
+    wins = sum(1 for t in trades if t["net"] > 0)
+    sign = "🟢" if net >= 0 else "🔴"
+    L += [f"<b>{len(trades)} trade(s)   {wins} up / {len(trades) - wins} down"
+          f"</b>",
+          f"gross      {_money(gross)}",
+          f"commission {_money(comm)}",
+          f"{sign} <b>NET       {_money(net)}</b>"]
+
+    bad = [t for t in trades if not t["reconciles"]]
+    if bad:
+        L += ["",
+              f"⚠️ {len(bad)} trade(s) do not reconcile with the log's own",
+              "trade_pnl. Commission here is recomputed, so a mismatch means",
+              "one of the two is wrong — check before trusting this total."]
+
+    opens = sum(1 for r in rows
+                if (r.get("action") or "").upper() == "BUY"
+                and (r.get("status") or "") == "FILLED")
+    if opens > len(trades):
+        L += ["", f"⚠️ {opens - len(trades)} position(s) still open — this "
+                  "total covers closed trades only"]
+    return "\n".join(L)
+
+
+def read_fills(path) -> list[dict]:
+    """The fill log as dicts. Missing file is empty, not an error: a session
+    that placed no orders never creates one."""
+    import csv as _csv
+    from pathlib import Path as _Path
+
+    p = _Path(path)
+    if not p.exists():
+        return []
+    with open(p, newline="", encoding="utf-8") as fh:
+        return list(_csv.DictReader(fh))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Telegram notifier")
     ap.add_argument("--test", action="store_true",
                     help="send one message and report the result")
+    ap.add_argument("--summary", metavar="FILLS_CSV",
+                    help="send the end-of-session summary for this fill log. "
+                         "Re-runnable on any past session's file")
+    ap.add_argument("--strategy", default="MCL",
+                    help="label for --summary (default: %(default)s)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="print the message instead of sending it")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
@@ -525,6 +773,13 @@ def main() -> int:
             print(f"  * {pr}")
         print()
 
+    if a.summary and a.dry_run:
+        # Before the credential check: rendering a past session's summary needs
+        # no token, and requiring one would make the safe way to look at it the
+        # awkward way.
+        print(session_summary(read_fills(a.summary), strategy=a.strategy))
+        return 0
+
     n = Notifier.from_env()
     if n.problems:
         print("Telegram configuration problems:")
@@ -535,6 +790,15 @@ def main() -> int:
         print(f"Not configured. Set {TOKEN_VAR} and {CHAT_VAR} "
               f"(literal value or op:// reference), then open a new terminal.")
         return 1
+    if a.summary:
+        rows = read_fills(a.summary)
+        if not rows:
+            print(f"no rows in {a.summary}")
+            return 1
+        n.send(session_summary(rows, strategy=a.strategy), force=True)
+        n.flush()
+        print(n.stats())
+        return 0
     if a.test:
         # force=True and spaced. Without both, the rate limiter does exactly
         # its job and swallows two of the three -- which is correct behaviour

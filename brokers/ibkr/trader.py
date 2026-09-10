@@ -1515,7 +1515,9 @@ async def main_async(args):
     # Resolved once, here, at startup -- the same discipline as every other
     # credential in this project. A lazy resolve mid-session can block on a
     # 1Password prompt with a position open.
-    tg = notify.Notifier() if args.no_telegram else notify.Notifier.from_env()
+    tg = (notify.Notifier() if args.no_telegram
+          else notify.Notifier.from_env(
+              batch_interval_s=args.telegram_batch_min * 60.0))
     strategies = SA.build_all(getattr(args, "strategy", ["mcl"]))
     LOG.info("strategies: %s (one book, cap %d across all of them)",
              ", ".join(a.name for a in strategies), MAX_CONCURRENT_POSITIONS)
@@ -1576,6 +1578,22 @@ async def main_async(args):
         log.close()
         ib.disconnect()
         LOG.info("disconnected. fill log: %s", args.out)
+        # AFTER log.close(), and read back off the FILE rather than from the
+        # trader's own state. A summary built from memory agrees with itself by
+        # construction; one read off the ledger can disagree, and that
+        # disagreement is the thing worth seeing. Wrapped because this is the
+        # shutdown path — a broken summary must not mask why the session ended.
+        if not args.no_summary:
+            try:
+                rows = notify.read_fills(log.path)
+                if rows:
+                    tg.send(notify.session_summary(
+                        rows, strategy=",".join(
+                            a.name for a in trader.strategies)), force=True)
+            except Exception as e:                          # noqa: BLE001
+                LOG.warning("session summary failed (%s: %s)",
+                            type(e).__name__, e)
+        tg.flush()
         if not args.no_archive:
             trader.archive_watchlist(force=args.force_archive)
         if args.sleep_on_exit:
@@ -1671,6 +1689,15 @@ def build_parser() -> argparse.ArgumentParser:
                         "slot. Two processes would each see half the account.")
     p.add_argument("--no-telegram", action="store_true",
                    help="run without notifications even if configured")
+    p.add_argument("--telegram-batch-min", type=float, default=0.0,
+                   help="hold ORDINARY notifications and send them joined "
+                        "every N minutes (e.g. 15 or 30). Fills and the "
+                        "heartbeat are never batched — a delayed fill means "
+                        "not knowing you are holding, and a queued heartbeat "
+                        "cannot prove the process is alive. 0 = send "
+                        "immediately (default)")
+    p.add_argument("--no-summary", action="store_true",
+                   help="skip the end-of-session summary")
     p.add_argument("--dry-run", action="store_true",
                    help="evaluate and log signals but place no orders")
     p.add_argument("--allow-empty", action="store_true",
