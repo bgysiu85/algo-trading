@@ -152,6 +152,34 @@ def is_locked(rec: dict, day: str) -> bool:
     return str(day) >= rec["lock_from"]
 
 
+def split_sessions(sessions, spend: bool = False, rec: dict | None = None):
+    """(sessions to use, how many were set aside, which side was taken).
+
+    ONE IMPLEMENTATION, because there were two. `prior_spike` grew this in
+    2026-09-10 and `ladder_study` and `cameron_exit` were written without it --
+    so pointing either of those at bar_cache_xnas would have read the LOCKED
+    slice along with the training one and spent the holdout by accident, while
+    reporting a perfectly ordinary-looking number.
+
+    Default is the TRAINING side. A holdout that can be read casually is not a
+    holdout.
+
+    `sessions` are (symbol, date, frame) triples as load_sessions returns them.
+    With no committed cut everything is returned and the label says so, which
+    is the correct behaviour on bar_cache -- holdout.json was cut over the
+    SCREENED universe and does not describe it.
+    """
+    rec = load() if rec is None else rec
+    if rec is None:
+        return sessions, 0, "all (no committed cut)"
+    cut = rec["lock_from"]
+    if spend:
+        keep = [s for s in sessions if s[1] >= cut]
+        return keep, len(sessions) - len(keep), f"LOCKED, from {cut}"
+    keep = [s for s in sessions if s[1] < cut]
+    return keep, len(sessions) - len(keep), f"training, before {cut}"
+
+
 def partition(rec: dict, pairs) -> dict:
     """Split symbol-day pairs into the three sets, by date."""
     out = {"early": [], "late": [], "locked": []}

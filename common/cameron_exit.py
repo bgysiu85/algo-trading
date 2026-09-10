@@ -62,12 +62,14 @@ needs a definition of "outsized" the source does not give.
 from __future__ import annotations
 
 import argparse
+import sys
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from common import target_exit as TE
 from common.analysis import LIVE, MEASURED_FRICTION, load_sessions
+from common import holdout as HO
 from common.report_io import emit
 from strategy.mcl import mcl as MCL
 
@@ -224,6 +226,10 @@ def render(got, split, n_sessions) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--cache", default="bar_cache")
+    p.add_argument("--spend-holdout", action="store_true",
+                   help="read the LOCKED sessions instead of the "
+                        "training ones. One-way: a holdout read "
+                        "casually is not a holdout.")
     p.add_argument("--out", default="var/reports/cameron_exit.txt")
     return p
 
@@ -231,10 +237,21 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
     sessions = load_sessions(Path(a.cache))
+    # THE HOLDOUT GUARD. Without it, pointing --cache at
+    # bar_cache_xnas reads the LOCKED slice along with the
+    # training one and spends the holdout while reporting an
+    # ordinary-looking number. On bar_cache there is no
+    # committed cut for that universe, so this is a no-op
+    # there and the header says which side was taken.
+    sessions, set_aside, side = HO.split_sessions(
+        sessions, a.spend_holdout)
+    if not sessions:
+        sys.exit(f'no sessions on the {side} side of {a.cache}')
     split = halves_split([d for _, d, _ in sessions])
     got = {name: stats(run(sessions, te=te), split) for name, te in CELLS}
     emit("\n".join(render(got, split, len(sessions))), a.out,
-         header=f"common.cameron_exit  cache={a.cache}")
+         header=f"common.cameron_exit  cache={a.cache}  side={side}"
+                + (f"  ({set_aside} set aside)" if set_aside else ""))
     return 0
 
 

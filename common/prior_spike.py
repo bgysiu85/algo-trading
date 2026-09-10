@@ -65,6 +65,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from common import holdout as HOLDOUT_MOD
 from common.analysis import LIVE, MEASURED_FRICTION, load_sessions
 from common.report_io import emit
 from strategy.mcl import mcl as MCL
@@ -403,19 +404,14 @@ def lock_from() -> str | None:
 
 
 def split_sessions(sessions, spend: bool):
-    """(sessions to use, how many were set aside, which side was taken).
+    """Delegates to common.holdout, which is now the single implementation.
 
-    Default is the TRAINING side. A holdout that can be read casually is not a
-    holdout, and this one is clean for this filter exactly once.
+    This function grew here first; ladder_study and cameron_exit were then
+    written without it, so either pointed at bar_cache_xnas would have read the
+    LOCKED slice and spent the holdout while reporting an ordinary-looking
+    number. Moving it stops that recurring per study.
     """
-    cut = lock_from()
-    if cut is None:
-        return sessions, 0, "all (no committed cut)"
-    if spend:
-        keep = [s for s in sessions if s[1] >= cut]
-        return keep, len(sessions) - len(keep), f"LOCKED, from {cut}"
-    keep = [s for s in sessions if s[1] < cut]
-    return keep, len(sessions) - len(keep), f"training, before {cut}"
+    return HOLDOUT_MOD.split_sessions(sessions, spend)
 
 
 def build_parser() -> argparse.ArgumentParser:

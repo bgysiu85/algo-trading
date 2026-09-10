@@ -219,3 +219,93 @@ def test_no_read_counter_is_advertised():
     assert "reads" not in H.load()
     src = inspect.getsource(H)
     assert 'rec.get("reads"' not in src
+
+
+# --- split_sessions: the one implementation, and the studies that use it -----
+#
+# Two copies of this logic existed on 2026-09-11: prior_spike had one and
+# ladder_study and cameron_exit had NONE, so pointing either of those at
+# bar_cache_xnas would have read the LOCKED slice alongside the training one
+# and spent the holdout while printing an ordinary-looking number. These tests
+# pin the merged implementation AND that every study that loads sessions calls
+# it, because the defect was an absence and an absence is what a test has to
+# catch.
+
+CUT = {"lock_from": "2026-06-01"}
+
+
+def sess(dates):
+    return [("SYM", d, None) for d in dates]
+
+
+DATES = ["2026-05-30", "2026-05-31", "2026-06-01", "2026-06-02"]
+
+
+def test_the_default_side_is_training():
+    """Not "everything". A holdout that is read unless you opt out is not a
+    holdout -- it is a comment."""
+    keep, aside, side = H.split_sessions(sess(DATES), rec=CUT)
+    assert [d for _, d, _ in keep] == ["2026-05-30", "2026-05-31"]
+    assert aside == 2
+    assert "training" in side and "2026-06-01" in side
+
+
+def test_spending_takes_the_locked_side_and_says_so():
+    keep, aside, side = H.split_sessions(sess(DATES), True, rec=CUT)
+    assert [d for _, d, _ in keep] == ["2026-06-01", "2026-06-02"]
+    assert aside == 2
+    assert "LOCKED" in side, "the label has to be loud; it lands in a report header"
+
+
+def test_the_boundary_date_is_locked_not_training():
+    """`lock_from` is inclusive. Off by one here silently leaks the first
+    locked session into every training run."""
+    a = {d for _, d, _ in H.split_sessions(sess(["2026-06-01"]), rec=CUT)[0]}
+    b = {d for _, d, _ in H.split_sessions(sess(["2026-06-01"]), True, rec=CUT)[0]}
+    assert a == set() and b == {"2026-06-01"}
+
+
+def test_the_two_sides_partition_exactly():
+    """No session in both, none in neither. Overlap would double-count and a
+    gap would silently shrink the sample."""
+    tr = {d for _, d, _ in H.split_sessions(sess(DATES), rec=CUT)[0]}
+    lo = {d for _, d, _ in H.split_sessions(sess(DATES), True, rec=CUT)[0]}
+    assert tr & lo == set()
+    assert tr | lo == set(DATES)
+
+
+def test_no_committed_cut_returns_everything_and_labels_it():
+    """bar_cache is NOT the screened universe holdout.json was cut over, so
+    filtering it by that cut would be a false claim of out-of-sample. Returning
+    everything is right; returning it silently is not."""
+    # rec=None means "load from disk", so the no-cut path needs load() stubbed.
+    import unittest.mock as M
+    with M.patch.object(H, "load", return_value=None):
+        keep, aside, side = H.split_sessions(sess(DATES))
+    assert len(keep) == len(DATES) and aside == 0
+    assert "no committed cut" in side
+
+
+def test_prior_spike_delegates_rather_than_keeping_its_own_copy():
+    """It grew this first. Leaving the copy in place is how the two drift."""
+    import inspect
+    from common import prior_spike as P
+    src = inspect.getsource(P.split_sessions)
+    assert "split_sessions" in src and "HOLDOUT_MOD" in src
+    assert "lock_from" not in src, "that is a second implementation"
+
+
+@pytest.mark.parametrize("mod", ["ladder_study", "cameron_exit", "prior_spike"])
+def test_every_session_study_guards_the_holdout(mod):
+    """THE TEST FOR THE ABSENCE. ladder_study and cameron_exit each called
+    load_sessions and scored whatever came back. On bar_cache that is harmless;
+    on bar_cache_xnas it spends the holdout. A study that loads sessions must
+    also split them, and must offer the explicit --spend-holdout that makes
+    reading the locked side a decision someone typed."""
+    import importlib
+    import inspect
+    m = importlib.import_module(f"common.{mod}")
+    src = inspect.getsource(m)
+    assert "load_sessions" in src
+    assert "split_sessions" in src, f"common/{mod}.py scores unsplit sessions"
+    assert "--spend-holdout" in src, f"common/{mod}.py has no opt-in"

@@ -41,12 +41,14 @@ that only holds for the compounding form is visible as such.
 from __future__ import annotations
 
 import argparse
+import sys
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from common import profit_ladder as PL
 from common.analysis import LIVE, MEASURED_FRICTION, load_sessions
+from common import holdout as HO
 from common.report_io import emit
 
 ET = ZoneInfo("America/New_York")
@@ -228,6 +230,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--strategy", choices=["mcl", "mc5"], default="mcl")
     p.add_argument("--cache", default="bar_cache")
+    p.add_argument("--spend-holdout", action="store_true",
+                   help="read the LOCKED sessions instead of the "
+                        "training ones. One-way: a holdout read "
+                        "casually is not a holdout.")
     p.add_argument("--out", default=None)
     return p
 
@@ -237,6 +243,16 @@ def main(argv=None) -> int:
     out = a.out or f"var/reports/ladder_{a.strategy}.txt"
     mod, extra = engine(a.strategy)
     sessions = load_sessions(Path(a.cache))
+    # THE HOLDOUT GUARD. Without it, pointing --cache at
+    # bar_cache_xnas reads the LOCKED slice along with the
+    # training one and spends the holdout while reporting an
+    # ordinary-looking number. On bar_cache there is no
+    # committed cut for that universe, so this is a no-op
+    # there and the header says which side was taken.
+    sessions, set_aside, side = HO.split_sessions(
+        sessions, a.spend_holdout)
+    if not sessions:
+        sys.exit(f'no sessions on the {side} side of {a.cache}')
     split = halves_split([d for _, d, _ in sessions])
     emit("\n".join(render(
         a.strategy,
@@ -245,7 +261,8 @@ def main(argv=None) -> int:
         run(sessions, mod, extra, ladder=PL.LadderConfig(linear=True)),
         split, len(sessions))),
         out, header=f"common.ladder_study  strategy={a.strategy} "
-                    f"cache={a.cache}")
+                    f"cache={a.cache}  side={side}"
+                    + (f"  ({set_aside} set aside)" if set_aside else ""))
     return 0
 
 
