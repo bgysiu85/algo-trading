@@ -83,6 +83,12 @@ FLOOR_AVG_LEN = 60
 # only the default. Set it back to True to reproduce V7.
 USE_APEX_EXIT = False
 
+# The label this strategy gives its signal exit. See mc5.EXIT_SIGNAL_REASON for
+# why it is a constant rather than a literal: the trader used to hard-code
+# "apex_reversal" for every strategy while MC5's backtest wrote
+# "gradient_reversal" for the same rule, and both now land in one database.
+EXIT_SIGNAL_REASON = "apex_reversal"
+
 # REQUIRE_MACD_POSITIVE gates the `MACD > 0` half of the entry.
 #
 # This has never been tested on its own. V9 dropped it AND the 3x volume surge
@@ -149,6 +155,7 @@ TICK = 0.01
 # mcl.rsi(c), ...) while leaving exactly one implementation of each formula
 # in the repo. Change a constant above and every call here follows.
 
+from common import profit_ladder as PL  # noqa: E402
 from common.commissions import order_cost  # noqa: E402
 from common.indicators import (  # noqa: E402
     ema, rma,
@@ -380,7 +387,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      trail_confirm_bars: int = 0,
                      max_adds: int | None = None,
                      entry_delay_bars: int = 0,
-                     max_hold_bars: int | None = None) -> list[Trade]:
+                     max_hold_bars: int | None = None,
+                     ladder: "PL.LadderConfig | None" = None) -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -525,6 +533,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                 q = size_for(px) if entry_shares is None else entry_shares
                 if q >= 1:
                     pos = dict(entry_i=i, entry_px=px, qty=q, init_qty=q,
+                               ladder_done=0,
                                # SEEDING THE PEAK. The default takes the entry
                                # bar's HIGH -- but that high happened BEFORE
                                # the close we bought at, so it is a move the
@@ -652,7 +661,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         if exit_px is None and last_of_session:
             exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "window_close"
         elif exit_px is None and use_apex and bool(row["exit_sig"]):
-            exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "apex_reversal"
+            exit_px, exit_reason = (float(row["close"]) - SLIPPAGE_TICKS * TICK,
+                                    EXIT_SIGNAL_REASON)
         elif (exit_px is None and max_hold_bars is not None
                 and i - pos["entry_i"] >= max_hold_bars):
             # TIME CAP. Ben, 2026-09-10: "the position should not be held for
@@ -689,6 +699,62 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                 adds=pos["adds"], max_qty=pos["max_qty"]))
             pos = None
         else:
+            # --- take-profit ladder, only when enabled -----------------------
+            # Ben, 2026-09-10. Sells half on every +10% (compounding from the
+            # last rung), down to a 20-share floor where the remainder goes at
+            # once. See common/profit_ladder.py -- the rule, its pinned
+            # parameters and the reason its expected sign is negative all live
+            # there rather than being restated here.
+            #
+            # AFTER the full-exit block above, so a bar that both clears a rung
+            # and trips the trailing stop is resolved as the STOP. The stop is
+            # protection and must not be pre-empted by a profit-taking rule; a
+            # ladder that outranked it would book part of the position at a
+            # rung and the rest at a stop the trade had already hit, which
+            # reads as two better fills than the trade actually got.
+            #
+            # Tested against the CLOSE, never the high: a rung tagged only by a
+            # bar's high is a rung reached intrabar at a price the strategy
+            # could not act on.
+            if ladder is not None and pos is not None:
+                sell_q, used = PL.plan(pos["avg_px"], float(row["close"]),
+                                       pos["qty"], pos["ladder_done"], ladder)
+                if sell_q > 0:
+                    px_out = float(row["close"]) - SLIPPAGE_TICKS * TICK
+                    pos["realised"] += (px_out - pos["avg_px"]) * sell_q
+                    pos["commission"] += order_cost(sell_q, px_out, True,
+                                                    commission_plan)
+                    pos["qty"] -= sell_q
+                    pos["shares_traded"] += sell_q
+                    pos["ladder_done"] += used
+                    if pos["qty"] <= 0:
+                        # The ladder took the last share. Close the trade here
+                        # rather than leaving a zero-quantity position that the
+                        # next bar's stop check would price against nothing.
+                        gross = pos["realised"]
+                        trades.append(Trade(
+                            symbol="", date=str(session_date),
+                            entry_time=str(pos["entry_t"]),
+                            exit_time=str(rows.iloc[i][tcol]),
+                            entry_price=round(pos["entry_px"], 4),
+                            exit_price=round(px_out, 4),
+                            qty=pos["init_qty"], reason="profit_ladder",
+                            bars_held=i - pos["entry_i"],
+                            gross=round(gross, 2),
+                            commission=round(pos["commission"], 2),
+                            net=round(gross - pos["commission"], 2),
+                            cycles=pos["cycles"],
+                            shares_traded=pos["shares_traded"],
+                            adds=pos["adds"], max_qty=pos["max_qty"]))
+                        pos = None
+                        # MUST skip the rest of the bar. Everything below
+                        # assumes a position -- peak maintenance dereferences
+                        # pos on the very next statement -- and falling through
+                        # raised TypeError rather than returning a wrong
+                        # number, which is the one merciful way for this to go
+                        # wrong.
+                        continue
+
             # --- scale out / scale back in, only when enabled ---------------
             # Ordering is deliberate: the full stop above has already been
             # ruled out for this bar, so a partial sell here cannot be masking

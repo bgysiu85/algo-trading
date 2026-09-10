@@ -62,6 +62,14 @@ class StrategyAdapter:
     trail_pct: float
     commission_plan: str
     _evaluate: Callable
+    # LAST, because it carries a default and every field above does not.
+    #
+    # The strategy's own name for its signal exit, so the fill log and the
+    # backtest agree. The trader used to hard-code "apex_reversal" for every
+    # strategy while MC5's backtest wrote "gradient_reversal" for the same
+    # rule; both now land in one database table and a query joining them on
+    # `reason` would report the mismatch as an absence.
+    exit_signal_reason: str = "apex_reversal"
 
     def evaluate(self, df, now):
         """The strategy's read of the last CLOSED bar, or None.
@@ -100,6 +108,8 @@ def _from_module(module, bar_minutes: int, evaluate: Callable) -> StrategyAdapte
         bar_minutes=bar_minutes,
         session_start=module.SESSION_START,
         session_end=module.SESSION_END,
+        exit_signal_reason=getattr(module, "EXIT_SIGNAL_REASON",
+                                   "apex_reversal"),
         price_min=module.PRICE_MIN,
         price_max=module.PRICE_MAX,
         enforce_band=module.ENFORCE_PRICE_BAND,

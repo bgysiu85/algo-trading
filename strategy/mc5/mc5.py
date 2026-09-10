@@ -103,6 +103,31 @@ STRATEGY_NAME = "MC5"
 # module default, so the cost of NOT having it can be measured rather than
 # asserted -- see claude/mc5_first_results.md.
 PRICE_MIN, PRICE_MAX = 2.0, 20.0
+# GRADIENT-REVERSAL EXIT -- a switch as of 2026-09-10, and ON only because that
+# is what MC5 has always done, NOT because it has been measured here.
+#
+# It is the same mechanic MCL calls the apex exit, and MCL's was switched OFF on
+# 2026-09-05 after a 2x2 sweep: net -$544 over 213 exits at a 27% win rate,
+# closing positions while the trail was still intact. MC5 never got the switch,
+# so it never got the measurement.
+#
+# The 2026-09-10 paper session is what prompted this. MC5's six signal exits
+# lost $109.24 of its $166.94 gross loss -- two thirds of the night from one
+# rule, on n=6, which is a reason to MEASURE and not yet a reason to flip.
+# common/mc5_apex_sweep.py does that; until it reports, the default stays at
+# today's behaviour so no published MC5 figure moves underneath us.
+USE_APEX_EXIT = True
+
+# The label this strategy gives that exit, read by BOTH the backtest below and
+# brokers/ibkr/trader.py through the adapter.
+#
+# Until 2026-09-10 the trader hard-coded "apex_reversal" for every strategy
+# while this module's backtest wrote "gradient_reversal" for the same rule. Both
+# now land in one paper_fill table beside backtest_trade, and a query grouping
+# the two on `reason` would have found no MC5 signal exits in one of them and
+# reported it as an absence rather than a mismatch.
+EXIT_SIGNAL_REASON = "gradient_reversal"
+
 ENFORCE_PRICE_BAND = True
 
 MAX_SHARES = 100
@@ -130,6 +155,7 @@ MIN_WARMUP_BARS = MACD_SLOW + MACD_SIGNAL
 # roc_pct's floor is MC5's ROC_MIN_BASE rather than the shared default -- see
 # that constant for why an unfloored percentage of RSI is meaningless.
 
+from common import profit_ladder as PL
 from common.commissions import order_cost
 from common.indicators import (  # noqa: E402
     ema, rma,
@@ -359,7 +385,9 @@ def backtest_session(df, session_date, tz,
                      enforce_price_band: bool | None = None,
                      gap_fills: bool = True,
                      seed_peak_with_bar_high: bool = False,
-                     entry_shares: int | None = None) -> list[Trade]:
+                     entry_shares: int | None = None,
+                     use_apex: bool | None = None,
+                     ladder: "PL.LadderConfig | None" = None) -> list[Trade]:
     """Run one pre-market session on 5-minute bars.
 
     Accepts 1-minute OR 5-minute bars and resamples if needed, so this can be
@@ -367,6 +395,9 @@ def backtest_session(df, session_date, tz,
     Include pre-session history for warm-up (see the module docstring).
     """
     band = ENFORCE_PRICE_BAND if enforce_price_band is None else enforce_price_band
+    # Passed explicitly rather than mutating the module constant, so a 2x2 sweep
+    # can evaluate both settings over the same frame with no shared state.
+    apex = USE_APEX_EXIT if use_apex is None else use_apex
     df5 = df if _looks_5m(df) else to_5m(df)
     sig = signals(df5)
     local = sig.index.tz_convert(tz)
@@ -395,7 +426,15 @@ def backtest_session(df, session_date, tz,
                 # real trading day holds size fixed -- see mcl.backtest_session.
                 q = size_for(px) if entry_shares is None else int(entry_shares)
                 if q >= 1:
-                    pos = dict(entry_i=i, entry_px=px, qty=q,
+                    pos = dict(entry_i=i, entry_px=px, qty=q, init_qty=q,
+                               # Partial-sell accounting, added with the
+                               # take-profit ladder. With no ladder `realised`
+                               # stays 0 and `comm_paid` stays the entry order's
+                               # cost, so the exit arithmetic below is
+                               # bit-identical to what it was -- pinned by a
+                               # test rather than asserted here.
+                               realised=0.0, ladder_done=0,
+                               comm_paid=order_cost(q, px, False, COMMISSION_PLAN),
                                # See strategy/mcl/mcl.py: the entry bar's high
                                # happened BEFORE the close we bought at, so
                                # trailing from it prices a move the position
@@ -428,23 +467,57 @@ def backtest_session(df, session_date, tz,
             exit_px, exit_reason = fill - SLIPPAGE_TICKS * TICK, "trailing_stop"
         elif last_of_session:
             exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "window_close"
-        elif bool(row["exit_sig"]):
-            exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "gradient_reversal"
+        elif apex and bool(row["exit_sig"]):
+            exit_px, exit_reason = (float(row["close"]) - SLIPPAGE_TICKS * TICK,
+                                    EXIT_SIGNAL_REASON)
 
         if exit_px is not None:
             q = pos["qty"]
-            gross = (exit_px - pos["entry_px"]) * q
-            comm = (order_cost(q, pos["entry_px"], False, COMMISSION_PLAN)
-                    + order_cost(q, exit_px, True, COMMISSION_PLAN))
+            gross = pos["realised"] + (exit_px - pos["entry_px"]) * q
+            comm = pos["comm_paid"] + order_cost(q, exit_px, True, COMMISSION_PLAN)
             trades.append(Trade(
                 symbol="", date=str(session_date),
                 entry_time=str(pos["entry_t"]), exit_time=str(rows.iloc[i][tcol]),
                 entry_price=round(pos["entry_px"], 4), exit_price=round(exit_px, 4),
-                qty=q, reason=exit_reason, bars_held=i - pos["entry_i"],
+                qty=pos["init_qty"], reason=exit_reason,
+                bars_held=i - pos["entry_i"],
                 gross=round(gross, 2), commission=round(comm, 2),
                 net=round(gross - comm, 2)))
             pos = None
         else:
+            # --- take-profit ladder ------------------------------------------
+            # AFTER the full-exit block, so a bar that both clears a rung and
+            # trips the trailing stop is resolved as the STOP. See
+            # common/profit_ladder.py and the matching block in mcl.py.
+            #
+            # On 5-MINUTE bars this matters more than on MCL's 1-minute ones: a
+            # single bucket can clear two rungs, and testing against the close
+            # rather than the high is the difference between a rule the
+            # strategy could act on and one it could not.
+            if ladder is not None:
+                sell_q, used = PL.plan(pos["entry_px"], float(row["close"]),
+                                       pos["qty"], pos["ladder_done"], ladder)
+                if sell_q > 0:
+                    px_out = float(row["close"]) - SLIPPAGE_TICKS * TICK
+                    pos["realised"] += (px_out - pos["entry_px"]) * sell_q
+                    pos["comm_paid"] += order_cost(sell_q, px_out, True,
+                                                   COMMISSION_PLAN)
+                    pos["qty"] -= sell_q
+                    pos["ladder_done"] += used
+                    if pos["qty"] <= 0:
+                        trades.append(Trade(
+                            symbol="", date=str(session_date),
+                            entry_time=str(pos["entry_t"]),
+                            exit_time=str(rows.iloc[i][tcol]),
+                            entry_price=round(pos["entry_px"], 4),
+                            exit_price=round(px_out, 4),
+                            qty=pos["init_qty"], reason="profit_ladder",
+                            bars_held=i - pos["entry_i"],
+                            gross=round(pos["realised"], 2),
+                            commission=round(pos["comm_paid"], 2),
+                            net=round(pos["realised"] - pos["comm_paid"], 2)))
+                        pos = None
+                        continue
             pos["peak"] = max(pos["peak"], float(row["high"]))
 
     return trades

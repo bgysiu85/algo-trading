@@ -1214,7 +1214,10 @@ class MCLPaperTrader:
         elif last_price <= pos.trail_level():
             reason = "trailing_stop"
         elif exit_signal:
-            reason = "apex_reversal"
+            # From the STRATEGY, not a literal. MC5's backtest calls this
+            # gradient_reversal; a hard-coded name here put a label in the fill
+            # log that nothing downstream could join to.
+            reason = st.strategy.exit_signal_reason
         elif pos.exiting:
             # An earlier exit didn't fill. The decision to be flat stands even
             # if the signal has since flipped back — otherwise a missed exit

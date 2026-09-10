@@ -220,4 +220,30 @@ def test_the_adapter_exposes_no_more_than_the_live_path_needs():
     assert fields == {
         "name", "module", "bar_minutes", "session_start", "session_end",
         "price_min", "price_max", "enforce_band", "trail_pct",
-        "commission_plan", "_evaluate"}
+        "commission_plan", "_evaluate",
+        # exit_signal_reason, added 2026-09-10. It earns its place because the
+        # alternative was the trader hard-coding one strategy's label for every
+        # strategy -- MC5's live rows said apex_reversal for a rule its own
+        # backtest calls gradient_reversal, and both now land in one database
+        # table where a join on `reason` reports that as an absence.
+        "exit_signal_reason"}
+
+
+def test_each_strategy_names_its_own_signal_exit():
+    """The point of the field. If both returned the same string it would be
+    doing nothing and the hard-coded literal would have been fine."""
+    assert A.build("mcl").exit_signal_reason == "apex_reversal"
+    assert A.build("mc5").exit_signal_reason == "gradient_reversal"
+
+
+def test_the_label_matches_what_the_backtest_writes():
+    """The whole reason this exists: live and backtest must agree, or a query
+    joining paper_fill to backtest_trade on `reason` silently finds nothing."""
+    import inspect
+    for key in A.BUILDERS:
+        a = A.build(key)
+        src = inspect.getsource(a.module.backtest_session)
+        assert "EXIT_SIGNAL_REASON" in src, (
+            f"{key}'s backtest writes a literal, so it can drift from the "
+            f"label the live path uses")
+        assert a.exit_signal_reason == a.module.EXIT_SIGNAL_REASON
