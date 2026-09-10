@@ -48,6 +48,24 @@ this project measured and rejected on 2026-09-10, and across a $2-20 band 15c is
 7.5% at $2 and 0.75% at $20 -- the same factor-of-ten that killed the cent stop.
 Testing them here would re-open a settled question wearing a different hat.
 
+CORRECTION, 2026-09-11, same day: an earlier version of this file and of
+`cameron_exit_result.md` §4.2 said the cent rules fail because "his parameters
+are scaled to a position two orders of magnitude larger than ours". **That is
+wrong and is withdrawn.** MEASURED_FRICTION is $0.0426 PER SHARE -- $4.26 is
+that times 100 -- so at 10,000 shares a 15c target is $1,500 against $426 of
+friction, the same 28%. The ratio is invariant to position size and size
+explains nothing here.
+
+The real reasons are two different ones, not one:
+
+  THE CENT STOP failed on the PRICE BAND. Across $2-20, 15c is 7.5% at $2 and
+  0.75% at $20. His names sit around $5-8, where 15c is a coherent 2-3%. One
+  cent value cannot serve a band ten times wider, whatever the share count.
+
+  THE CLOSE TARGET failed on OUR TRADE DISTRIBUTION. Cutting at 2-3% forfeits
+  the right tail, and MCL's R is 2.01 against his 1.20 -- our money is in fewer,
+  larger wins, so a close target costs more than the extra wins pay.
+
 **Re-posed as he asks: his target is 2R.** Against MCL's validated 5% trail that
 is a 10% target, and TARGET_PCT is 10.0 for that reason and no other.
 
