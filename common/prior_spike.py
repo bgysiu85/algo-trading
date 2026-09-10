@@ -57,6 +57,7 @@ described.
 from __future__ import annotations
 
 import argparse
+import json
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -89,6 +90,13 @@ MIN_HISTORY_SESSIONS = 20
 # verdict by itself. Set from that principle, not from the group sizes this
 # happened to produce.
 MIN_GROUP_FOR_VERDICT = 15
+
+# holdout.json was cut 2026-09-07 over the SCREENED universe. This filter was
+# invented on 2026-09-10, so the locked slice is genuinely clean for it -- the
+# first measurement in this project of which that is true. It is therefore
+# worth exactly one read, and this module refuses to make that read by
+# accident: the locked sessions are excluded unless --spend-holdout is passed.
+HOLDOUT = Path(__file__).resolve().parents[1] / "holdout.json"
 
 
 def prior_spike(closes: pd.Series) -> dict | None:
@@ -184,11 +192,19 @@ def stats(reals: list[float], drop: int = 3) -> dict:
             "win": 100.0 * sum(1 for r in reals if r > 0) / len(reals)}
 
 
-def render(groups: dict[str, list], n_trades: int, n_sessions: int) -> list[str]:
+def render(groups: dict[str, list], n_trades: int, n_sessions: int,
+           side: str = "all", set_aside: int = 0) -> list[str]:
     L = ["PRIOR-SPIKE RETENTION -- does a name's history predict its trades?",
          "",
          f"  {n_sessions} cached sessions, {n_trades} MCL trades, {QTY} shares "
          f"flat",
+         f"  SIDE: {side}"
+         + (f"   ({set_aside} session(s) set aside)" if set_aside else ""),]
+    if side.startswith("LOCKED"):
+        L += ["",
+              "  *** THIS READ THE LOCKED HOLDOUT. It is spent for this filter.",
+              "  *** Re-running it does not make the answer more out-of-sample."]
+    L += [
          f"  net after tiered commission and ${MEASURED_FRICTION}/RT friction",
          "",
          f"  window {LOOKBACK_SESSIONS} sessions, ending {QUIET_SESSIONS} "
@@ -327,12 +343,41 @@ def tail() -> list[str]:
             "  pump-and-dump group toward looking better than it was."]
 
 
+def lock_from() -> str | None:
+    """The first locked session date, or None if there is no committed cut."""
+    try:
+        return json.loads(HOLDOUT.read_text())["lock_from"]
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
+def split_sessions(sessions, spend: bool):
+    """(sessions to use, how many were set aside, which side was taken).
+
+    Default is the TRAINING side. A holdout that can be read casually is not a
+    holdout, and this one is clean for this filter exactly once.
+    """
+    cut = lock_from()
+    if cut is None:
+        return sessions, 0, "all (no committed cut)"
+    if spend:
+        keep = [s for s in sessions if s[1] >= cut]
+        return keep, len(sessions) - len(keep), f"LOCKED, from {cut}"
+    keep = [s for s in sessions if s[1] < cut]
+    return keep, len(sessions) - len(keep), f"training, before {cut}"
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--cache", default="bar_cache")
     p.add_argument("--archive", default=None,
                    help="Databento archive root (default: the configured one)")
     p.add_argument("--dataset", default="EQUS.MINI")
+    p.add_argument("--spend-holdout", action="store_true",
+                   help="read the LOCKED sessions instead of the training "
+                        "ones. One-way: a holdout read casually is not a "
+                        "holdout, and this one is clean for this filter "
+                        "exactly once")
     p.add_argument("--out", default="var/reports/prior_spike.txt")
     return p
 
@@ -351,6 +396,11 @@ def main(argv=None) -> int:
     daily["date"] = daily["date"].astype(str)
 
     sessions = load_sessions(Path(a.cache))
+    sessions, set_aside, side = split_sessions(sessions, a.spend_holdout)
+    if not sessions:
+        raise SystemExit(
+            f"no sessions on the {side} side of the cut. If --cache points at "
+            "a universe the cut was not made over, the split is meaningless.")
     groups: dict[str, list] = defaultdict(list)
     n = 0
     for sym, d, df in sessions:
@@ -369,8 +419,9 @@ def main(argv=None) -> int:
             groups[key].append({"symbol": sym, "date": d,
                                 "real": t.net - MEASURED_FRICTION})
 
-    emit("\n".join(render(groups, n, len(sessions))), a.out,
-         header=f"common.prior_spike  cache={a.cache} dataset={a.dataset}")
+    emit("\n".join(render(groups, n, len(sessions), side, set_aside)), a.out,
+         header=f"common.prior_spike  cache={a.cache} dataset={a.dataset} "
+                f"side={side}")
     return 0
 
 

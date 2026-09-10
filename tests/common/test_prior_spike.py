@@ -291,3 +291,94 @@ def test_a_group_too_small_for_drop_top_three_gets_no_verdict():
     text = report(groups)
     assert "FEWER THAN" in text and "no verdict drawn" in text
     assert "SUPPORTED" not in text
+
+
+# --- the holdout, which is clean for this filter exactly once ---------------
+
+def sess(dates):
+    return [("AAA", d, None) for d in dates]
+
+
+def test_the_default_side_is_training_and_the_locked_slice_is_set_aside():
+    """A holdout that can be read casually is not a holdout. holdout.json was
+    cut 2026-09-07 over the screened universe; this filter was invented on
+    09-10, so the locked slice is genuinely clean for it -- and worth exactly
+    one read."""
+    keep, aside, side = P.split_sessions(
+        sess(["2025-06-01", "2026-01-11", "2026-01-12", "2026-06-01"]), False)
+    assert [d for _, d, _ in keep] == ["2025-06-01", "2026-01-11"]
+    assert aside == 2
+    assert side.startswith("training")
+
+
+def test_spending_the_holdout_takes_only_the_locked_side():
+    keep, aside, side = P.split_sessions(
+        sess(["2025-06-01", "2026-01-11", "2026-01-12", "2026-06-01"]), True)
+    assert [d for _, d, _ in keep] == ["2026-01-12", "2026-06-01"]
+    assert aside == 2
+    assert side.startswith("LOCKED")
+
+
+def test_the_cut_date_is_read_from_the_committed_file():
+    """Not a constant here. The cut is committed at the repo root precisely so
+    it cannot quietly differ between a tool and the file of record."""
+    assert P.lock_from() == "2026-01-12"
+
+
+def test_the_two_sides_never_overlap():
+    dates = ["2025-06-01", "2026-01-11", "2026-01-12", "2026-06-01"]
+    a = {d for _, d, _ in P.split_sessions(sess(dates), False)[0]}
+    b = {d for _, d, _ in P.split_sessions(sess(dates), True)[0]}
+    assert not (a & b)
+    assert a | b == set(dates)
+
+
+def test_reading_the_holdout_is_announced_in_the_report():
+    """A locked read that looked like any other run is how a holdout gets
+    spent twice without anyone noticing."""
+    text = "\n".join(P.render({"former runner": g(20, 1.0)}, 20, 100,
+                              "LOCKED, from 2026-01-12", 300))
+    assert "THIS READ THE LOCKED HOLDOUT" in text
+    assert "spent for this filter" in text
+
+
+def test_an_ordinary_run_carries_no_such_banner():
+    text = "\n".join(P.render({"former runner": g(20, 1.0)}, 20, 100,
+                              "training, before 2026-01-12", 164))
+    assert "LOCKED HOLDOUT" not in text
+
+
+def test_the_side_is_stated_on_every_report():
+    text = "\n".join(P.render({"former runner": g(20, 1.0)}, 20, 100,
+                              "training, before 2026-01-12", 164))
+    assert "SIDE: training" in text and "164 session(s) set aside" in text
+
+
+def test_main_actually_applies_the_split(monkeypatch, tmp_path):
+    """Reading the cut correctly and then not applying it would run every
+    session including the locked ones — and the report would say 'training'
+    while having read the holdout. The only symptom is a number that is
+    quietly not out of sample."""
+    import common.dbn_io as dbn
+    from common import prior_spike as M
+
+    seen = {}
+
+    def fake_load(_root):
+        return [("AAA", "2025-06-01", None), ("AAA", "2026-06-01", None)]
+
+    def fake_backtest(df, d, tz, **kw):
+        seen.setdefault("dates", []).append(str(d))
+        return []
+
+    monkeypatch.setattr(M, "load_sessions", fake_load)
+    monkeypatch.setattr(M.MCL, "backtest_session", fake_backtest)
+    monkeypatch.setattr(dbn, "daily_frame",
+                        lambda root, ds: daily([("AAA", "2025-01-01", 1.0)]))
+    monkeypatch.setattr(M, "emit",
+                        lambda text, out, header="": seen.update(text=text))
+
+    M.main(["--archive", str(tmp_path)])
+    assert seen["dates"] == ["2025-06-01"], (
+        "the 2026-06-01 session is past lock_from and must not be read")
+    assert "SIDE: training" in seen["text"]
