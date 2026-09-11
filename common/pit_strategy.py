@@ -137,7 +137,14 @@ def engine(name: str):
     if name == "mc5":
         from strategy.mc5 import mc5 as M
         return M, {}
-    sys.exit(f"unknown strategy {name!r} -- expected mcl or mc5")
+    if name == "h0":
+        # The CONTROL, run through the same machinery as the rules it controls.
+        # `pit_h0` has no stage-2 arm and no unfloored arm, so it could never
+        # split its own leak; this is what settles pit_h0_result §6 rather than
+        # leaving it flagged. See strategy/premkt/h0_engine.py.
+        from strategy.premkt import h0_engine as M
+        return M, {}
+    sys.exit(f"unknown strategy {name!r} -- expected mcl, mc5 or h0")
 
 
 # --- universes ---------------------------------------------------------------
@@ -346,6 +353,37 @@ def arm_rows(trades: list[dict], split: str) -> list[str]:
     return L
 
 
+def tail(name: str, arms: dict, split: str) -> list[str]:
+    """The closing sections, shared by every exit path from `render`.
+
+    Factored out because the H0 run returns early -- a control has no control
+    to be compared against -- and the caveats are exactly the part that must
+    not be dropped from a short report. A reader who sees three arms and no
+    "not the published backtest" note is the reader who quotes one against a
+    figure from a doc.
+    """
+    L = ["SIGN STABILITY ACROSS THE FRICTION RANGE", ""]
+    for key, label in (("stage2", "STAGE-2"), ("pit", "POINT-IN-TIME"),
+                       ("early", "EARLY ONLY")):
+        s = {score(arms[key], split, fv)["net"] > 0 for _, fv in FRICTIONS}
+        L.append(f"  {label:<16}"
+                 f"{'STABLE' if len(s) == 1 else 'FLIPS'} across $1.00-$8.92")
+
+    return L + ["", "WHAT THIS IS NOT", "",
+                "  Not out of sample. `holdout.json` was cut over the SCREENED",
+                "  universe on 2026-09-07 and is clean for a screen built "
+                "after it.",
+                "  It has NOT been spent here.",
+                "",
+                "  Not the published backtest. Different warm-up, different "
+                "tape.",
+                "  The arms are comparable to each other and to nothing else.",
+                "",
+                "  Not TradingView's data. The universe reproduces their "
+                "columns",
+                "  from one Databento dataset at a measured 55.2% capture."]
+
+
 def render(name: str, arms: dict, suppressed: dict, counts: dict,
            with_bars: dict, split: str, n_days: int, warmup_missing: int,
            elapsed: float, traded_early: int = 0) -> list[str]:
@@ -399,7 +437,7 @@ def render(name: str, arms: dict, suppressed: dict, counts: dict,
               "  same trade list and only one of them is a result, so NO",
               "  VERDICT is drawn below. Check `not_before` reaches",
               "  backtest_session before reading anything above.", ""]
-        return L
+        return L + tail(name, arms, split)
     L += ["  Non-zero, so the floor is doing work and the point-in-time arm",
           "  is a different measurement from the leaky one rather than the",
           "  same one relabelled. This percentage is also the look-ahead's",
@@ -451,6 +489,17 @@ def render(name: str, arms: dict, suppressed: dict, counts: dict,
                   "  missing names are not missing at random, so part of this",
                   "  difference is which names survived the tape rather than",
                   "  the look-ahead. Read it as an upper bound.", ""]
+
+    if name == "h0":
+        # Comparing the control to itself is not a weak measurement, it is a
+        # tautology, and a tautology rendered in the same table as a real
+        # comparison is how a reader ends up quoting one as the other.
+        L += ["NO CONTROL COMPARISON", "",
+              "  This run IS the control. H0 against H0 is +0.00 by",
+              "  construction and the section is omitted rather than printed",
+              "  as a result. Read the three arms above and the leak split;",
+              "  the comparison lives in the MCL and MC5 reports.", ""]
+        return L + tail(name, arms, split)
 
     h0_trade = H0_PIT_NET / H0_PIT_TRADES
     h0_day = H0_PIT_NET / H0_PIT_OFFERED
@@ -520,24 +569,7 @@ def render(name: str, arms: dict, suppressed: dict, counts: dict,
               "  this differs, the strategy is selecting on something the",
               "  screen's ordering already carries.", ""]
 
-    L += ["SIGN STABILITY ACROSS THE FRICTION RANGE", ""]
-    for key, label in (("stage2", "STAGE-2"), ("pit", "POINT-IN-TIME"),
-                       ("early", "EARLY ONLY")):
-        s = {score(arms[key], split, fv)["net"] > 0 for _, fv in FRICTIONS}
-        L.append(f"  {label:<16}"
-                 f"{'STABLE' if len(s) == 1 else 'FLIPS'} across $1.00-$8.92")
-
-    L += ["", "WHAT THIS IS NOT", "",
-          "  Not out of sample. `holdout.json` was cut over the SCREENED",
-          "  universe on 2026-09-07 and is clean for a screen built after it.",
-          "  It has NOT been spent here.",
-          "",
-          "  Not the published backtest. Different warm-up, different tape.",
-          "  The arms are comparable to each other and to nothing else.",
-          "",
-          "  Not TradingView's data. The universe reproduces their columns",
-          "  from one Databento dataset at a measured 55.2% capture."]
-    return L
+    return L + tail(name, arms, split)
 
 
 # --- driver ------------------------------------------------------------------
