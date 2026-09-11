@@ -20,7 +20,7 @@ tz_credentials.json
 # --- runtime output and real trading history -------------------------------
 # Excluded for privacy as much as for noise: these are actual fills and actual
 # positions, not test fixtures.
-var/
+var
 archive/
 mcl_fills_*.csv
 backtest_run_*.log

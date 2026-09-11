@@ -264,3 +264,22 @@ def test_main_warns_when_the_trading_tree_is_dirty():
     # failed on its own line break.
     src = inspect.getsource(M)
     assert "uncommitted changes" in src and "frozen copy." in src
+
+
+def test_var_is_gitignored_WITHOUT_a_trailing_slash():
+    """THE TRAP THAT MADE THE FIRST PRODUCTION COPY PERMANENTLY DIRTY.
+
+    `var/` with a trailing slash is a DIRECTORY-ONLY pattern. The production
+    copy reaches its var/ through a junction, and git sees a junction or
+    symlink as a file entry -- so `git status --porcelain` returned `?? var`,
+    the tree read DIRTY on every session, and the "this is not a frozen copy"
+    warning would have fired every single night until it was ignored.
+
+    A warning that always fires is worse than no warning. `var` without the
+    slash matches the directory AND the link.
+    """
+    lines = [l.strip() for l in (P.TREE / ".gitignore").read_text().splitlines()]
+    assert "var" in lines, "var must be ignored"
+    assert "var/" not in lines, (
+        "a trailing slash makes this directory-only, and the production copy "
+        "reaches var/ through a junction that git reads as a file")
