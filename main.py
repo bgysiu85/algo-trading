@@ -37,7 +37,7 @@ import argparse
 import sys
 from contextlib import contextmanager
 
-from common import session_lock
+from common import provenance, session_lock
 
 # Modes that hold an IB session for an extended period and therefore take the
 # lock. `scan` deliberately does NOT: the scanner is designed to run alongside
@@ -264,7 +264,20 @@ def run(argv: list[str] | None = None) -> int:
         # only makes a person look at what is about to happen.
         if args.mode == "paper" and not _confirmed(wanted, forwarded):
             return _fail("cancelled at the confirmation prompt.")
-        with session_lock.held(args.mode, args.strategy):
+        # WHICH CODE, recorded where it can be read back. Added 2026-09-11
+        # with the production/development split: a fill log has never said
+        # which tree produced it, and "MCL, apex off" has had three different
+        # meanings this week. It goes into the LOCK as well as the log, so a
+        # second session blocked by the first is told where the first is
+        # running from rather than only that it exists.
+        prov = provenance.read()
+        print(f"  running {prov.as_line()}")
+        if prov.dirty:
+            print("  NOTE: this tree has uncommitted changes -- it is not a "
+                  "frozen copy.")
+        with session_lock.held(args.mode, args.strategy,
+                               tree=prov.tree, version=prov.described,
+                               dirty=prov.dirty, var=prov.var_path):
             with _feed_beside(args.mode, args.feed, forwarded):
                 return trader.main(forwarded) or 0
 

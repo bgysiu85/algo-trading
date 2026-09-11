@@ -128,9 +128,23 @@ def active(path: Path = LOCK_PATH) -> dict | None:
 
 
 def describe(info: dict) -> str:
-    return (f"{info.get('mode')} session for strategy "
+    """What is holding the lock, including WHICH TREE since 2026-09-11.
+
+    With a frozen production copy running sessions beside a development tree,
+    "a live session is already running" is only half an answer -- the useful
+    half is which directory it is running from, because that is what tells
+    Ben whether to stop it or whether he is about to start a second one from
+    the wrong window. `tree` is absent on locks written before this, so it is
+    read defensively.
+    """
+    base = (f"{info.get('mode')} session for strategy "
             f"{info.get('strategy')} (pid {info.get('pid')}, started "
             f"{info.get('started_at')})")
+    tree = info.get("tree")
+    ver = info.get("version")
+    if tree:
+        base += f"\n  running from {tree}" + (f" at {ver}" if ver else "")
+    return base
 
 
 @contextmanager
