@@ -83,6 +83,22 @@ MIN_UNIVERSE = 500
 N_PERM = 2000
 SEED = 20260911
 
+# A bucket carrying fewer SESSIONS than this cannot support a verdict, however
+# many trades it holds.
+#
+# Trades inside one session share a market and are not independent draws --
+# that is the whole reason the permutation test shuffles DATES rather than
+# trades. So the effective sample is the session count, and a bucket of one
+# session is one day wearing a trade count. The 2026-09-11 run made this
+# concrete: 71 trades looked like a sample until the corrected sessions column
+# showed cold=1, mixed=2, hot=11, and the cold bucket's -$16.96 per trade was
+# a single morning.
+#
+# Set from what the controls need rather than picked: drop-top-N removes DROP
+# trades, so a bucket has to carry more sessions than that for the check to
+# mean anything at all.
+MIN_SESSIONS_PER_BUCKET = DROP + 2
+
 
 def bucket_stats(reals: list[float]) -> dict:
     if not reals:
@@ -239,6 +255,36 @@ def render(*, trades, lab_same, lab_lag, feats, n_sessions, med_universe,
                     "  labelling, so there is nothing to compare. A bucket",
                     "  with no trades reads exactly like a bucket that lost",
                     "  nothing.", ""]
+
+    # THE SESSION FLOOR. See MIN_SESSIONS_PER_BUCKET -- trades within a session
+    # are not independent, so a bucket of one session is one day no matter how
+    # many trades sit in it.
+    sess = {k: sum(1 for d in scored if lab_lag.get(d) == k) for k in ORDER}
+    thin = {k: n for k, n in sess.items() if n < MIN_SESSIONS_PER_BUCKET}
+    if thin:
+        return L + ["NO VERDICT — the sample is sessions, not trades", "",
+                    "  " + ";  ".join(f"{k} = {n} session(s)"
+                                      for k, n in thin.items()),
+                    "",
+                    f"  Under {MIN_SESSIONS_PER_BUCKET} sessions a bucket is a"
+                    " handful of mornings. Trades inside",
+                    "  one session share a market and are not independent"
+                    " draws -- which is",
+                    "  why the permutation test shuffles dates and not trades"
+                    " -- so the",
+                    "  trade counts in the table above overstate what is"
+                    " actually known by",
+                    "  roughly the trades-per-session ratio.",
+                    "",
+                    "  The ordering and the spread are printed because they"
+                    " are the honest",
+                    "  reading of a small sample, NOT because they are"
+                    " evidence. What this",
+                    "  needs is more SESSIONS: bar_cache holds the"
+                    " symbol-days Ben traded,",
+                    "  so run it against bar_cache_xnas, where the training"
+                    " slice carries",
+                    "  19,292 sessions instead of 66.", ""]
 
     per = {k: bucket_stats(by[k])["per"] for k in ORDER}
     obs = per["hot"] - per["cold"]

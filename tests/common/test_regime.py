@@ -481,11 +481,13 @@ def test_an_empty_bucket_in_a_half_is_not_reported_as_a_sign_flip():
     # label leaves the lagged hot bucket full and the test passes vacuously.
     lag = RG.lagged(lab)
     dates = sorted(d for d in spec if d in lag)
-    # Cut at a QUARTER, not at the half. Removing dates moves the derived
-    # split point earlier, so a cut at the half leaves hot trades sitting
-    # between the new split and the old one -- which is how the first version
-    # of this test passed vacuously.
-    cut = dates[len(dates) // 4]
+    # Cut at a THIRD, not at the half. Removing dates moves the derived split
+    # point earlier, so a cut at the half leaves hot trades sitting between
+    # the new split and the old one -- which is how the first version of this
+    # test passed vacuously. A quarter empties the late half too but starves
+    # the hot bucket below MIN_SESSIONS_PER_BUCKET, and then the session floor
+    # answers first and this test stops being about the halves at all.
+    cut = dates[len(dates) // 3]
     spec = {d: v for d, v in spec.items()
             if not (d >= cut and lag.get(d) == "hot")}
     out = "\n".join(RS.render(**render_args(spec, lab)))
@@ -503,3 +505,39 @@ def test_a_genuine_reversal_is_still_called_a_sign_flip():
     out = "\n".join(RS.render(**render_args(spec, lab)))
     assert "the sign flips between halves" in out
     assert "did not divide" not in out
+
+
+def test_a_bucket_of_one_session_cannot_carry_a_verdict():
+    """THE FOURTH DEFECT, from the 2026-09-11 run. The table showed 9 / 9 / 53
+    trades — which reads as a sample — and the corrected sessions column showed
+    cold=1, mixed=2, hot=11. The cold bucket's -$16.96 per trade was a SINGLE
+    MORNING.
+
+    Trades inside one session share a market and are not independent draws:
+    that is the whole reason the permutation test shuffles dates rather than
+    trades. So the effective sample is the session count, and a thin bucket
+    must refuse a verdict however many trades sit in it.
+    """
+    spec, lab = spread_sample()
+    lag = RG.lagged(lab)
+    # One cold session, carrying plenty of trades.
+    cold = [d for d in sorted(spec) if lag.get(d) == "cold"]
+    spec = {d: (v * 12 if d == cold[0] else v)
+            for d, v in spec.items() if d not in cold[1:]}
+    out = "\n".join(RS.render(**render_args(spec, lab)))
+    assert "NO VERDICT" in out and "sessions, not trades" in out
+    assert "cold = 1 session(s)" in out
+    assert "not adoptable" not in out and "the gate separates" not in out
+
+
+def test_the_session_floor_does_not_fire_on_a_real_sample():
+    """Or every run refuses and the study never answers anything."""
+    out = "\n".join(RS.render(**render_args(*spread_sample())))
+    assert "sessions, not trades" not in out
+    assert "VERDICT" in out
+
+
+def test_the_floor_is_set_from_what_the_controls_need():
+    """drop-top-N removes DROP trades, so a bucket has to carry more sessions
+    than that for the check to mean anything."""
+    assert RS.MIN_SESSIONS_PER_BUCKET > RS.DROP
