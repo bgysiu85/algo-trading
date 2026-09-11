@@ -237,12 +237,21 @@ def render(name: str, variant: str, what: str, arms: dict, split: str,
               "  between a handful of trades.", ""]
         return L + notes(u, f)
 
-    flipped = (u["per"] > 0) != (f["per"] > 0)
+    # A SIGN CHANGE ONLY COUNTS IF THERE IS A SIGN TO CHANGE. The first version
+    # tested the flip before the magnitude, and the ladder's real run tripped it
+    # on -0.09 -> +0.07 -- nine cents to seven cents on a strategy losing
+    # $10.49 a trade -- and printed "it reverses it, all four must be re-run".
+    # Both deltas were economically zero and the flip was noise crossing zero.
+    # The pre-registration said "below MATERIAL **and** no sign change"; this is
+    # the conjunction it actually meant.
+    flipped = ((u["per"] > 0) != (f["per"] > 0)
+               and max(abs(u["per"]), abs(f["per"])) >= MATERIAL)
     if flipped:
-        L += ["  THE DELTA CHANGES SIGN. The floor does not merely shift this",
-              "  mechanic's value, it reverses it. Every rejection measured on",
-              "  an unfloored run is unsafe and all four must be re-run before",
-              "  any of them is treated as settled.", ""]
+        L += ["  THE DELTA CHANGES SIGN, and at least one side is material.",
+              "  The floor does not merely shift this mechanic's value, it",
+              "  reverses it. Every rejection measured on an unfloored run is",
+              "  unsafe and all four must be re-run before any of them is",
+              "  treated as settled.", ""]
     elif abs(moved) >= MATERIAL:
         L += ["  MATERIAL. The population change reaches the delta, so the",
               "  four rejections were measured on trades that could not have",
@@ -254,7 +263,18 @@ def render(name: str, variant: str, what: str, arms: dict, split: str,
               "  delta barely at all, which is what a delta between two exit",
               "  rules on the same trades should do -- the entry timing is",
               "  common to both sides and cancels. `HANDOVER` §4's inference",
-              "  from the level gap to the deltas does not hold here.", ""]
+              "  from the level gap to the deltas does not hold here.", "",
+              f"    the LEVEL moved  {acct(f['base']['per'] - u['base']['per'], 8)}"
+              "   (base, unfloored to floored)",
+              f"    the DELTA moved  {acct(moved, 8)}", "",
+              "  Those two numbers side by side are the finding. If the sign",
+              "  crossed zero on its way, say so and move on: a flip between",
+              "  two economically-zero deltas is noise crossing an axis, not a",
+              "  mechanic reversing."]
+        if (u["per"] > 0) != (f["per"] > 0):
+            L += ["", "  (It did cross zero here. Both sides are below the",
+                  "  registered threshold, so that is what this is.)"]
+        L.append("")
     return L + notes(u, f)
 
 

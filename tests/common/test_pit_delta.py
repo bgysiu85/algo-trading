@@ -113,6 +113,29 @@ def test_a_delta_that_changes_sign_is_called_out_above_the_threshold():
     assert "CHANGES SIGN" in o
 
 
+def test_a_sign_flip_between_two_tiny_deltas_is_noise_not_a_reversal():
+    """The ladder's real run: -0.09 -> +0.07, nine cents to seven cents on a
+    strategy losing $10.49 a trade. The first version tested the flip before
+    the magnitude and printed "it reverses it, all four must be re-run"."""
+    o = out(-10.00, -10.09, -14.00, -13.93)
+    assert "CHANGES SIGN" not in o
+    assert "NOT MATERIAL" in o
+    assert "noise crossing an axis" in o
+    assert "It did cross zero here" in o
+
+
+def test_a_sign_flip_with_one_material_side_still_counts():
+    o = out(-10.0, -9.0, -14.0, -14.8)
+    assert "CHANGES SIGN, and at least one side is material" in o
+
+
+def test_the_level_move_is_printed_beside_the_delta_move():
+    """The two numbers side by side are the finding: a $6.84 level move next to
+    a $0.16 delta move is what shows the inference does not transfer."""
+    o = out(-3.65, -3.74, -10.49, -10.42)
+    assert "the LEVEL moved" in o and "the DELTA moved" in o
+
+
 def test_the_threshold_is_stated_in_the_report_before_the_numbers():
     o = out(-10.0, -10.2, -14.0, -14.25)
     i, j = o.index("PRE-REGISTERED"), o.index("UNFLOORED")

@@ -595,7 +595,13 @@ def main(argv=None) -> int:
 
     name = a.strategy.strip().lower()
     mod, extra = engine(name)
-    out_path = a.out or f"var/reports/pit_{name}.txt"
+    # NAMED FOR THE MODULE, NOT JUST THE STRATEGY. `pit_{name}` put the h0 run
+    # at var/reports/pit_h0.txt -- the exact path `common.pit_h0` writes -- and
+    # the first h0 run silently overwrote it. Nothing was lost (this report's
+    # POINT-IN-TIME and EARLY arms reproduce that file's two arms exactly, which
+    # is how the clobber was noticed at all), but two modules sharing an output
+    # path is a data-loss bug waiting on the next unlucky ordering.
+    out_path = a.out or f"var/reports/pit_strategy_{name}.txt"
 
     archive = Path(a.archive) if a.archive else default_archive()
     slices = {date_of(p): p for p in window_slices(archive, a.dataset)}
