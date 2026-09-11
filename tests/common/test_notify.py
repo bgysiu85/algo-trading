@@ -898,3 +898,179 @@ def test_the_batch_helpers_are_plain_static_methods():
         got = N.Notifier.__dict__[name]
         assert isinstance(got, staticmethod), (
             f"{name} is {type(got).__name__}, not a plain staticmethod")
+
+
+# --- grouped by strategy, subtotals, grand total ----------------------------
+# Ben, 2026-09-11: "group the results by strategy, provide a subtotal by
+# strategy and a grand total of all strategies."
+#
+# The headline test is `test_the_grand_total_is_not_the_sum_of_the_subtotals`.
+# Every other property here is presentation; that one is the control, because
+# a grouping that drops a trade still produces subtotals that add up perfectly
+# among themselves.
+
+def sell_for(strategy, symbol="BNC", entry=5.41, exit_=5.26,
+             ts="2026-09-11 07:45:02"):
+    return dict(sell_row(symbol, entry, exit_, ts=ts), strategy=strategy)
+
+
+def test_each_strategy_gets_its_own_section_and_subtotal():
+    text = N.session_summary(
+        [sell_for("MCL", "AAA", 10.0, 11.0), sell_for("MC5", "ZZZ", 4.0, 3.8)],
+        now=NOW, strategy="mcl,mc5")
+    assert "━━ MCL ━━" in text and "━━ MC5 ━━" in text
+    assert "MCL subtotal" in text and "MC5 subtotal" in text
+    assert "GRAND TOTAL" in text
+
+
+def test_the_subtotals_are_the_sums_of_their_own_groups():
+    rows = [sell_for("MCL", "AAA", 10.0, 11.0),
+            sell_for("MCL", "BBB", 5.0, 4.5),
+            sell_for("MC5", "ZZZ", 4.0, 3.8)]
+    trades = N._round_trips(rows)
+    mcl = [t for t in trades if t["strategy"] == "MCL"]
+    text = N.session_summary(rows, now=NOW, strategy="mcl,mc5")
+    assert f"MCL subtotal  ${sum(t['net'] for t in mcl):,.2f}" in text
+
+
+def test_the_grand_total_is_not_the_sum_of_the_subtotals():
+    """THE CONTROL. If the grand total were computed by adding the subtotals,
+    a trade that fell out of the grouping would shrink it silently while every
+    visible line still added up. It is computed from ALL trades independently
+    and then checked against their sum, so a loss shows as a disagreement.
+    """
+    import inspect
+    src = inspect.getsource(N.session_summary)
+    assert 'grand = _totals(trades)' in src
+    assert 'summed = sum(_totals(g)["net"] for g in groups.values())' in src
+    i = src.index("summed = sum")
+    assert "grouping lost something" in src[i:]
+
+
+def test_a_grouping_that_loses_a_trade_is_flagged(monkeypatch):
+    """And the check has to actually fire, or it is decoration. A grouping
+    that drops one trade must produce the warning rather than a total that is
+    quietly too small."""
+    real = N._group_by_strategy
+    monkeypatch.setattr(N, "_group_by_strategy",
+                        lambda trades, ran=(): real(trades[:-1], ran))
+    text = N.session_summary([sell_for("MCL", "AAA", 10.0, 11.0),
+                              sell_for("MC5", "ZZZ", 4.0, 3.8)],
+                             now=NOW, strategy="mcl,mc5")
+    assert "grouping lost something" in text
+
+
+def test_the_grand_total_still_covers_every_trade():
+    rows = [sell_for("MCL", "AAA", 10.0, 11.0),
+            sell_for("MC5", "ZZZ", 4.0, 3.8),
+            sell_for("", "QQQ", 6.0, 6.5)]
+    trades = N._round_trips(rows)
+    text = N.session_summary(rows, now=NOW, strategy="mcl,mc5")
+    assert f"GRAND TOTAL  ${sum(t['net'] for t in trades):,.2f}" in text
+    assert "3 trade(s)" in text
+
+
+# --- the two ways a trade could vanish from the subtotals -------------------
+
+def test_the_case_of_the_label_does_not_split_a_strategy_in_two():
+    """THE TRAP. The trader labels the session from its own argv -- 'mcl,mc5'
+    -- while the fill log writes 'MCL'. A case-sensitive key would print an
+    empty `mcl` section beside a real `MCL` one and split the night in half."""
+    g = N._group_by_strategy(N._round_trips([sell_for("MCL"), sell_for("mcl")]),
+                             ["mcl"])
+    assert list(g) == ["MCL"] and len(g["MCL"]) == 2
+
+
+def test_an_unlabelled_trade_gets_a_visible_group_of_its_own():
+    """It must not be dropped, and it must not be folded into whichever
+    strategy sorts first -- a trade that cost money has to appear in the
+    subtotals somewhere, under a name that actually took it."""
+    text = N.session_summary([sell_for("MCL", "AAA", 10.0, 11.0),
+                              sell_for("", "QQQ", 6.0, 6.5)],
+                             now=NOW, strategy="mcl")
+    assert N.UNLABELLED in text
+    assert "grouping lost something" not in text
+
+
+def test_a_strategy_in_the_log_but_not_in_the_label_still_appears():
+    """Otherwise a mislabelled session hides real trades."""
+    text = N.session_summary([sell_for("VW9_5M", "AAA", 10.0, 11.0)],
+                             now=NOW, strategy="mcl")
+    assert "━━ VW9_5M ━━" in text
+
+
+def test_a_strategy_that_ran_and_took_nothing_gets_a_line():
+    """'MC5 took nothing' and 'MC5 was not running' are different facts about
+    a night, and a grouping that only shows strategies with trades cannot tell
+    them apart."""
+    text = N.session_summary([sell_for("MCL")], now=NOW, strategy="mcl,mc5")
+    assert "━━ MC5 ━━" in text and "no trades" in text
+
+
+def test_the_strategies_that_ran_come_first_and_in_order():
+    """Stable placement across nights is how a change gets noticed."""
+    g = N._group_by_strategy(
+        N._round_trips([sell_for("MC5"), sell_for("MCL"), sell_for("")]),
+        ["mcl", "mc5"])
+    assert list(g) == ["MCL", "MC5", N.UNLABELLED]
+
+
+def test_the_unlabelled_group_sorts_last():
+    g = N._group_by_strategy(
+        N._round_trips([sell_for(""), sell_for("AAA_STRAT")]), [])
+    assert list(g) == ["AAA_STRAT", N.UNLABELLED]
+
+
+# --- everything that worked before still works ------------------------------
+
+def test_grouping_did_not_lose_the_reconciliation_warning():
+    text = N.session_summary([dict(sell_for("MCL"), trade_pnl="999.99")],
+                             now=NOW, strategy="mcl")
+    assert "do not reconcile" in text
+
+
+def test_grouping_did_not_lose_the_open_position_warning():
+    text = N.session_summary([buy_row("AAA"), buy_row("BBB"),
+                              sell_for("MCL", "AAA")],
+                             now=NOW, strategy="mcl")
+    assert "still open" in text
+
+
+def test_a_strategy_name_is_escaped():
+    """It is interpolated into HTML like every other field. A bare '<' is
+    rejected for the WHOLE message -- the 2026-09-09 defect, a third door."""
+    text = N.session_summary([sell_for("A<B")], now=NOW, strategy="mcl")
+    assert "━━ A<B ━━" not in text and "&lt;" in text
+
+
+# --- the 4,096-character cliff ----------------------------------------------
+
+def test_a_busy_night_keeps_the_totals_instead_of_losing_the_message():
+    """Telegram REFUSES a message over 4,096 characters rather than truncating
+    it, so an overflow loses the entire end-of-session report -- the one
+    message that matters most. Grouping adds four lines per strategy, which
+    moves that edge closer."""
+    rows = [sell_for("MCL" if i % 2 else "MC5", f"SYM{i:03d}", 10.0, 10.5,
+                     ts=f"2026-09-11 07:{i % 60:02d}:00") for i in range(120)]
+    text = N.session_summary(rows, now=NOW, strategy="mcl,mc5")
+    assert len(text) <= N.TELEGRAM_MAX_CHARS
+    assert "GRAND TOTAL" in text
+    assert "per-trade lines dropped" in text
+    assert "SYM001" not in text, "the detail should be what was dropped"
+
+
+def test_the_short_form_still_carries_every_group():
+    rows = [sell_for("MCL" if i % 2 else "MC5", f"SYM{i:03d}", 10.0, 10.5)
+            for i in range(120)]
+    text = N.session_summary(rows, now=NOW, strategy="mcl,mc5")
+    assert "MCL" in text and "MC5" in text
+
+
+def test_an_ordinary_night_is_not_shortened():
+    """The fallback must not fire on a normal session, or the detail Ben asked
+    for is gone every night."""
+    rows = [sell_for("MCL" if i % 2 else "MC5", f"SYM{i:03d}", 10.0, 10.5)
+            for i in range(6)]
+    text = N.session_summary(rows, now=NOW, strategy="mcl,mc5")
+    assert "per-trade lines dropped" not in text
+    assert "SYM001" in text

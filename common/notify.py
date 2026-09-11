@@ -745,48 +745,133 @@ def _round_trips(rows: list[dict], plan: str = "ibkr_tiered") -> list[dict]:
     return out
 
 
+# A trade whose `strategy` column is blank. It gets a VISIBLE group of its own
+# rather than being dropped or folded into whichever strategy sorts first: a
+# trade that cost money has to appear in the subtotals somewhere, and putting
+# it under a name that did not take it would be worse than not grouping at all.
+UNLABELLED = "(unlabelled)"
+
+
+def _totals(trades: list[dict]) -> dict:
+    """One group's arithmetic. Also used for the grand total, so the two
+    cannot be computed by different code and disagree."""
+    net = sum(t["net"] for t in trades)
+    return {"n": len(trades),
+            "wins": sum(1 for t in trades if t["net"] > 0),
+            "gross": sum(t["gross"] for t in trades),
+            "comm": sum(t["commission"] for t in trades),
+            "net": net}
+
+
+def _group_by_strategy(trades: list[dict],
+                       ran: "list[str] | tuple[str, ...]" = ()) -> dict:
+    """{STRATEGY: [trades]}, in a stable order, including empty groups.
+
+    Keyed on the UPPERCASED name. The trader labels the session from its own
+    argv -- "mcl,mc5" -- while the fill log writes "MCL", so a case-sensitive
+    key would print a phantom empty `mcl` beside a real `MCL` and split the
+    session in half.
+
+    `ran` comes first and in the order given, and a strategy that ran WITHOUT
+    trading still gets a line. "MC5 took nothing" and "MC5 was not running"
+    are different facts about a night, and a grouping that only shows the
+    strategies with trades cannot tell them apart.
+    """
+    found: dict[str, list[dict]] = {}
+    for t in trades:
+        key = (t.get("strategy") or "").strip().upper() or UNLABELLED
+        found.setdefault(key, []).append(t)
+
+    out: dict[str, list[dict]] = {}
+    for name in ran:
+        key = name.strip().upper()
+        if key:
+            out[key] = found.pop(key, [])
+    for key in sorted(k for k in found if k != UNLABELLED):
+        out[key] = found.pop(key)
+    if UNLABELLED in found:
+        out[UNLABELLED] = found.pop(UNLABELLED)
+    return out
+
+
+def _trade_lines(t: dict) -> list[str]:
+    sign = "🟢" if t["net"] >= 0 else "🔴"
+    flag = "" if t["reconciles"] else "  ⚠️"
+    return [f"{sign} <b>{_esc(t['symbol'])}</b>  {_esc(t['ts'][11:16])}"
+            f"  {t['qty']:,} sh{flag}",
+            f"   {_money(t['entry'])} → {_money(t['exit'])}"
+            + (f"   {_esc(t['hold'])}m" if t["hold"] else ""),
+            f"   gross {_money(t['gross'])}   comm {_money(t['commission'])}"
+            f"   <b>net {_money(t['net'])}</b>"]
+
+
+def _total_block(title: str, s: dict, *, bold_net: bool) -> list[str]:
+    sign = "🟢" if s["net"] >= 0 else "🔴"
+    net = (f"<b>{title}  {_money(s['net'])}</b>" if bold_net
+           else f"{title}  {_money(s['net'])}")
+    return [f"{s['n']} trade(s)   {s['wins']} up / {s['n'] - s['wins']} down",
+            f"gross {_money(s['gross'])}   comm {_money(s['comm'])}",
+            f"{sign} {net}"]
+
+
 def session_summary(rows: list[dict], now: datetime | None = None,
                     strategy: str = "", plan: str = "ibkr_tiered") -> str:
-    """The end-of-session message: every round trip, then the totals.
+    """The end-of-session message: round trips grouped by strategy, a subtotal
+    for each, then the grand total. Ben, 2026-09-11.
 
     Built from the fill log rather than from in-memory state on purpose. A
     summary assembled from the trader's own objects agrees with itself by
     construction; one read back off the ledger can disagree, and that
     disagreement is the thing worth seeing.
+
+    THE GRAND TOTAL IS NOT THE SUM OF THE SUBTOTALS. It is computed
+    independently from every trade and then CHECKED against their sum, because
+    those are the same number only if the grouping lost nothing -- and a
+    grouping that drops a trade produces a total that is quietly too small
+    while every visible line still adds up.
     """
     trades = _round_trips(rows, plan)
-    L = [header(now), f"<b>{_esc(strategy or 'SESSION')} SUMMARY</b>", ""]
+    ran = [s for s in (strategy or "").split(",") if s.strip()]
+    # Uppercased so the header and the group rules read as the same names. The
+    # trader passes its own argv ("mcl,mc5") and the log writes "MCL".
+    title = _esc((strategy or "SESSION").upper())
+    L = [header(now), f"<b>{title} SUMMARY</b>", ""]
 
+    opens = sum(1 for r in rows
+                if (r.get("action") or "").upper() == "BUY"
+                and (r.get("status") or "") == "FILLED")
     if not trades:
-        opens = sum(1 for r in rows
-                    if (r.get("action") or "").upper() == "BUY"
-                    and (r.get("status") or "") == "FILLED")
         L.append("no completed round trips")
         if opens:
             L.append(f"⚠️ {opens} position(s) opened and not closed")
         return "\n".join(L)
 
-    for t in trades:
-        sign = "🟢" if t["net"] >= 0 else "🔴"
-        flag = "" if t["reconciles"] else "  ⚠️"
-        L += [f"{sign} <b>{_esc(t['symbol'])}</b>  {_esc(t['ts'][11:16])}"
-              f"  {t['qty']:,} sh{flag}",
-              f"   {_money(t['entry'])} → {_money(t['exit'])}"
-              + (f"   {_esc(t['hold'])}m" if t["hold"] else ""),
-              f"   gross {_money(t['gross'])}   comm {_money(t['commission'])}"
-              f"   <b>net {_money(t['net'])}</b>"]
-    L.append("")
+    groups = _group_by_strategy(trades, ran)
+    for name, group in groups.items():
+        L.append(f"<b>━━ {_esc(name)} ━━</b>")
+        if not group:
+            # A strategy that ran and took nothing. Worth a line: an absent
+            # group and a flat one look identical, and only one of them means
+            # something went wrong with the feed.
+            L += ["no trades", ""]
+            continue
+        for t in group:
+            L += _trade_lines(t)
+        L += _total_block(f"{name} subtotal", _totals(group),
+                          bold_net=False) + [""]
 
-    gross = sum(t["gross"] for t in trades)
-    comm = sum(t["commission"] for t in trades)
-    net = sum(t["net"] for t in trades)
-    wins = sum(1 for t in trades if t["net"] > 0)
-    sign = "🟢" if net >= 0 else "🔴"
-    L += [f"<b>{len(trades)} trade(s)   {wins} up / {len(trades) - wins} down"
-          f"</b>",
-          f"gross      {_money(gross)}",
-          f"commission {_money(comm)}",
-          f"{sign} <b>NET       {_money(net)}</b>"]
+    grand = _totals(trades)
+    L += ["<b>━━━━━━━━━━━━━━</b>"]
+    L += _total_block("GRAND TOTAL", grand, bold_net=True)
+
+    # THE CHECK. See the docstring: these agree unless the grouping lost a
+    # trade, and then the subtotals still add up among themselves.
+    summed = sum(_totals(g)["net"] for g in groups.values())
+    if abs(summed - grand["net"]) > 0.005:
+        L += ["",
+              f"⚠️ the subtotals sum to {_money(summed)} but the grand total",
+              f"over all {grand['n']} trade(s) is {_money(grand['net'])}. The",
+              "grouping lost something — trust neither until that is found."]
 
     bad = [t for t in trades if not t["reconciles"]]
     if bad:
@@ -795,12 +880,36 @@ def session_summary(rows: list[dict], now: datetime | None = None,
               "trade_pnl. Commission here is recomputed, so a mismatch means",
               "one of the two is wrong — check before trusting this total."]
 
-    opens = sum(1 for r in rows
-                if (r.get("action") or "").upper() == "BUY"
-                and (r.get("status") or "") == "FILLED")
     if opens > len(trades):
         L += ["", f"⚠️ {opens - len(trades)} position(s) still open — this "
                   "total covers closed trades only"]
+
+    text = "\n".join(L)
+    return text if len(text) <= TELEGRAM_MAX_CHARS else _totals_only(
+        groups, grand, rows, now, strategy, opens, bad)
+
+
+def _totals_only(groups, grand, rows, now, strategy, opens, bad) -> str:
+    """The same summary with the per-trade lines dropped.
+
+    Telegram REFUSES a message over 4,096 characters rather than truncating it,
+    so a busy night would lose the entire end-of-session report -- the one
+    message that matters most. Grouping adds four lines per strategy, which
+    moves that edge closer, so the overflow now costs the detail instead of the
+    whole thing. The totals are the point; the trade list is the detail.
+    """
+    L = [header(now), f"<b>{_esc((strategy or 'SESSION').upper())} SUMMARY</b>",
+         "(too long for one message — per-trade lines dropped)", ""]
+    for name, group in groups.items():
+        s = _totals(group)
+        sign = "🟢" if s["net"] >= 0 else "🔴"
+        L.append(f"{sign} <b>{_esc(name)}</b>  {s['n']} trade(s)  "
+                 f"{s['wins']}↑/{s['n'] - s['wins']}↓  {_money(s['net'])}")
+    L += [""] + _total_block("GRAND TOTAL", grand, bold_net=True)
+    if bad:
+        L += ["", f"⚠️ {len(bad)} trade(s) do not reconcile with the log."]
+    if opens > grand["n"]:
+        L += ["", f"⚠️ {opens - grand['n']} position(s) still open."]
     return "\n".join(L)
 
 

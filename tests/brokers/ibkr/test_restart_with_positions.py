@@ -283,7 +283,11 @@ def test_the_summary_actually_goes_out_at_shutdown(tmp_path):
     tg = FakeTg()
     M.finish_session(tg, a_session(tmp_path), ["MCL"])
     assert len(tg.sent) == 1
-    assert "BNC" in tg.sent[0] and "NET" in tg.sent[0]
+    # "GRAND TOTAL" since 2026-09-11, when the summary grew per-strategy
+    # subtotals. What is asserted is that a real total went out with the
+    # trade in it, not the wording it happens to use.
+    assert "BNC" in tg.sent[0] and "GRAND TOTAL" in tg.sent[0]
+    assert "━━ MCL ━━" in tg.sent[0], "the strategy the trader ran is named"
 
 
 def test_no_summary_suppresses_it_but_still_flushes(tmp_path):
