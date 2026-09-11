@@ -160,30 +160,29 @@ def test_a_floor_past_every_signal_returns_no_trades_rather_than_failing():
 
 def test_run_day_counts_the_symbol_days_where_the_floor_bit():
     df = frame()
-    _, bit, seen = P.run_day(df, D.isoformat(), [rec(h=9, m=0)],
-                             mod=MCL, extra=dict(use_apex=False,
-                                                 require_macd_pos=True),
-                             floor=True)
+    rows, free, bit, seen = P.run_day(
+        df, D.isoformat(), [rec(h=9, m=0)], mod=MCL,
+        extra=dict(use_apex=False, require_macd_pos=True), floor=True)
     assert bit == 1 and seen == 1
+    assert len(free) > len(rows), "unfloored arm did not keep the extra trades"
 
 
 def test_run_day_with_no_floor_never_counts_a_bite():
     """The stage-2 arm has no first_seen and must not be charged with one."""
     df = frame()
-    rows, bit, seen = P.run_day(df, D.isoformat(),
-                                [{"symbol": "AAA", "date": D.isoformat(),
-                                  "first_seen": None}],
-                                mod=MCL, extra=dict(use_apex=False,
-                                                    require_macd_pos=True),
-                                floor=False)
+    rows, free, bit, seen = P.run_day(
+        df, D.isoformat(),
+        [{"symbol": "AAA", "date": D.isoformat(), "first_seen": None}],
+        mod=MCL, extra=dict(use_apex=False, require_macd_pos=True), floor=False)
     assert bit == 0 and seen == 1
+    assert rows == free, "an unfloored arm must be its own unfloored twin"
 
 
 def test_a_symbol_with_no_bars_is_skipped_not_crashed():
     df = frame(sym="AAA")
-    rows, bit, seen = P.run_day(df, D.isoformat(), [rec(sym="ZZZ")],
-                                mod=MCL, extra={}, floor=True)
-    assert rows == [] and bit == 0 and seen == 0,  "a missing name was counted"
+    rows, free, bit, seen = P.run_day(df, D.isoformat(), [rec(sym="ZZZ")],
+                                      mod=MCL, extra={}, floor=True)
+    assert rows == [] and free == [] and bit == 0 and seen == 0
 
 
 # --- 3. the early arm is derived, not re-run --------------------------------
@@ -221,17 +220,24 @@ def trades(spec):
             for d, s, n in spec]
 
 
-def arms(per, n=200):
+def arms(per, n=200, unfloored=None):
     t = trades([(f"2026-{1 + i % 9:02d}-01", f"S{i}", per + 4.26)
                 for i in range(n)])
-    return {"stage2": t, "pit": t, "early": t}
+    u = trades([(f"2026-{1 + i % 9:02d}-01", f"S{i}", (unfloored or per) + 4.26)
+                for i in range(n)])
+    return {"stage2": t, "pit": t, "early": t, "pit_unfloored": u}
 
 
-def out(per=1.0, bit=7, counts=None, with_bars=None):
-    counts = counts or {"stage2": 500, "pit": 400, "early": 100}
+# Sized so the arm trades at H0's own rate (4,568 trades over 4,997 symbol-days).
+# A fixture with 200 trades over 4,997 offered would make the two denominators
+# disagree in EVERY test -- which is a true statement about that fixture and
+# tells you nothing about the branch under test.
+def out(per=1.0, bit=7, counts=None, with_bars=None, n=P.H0_PIT_TRADES,
+        unfloored=None):
+    counts = counts or {"stage2": 500, "pit": P.H0_PIT_OFFERED, "early": 100}
     return "\n".join(P.render(
-        "mcl", arms(per), {"pit": bit, "early": None}, counts,
-        with_bars or dict(counts), "2026-05-01", 500, 0, 1.0))
+        "mcl", arms(per, n, unfloored), {"pit": bit, "early": None}, counts,
+        with_bars or dict(counts), "2026-05-01", 500, 0, 1.0, traded_early=60))
 
 
 def test_a_floor_that_never_bit_refuses_every_verdict():
@@ -265,7 +271,7 @@ def test_beating_the_control_while_still_losing_is_said_plainly():
     """The likeliest outcome, and the one most open to being written up as a
     win. -$5 beats H0's -$15.78 and is still -$5."""
     o = out(per=-5.0)
-    assert "beat the control and still lose money" in o
+    assert "beat the control on both denominators and still" in o
 
 
 def test_losing_to_the_control_says_the_old_verdict_stands():
@@ -351,3 +357,68 @@ def test_even_attrition_draws_no_caveat():
 
 def test_each_arm_reports_how_many_names_had_bars():
     assert "had bars on this tape" in out()
+
+
+# --- the two-denominator guard ----------------------------------------------
+
+def test_the_two_denominators_are_both_printed():
+    o = out()
+    assert "/symbol-day" in o
+    assert "trades per symbol-day against H0's" in o
+
+
+def test_a_denominator_disagreement_refuses_a_verdict():
+    """The MC5 case from 2026-09-11: a strategy taking MORE trades per
+    symbol-day than H0 can look better per trade and worse per opportunity.
+    The first version printed only the per-trade figure and called it a win."""
+    per_trade, per_day, agree = P.beats_control(
+        -77_662.0, 5_451, 4_997,
+        P.H0_PIT_NET, P.H0_PIT_TRADES, P.H0_PIT_OFFERED)
+    assert per_trade > 0 > per_day
+    assert not agree
+
+    o = out(per=-77_662.0 / 5_451, n=5_451)
+    assert "THE TWO DENOMINATORS DISAGREE" in o
+    assert "Neither figure may be quoted alone" in o
+    for banned in ("beat the control on both", "do NOT beat the control"):
+        assert banned not in o
+
+
+def test_a_trade_rate_matching_h0_lets_a_verdict_through():
+    assert "THE TWO DENOMINATORS DISAGREE" not in out(per=-5.0)
+
+
+# --- the H0 reference cannot go stale silently ------------------------------
+
+def test_a_universe_of_a_different_size_flags_the_h0_reference_as_stale():
+    """H0's figures belong to one universe file. If screen_sim is re-run and
+    the universe changes size, comparing to them is comparing two universes --
+    which is the failure this whole module exists to stop doing."""
+    o = out(counts={"stage2": 500, "pit": P.H0_PIT_OFFERED + 1, "early": 100})
+    assert "STALE REFERENCE" in o
+    assert "pit_h0" in o
+
+
+def test_the_matching_universe_draws_no_stale_warning():
+    assert "STALE REFERENCE" not in out()
+
+
+# --- the leak decomposes ----------------------------------------------------
+
+def test_the_leak_is_reported_as_two_leaks_not_one():
+    """A universe chosen with hindsight and a name bought before the screen
+    showed it are different mistakes, fixed in different places. Reporting
+    their sum as 'the look-ahead' hides which one is doing the damage."""
+    o = out(per=-10.0, unfloored=-6.0)
+    assert "universe leak" in o and "intraday leak" in o
+    assert "POINT-IN-TIME, no floor" in o
+
+
+def test_the_early_arms_hit_rate_is_not_labelled_as_tape_coverage():
+    """The early arm is a SUBSET of an arm with full bar coverage, so it cannot
+    have attrition of its own. The first version printed its trade hit rate in
+    the coverage column and it read as 71% of names missing from the tape."""
+    o = out()
+    i = o.index("EARLY NAMES ONLY")
+    seg = o[i:i + 400]
+    assert "produced at least one trade" in seg

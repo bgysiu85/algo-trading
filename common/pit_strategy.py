@@ -97,11 +97,19 @@ ENTRY_FLOOR_ARM = dtime(4, 30)   # what "early" means, matching H0's entry time
 
 # H0 on these same two universes, from var/reports/pit_h0.txt generated
 # 2026-09-11. Quoted so the strategy arms can be read against their own control
-# instead of against a bracket from a different tape. RE-RUN `pit_h0` AND UPDATE
-# THESE IF THE UNIVERSE FILE CHANGES -- a stale reference here would be read as
-# a moving strategy result.
-H0_PIT_AS_SCREENED = -15.78
-H0_PIT_KNOWABLE = -14.64
+# instead of against a bracket from a different tape.
+#
+# NET AND OFFERED, not per-trade, because the per-trade figure alone cannot be
+# compared safely -- see `beats_control()`. `H0_PIT_OFFERED` is also the staleness
+# guard: if this run's universe does not offer exactly that many symbol-days, the
+# reference belongs to a different universe file and the report says so instead
+# of quietly comparing two things.
+H0_PIT_NET = -72_086.0        # AS SCREENED, at $4.26
+H0_PIT_TRADES = 4_568
+H0_PIT_OFFERED = 4_997
+H0_KNOWABLE_NET = -10_440.0   # KNOWABLE AT 04:30, at $4.26
+H0_KNOWABLE_TRADES = 713
+H0_KNOWABLE_OFFERED = 789
 H0_REFERENCE_SOURCE = "var/reports/pit_h0.txt, 2026-09-11"
 
 # The warm-up the published backtests use, imported rather than restated: 2
@@ -161,6 +169,31 @@ def load_stage2(path: Path, dates: set[str]) -> dict[str, list[dict]]:
     return dict(out)
 
 
+def beats_control(net: float, trades: int, offered: int,
+                  h0_net: float, h0_trades: int,
+                  h0_offered: int) -> tuple[float, float, bool]:
+    """Does the strategy beat H0? Returns (per-trade edge, per-day edge, agree).
+
+    TWO DENOMINATORS, AND THEY CAN DISAGREE. H0 takes at most one trade per
+    symbol-day; a strategy takes as many as it likes, so per-trade and
+    per-opportunity are different questions and the strategy's own selectivity
+    is what separates them. A rule that trades half as often looks better per
+    trade almost by construction; a rule that trades MORE often can look better
+    per trade while losing more money per opportunity.
+
+    That is not hypothetical. On the 2026-09-11 run MC5 came out +1.53/trade
+    against H0 and -1.11 per symbol-day -- a sign flip hidden entirely in the
+    choice of denominator, and the first version of this report printed only
+    the flattering one. When they disagree there is no verdict to draw, and
+    `agree` says so.
+    """
+    per_trade = (net / trades if trades else 0.0) - (h0_net / h0_trades
+                                                     if h0_trades else 0.0)
+    per_day = (net / offered if offered else 0.0) - (h0_net / h0_offered
+                                                     if h0_offered else 0.0)
+    return per_trade, per_day, (per_trade > 0) == (per_day > 0)
+
+
 def is_early(rec: dict) -> bool:
     return bool(rec["first_seen"]) and first_seen_time(rec) <= ENTRY_FLOOR_ARM
 
@@ -193,7 +226,13 @@ def early_trades(pit_rows: list[dict]) -> list[dict]:
 
 def run_day(frame: pd.DataFrame, day: str, universe: list[dict], *,
             mod, extra: dict, floor: bool) -> tuple[list[dict], int, int]:
-    """One session. Returns (trade rows, floor bites, symbol-days WITH BARS).
+    """One session. Returns (floored rows, UNFLOORED rows, bites, with-bars).
+
+    The unfloored rows were already being computed to count the bites and were
+    previously thrown away. Keeping them splits the leak in two -- the universe
+    was chosen with the day known, AND names were bought before the screen would
+    have shown them -- where the first version of this reported their sum as one
+    number and called it "the look-ahead alone".
 
     THE THIRD RETURN IS NOT BOOKKEEPING. The stage-2 universe was built on
     EQUS.SUMMARY and is being replayed here on XNAS.BASIC; any of its names
@@ -217,6 +256,7 @@ def run_day(frame: pd.DataFrame, day: str, universe: list[dict], *,
     """
     d = _date.fromisoformat(day)
     out: list[dict] = []
+    unfloored: list[dict] = []
     bit = 0
     with_bars = 0
     for rec in universe:
@@ -227,8 +267,8 @@ def run_day(frame: pd.DataFrame, day: str, universe: list[dict], *,
         nb = first_seen_time(rec) if (floor and rec["first_seen"]) else None
         try:
             if nb is None:
-                trades = mod.backtest_session(df, d, ET, entry_shares=QTY,
-                                              **extra)
+                trades = free = mod.backtest_session(df, d, ET,
+                                                     entry_shares=QTY, **extra)
             else:
                 free = mod.backtest_session(df, d, ET, entry_shares=QTY,
                                             **extra)
@@ -242,12 +282,13 @@ def run_day(frame: pd.DataFrame, day: str, universe: list[dict], *,
             # study here. Both calls are inside the guard together, so they can
             # never disagree about whether the session existed.
             continue
-        for t in trades:
-            row = asdict(t)
-            row.update(symbol=rec["symbol"], date=day,
-                       first_seen=rec["first_seen"])
-            out.append(row)
-    return out, bit, with_bars
+        for src, dst in ((trades, out), (free, unfloored)):
+            for t in src:
+                row = asdict(t)
+                row.update(symbol=rec["symbol"], date=day,
+                           first_seen=rec["first_seen"])
+                dst.append(row)
+    return out, unfloored, bit, with_bars
 
 
 def needed_symbols(universes: list[dict[str, list[dict]]], days: list[str],
@@ -305,7 +346,7 @@ def arm_rows(trades: list[dict], split: str) -> list[str]:
 
 def render(name: str, arms: dict, suppressed: dict, counts: dict,
            with_bars: dict, split: str, n_days: int, warmup_missing: int,
-           elapsed: float) -> list[str]:
+           elapsed: float, traded_early: int = 0) -> list[str]:
     L = [f"{name.upper()} ON THE POINT-IN-TIME UNIVERSE", "",
          f"  {n_days} sessions, {WARMUP_SESSIONS} session(s) of warm-up, "
          f"{QTY} shares, friction charged per round trip",
@@ -332,11 +373,16 @@ def render(name: str, arms: dict, suppressed: dict, counts: dict,
              "the point-in-time subset first seen by 04:30, same floor")):
         off, seen = counts[key], with_bars[key]
         pct = f" ({100.0 * seen / off:.0f}%)" if off else ""
-        L += [label, "",
-              f"  {note}",
-              f"  {off:,} symbol-days offered, {seen:,} had bars on this "
-              f"tape{pct}",
-              ""] + arm_rows(arms[key], split) + [""]
+        head = (f"  {off:,} symbol-days offered, {seen:,} had bars on this "
+                f"tape{pct}")
+        if key == "early":
+            # Named separately from the coverage line because it is a HIT RATE,
+            # not tape coverage, and conflating the two is the error this
+            # section was rewritten to remove.
+            head += (f"\n  {traded_early:,} of them produced at least one "
+                     f"trade")
+        L += [label, "", f"  {note}", head, ""] + arm_rows(arms[key], split)
+        L += [""]
 
     ran = with_bars["pit"] or 1
     L += ["IS THE FLOOR CONNECTED TO ANYTHING", "",
@@ -370,12 +416,28 @@ def render(name: str, arms: dict, suppressed: dict, counts: dict,
               "  A difference read off a handful of trades is a difference",
               "  between a handful of trades.", ""]
     else:
-        L += [f"  STAGE-2        {s2['per']:+.2f}/trade over {s2['n']:,}",
-              f"  POINT-IN-TIME  {pit['per']:+.2f}/trade over {pit['n']:,}",
-              f"  the leak       {s2['per'] - pit['per']:+.2f}/trade", "",
-              "  Everything else is held constant, so this subtraction is the",
-              "  look-ahead alone -- the number `pit_h0` could not isolate",
-              "  because its bracket came from a different tape.", ""]
+        uf = score(arms.get("pit_unfloored", []), split, 4.26)
+        L += [f"  STAGE-2                    {s2['per']:+.2f}/trade over "
+              f"{s2['n']:,}",
+              f"  POINT-IN-TIME, no floor    {uf['per']:+.2f}/trade over "
+              f"{uf['n']:,}",
+              f"  POINT-IN-TIME, floored     {pit['per']:+.2f}/trade over "
+              f"{pit['n']:,}", ""]
+        if uf["n"]:
+            L += [f"    universe leak  {s2['per'] - uf['per']:+.2f}   "
+                  f"(which names, chosen with the day known)",
+                  f"    intraday leak  {uf['per'] - pit['per']:+.2f}   "
+                  f"(bought before the screen would have shown them)",
+                  f"    total          {s2['per'] - pit['per']:+.2f}", ""]
+        else:
+            L += [f"  the leak       {s2['per'] - pit['per']:+.2f}/trade", ""]
+        L += ["  Everything else is held constant -- same tape, same slices,",
+              "  same dates -- so these are the look-ahead alone, which is the",
+              "  number `pit_h0` could not isolate because its bracket came",
+              "  from a different tape. They are TWO leaks and are reported as",
+              "  two: a universe chosen with hindsight is a different mistake",
+              "  from buying a name before it was on the list, and they are",
+              "  fixed in different places.", ""]
         keep = [(100.0 * with_bars[k] / counts[k]) if counts[k] else 0.0
                 for k in ("stage2", "pit")]
         if abs(keep[0] - keep[1]) > 10.0:
@@ -387,30 +449,63 @@ def render(name: str, arms: dict, suppressed: dict, counts: dict,
                   "  difference is which names survived the tape rather than",
                   "  the look-ahead. Read it as an upper bound.", ""]
 
+    h0_trade = H0_PIT_NET / H0_PIT_TRADES
+    h0_day = H0_PIT_NET / H0_PIT_OFFERED
     L += ["DO THE RULES BEAT THEIR OWN CONTROL", "",
-          f"  H0 on this universe, as screened   {H0_PIT_AS_SCREENED:+.2f}",
-          f"  H0 on this universe, early only    {H0_PIT_KNOWABLE:+.2f}",
-          f"  ({H0_REFERENCE_SOURCE})", ""]
+          f"  H0 on this universe, as screened   {h0_trade:+.2f}/trade   "
+          f"{h0_day:+.2f}/symbol-day",
+          f"  ({H0_REFERENCE_SOURCE})"]
+    if counts["pit"] != H0_PIT_OFFERED:
+        L += ["",
+              f"  STALE REFERENCE: H0 was scored over {H0_PIT_OFFERED:,} "
+              f"symbol-days and this run",
+              f"  offered {counts['pit']:,}. The universe file has changed, so "
+              "the comparison below",
+              "  is between two different universes. Re-run "
+              "`python -m common.pit_h0`",
+              "  and update the H0_* constants before quoting any of it."]
+    L.append("")
     if pit["n"] >= MIN_TRADES:
-        edge = pit["per"] - H0_PIT_AS_SCREENED
-        L += [f"  {name.upper()} POINT-IN-TIME      {pit['per']:+.2f}"
-              f" over {pit['n']:,}",
-              f"  vs H0                       {edge:+.2f}/trade", ""]
-        if edge > 0 and pit["per"] > 0:
-            L += ["  The rules beat the control AND clear zero. This is the",
-                  "  first time that has been true on an honest universe, so",
-                  "  it wants the holdout spent on it before it is believed --",
-                  "  not another in-sample variation.", ""]
-        elif edge > 0:
-            L += ["  The rules beat the control and still lose money. Selection",
-                  "  is doing something real; it is not doing enough. A better",
-                  "  entry on a universe with no edge in it is still a loss.",
-                  ""]
+        per_trade, per_day, agree = beats_control(
+            pit["net"], pit["n"], counts["pit"],
+            H0_PIT_NET, H0_PIT_TRADES, H0_PIT_OFFERED)
+        L += [f"  {name.upper()} POINT-IN-TIME      "
+              f"{pit['per']:+.2f}/trade   "
+              f"{pit['net'] / (counts['pit'] or 1):+.2f}/symbol-day",
+              f"  vs H0                       {per_trade:+.2f}        "
+              f"{per_day:+.2f}",
+              f"  ({pit['n'] / (counts['pit'] or 1):.2f} trades per symbol-day "
+              f"against H0's {H0_PIT_TRADES / H0_PIT_OFFERED:.2f})", ""]
+        if not agree:
+            L += ["  NO VERDICT -- THE TWO DENOMINATORS DISAGREE. Per trade "
+                  "and per",
+                  "  opportunity give opposite answers, and which one flatters "
+                  "the",
+                  "  strategy is decided by how often it chooses to trade "
+                  "rather than",
+                  "  by how well it trades. A rule taking fewer, larger bets "
+                  "looks",
+                  "  better per trade by construction; one taking more looks "
+                  "worse.",
+                  "  Neither figure may be quoted alone.", ""]
+        elif per_trade > 0 and pit["per"] > 0:
+            L += ["  The rules beat the control on BOTH denominators and clear",
+                  "  zero. This is the first time that has been true on an",
+                  "  honest universe, so it wants the holdout spent on it "
+                  "before",
+                  "  it is believed -- not another in-sample variation.", ""]
+        elif per_trade > 0:
+            L += ["  The rules beat the control on both denominators and still",
+                  "  lose money. Selection is doing something real; it is not",
+                  "  doing enough. A better entry on a universe with no edge in",
+                  "  it is still a loss.", ""]
         else:
-            L += ["  The rules do NOT beat the control. On the honest universe",
-                  "  the signal is worth less than buying the screen outright,",
-                  "  which is the same verdict the old universe gave -- it was",
-                  "  simply being read against an inflated control.", ""]
+            L += ["  The rules do NOT beat the control, on either denominator.",
+                  "  On the honest universe the signal is worth less than "
+                  "buying",
+                  "  the screen outright -- the same verdict the old universe",
+                  "  gave, which was simply being read against an inflated",
+                  "  control.", ""]
     if early["n"] >= MIN_TRADES and pit["n"] >= MIN_TRADES:
         L += ["DO THE EARLY NAMES BEHAVE DIFFERENTLY", "",
               f"  EARLY ONLY     {early['per']:+.2f}/trade over {early['n']:,}",
@@ -482,6 +577,7 @@ def main(argv=None) -> int:
 
     t0 = time.time()
     arms: dict[str, list[dict]] = {k: [] for k in universes}
+    arms["pit_unfloored"] = []
     suppressed = {k: 0 for k in universes}
     counts = {k: 0 for k in universes}
     with_bars = {k: 0 for k in universes}
@@ -506,11 +602,14 @@ def main(argv=None) -> int:
             if not recs:
                 continue
             counts[key] += len(recs)
-            rows, bit, seen = run_day(frame, day, recs, mod=mod, extra=extra,
-                                      floor=(key != "stage2"))
+            rows, free, bit, seen = run_day(frame, day, recs, mod=mod,
+                                            extra=extra,
+                                            floor=(key != "stage2"))
             arms[key] += rows
             suppressed[key] += bit
             with_bars[key] += seen
+            if key == "pit":
+                arms["pit_unfloored"] += free
         early_offered += sum(1 for r in pit.get(day, ()) if is_early(r))
         if i % 25 == 0:
             print(f"  {i}/{len(days)}  {day}  "
@@ -519,12 +618,21 @@ def main(argv=None) -> int:
     arms["early"] = early_trades(arms["pit"])
     counts["early"] = early_offered
     suppressed["early"] = None      # derived: it has no separate run to count
-    with_bars["early"] = len({(t["symbol"], t["date"]) for t in arms["early"]})
+    # THE EARLY ARM IS A SUBSET OF `pit`, WHICH HAD BARS FOR EVERYTHING IT WAS
+    # OFFERED, so its with-bars count is its offered count. The first version
+    # put the number of symbol-days that produced TRADES here instead, and
+    # printed it in the same column, under the same words, as the other arms'
+    # bar coverage. It read as 71% tape attrition inside a subset of an arm
+    # showing 100% -- an impossible number that nothing flagged, because a hit
+    # rate and a coverage rate are both plausible percentages.
+    with_bars["early"] = early_offered
+    traded_early = len({(t["symbol"], t["date"]) for t in arms["early"]})
 
     split = halves_split([t["date"] for t in arms["pit"]]
                          or [t["date"] for t in arms["stage2"]])
     emit("\n".join(render(name, arms, suppressed, counts, with_bars, split,
-                          len(days), warmup_missing, time.time() - t0)),
+                          len(days), warmup_missing, time.time() - t0,
+                          traded_early=traded_early)),
          out_path,
          header=f"common.pit_strategy  strategy={name}  pairs={a.pairs}"
                 + (f"  LIMIT {a.limit}" if a.limit else ""))
