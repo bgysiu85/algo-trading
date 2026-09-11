@@ -222,11 +222,14 @@ def test_mostly_unpaired_trades_reads_as_a_tape_artefact():
     assert "TAPE artefact" in out
 
 
-def test_paired_trades_with_a_large_gap_points_at_the_exits():
+def test_paired_trades_that_ALSO_differ_point_at_the_exits():
+    """Every paired trade here differs by $4.69, so the exits really are where
+    the gap lives and the report should say so."""
     out = "\n".join(TC.render(g_with(90, 5, 5, pa=-5.22, pb=-0.53),
                               "xnas", "db"))
-    assert "That is the EXITS" in out
+    assert "this is the EXITS" in out
     assert "FEWER THAN HALF" not in out
+    assert "It is SELECTION" not in out
 
 
 def test_agreement_sends_the_reader_to_the_universe():
@@ -304,3 +307,80 @@ def test_the_identity_case_reaches_the_agreement_verdict():
         pytest.skip("bar_cache is not populated in this environment")
     out = "\n".join(TC.render(TC.collect(sessions, sessions), "x", "y"))
     assert "it is NOT the tape" in out
+
+
+# --- the misattribution the first real run made -----------------------------
+
+def test_identical_paired_trades_point_at_SELECTION_and_not_the_exits():
+    """THE DEFECT THE 2026-09-11 RUN EXPOSED. xnas-vs-IB printed
+
+        'That is the EXITS: the same entries, held on two tapes, ending
+         differently'
+
+    directly beneath a paired block reading $0.00 median delta, 100% the same
+    exit reason and a 0.0-bar difference. The shared trades ended IDENTICALLY.
+    The whole -$2.06 came from the 98 and 93 trades only one tape took.
+
+    The branch tested `abs(pa - pb) > 2.0` without ever asking whether the
+    paired trades differed — a plausible sentence about the wrong mechanism,
+    which is worse than no sentence.
+    """
+    # A paired MAJORITY — otherwise the "fewer than half pair" branch answers
+    # first and this test is about a different verdict.
+    g = g_with(90, 25, 25, pa=0.0, pb=0.0)
+    # The aggregate differs; the shared trades do not.
+    g["trades_a"], g["net_a"] = 100, -310.0
+    g["trades_b"], g["net_b"] = 100, -104.0
+    out = "\n".join(TC.render(g, "xnas", "ib"))
+    assert "It is SELECTION" in out
+    assert "the EXITS" not in out
+
+
+def test_the_paired_block_reports_a_mean_and_a_tail_share():
+    """A MEDIAN OF ZERO cannot separate 'all identical' from 'large offsetting
+    differences'. The first version printed medians only, and that is what let
+    the misattribution above read as verified agreement."""
+    out = "\n".join(TC.render(g_with(90, 5, 5, pa=-5.22, pb=-0.53),
+                              "xnas", "db"))
+    assert "MEAN a - b" in out
+    assert "differ by over $1" in out
+
+
+def test_offsetting_differences_do_not_read_as_agreement():
+    """Half the paired trades +$5 and half -$5 medians to zero. That is not
+    agreement and must not be scored as it."""
+    g = g_with(0, 0, 0)
+    g["paired"] = ([("A", "2026-03-02", T(ts(10), 5.0), T(ts(10), 0.0), 0.0)] * 45
+                   + [("A", "2026-03-02", T(ts(10), 0.0), T(ts(10), 5.0), 0.0)] * 45)
+    g["trades_a"], g["net_a"] = 100, -310.0
+    g["trades_b"], g["net_b"] = 100, -104.0
+    out = "\n".join(TC.render(g, "xnas", "ib"))
+    assert "100.0" in out.split("differ by over $1")[1][:24]
+    assert "It is SELECTION" not in out, "offsetting spread read as agreement"
+
+
+# --- the coverage narrative reads the measurement, it does not assert -------
+
+def test_the_range_direction_is_measured_not_assumed():
+    """The first version asserted 'a thinner tape has a narrower range' and
+    then printed 1.40x for the thinner tape. A tape can be thinner overall and
+    have WIDER bars, because the minutes it misses entirely are the quiet ones
+    and the ones it keeps are the active ones."""
+    g = g_with(90, 5, 5)
+    g["bars"] = [{"minutes": 10, "vol_ratio": 0.62,
+                  "range_a": 0.0102, "range_b": 0.0073}]
+    out = "\n".join(TC.render(g, "xnas", "ib"))
+    assert "1.40x" in out
+    assert "tape with the WIDER range (xnas) trips it sooner" in out
+    assert "measured, not assumed" in out
+
+
+def test_a_tape_whose_median_minute_has_no_range_is_called_out():
+    """EQUS.MINI's median minute is high == low: at ~5% of the tape a typical
+    minute is a single print, and every intrabar rule — the trail included —
+    is running against a degenerate bar."""
+    g = g_with(90, 5, 5)
+    g["bars"] = [{"minutes": 10, "vol_ratio": 7.18,
+                  "range_a": 0.0050, "range_b": 0.0}]
+    out = "\n".join(TC.render(g, "xnas", "db"))
+    assert "NO RANGE AT ALL" in out and "single print" in out

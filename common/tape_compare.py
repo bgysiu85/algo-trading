@@ -268,12 +268,23 @@ def render(g, name_a, name_b) -> list[str]:
           f"  volume ratio a/b, median {med(vr):>9.3f}",
           f"  minute range /close, {name_a:<10}{med(ra):>9.4f}",
           f"  minute range /close, {name_b:<10}{med(rb):>9.4f}", ""]
-    if med(ra) == med(ra) and med(rb) == med(rb) and med(rb) > 0:
-        L += [f"  A narrower minute range means an intrabar trail is tested",
-              f"  against a shallower low. {name_a}'s median range is "
-              f"{med(ra) / med(rb):.2f}x {name_b}'s,",
-              "  so the trail should fire less often on whichever is thinner —",
-              "  before any strategy logic is involved.", ""]
+    if med(rb) == med(rb) and med(rb) > 0 and med(ra) == med(ra):
+        r = med(ra) / med(rb)
+        wider, thinner = (name_a, name_b) if r > 1 else (name_b, name_a)
+        L += [f"  {name_a}'s median minute range is {r:.2f}x {name_b}'s.",
+              "",
+              "  A trailing stop is an intrabar test against the low, so the",
+              f"  tape with the WIDER range ({wider}) trips it sooner. Note",
+              "  the direction is measured, not assumed: a tape can be thinner",
+              "  overall and still have wider bars, because the minutes it",
+              "  misses entirely are the QUIET ones and the ones it keeps are",
+              "  the active ones. Compare the minutes-only-on-one-side counts",
+              "  above before reading the range as coverage.", ""]
+    elif med(rb) == 0.0:
+        L += [f"  {name_b}'s MEDIAN MINUTE HAS NO RANGE AT ALL — high equals",
+              "  low. That is a tape thin enough that a typical minute is a",
+              "  single print, and every intrabar rule, the trail included, is",
+              "  running against a degenerate bar rather than a range.", ""]
 
     pa = g["net_a"] / g["trades_a"] if g["trades_a"] else 0.0
     pb = g["net_b"] / g["trades_b"] if g["trades_b"] else 0.0
@@ -294,16 +305,28 @@ def render(g, name_a, name_b) -> list[str]:
           f"  {name_b + ' only':<24}{n_b:>6}"
           f"   {100.0 * n_b / total if total else 0:>5.1f}%", ""]
 
+    agree = None
     if n_p:
         gaps = [gap for _, _, _, _, gap in g["paired"]]
         dnet = [net(x) - net(y) for _, _, x, y, _ in g["paired"]]
         dbars = [x.bars_held - y.bars_held for _, _, x, y, _ in g["paired"]]
         same = sum(1 for _, _, x, y, _ in g["paired"] if x.reason == y.reason)
+        # A MEDIAN OF ZERO CANNOT TELL "all identical" FROM "large offsetting
+        # differences". The first version printed only medians, and on the
+        # xnas-vs-IB run that read as perfect agreement on trades that had
+        # never been checked for spread. Mean and a tail share, always.
+        mean_d = sum(dnet) / n_p
+        differ = sum(1 for d in dnet if abs(d) > 1.0)
+        agree = (differ / n_p < 0.10 and abs(mean_d) < 1.0
+                 and same / n_p > 0.95)
         L += ["  ON THE PAIRED TRADES — same setup, two tapes", "",
               f"    entry gap, median            {med(gaps):>8.1f} min",
               f"    same exit reason             {100.0 * same / n_p:>8.1f}%",
               f"    bars held, median a - b      {med(dbars):>8.1f}",
-              f"    net per trade, median a - b  ${med(dnet):>7.2f}", ""]
+              f"    net per trade, median a - b  ${med(dnet):>7.2f}",
+              f"    net per trade, MEAN a - b    ${mean_d:>7.2f}",
+              f"    differ by over $1            "
+              f"{100.0 * differ / n_p:>8.1f}%", ""]
         if med(gaps) > 1.0:
             L += ["    THE ENTRIES DO NOT LINE UP. A median gap over a minute",
                   "    is not a reporting delay — the two tapes are arming on",
@@ -318,11 +341,24 @@ def render(g, name_a, name_b) -> list[str]:
               "  not describe the other, and the 10x gap between the screened",
               "  and xnas runs is a TAPE artefact rather than a property of",
               "  MCL.", ""]
+    elif abs(pa - pb) > 2.0 and agree:
+        # THE MISATTRIBUTION THE FIRST RUN MADE. xnas-vs-IB printed "that is
+        # the EXITS" directly beneath a paired block showing a $0.00 median
+        # delta, 100% the same exit reason and a 0.0-bar difference. The
+        # paired trades ended IDENTICALLY; the whole gap came from the 98 and
+        # 93 trades the two tapes did not share. Attributing to the exits
+        # there was a plausible sentence about the wrong mechanism.
+        L += [f"  The per-trade result differs by ${abs(pa - pb):.2f}, and the",
+              "  trades the two tapes SHARE end identically — see the paired",
+              "  block above. So this is not the exits. It is SELECTION: the",
+              f"  {n_a + n_b} trades only one tape took are carrying the whole",
+              "  difference, and which tape you hold decides which trades the",
+              "  strategy takes at all.", ""]
     elif abs(pa - pb) > 2.0:
         L += [f"  The trades largely pair, and the per-trade result still",
-              f"  differs by ${abs(pa - pb):.2f}. That is the EXITS: the same",
-              "  entries, held on two tapes, ending differently. Read the",
-              "  coverage block — a narrower minute range is the mechanism.", ""]
+              f"  differs by ${abs(pa - pb):.2f}. The paired trades also differ,",
+              "  so this is the EXITS: the same entries, held on two tapes,",
+              "  ending differently. Read the coverage block.", ""]
     else:
         L += ["  The two tapes agree, on the matched days, to within $2 a",
               "  trade. Whatever separates the screened run from the xnas run,",
