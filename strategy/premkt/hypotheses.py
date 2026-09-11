@@ -100,7 +100,8 @@ def _local_times(df: pd.DataFrame, tz) -> np.ndarray:
 
 # --- H0: buy the screen ---------------------------------------------------------
 
-def signal_h0(df: pd.DataFrame, session_date, tz) -> pd.DataFrame:
+def signal_h0(df: pd.DataFrame, session_date, tz,
+              not_before: "dtime | None" = None) -> pd.DataFrame:
     """entry = the first session bar at or after 04:30 ET.
 
     The band is applied by the harness at the fill price, and the harness
@@ -109,11 +110,19 @@ def signal_h0(df: pd.DataFrame, session_date, tz) -> pd.DataFrame:
     which is not the registered rule. The registered rule is the first bar at
     or after 04:30, in band or not: if that bar is outside the band there is
     no H0 trade that day. So exactly one bar is marked.
+
+    `not_before` moves the floor LATER and never earlier, added 2026-09-11 for
+    the point-in-time universe: a name the screen only surfaces at 06:10 cannot
+    be bought at 04:30, and `max()` is what keeps this from becoming a way to
+    enter before the registered time. `None` is the registered rule exactly,
+    and a test asserts the default path is bit-identical -- this is a new
+    caller, not a change to H0.
     """
     out = df.copy()
     times = _local_times(out, tz)
     in_sess = _session_mask(out, session_date, tz)
-    eligible = in_sess & (times >= ENTRY_FROM)
+    floor = ENTRY_FROM if not_before is None else max(ENTRY_FROM, not_before)
+    eligible = in_sess & (times >= floor)
     entry = np.zeros(len(out), dtype=bool)
     hits = np.flatnonzero(eligible)
     if len(hits):
