@@ -404,12 +404,26 @@ def backtest_session(df, session_date, tz,
                      seed_peak_with_bar_high: bool = False,
                      entry_shares: int | None = None,
                      use_apex: bool | None = None,
+                     not_before: dtime | None = None,
                      ladder: "PL.LadderConfig | None" = None) -> list[Trade]:
     """Run one pre-market session on 5-minute bars.
 
     Accepts 1-minute OR 5-minute bars and resamples if needed, so this can be
     handed exactly the same frame mcl_strategy.backtest_session receives.
     Include pre-session history for warm-up (see the module docstring).
+
+    `not_before` is the point-in-time entry floor -- an ET time-of-day before
+    which no entry may be taken -- and carries exactly the contract documented
+    on `mcl.backtest_session`: it can only move an entry later or remove it,
+    and `None` is bit-identical to this function before the parameter existed.
+
+    ON 5-MINUTE BARS THE FLOOR IS COARSER, and in the safe direction. The bar
+    stamped 06:10 covers 06:10-06:14 and fills at its close, 06:15, so a
+    `first_seen` of 06:12 could legitimately trade it; testing the bar's START
+    pushes the entry to the 06:15 bar instead. Up to one bar -- five minutes --
+    later than strictly required. A floor that erred the other way would buy a
+    name minutes before the screen surfaced it, which is the defect being
+    controlled for, so the coarseness is kept rather than tuned away.
     """
     band = ENFORCE_PRICE_BAND if enforce_price_band is None else enforce_price_band
     # Passed explicitly rather than mutating the module constant, so a 2x2 sweep
@@ -425,6 +439,12 @@ def backtest_session(df, session_date, tz,
     if not idx:
         return []
 
+    # A mask over entries, never a narrowing of `idx` -- see the note on
+    # mcl.backtest_session for why an entry restriction must not be allowed to
+    # change which bar counts as the last of the session.
+    entry_allowed = ([True] * len(sig) if not_before is None
+                     else [t >= not_before for t in local.time])
+
     trades: list[Trade] = []
     pos = None
     rows = sig.reset_index()
@@ -435,7 +455,7 @@ def backtest_session(df, session_date, tz,
         last_of_session = (k == len(idx) - 1)
 
         if pos is None:
-            if bool(row["entry"]):
+            if bool(row["entry"]) and entry_allowed[i]:
                 px = float(row["close"]) + SLIPPAGE_TICKS * TICK
                 if band and not (PRICE_MIN <= px <= PRICE_MAX):
                     continue

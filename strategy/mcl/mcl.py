@@ -389,6 +389,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      max_adds: int | None = None,
                      entry_delay_bars: int = 0,
                      max_hold_bars: int | None = None,
+                     not_before: dtime | None = None,
                      ladder: "PL.LadderConfig | None" = None,
                      target_exit: "TE.TargetExit | None" = None) -> list[Trade]:
     """Run one pre-market session.
@@ -469,6 +470,31 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     full level has necessarily passed the partial one), and both before any
     buy-back, so a bar that could plausibly have done several things is
     resolved against the position.
+
+    NOT_BEFORE: THE POINT-IN-TIME ENTRY FLOOR
+    -----------------------------------------
+    `not_before` is an ET time-of-day before which no entry may be taken. It
+    exists for `common/pit_strategy.py`, which runs this engine over a universe
+    built by `common/screen_sim.py` where every name carries a `first_seen` --
+    the moment the live screen would actually have surfaced it. A name the feed
+    puts on the watchlist at 07:20 cannot be bought at 04:30, and running
+    without the floor would reproduce exactly the look-ahead that whole exercise
+    exists to remove, while producing a number that looks like an answer.
+
+    Two properties, both tested:
+
+      * It can only move an entry LATER or remove it. The floor is applied to
+        the bar's own timestamp and no bar is ever brought forward, so a floor
+        earlier than SESSION_START is inert rather than permissive.
+      * `not_before=None` is BIT-IDENTICAL to this function before the
+        parameter existed. This is a published engine; a default that changed
+        behaviour would silently rewrite every result already in the docs.
+
+    The floor is tested against the bar's START timestamp, which is up to one
+    bar more conservative than necessary (a 1-minute bar stamped 06:09 is not
+    knowable until 06:10, so a `first_seen` of 06:10 could legitimately fill on
+    it). Conservative is the correct direction for a control: it can cost
+    entries, never manufacture them.
     """
     if use_apex is None:
         use_apex = USE_APEX_EXIT
@@ -490,6 +516,16 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     if not idx:
         return []
 
+    # The point-in-time entry floor (see the docstring). A MASK over entries
+    # rather than a narrowing of `idx`, deliberately: `idx` also drives
+    # `prev_high` and `last_of_session`, so dropping bars from it would change
+    # the buy-back trigger and which bar counts as the forced flatten -- i.e.
+    # it would alter the EXIT model as a side effect of an ENTRY restriction.
+    # `None` yields an all-True mask, which is why the default path is
+    # bit-identical rather than merely equivalent.
+    entry_allowed = ([True] * len(sig) if not_before is None
+                     else [t >= not_before for t in local.time])
+
     trades: list[Trade] = []
     pos = None
     rows = sig.reset_index()
@@ -503,7 +539,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         last_of_session = (k == len(idx) - 1)
 
         if pos is None:
-            if row["entry"]:
+            if row["entry"] and entry_allowed[i]:
                 # ENTRY LATENCY. entry_delay_bars=0 is the rule as backtested:
                 # the signal bar closes and we are filled at that close. LIVE,
                 # measured 2026-09-09, the order leaves SIXTY SECONDS after the

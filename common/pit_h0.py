@@ -135,7 +135,7 @@ def score(trades: list[dict], split: str, friction: float) -> dict:
     real = [t["net"] - friction for t in trades]
     if not real:
         return {"n": 0, "net": 0.0, "per": 0.0, "win": 0.0, "dropped": 0.0,
-                "early": 0.0, "late": 0.0, "ne": 0, "nl": 0}
+                "early": 0.0, "late": 0.0, "ne": 0, "nl": 0, "syms": 0}
     e = [r for t, r in zip(trades, real) if t["date"] < split]
     l = [r for t, r in zip(trades, real) if t["date"] >= split]
     by_sym: dict[str, float] = defaultdict(float)
@@ -143,12 +143,17 @@ def score(trades: list[dict], split: str, friction: float) -> dict:
         by_sym[t["symbol"]] += r
     worst_removed = sum(sorted(by_sym.values(), reverse=True)[:DROP])
     net = sum(real)
+    # `syms` exists so a caller can tell a real drop-top-5 from a degenerate
+    # one. With DROP or fewer distinct symbols the drop removes EVERYTHING and
+    # the column prints exactly 0.00 -- which is indistinguishable from a
+    # result whose top names happened to cancel out. Callers that render the
+    # column must say "n/a" rather than print that zero.
     return {"n": len(real), "net": net, "per": net / len(real),
             "win": 100.0 * sum(1 for r in real if r > 0) / len(real),
             "dropped": net - worst_removed,
             "early": (sum(e) / len(e)) if e else 0.0,
             "late": (sum(l) / len(l)) if l else 0.0,
-            "ne": len(e), "nl": len(l)}
+            "ne": len(e), "nl": len(l), "syms": len(by_sym)}
 
 
 def halves_split(dates) -> str:
@@ -181,8 +186,10 @@ def render(res: dict, n_sessions: int, n_universe: int, split: str,
               f"{'win%':>7}{'drop-top-5':>12}{'early':>9}{'late':>9}"]
         for fl, fv in FRICTIONS:
             s = score(trades, split, fv)
+            drop = (f"${s['dropped']:>11,.0f}" if s["syms"] > DROP
+                    else f"{'n/a':>12}")
             L.append(f"  {fl:<10}{s['n']:>8}${s['net']:>11,.0f}"
-                     f"${s['per']:>8.2f}{s['win']:>6.1f}%${s['dropped']:>11,.0f}"
+                     f"${s['per']:>8.2f}{s['win']:>6.1f}%{drop}"
                      f"${s['early']:>8.2f}${s['late']:>8.2f}")
         L.append("")
 
