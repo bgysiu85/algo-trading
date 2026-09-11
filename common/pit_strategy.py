@@ -88,6 +88,7 @@ import pandas as pd
 from common.analysis import LIVE
 from common.cache_io import BACKTEST_SESSIONS
 from common.pit_h0 import DROP, FRICTIONS, first_seen_time, halves_split, score
+from common.report_fmt import acct
 from common.report_io import emit
 
 ET = ZoneInfo("America/New_York")
@@ -337,10 +338,11 @@ def arm_rows(trades: list[dict], split: str) -> list[str]:
         # the drop then removes the entire arm, and a printed zero would read
         # as "the top names cancelled out" instead of "there was nothing to
         # drop". See the note on pit_h0.score.
-        drop = f"${s['dropped']:>11,.0f}" if s["syms"] > DROP else f"{'n/a':>12}"
-        L.append(f"  {fl:<10}{s['n']:>8}${s['net']:>11,.0f}"
-                 f"${s['per']:>8.2f}{s['win']:>6.1f}%{drop}"
-                 f"${s['early']:>8.2f}${s['late']:>8.2f}")
+        drop = (f"${acct(s['dropped'], 11, 0)}" if s["syms"] > DROP
+                else f"{'n/a':>12}")
+        L.append(f"  {fl:<10}{s['n']:>8}${acct(s['net'], 11, 0)}"
+                 f"${acct(s['per'], 8)}{s['win']:>6.1f}%{drop}"
+                 f"${acct(s['early'], 8)}${acct(s['late'], 8)}")
     return L
 
 
@@ -417,20 +419,21 @@ def render(name: str, arms: dict, suppressed: dict, counts: dict,
               "  between a handful of trades.", ""]
     else:
         uf = score(arms.get("pit_unfloored", []), split, 4.26)
-        L += [f"  STAGE-2                    {s2['per']:+.2f}/trade over "
+        L += [f"  STAGE-2                    {acct(s2['per'], 8)}/trade over "
               f"{s2['n']:,}",
-              f"  POINT-IN-TIME, no floor    {uf['per']:+.2f}/trade over "
+              f"  POINT-IN-TIME, no floor    {acct(uf['per'], 8)}/trade over "
               f"{uf['n']:,}",
-              f"  POINT-IN-TIME, floored     {pit['per']:+.2f}/trade over "
+              f"  POINT-IN-TIME, floored     {acct(pit['per'], 8)}/trade over "
               f"{pit['n']:,}", ""]
         if uf["n"]:
-            L += [f"    universe leak  {s2['per'] - uf['per']:+.2f}   "
-                  f"(which names, chosen with the day known)",
-                  f"    intraday leak  {uf['per'] - pit['per']:+.2f}   "
-                  f"(bought before the screen would have shown them)",
-                  f"    total          {s2['per'] - pit['per']:+.2f}", ""]
+            L += [f"    universe leak  {acct(s2['per'] - uf['per'], 8)}   "
+                  f"which names, chosen with the day known",
+                  f"    intraday leak  {acct(uf['per'] - pit['per'], 8)}   "
+                  f"bought before the screen would have shown them",
+                  f"    total          {acct(s2['per'] - pit['per'], 8)}", ""]
         else:
-            L += [f"  the leak       {s2['per'] - pit['per']:+.2f}/trade", ""]
+            L += [f"  the leak       {acct(s2['per'] - pit['per'], 8)}/trade",
+                  ""]
         L += ["  Everything else is held constant -- same tape, same slices,",
               "  same dates -- so these are the look-ahead alone, which is the",
               "  number `pit_h0` could not isolate because its bracket came",
@@ -452,8 +455,8 @@ def render(name: str, arms: dict, suppressed: dict, counts: dict,
     h0_trade = H0_PIT_NET / H0_PIT_TRADES
     h0_day = H0_PIT_NET / H0_PIT_OFFERED
     L += ["DO THE RULES BEAT THEIR OWN CONTROL", "",
-          f"  H0 on this universe, as screened   {h0_trade:+.2f}/trade   "
-          f"{h0_day:+.2f}/symbol-day",
+          f"  H0 on this universe, as screened   {acct(h0_trade, 9)}/trade   "
+          f"{acct(h0_day, 9)}/symbol-day",
           f"  ({H0_REFERENCE_SOURCE})"]
     if counts["pit"] != H0_PIT_OFFERED:
         L += ["",
@@ -470,10 +473,10 @@ def render(name: str, arms: dict, suppressed: dict, counts: dict,
             pit["net"], pit["n"], counts["pit"],
             H0_PIT_NET, H0_PIT_TRADES, H0_PIT_OFFERED)
         L += [f"  {name.upper()} POINT-IN-TIME      "
-              f"{pit['per']:+.2f}/trade   "
-              f"{pit['net'] / (counts['pit'] or 1):+.2f}/symbol-day",
-              f"  vs H0                       {per_trade:+.2f}        "
-              f"{per_day:+.2f}",
+              f"{acct(pit['per'], 9)}/trade   "
+              f"{acct(pit['net'] / (counts['pit'] or 1), 9)}/symbol-day",
+              f"  vs H0                       {acct(per_trade, 9)}        "
+              f"{acct(per_day, 9)}",
               f"  ({pit['n'] / (counts['pit'] or 1):.2f} trades per symbol-day "
               f"against H0's {H0_PIT_TRADES / H0_PIT_OFFERED:.2f})", ""]
         if not agree:
@@ -508,10 +511,12 @@ def render(name: str, arms: dict, suppressed: dict, counts: dict,
                   "  control.", ""]
     if early["n"] >= MIN_TRADES and pit["n"] >= MIN_TRADES:
         L += ["DO THE EARLY NAMES BEHAVE DIFFERENTLY", "",
-              f"  EARLY ONLY     {early['per']:+.2f}/trade over {early['n']:,}",
-              f"  ALL NAMES      {pit['per']:+.2f}/trade over {pit['n']:,}",
-              f"  difference     {early['per'] - pit['per']:+.2f}", "",
-              "  H0 found the late qualifiers worth -$1.14, i.e. nothing. If",
+              f"  EARLY ONLY     {acct(early['per'], 8)}/trade over "
+              f"{early['n']:,}",
+              f"  ALL NAMES      {acct(pit['per'], 8)}/trade over "
+              f"{pit['n']:,}",
+              f"  difference     {acct(early['per'] - pit['per'], 8)}", "",
+              "  H0 found the late qualifiers worth $(1.14), i.e. nothing. If",
               "  this differs, the strategy is selecting on something the",
               "  screen's ordering already carries.", ""]
 

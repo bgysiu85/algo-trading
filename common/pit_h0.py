@@ -72,6 +72,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from common.harness import run_session
+from common.report_fmt import acct
 from common.report_io import emit
 from strategy.premkt import hypotheses as H
 
@@ -186,11 +187,11 @@ def render(res: dict, n_sessions: int, n_universe: int, split: str,
               f"{'win%':>7}{'drop-top-5':>12}{'early':>9}{'late':>9}"]
         for fl, fv in FRICTIONS:
             s = score(trades, split, fv)
-            drop = (f"${s['dropped']:>11,.0f}" if s["syms"] > DROP
+            drop = (f"${acct(s['dropped'], 11, 0)}" if s["syms"] > DROP
                     else f"{'n/a':>12}")
-            L.append(f"  {fl:<10}{s['n']:>8}${s['net']:>11,.0f}"
-                     f"${s['per']:>8.2f}{s['win']:>6.1f}%{drop}"
-                     f"${s['early']:>8.2f}${s['late']:>8.2f}")
+            L.append(f"  {fl:<10}{s['n']:>8}${acct(s['net'], 11, 0)}"
+                     f"${acct(s['per'], 8)}{s['win']:>6.1f}%{drop}"
+                     f"${acct(s['early'], 8)}${acct(s['late'], 8)}")
         L.append("")
 
     k = score(res["knowable"], split, 4.26)
@@ -204,10 +205,10 @@ def render(res: dict, n_sessions: int, n_universe: int, split: str,
                     "  var/reports/screen_sim.txt before anything else.", ""]
 
     L += ["WHERE THE LIKE-FOR-LIKE LANDS", "",
-          f"  KNOWABLE AT 04:30, at $4.26   {k['per']:+.2f}/trade over "
+          f"  KNOWABLE AT 04:30, at $4.26   {acct(k['per'], 8)}/trade over "
           f"{k['n']:,} trades",
-          f"  survivors  {BRACKET_SURVIVORS:+.2f}   rejects "
-          f"{BRACKET_REJECTS:+.2f}", ""]
+          f"  survivors  {acct(BRACKET_SURVIVORS, 7)}   rejects "
+          f"{acct(BRACKET_REJECTS, 7)}", ""]
     span = BRACKET_SURVIVORS - BRACKET_REJECTS
     pos = (k["per"] - BRACKET_REJECTS) / span if span else 0.0
     L.append(f"  It sits {pos:.0%} of the way from the rejects to the survivors.")
@@ -229,9 +230,9 @@ def render(res: dict, n_sessions: int, n_universe: int, split: str,
 
     if k["n"] and a["n"]:
         L += ["WHAT THE LATE QUALIFIERS ARE WORTH", "",
-              f"  AS SCREENED  {a['per']:+.2f}/trade over {a['n']:,}",
-              f"  KNOWABLE     {k['per']:+.2f}/trade over {k['n']:,}",
-              f"  difference   {a['per'] - k['per']:+.2f}", "",
+              f"  AS SCREENED  {acct(a['per'], 8)}/trade over {a['n']:,}",
+              f"  KNOWABLE     {acct(k['per'], 8)}/trade over {k['n']:,}",
+              f"  difference   {acct(a['per'] - k['per'], 8)}", "",
               "  A name the feed surfaces at 06:10 is bought at 06:10. If AS",
               "  SCREENED is much worse, the early names carry the result and",
               "  the re-ranking through the session is destroying value; if it",

@@ -27,15 +27,30 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from common.report_fmt import paint, supports_colour
 
-def emit(text: str, out: str | Path | None = None, *, header: str = "") -> None:
+
+def emit(text: str, out: str | Path | None = None, *, header: str = "",
+         colour: bool | None = None) -> None:
     """Print to stdout and, when `out` is given, write the same text as UTF-8.
 
     The file gets a timestamp line the terminal does not, because a saved
     report read weeks later needs to say when it was produced -- half the
     figures in this project have been quietly superseded by a later run.
+
+    COLOUR GOES TO THE TERMINAL AND NOWHERE ELSE. Negative figures are painted
+    red on stdout and the file is written from the UNPAINTED text. An ANSI
+    escape in a .txt defeats the reason this module exists: these reports are
+    written so they can be read back exactly, weeks later, by a person or a
+    parser, and `\\x1b[31m` breaks both.
+
+    `colour=None` decides by asking -- a TTY, no NO_COLOR, and on Windows only
+    if virtual-terminal processing can actually be switched on. A redirect or a
+    pipe therefore gets clean text with no flag needed.
     """
-    print(text)
+    if colour is None:
+        colour = supports_colour()
+    print(paint(text) if colour else text)
     if not out:
         return
     p = Path(out)
