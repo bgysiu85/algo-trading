@@ -232,6 +232,7 @@ def render(*, trades, lab_same, lab_lag, feats, n_sessions, med_universe,
          "tomorrow's paper."),
     ):
         by = group(trades, labels)
+        ceiling = labels is lab_same
         L += [title, "", f"  {note}", "",
               f"  {'bucket':<10}{'sessions':>10}{'trades':>8}{'net':>10}"
               f"{'per':>8}{'win%':>7}{'drop top 3':>12}"]
@@ -245,6 +246,34 @@ def render(*, trades, lab_same, lab_lag, feats, n_sessions, med_universe,
             L.append(f"  {k:<10}{ns:>10}{s['n']:>8}${s['net']:>9,.0f}"
                      f"${s['per']:>7.2f}{s['win']:>6.1f}%${s['dropped']:>11,.0f}")
         L.append("")
+        # The ceiling gets its OWN permutation test, and it decides what the
+        # whole thread is worth. "The lagged gate is null" has two very
+        # different causes: the features do not separate trades at all, or
+        # they DO and yesterday cannot predict today. Only the second leaves
+        # anything to build on -- better features, a longer smoother, or the
+        # size response -- and without a p-value on the same-day split the two
+        # are indistinguishable. It stays unusable either way; a same-day
+        # label cannot be read at 04:00.
+        if ceiling:
+            per_c = {k: bucket_stats(by[k])["per"] for k in ORDER}
+            if all(bucket_stats(by[k])["n"] for k in ORDER):
+                obs_c = per_c["hot"] - per_c["cold"]
+                p_c = permutation_p(trades, labels, obs_c)
+                mono_c = per_c["cold"] <= per_c["mixed"] <= per_c["hot"]
+                L += [f"  hot - cold, per trade  {obs_c:+.2f}   "
+                      f"permutation p {p_c:.4f}   "
+                      f"monotone {'yes' if mono_c else 'NO'}",
+                      "",
+                      "  If THIS is significant and the lagged split is not,"
+                      " the finding is",
+                      "  that regime is real and today's reading is not"
+                      " recoverable from",
+                      "  yesterday's -- which points at better features or a"
+                      " smoother, not",
+                      "  at abandoning the idea. If this is null too, the"
+                      " breadth features",
+                      "  do not separate these trades at all and the thread"
+                      " is finished.", ""]
 
     by = group(trades, lab_lag)
     counts = {k: bucket_stats(by[k])["n"] for k in ORDER}

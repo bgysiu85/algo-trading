@@ -541,3 +541,36 @@ def test_the_floor_is_set_from_what_the_controls_need():
     """drop-top-N removes DROP trades, so a bucket has to carry more sessions
     than that for the check to mean anything."""
     assert RS.MIN_SESSIONS_PER_BUCKET > RS.DROP
+
+
+def test_the_ceiling_gets_its_own_permutation_test():
+    """WHAT THE WHOLE THREAD TURNS ON. "The lagged gate is null" has two very
+    different causes: the breadth features do not separate these trades at
+    all, or they DO and yesterday cannot predict today. Only the second leaves
+    anything to build on. Without a p-value on the same-day split the two are
+    indistinguishable, and the 2026-09-11 xnas run had a same-day spread more
+    than twice the lagged one — monotone, where the lagged split was not.
+    """
+    out = "\n".join(RS.render(**render_args(*spread_sample())))
+    ceiling = out[out.index("THE CEILING"):]
+    assert "permutation p" in ceiling
+    assert "not recoverable from" in ceiling
+
+
+def test_the_ceiling_is_still_labelled_unusable_alongside_its_p_value():
+    """A significant ceiling is the most tempting number in the report and it
+    cannot be read at 04:00. The p-value must not launder it into a result."""
+    out = "\n".join(RS.render(**render_args(*spread_sample())))
+    i = out.index("THE CEILING")
+    assert "cannot know at 04:00" in out[i:i + 200]
+    assert "NOT a result" in out[i:]
+
+
+def test_the_ceiling_test_is_skipped_when_a_bucket_is_empty():
+    """permutation_p on an empty bucket compares against a spread of 0.0 and
+    returns a meaningless 1.0. Absent beats wrong."""
+    spec, lab = spread_sample()
+    spec = {d: v for d, v in spec.items() if lab[d] != "cold"}
+    out = "\n".join(RS.render(**render_args(spec, lab)))
+    ceiling = out[out.index("THE CEILING"):]
+    assert "permutation p" not in ceiling.split("CONTROLS")[0]
