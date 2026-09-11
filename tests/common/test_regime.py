@@ -388,3 +388,118 @@ def test_the_null_result_says_what_it_does_not_say():
     out = "\n".join(RS.render(**render_args(spec, lab)))
     assert "not adoptable" in out
     assert "does NOT say" in out and "cuts size" in out
+
+
+# --- the reverse-split guard, and the two defects the first real run showed --
+
+def dailyv(rows):
+    """(symbol, date, close, high, volume)."""
+    return pd.DataFrame([{"symbol": s, "date": d, "open": c, "high": h,
+                          "low": min(c, h) * 0.9, "close": c, "volume": v}
+                         for s, d, c, h, v in rows])
+
+
+def history(sym, n=25, close=4.0, vol=1e6, start=1):
+    return [(sym, f"2026-01-{start + i:02d}", close, close, vol)
+            for i in range(n)]
+
+
+def test_a_price_jump_with_no_volume_is_not_a_mover():
+    """THE REVERSE-SPLIT GUARD. Daily bars are not split-adjusted, so a
+    1-for-10 prints as a ~900% overnight gain with no volume behind it, and
+    across ~9,000 names in the band there are several every session. The first
+    real run reported a MEDIAN leading gainer of 195% and a >=100% gainer on
+    729 of 863 sessions — that is not a description of the market.
+    """
+    rows = history("SPLIT") + [("SPLIT", "2026-02-01", 40.0, 40.0, 1e6)]
+    f = RG.series(dailyv(rows))["2026-02-01"]
+    assert f.n_big == 0, "a 900% move on ordinary volume counted as a gainer"
+    assert f.n_suspect == 1, "and it was not counted as rejected"
+    assert f.lead <= 0.0
+
+
+def test_a_real_runner_brings_volume_and_still_counts():
+    """The guard has to let the thing it is about through, or it is just a
+    filter that makes every day look cold."""
+    rows = history("RUN") + [("RUN", "2026-02-01", 12.0, 12.0, 1e6 * 20)]
+    f = RG.series(dailyv(rows))["2026-02-01"]
+    assert f.n_big == 1 and f.n_suspect == 0
+    assert f.lead == pytest.approx(2.0)
+
+
+def test_todays_volume_is_not_in_its_own_baseline():
+    """Otherwise a huge day raises the bar it has to clear, and the biggest
+    movers filter themselves out — the guard would remove exactly the sessions
+    it exists to measure."""
+    rows = history("RUN") + [("RUN", "2026-02-01", 12.0, 12.0, 1e6 * 8)]
+    p = RG.prepare(dailyv(rows))
+    last = p[p["date"] == "2026-02-01"].iloc[0]
+    assert float(last["rel_volume"]) == pytest.approx(8.0)
+
+
+def test_a_name_with_no_volume_history_gets_the_benefit_of_the_doubt():
+    """The guard is aimed at one artefact, not at thinning the universe. A
+    recent listing has no baseline, and these are a large part of this market."""
+    rows = [("NEW", "2026-02-01", 4.0, 4.0, 1e6),
+            ("NEW", "2026-02-02", 12.0, 12.0, 1e6)]
+    f = RG.series(dailyv(rows))["2026-02-02"]
+    assert f.n_big == 1, "a new listing was filtered out for being new"
+
+
+def test_the_relative_volume_floor_is_the_screens_own():
+    """One threshold, not a new one."""
+    import inspect
+    from common.tv_screener import RELATIVE_VOLUME_MIN
+    assert RG.RELATIVE_VOLUME_MIN == RELATIVE_VOLUME_MIN
+    assert "RELATIVE_VOLUME_MIN" in inspect.getsource(RG.live_volume)
+
+
+def test_the_sessions_column_counts_sessions_scored_not_labelled():
+    """The archive carries ~860 daily sessions and the cache carried 66 of
+    them. The first run printed 297 in a column the eye reads as sample size,
+    next to nine trades."""
+    spec, lab = spread_sample()
+    # Label a year of dates, but only score a handful.
+    for i in range(300):
+        lab[f"2025-{1 + i // 28:02d}-{1 + i % 28:02d}"] = "cold"
+    out = "\n".join(RS.render(**render_args(spec, lab)))
+    gate = out[out.index("THE GATE"):out.index("THE CEILING")]
+    counts = [int(line.split()[1]) for line in gate.splitlines()
+              if line.strip().startswith(("cold", "mixed", "hot"))]
+    assert sum(counts) <= len(spec), (
+        f"{sum(counts)} sessions reported against {len(spec)} scored")
+
+
+def test_an_empty_bucket_in_a_half_is_not_reported_as_a_sign_flip():
+    """`spread` returns 0.0 for an empty bucket, and 0.0 fails the
+    both-halves test for exactly the same reason a genuine reversal does. The
+    first run printed 'late +0.00' and concluded 'the sign flips between
+    halves' when the late half simply had no hot trades."""
+    spec, lab = spread_sample()
+    # Strip every hot trade from the late half. Bucketing uses the LAGGED
+    # labelling, so the strip has to as well -- stripping by the same-day
+    # label leaves the lagged hot bucket full and the test passes vacuously.
+    lag = RG.lagged(lab)
+    dates = sorted(d for d in spec if d in lag)
+    # Cut at a QUARTER, not at the half. Removing dates moves the derived
+    # split point earlier, so a cut at the half leaves hot trades sitting
+    # between the new split and the old one -- which is how the first version
+    # of this test passed vacuously.
+    cut = dates[len(dates) // 4]
+    spec = {d: v for d, v in spec.items()
+            if not (d >= cut and lag.get(d) == "hot")}
+    out = "\n".join(RS.render(**render_args(spec, lab)))
+    assert "a bucket is EMPTY" in out
+    assert "halves control did not divide" in out
+    assert "the sign flips between halves" not in out
+
+
+def test_a_genuine_reversal_is_still_called_a_sign_flip():
+    """Or the new branch would absorb the real finding too."""
+    spec, lab = spread_sample()
+    mid = sorted(spec)[len(spec) // 2]
+    spec = {d: ([-v for v in vs] if d >= mid else vs)
+            for d, vs in spec.items()}
+    out = "\n".join(RS.render(**render_args(spec, lab)))
+    assert "the sign flips between halves" in out
+    assert "did not divide" not in out

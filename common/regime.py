@@ -89,6 +89,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from common.tv_screener import RELATIVE_VOLUME_MIN
 from strategy.mcl.mcl import PRICE_MAX, PRICE_MIN
 
 # The move that counts as a "mover" for the breadth measure. Below the >100%
@@ -112,6 +113,22 @@ MIN_NAMES = 5
 # would be a different market from the one MCL operates in.
 BAND = (PRICE_MIN, PRICE_MAX)
 
+# THE REVERSE-SPLIT GUARD, and it is not optional on an unadjusted archive.
+#
+# Daily bars are not split-adjusted. A 1-for-10 reverse split prints as a
+# ~900% overnight "gain" with no volume behind it, and across ~9,000 names in
+# the $2-20 band there are several of those EVERY session. They land straight
+# in `lead` and `n_big` -- the two features the whole regime reading rests on.
+# The first run reported a MEDIAN leading gainer of 195% and a >=100% gainer on
+# 729 of 863 sessions, which is not a description of the market.
+#
+# A real runner brings enormous volume; a reverse split brings none. So a name
+# is only allowed to count as a mover if its volume also cleared the screen's
+# own relative-volume floor against its recent median. RELATIVE_VOLUME_MIN is
+# imported from `tv_screener` rather than restated -- it is the number the
+# live screen already uses, so this is one threshold, not a new one.
+VOL_WINDOW = 20
+
 
 @dataclass(frozen=True)
 class DayFeatures:
@@ -122,6 +139,10 @@ class DayFeatures:
     lead: float           # the leading gainer's intraday move, as a fraction
     round_trip: float     # share of movers retaining < RETAIN_MIN into close
     med_price: float      # median prior close of the movers
+    # Names that gained >= BIG_MIN on ordinary volume -- almost all reverse
+    # splits in an unadjusted archive. Counted so the guard's size is visible
+    # rather than being a silent filter.
+    n_suspect: int = 0
 
     @property
     def usable(self) -> bool:
@@ -142,10 +163,18 @@ def day_features(rows: pd.DataFrame, date: str) -> DayFeatures:
     the edges.
     """
     if rows.empty:
-        return DayFeatures(date, 0, 0, 0, 0.0, 0.0, 0.0)
+        return DayFeatures(date, 0, 0, 0, 0.0, 0.0, 0.0, 0)
     pc = rows["prior_close"].astype(float)
     gain = rows["high"].astype(float) / pc - 1.0
     close_gain = rows["close"].astype(float) / pc - 1.0
+
+    # A price move with no volume behind it is a corporate action, not a
+    # market event. See VOL_WINDOW above -- without this the leading gainer is
+    # whichever name reverse-split that morning.
+    real = live_volume(rows)
+    suspect = int(((gain >= BIG_MIN) & ~real).sum())
+    gain = gain.where(real, -1.0)
+
     movers = gain >= MOVER_MIN
     n_movers = int(movers.sum())
     if n_movers:
@@ -163,10 +192,23 @@ def day_features(rows: pd.DataFrame, date: str) -> DayFeatures:
         n_names=len(rows),
         n_movers=n_movers,
         n_big=int((gain >= BIG_MIN).sum()),
-        lead=float(gain.max()),
+        lead=float(max(gain.max(), 0.0)),
         round_trip=rt,
         med_price=med,
+        n_suspect=suspect,
     )
+
+
+def live_volume(rows: pd.DataFrame) -> "pd.Series":
+    """Which rows had real volume behind the move.
+
+    With no `rel_volume` column every row passes, so a caller that has not
+    computed it gets the old behaviour rather than a silently empty market --
+    but `series` always computes it, and a test pins that.
+    """
+    if "rel_volume" not in rows.columns:
+        return pd.Series(True, index=rows.index)
+    return rows["rel_volume"].astype(float) >= RELATIVE_VOLUME_MIN
 
 
 def prepare(daily: pd.DataFrame, band: tuple[float, float] = BAND) -> pd.DataFrame:
@@ -176,9 +218,25 @@ def prepare(daily: pd.DataFrame, band: tuple[float, float] = BAND) -> pd.DataFra
     today's price would drop exactly the names that ran out of the band -- the
     biggest gainers -- which is the population the regime measure is about.
     """
-    d = daily[["symbol", "date", "high", "low", "close"]].copy()
+    cols = ["symbol", "date", "high", "low", "close"]
+    if "volume" in daily.columns:
+        cols.append("volume")
+    d = daily[cols].copy()
     d = d.sort_values(["symbol", "date"])
-    d["prior_close"] = d.groupby("symbol")["close"].shift(1)
+    g = d.groupby("symbol")
+    d["prior_close"] = g["close"].shift(1)
+    if "volume" in d.columns:
+        # The symbol's OWN recent median, shifted so today's volume is not in
+        # its own baseline -- otherwise a huge day raises the bar it has to
+        # clear and the biggest movers filter themselves out.
+        med = (g["volume"].shift(1)
+               .rolling(VOL_WINDOW, min_periods=5).median())
+        d["rel_volume"] = d["volume"] / med.replace(0, pd.NA)
+        # A name with too little history to have a baseline keeps the benefit
+        # of the doubt: NaN passes, so a new listing is not filtered out for
+        # being new. The split guard is aimed at a specific artefact, not at
+        # thinning the universe.
+        d["rel_volume"] = d["rel_volume"].fillna(RELATIVE_VOLUME_MIN)
     d = d[d["prior_close"].notna() & (d["prior_close"] > 0)]
     lo, hi = band
     return d[(d["prior_close"] >= lo) & (d["prior_close"] <= hi)]

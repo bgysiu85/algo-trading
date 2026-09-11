@@ -181,7 +181,20 @@ def render(*, trades, lab_same, lab_lag, feats, n_sessions, med_universe,
           f"{sum(1 for f in feats.values() if f.n_big)}",
           f"  median leading gainer            "
           f"{(sorted(f.lead for f in rated)[len(rated) // 2] if rated else 0):.0%}",
+          f"  >= {RG.BIG_MIN:.0%} moves REJECTED on volume  "
+          f"{sum(f.n_suspect for f in feats.values()):,}",
+          "",
+          "  That last line is the reverse-split guard. Daily bars are not",
+          "  split-adjusted, so a 1-for-10 prints as a ~900% overnight gain",
+          "  with no volume behind it, and across ~9,000 names in the band",
+          "  there are several every session. Left in, they ARE the leading",
+          "  gainer on most days. A move only counts if its volume also",
+          f"  cleared the screen's own {RG.RELATIVE_VOLUME_MIN:.0f}x relative-volume floor.",
           ""]
+
+    # The dates that actually contributed a trade. Everything below counts
+    # sessions from this and never from the archive's labelling.
+    scored = sorted({d for _, d, _ in trades})
 
     ac = RG.autocorr(lab_same)
     L += ["PERSISTENCE — the ceiling on any lagged gate", "",
@@ -208,7 +221,11 @@ def render(*, trades, lab_same, lab_lag, feats, n_sessions, med_universe,
               f"{'per':>8}{'win%':>7}{'drop top 3':>12}"]
         for k in ORDER:
             s = bucket_stats(by[k])
-            ns = sum(1 for v in labels.values() if v == k)
+            # SESSIONS SCORED, not sessions labelled. The archive carries ~860
+            # daily sessions and the cache carries 66 of them; printing the
+            # archive's count put "297" in a column the eye reads as sample
+            # size next to nine trades.
+            ns = sum(1 for d in scored if labels.get(d) == k)
             L.append(f"  {k:<10}{ns:>10}{s['n']:>8}${s['net']:>9,.0f}"
                      f"${s['per']:>7.2f}{s['win']:>6.1f}%${s['dropped']:>11,.0f}")
         L.append("")
@@ -232,7 +249,15 @@ def render(*, trades, lab_same, lab_lag, feats, n_sessions, med_universe,
     mid = halves_split(dates)
     early = [(s, d, t) for s, d, t in trades if d in lab_lag and d < mid]
     late = [(s, d, t) for s, d, t in trades if d in lab_lag and d >= mid]
-    se, sl = spread(group(early, lab_lag)), spread(group(late, lab_lag))
+    ge, gl = group(early, lab_lag), group(late, lab_lag)
+    se, sl = spread(ge), spread(gl)
+    # `spread` returns 0.0 when a bucket is empty, and 0.0 fails `se * sl > 0`
+    # for exactly the same reason a genuine reversal does. The first run
+    # printed "late +0.00" and concluded "the sign flips between halves" when
+    # what actually happened is that the late half had no trades in one
+    # bucket. Those are different findings and must not share a verdict.
+    undivided = [n for n, g in (("early", ge), ("late", gl))
+                 if not g["hot"] or not g["cold"]]
     dropped_ok = (bucket_stats(by["hot"])["dropped"] / max(counts["hot"], 1)
                   > bucket_stats(by["cold"])["dropped"] / max(counts["cold"], 1))
 
@@ -242,11 +267,14 @@ def render(*, trades, lab_same, lab_lag, feats, n_sessions, med_universe,
           f"({N_PERM:,} shuffles of the labels across dates)",
           f"  monotone cold<=mixed<=hot    {'yes' if mono else 'NO'}   "
           f"({per['cold']:+.2f} / {per['mixed']:+.2f} / {per['hot']:+.2f})",
-          f"  both halves (split {mid})  early {se:+.2f}   late {sl:+.2f}",
+          f"  both halves (split {mid})  early {se:+.2f}   late {sl:+.2f}"
+          + (f"   [{', '.join(undivided)}: a bucket is EMPTY]"
+             if undivided else ""),
           f"  survives drop-top-3          {'yes' if dropped_ok else 'NO'}",
           ""]
 
-    ok = p < 0.05 and mono and se * sl > 0 and dropped_ok and obs > 0
+    ok = (p < 0.05 and mono and not undivided and se * sl > 0
+          and dropped_ok and obs > 0)
     if ok:
         L += ["VERDICT — the gate separates", "",
               "  Every control holds. This is still IN-SAMPLE: MCL's parameters",
@@ -262,7 +290,12 @@ def render(*, trades, lab_same, lab_lag, feats, n_sessions, med_universe,
         if not mono:
             why.append("the ordering is not monotone, so mixed is not between "
                        "the two and the feature is not a temperature")
-        if se * sl <= 0:
+        if undivided:
+            why.append(
+                f"the halves control did not divide -- {' and '.join(undivided)} "
+                "has no trades in one bucket, which reads as a spread of zero "
+                "and NOT as a reversal")
+        elif se * sl <= 0:
             why.append("the sign flips between halves")
         if not dropped_ok:
             why.append("it does not survive drop-top-3")
