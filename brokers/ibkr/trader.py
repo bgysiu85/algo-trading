@@ -1310,9 +1310,24 @@ class MCLPaperTrader:
             return                      # removed from the watchlist
         if not self.in_session(now_et, st.strategy):
             return
-        if st.last_bar_ts == last_ts:
+        # Dedupe on the bar the SIGNAL was computed on, which the strategy
+        # hands us, NOT on the frame's last row.
+        #
+        # `last_ts` is the last 1-MINUTE bar. For MCL that is the signal bar
+        # and this guard worked; for MC5 the frame advances every minute while
+        # the signal changes every five, so the guard never fired inside a
+        # bucket and one signal entered up to five times at successively worse
+        # prices. On 2026-09-11 that was 40% of all entries.
+        #
+        # A strategy that does not supply `bar_ts` falls back to the frame's
+        # last row -- the old behaviour, which is correct only when the two
+        # coincide. That fallback is deliberate and narrow: a new strategy
+        # omitting the field gets the SAFE-for-1-minute answer, and
+        # test_entry_dedup pins that every registered adapter supplies it.
+        signal_ts = getattr(sig, "bar_ts", None) or last_ts
+        if st.last_bar_ts == signal_ts:
             return                      # already evaluated this bar
-        st.last_bar_ts = last_ts
+        st.last_bar_ts = signal_ts
 
         if not sig.long_entry:
             return

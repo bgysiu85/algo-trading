@@ -279,6 +279,22 @@ class Signals:
     exit_signal: bool
     close: float
     detail: dict
+    # The BUCKET this signal was computed on -- not the frame's last row.
+    #
+    # The live trader dedupes entries with "have I already evaluated this
+    # bar?", and it keyed that on `df.index[-1]`, the last 1-MINUTE row. For
+    # MCL those are the same bar and the guard worked. For MC5 the frame
+    # advances every minute while the signal only changes every five, so the
+    # guard never fired inside a bucket and ONE signal entered up to five
+    # times, each at a worse price. 2026-09-11: 40% of entries reused an
+    # already-traded bucket; one TNON bucket (close 7.51) bought at 7.22,
+    # 7.04, 6.94, 6.98 and 6.96 on five consecutive minutes.
+    #
+    # The adapter's whole design is that "the trader never learns what a
+    # 5-minute bar is". That is right, and it is exactly why the signal has
+    # to hand the trader its own bar: a caller that cannot know the bar size
+    # cannot derive the bar.
+    bar_ts: object = None
 
 
 def last_closed_bucket(df1m: pd.DataFrame, now) -> "pd.Timestamp | None":
@@ -359,6 +375,7 @@ def evaluate_last_bar(df, now) -> "Signals | None":
         long_entry=bool(row["entry"]),
         exit_signal=bool(row["exit_sig"]),
         close=float(row["close"]),
+        bar_ts=df5.index[-1],
         detail={
             "macd": round(float(row["macd"]), 5),
             "macd_sig": round(float(row["macd_sig"]), 5),

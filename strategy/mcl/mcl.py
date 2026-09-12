@@ -245,6 +245,12 @@ class Signals:
     exit_signal: bool
     close: float
     detail: dict
+    # The bar this signal was COMPUTED ON, which the live trader dedupes
+    # entries on. For MCL it equals the frame's last row -- which is precisely
+    # why it must be carried rather than inferred by the caller: the caller
+    # inferring it is correct for MCL and wrong for MC5, and it looked right
+    # for three sessions. See mc5.Signals.bar_ts.
+    bar_ts: object = None
 
 
 def evaluate_last_bar(df: pd.DataFrame,
@@ -284,6 +290,7 @@ def evaluate_last_bar(df: pd.DataFrame,
         long_entry=bool(row["entry"]),
         exit_signal=bool(row["exit_sig"]) and use_apex,
         close=float(row["close"]),
+        bar_ts=sig.index[-1],
         detail={
             "macd": round(float(row["macd"]), 5),
             "macd_sig": round(float(row["macd_sig"]), 5),
