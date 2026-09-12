@@ -144,6 +144,57 @@ def test_unfilled_rows_are_excluded(tmp_path):
                      "SKIPPED_CONCURRENCY_CAP", None, None, 8.0, 0.1, 0.05,
                      70.0, 1000]
     d.to_csv(p, index=False)
-    out = C.load(p)
+    out, derived = C.load(p)
     assert len(out) == 2
     assert (out.status == "FILLED").all()
+    assert derived is None
+
+
+# --- the legacy logs ---------------------------------------------------------
+
+def test_a_log_without_a_strategy_column_is_labelled_from_the_filename(tmp_path):
+    """2026-09-02/-03/-08 predate the column. Crashing on them cost a run."""
+    p = tmp_path / "mcl_fills_20260902.csv"
+    d = f([buy("2026-09-02 04:00:00"), sell("2026-09-02 04:10:00", 1.0, 10.0)])
+    d.drop(columns=["strategy"]).to_csv(p, index=False)
+    out, derived = C.load(p)
+    assert derived == "MCL"
+    assert set(out.strategy) == {"MCL"}
+
+
+def test_a_derived_label_is_REPORTED_not_printed_like_a_recorded_one(tmp_path):
+    t = C.round_trips(f([buy("2026-09-02 04:00:00"),
+                         sell("2026-09-02 04:10:00", 1.0, 10.0)]))
+    text = "\n".join(C.render([], t, ["2026-09-02"], 0.1,
+                              derived=["2026-09-02 (MCL)"]))
+    assert "labelled from the FILENAME" in text
+    assert "2026-09-02 (MCL)" in text
+    assert "DERIVED" in text
+
+
+def test_the_filename_never_overrides_a_recorded_strategy(tmp_path):
+    """mcl_fills_20260911.csv is named MCL and is full of MC5 rows."""
+    p = tmp_path / "mcl_fills_20260911.csv"
+    d = f([buy("2026-09-11 04:00:00"), sell("2026-09-11 04:10:00", 1.0, 10.0)])
+    d.to_csv(p, index=False)
+    out, derived = C.load(p)
+    assert derived is None
+    assert set(out.strategy) == {"MC5"}
+
+
+def test_a_log_missing_a_REQUIRED_column_is_refused_by_name(tmp_path):
+    p = tmp_path / "mcl_fills_20260902.csv"
+    d = f([buy("2026-09-02 04:00:00"), sell("2026-09-02 04:10:00", 1.0, 10.0)])
+    d.drop(columns=["hold_minutes"]).to_csv(p, index=False)
+    with pytest.raises(ValueError, match="hold_minutes"):
+        C.load(p)
+
+
+def test_a_refused_log_is_not_reported_as_a_clean_one():
+    t = C.round_trips(f([buy("2026-09-11 04:00:00"),
+                         sell("2026-09-11 04:10:00", 1.0, 10.0)]))
+    text = "\n".join(C.render([], t, ["2026-09-11"], 0.1,
+                              refused=[{"file": "x.csv", "why": "no vol"}]))
+    assert "REFUSED" in text
+    assert "x.csv: no vol" in text
+    assert "NOT a clean one" in text

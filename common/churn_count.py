@@ -101,12 +101,37 @@ def round_trips(f: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def load(path: Path) -> pd.DataFrame:
+# Everything round_trips() reads. Checked up front so a missing column is a
+# named refusal instead of a KeyError from inside a groupby six frames down.
+REQUIRED = ["ts_et", "symbol", "action", "status", "trade_pnl", "hold_minutes"]
+
+
+def load(path: Path) -> tuple[pd.DataFrame, str | None]:
+    """(filled rows, the strategy label if it had to be DERIVED).
+
+    The logs from before the multi-strategy work -- 2026-09-02, -03, -08 --
+    have no `strategy` column at all, because there was only MCL. The label is
+    taken from the filename prefix for those, and the caller is told, because
+    a derived label that prints identically to a recorded one is the mistake
+    this project keeps making.
+
+    The prefix is used ONLY when the column is absent, never as a fallback for
+    a file that has it: `mcl_fills_20260911.csv` is named for MCL and is full
+    of MC5 rows, so the name is evidence about the ERA and not about any row.
+    """
     d = pd.read_csv(path)
-    if "ts_et" not in d.columns:
-        raise ValueError(f"{path.name} has no ts_et column")
+    missing = [c for c in REQUIRED if c not in d.columns]
+    if missing:
+        raise ValueError(f"no {', '.join(missing)} column(s)")
     d["ts_et"] = pd.to_datetime(d["ts_et"])
-    return d[d.status == "FILLED"].copy()
+    derived = None
+    if "strategy" not in d.columns:
+        derived = path.name.split("_", 1)[0].upper()
+        d["strategy"] = derived
+    for c in FINGERPRINT:
+        if c not in d.columns:
+            d[c] = pd.NA
+    return d[d.status == "FILLED"].copy(), derived
 
 
 def section(t: pd.DataFrame, flag: str, label: str) -> list[str]:
@@ -127,7 +152,8 @@ def section(t: pd.DataFrame, flag: str, label: str) -> list[str]:
 
 
 def render(per: list[dict], t: pd.DataFrame, files: list[str],
-           elapsed: float) -> list[str]:
+           elapsed: float, derived: list[str] | None = None,
+           refused: list[dict] | None = None) -> list[str]:
     L = ["SUB-MINUTE CHURN IN THE LIVE RECORD", "",
          f"  {len(files)} session(s): {', '.join(files)}",
          f"  {len(t):,} round trip(s), net {acct(t.pnl.sum(), 1).strip()}",
@@ -169,6 +195,28 @@ def render(per: list[dict], t: pd.DataFrame, files: list[str],
           "  figure far below it means the bug's cost was concentrated, not",
           "  routine -- and the headline should be re-stated accordingly.", ""]
 
+    if derived:
+        L += ["HOW THE STRATEGY WAS LABELLED", "",
+              "  These session(s) predate the strategy column and were",
+              "  labelled from the FILENAME, not from the rows:", ""]
+        L += [f"    {d}" for d in derived]
+        L += ["",
+              "  They are from the single-strategy era, so the label is sound",
+              "  -- but it is DERIVED, and a derived label that prints like a",
+              "  recorded one is how this project has been caught before.",
+              "",
+              "  They are also a CONTROL. MCL's signal bar is the frame's last",
+              "  row, so the old guard worked for it: these sessions should",
+              "  show ZERO reused signal bars. If they do not, the dedupe bug",
+              "  was not what this report says it was.", ""]
+
+    if refused:
+        L += ["REFUSED", ""]
+        L += [f"  {r['file']}: {r['why']}" for r in refused]
+        L += ["",
+              "  A refused log is NOT a clean one. It was not counted at all.",
+              ""]
+
     L += ["WHAT THIS IS NOT", "",
           "  Not an estimate of what the fix earns. Every session here ran",
           "  the broken guard, so removing these trades is a counterfactual:",
@@ -201,12 +249,12 @@ def main(argv=None) -> int:
     if not paths:
         sys.exit(f"no fill logs in {a.fills}")
 
-    per, frames, names = [], [], []
+    per, frames, names, derived_from_name, refused = [], [], [], [], []
     for p in paths:
         try:
-            f = load(p)
-        except (ValueError, pd.errors.EmptyDataError) as e:
-            print(f"  skipping {p.name}: {e}")
+            f, derived = load(p)
+        except (ValueError, pd.errors.EmptyDataError, KeyError) as e:
+            refused.append({"file": p.name, "why": str(e)})
             continue
         t = round_trips(f)
         if t.empty:
@@ -216,6 +264,8 @@ def main(argv=None) -> int:
         t = t.assign(session=day)
         by = ", ".join(f"{s}:{acct(g.pnl.sum(), 1).strip()}"
                        for s, g in t.groupby("strategy"))
+        if derived:
+            derived_from_name.append(f"{day} ({derived})")
         per.append({"date": day, "n": len(t), "net": t.pnl.sum(),
                     "reused": int(t.reused.sum()),
                     "instant": int(t.instant.sum()),
@@ -228,8 +278,9 @@ def main(argv=None) -> int:
     if not frames:
         sys.exit("no round trips found in any fill log")
     allt = pd.concat(frames, ignore_index=True)
-    emit("\n".join(render(per, allt, names, time.time() - t0)), a.out,
-         header="common.churn_count")
+    emit("\n".join(render(per, allt, names, time.time() - t0,
+                          derived_from_name, refused)),
+         a.out, header="common.churn_count")
     return 0
 
 
