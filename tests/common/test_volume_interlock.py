@@ -230,3 +230,45 @@ def test_the_column_contract_with_signals_is_pinned():
     for col in ["c_macd", "c_mfi", "c_rsi", "c_vol", "c_floor", "prev_vol",
                 "trail_avg", "volume"]:
         assert col in sig.columns, f"signals() no longer emits {col}"
+
+
+# --- the constants are IMPORTED, not restated ---------------------------------
+
+def test_the_cache_window_comes_from_cache_io_not_from_here():
+    """The first run of this module looked for var/cache/1d_to_09:30 -- a
+    window I invented and a path Windows cannot even hold, because a colon is
+    illegal in a filename. Every other offline consumer imports the shared
+    constants; this one must too."""
+    import inspect
+
+    from common import volume_interlock as mod
+    src = inspect.getsource(mod.main)
+    assert "SHARED_DURATION" in src and "SHARED_END_HHMM" in src
+    for bad in ('"1 D"', "'1 D'", '"09:30"', "'09:30'"):
+        assert bad not in src, f"{bad} is restated here instead of imported"
+
+
+def test_the_superset_is_SLICED_before_it_is_measured():
+    """cache_io caches SHARED_DURATION (3 D) to 20:00 and warns that passing
+    the superset through unsliced 'would silently revalue every backtest'.
+    Here it would measure a PRE-MARKET rule across three full sessions
+    including regular and after hours."""
+    import inspect
+
+    from common import volume_interlock as mod
+    src = inspect.getsource(mod.main)
+    assert "slice_sessions(" in src
+    assert "BACKTEST_SESSIONS" in src
+    assert "check_sessions(" in src, "a short superset must be caught, not sliced"
+
+
+def test_no_bars_and_too_short_are_counted_separately():
+    """They mean different things: one is a cache that was never built, the
+    other a symbol without enough history. A single 'skipped' number would
+    send someone rebuilding a cache that is already fine."""
+    import inspect
+
+    from common import volume_interlock as mod
+    src = inspect.getsource(mod.main)
+    assert "no_bars" in src and "too_short" in src
+    assert "had no cached file" in src

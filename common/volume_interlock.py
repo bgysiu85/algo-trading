@@ -66,8 +66,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from zoneinfo import ZoneInfo
+
 from common.report_fmt import acct
 from common.report_io import emit
+
+ET = ZoneInfo("America/New_York")
 
 # Where the joint window opens: volume >= OPENS_AT x trail_avg. Derived, not
 # chosen -- it falls out of VOL_MULTIPLE and FLOOR_FRACTION, and a test pins
@@ -138,8 +142,8 @@ def render(rows: list[dict], pairs_path: str, mcl, skipped: int,
          f"  so both can hold only when volume >= {gate:g}x trail_avg",
          f"  elapsed {elapsed:.1f}s", ""]
     if skipped:
-        L += [f"  {skipped:,} symbol-day(s) had no cached bars and were NOT "
-              "tested", ""]
+        L += [f"  {skipped:,} symbol-day(s) NOT tested: no cached bars, or "
+              "too short for full warm-up", ""]
 
     if not judge:
         return L + [
@@ -196,8 +200,13 @@ def render(rows: list[dict], pairs_path: str, mcl, skipped: int,
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--pairs", default="var/state/traded_pairs.json")
-    p.add_argument("--cache", default=None,
-                   help="bar cache root (default: the MCL backtest window)")
+    p.add_argument("--cache", default="bar_cache",
+                   help="bar cache ROOT. The window under it, and the slice "
+                        "back to the backtest window, both come from "
+                        "cache_io's shared constants -- restating either here "
+                        "is how the first run of this module looked for "
+                        "var/cache/1d_to_09:30, a path Windows cannot even "
+                        "hold.")
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--out", default="var/reports/volume_interlock.txt")
     return p
@@ -206,7 +215,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     import time
     a = build_parser().parse_args(argv)
-    from common.cache_io import load_cached_bars, load_pairs, window_dir
+    from datetime import datetime
+
+    from common.cache_io import (BACKTEST_END_HHMM, BACKTEST_SESSIONS,
+                                 SHARED_DURATION, SHARED_END_HHMM,
+                                 check_sessions, load_cached_bars, load_pairs,
+                                 slice_sessions, window_dir)
     from strategy.mcl import mcl as MCL
 
     pairs = load_pairs(Path(a.pairs))
@@ -215,28 +229,47 @@ def main(argv=None) -> int:
     if a.limit:
         pairs = pairs[:a.limit]
 
-    cache = Path(a.cache) if a.cache else window_dir(
-        Path("var/cache"), "1 D", "09:30")
+    # The cache holds a SUPERSET -- SHARED_DURATION to SHARED_END_HHMM -- and
+    # every offline consumer slices it back to the backtest window before
+    # reading anything off it. cache_io's own comment says caching a superset
+    # and passing it through unsliced "would silently revalue every backtest";
+    # here it would mean measuring a PRE-MARKET rule across three full
+    # sessions including regular and after hours, which is a different
+    # population wearing the same name.
+    cache = window_dir(Path(a.cache), SHARED_DURATION, SHARED_END_HHMM)
+    end_h, end_m = int(BACKTEST_END_HHMM[:2]), int(BACKTEST_END_HHMM[2:])
 
     t0 = time.time()
-    rows, skipped = [], 0
+    rows, no_bars, too_short = [], 0, 0
     for p in pairs:
         bars = load_cached_bars(cache, p["symbol"], p["date"])
-        if bars is None or len(bars) < MCL.MIN_BARS_REQUIRED:
-            skipped += 1
+        if bars is None or bars.empty:
+            no_bars += 1
             continue
-        try:
-            sig = MCL.signals(bars)
-        except Exception:  # noqa: BLE001
-            skipped += 1
+        bars.index = (bars.index.tz_localize("UTC") if bars.index.tz is None
+                      else bars.index.tz_convert("UTC"))
+        bars = bars.sort_index()
+        want_end = datetime.strptime(p["date"], "%Y-%m-%d").replace(
+            hour=end_h, minute=end_m, tzinfo=ET)
+        if check_sessions(bars, want_end, BACKTEST_SESSIONS) < BACKTEST_SESSIONS:
+            too_short += 1
             continue
-        r = per_session(sig, MCL)
+        sl = slice_sessions(bars, want_end, BACKTEST_SESSIONS)
+        if len(sl) < MCL.MIN_BARS_REQUIRED:
+            too_short += 1
+            continue
+        r = per_session(MCL.signals(sl), MCL)
         r["symbol"], r["date"] = p["symbol"], p["date"]
         rows.append(r)
 
+    skipped = no_bars + too_short
     if not rows:
-        sys.exit(f"no cached bars for any of {len(pairs)} symbol-day(s) under "
-                 f"{cache}/. Build the cache first, or pass --cache.")
+        sys.exit(
+            f"no usable bars for any of {len(pairs)} symbol-day(s) under "
+            f"{cache}/\n"
+            f"  {no_bars} had no cached file, {too_short} were too short for "
+            f"{BACKTEST_SESSIONS} session(s) of warm-up.\n"
+            "  Pass --cache <root> if the cache lives elsewhere.")
 
     emit("\n".join(render(rows, a.pairs, MCL, skipped, time.time() - t0)),
          a.out, header=f"common.volume_interlock  pairs={a.pairs}")
