@@ -225,7 +225,7 @@ def render(refused: list[dict], control: list[dict], population: str,
 
 
 def render_one(refused: list[dict], control: list[dict], population: str,
-               only: str, elapsed: float) -> list[str]:
+               only: str, elapsed: float, source: str = "cache") -> list[str]:
     """One symbol-day, every trade listed in full.
 
     Separate from `render` because the aggregate view answers "is this
@@ -235,8 +235,17 @@ def render_one(refused: list[dict], control: list[dict], population: str,
     """
     L = ["ONE SYMBOL-DAY, PRICED IN FULL", "",
          f"  {only}   population: {population}",
+         f"  bars from: {source}",
          "  entered at the refused bar's close, exited by MCL's OWN exit",
          f"  elapsed {elapsed:.1f}s", ""]
+    if source == "archive":
+        L += ["  NOT THE BARS THE LIVE TRADER SAW. Databento XNAS.BASIC at a",
+              "  measured 55.2% capture, so every VOLUME here is roughly half",
+              "  the consolidated figure and the capture is not constant bar",
+              "  to bar -- on 2026-09-11 TNON it was 81% at 07:34 and 46% at",
+              "  07:35. PRICES are prices and are unaffected; the entry and",
+              "  exit below are therefore sound, while which bars qualified",
+              "  carries that uncertainty.", ""]
 
     ts = [t for row in refused for t in row["trades"]]
     if not ts:
@@ -308,6 +317,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--pairs", default="var/state/traded_pairs.json")
     p.add_argument("--cache", default="bar_cache")
+    p.add_argument("--source", default="cache", choices=["cache", "archive"],
+                   help="where the bars come from. `cache` is IB's feed and is "
+                        "what every published P/L here was measured on. "
+                        "`archive` is the Databento window slices, which reach "
+                        "recent sessions the cache has not been built for -- "
+                        "at a measured 55.2%% capture, so its VOLUMES are "
+                        "roughly half consolidated. Only sensible with --only.")
+    p.add_argument("--archive", default=None)
+    p.add_argument("--dataset", default="XNAS.BASIC")
     p.add_argument("--population", default="floor_sole",
                    choices=["floor_sole", "locked"])
     p.add_argument("--only", default=None, metavar="SYMBOL:DATE",
@@ -341,10 +359,41 @@ def main(argv=None) -> int:
     cache = window_dir(Path(a.cache), SHARED_DURATION, SHARED_END_HHMM)
     end_h, end_m = int(BACKTEST_END_HHMM[:2]), int(BACKTEST_END_HHMM[2:])
 
+    archive = None
+    if a.source == "archive":
+        from common.databento_fetch import default_archive
+        archive = Path(a.archive) if a.archive else default_archive()
+
     t0 = time.time()
     refused, control, skipped = [], [], 0
     for p in pairs:
-        bars = load_cached_bars(cache, p["symbol"], p["date"])
+        if a.source == "archive":
+            # Reuse why_no_entry's loader rather than re-deriving the
+            # prior-session warm-up: the archive slices are 04:00-09:30 only,
+            # so a session on its own carries no history to seed MACD or the
+            # 60-bar volume average, and getting that wrong would change every
+            # condition silently.
+            from common.why_no_entry import MIN_WARMUP_BARS, from_archive
+            try:
+                bars = from_archive(p["symbol"], p["date"], archive, a.dataset)
+            except SystemExit:
+                bars = None
+            if bars is not None and not bars.empty:
+                bars.index = (bars.index.tz_localize("UTC")
+                              if bars.index.tz is None
+                              else bars.index.tz_convert("UTC"))
+                bars = bars.sort_index()
+                warm = int((bars.index.tz_convert(ET).date
+                            < datetime.strptime(p["date"], "%Y-%m-%d").date()
+                            ).sum())
+                if warm < MIN_WARMUP_BARS:
+                    sys.exit(
+                        f"only {warm} warm-up bar(s) before {p['date']} for "
+                        f"{p['symbol']}; MACD and the 60-bar volume average "
+                        f"need at least {MIN_WARMUP_BARS}. Every condition "
+                        "would be computed on a cold start.")
+        else:
+            bars = load_cached_bars(cache, p["symbol"], p["date"])
         if bars is None or bars.empty:
             skipped += 1
             continue
@@ -354,10 +403,16 @@ def main(argv=None) -> int:
         day = datetime.strptime(p["date"], "%Y-%m-%d").date()
         want_end = datetime.combine(day, datetime.min.time()).replace(
             hour=end_h, minute=end_m, tzinfo=ET)
-        if check_sessions(bars, want_end, BACKTEST_SESSIONS) < BACKTEST_SESSIONS:
-            skipped += 1
-            continue
-        sl = slice_sessions(bars, want_end, BACKTEST_SESSIONS)
+        if a.source == "archive":
+            # The archive slices ARE the 04:00-09:30 window already; slicing
+            # them to a 2-session IB superset would discard the warm-up day.
+            sl = bars
+        else:
+            if check_sessions(bars, want_end,
+                              BACKTEST_SESSIONS) < BACKTEST_SESSIONS:
+                skipped += 1
+                continue
+            sl = slice_sessions(bars, want_end, BACKTEST_SESSIONS)
         if len(sl) < MCL.MIN_BARS_REQUIRED:
             skipped += 1
             continue
@@ -381,7 +436,7 @@ def main(argv=None) -> int:
         out = a.out or ("var/reports/refused_value_"
                         f"{a.only.replace(':', '_')}.txt")
         emit("\n".join(render_one(refused, control, a.population, a.only,
-                                  time.time() - t0)),
+                                  time.time() - t0, a.source)),
              out, header=f"common.refused_value  only={a.only} "
                          f"population={a.population}")
         return 0

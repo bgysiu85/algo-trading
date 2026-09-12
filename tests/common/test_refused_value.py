@@ -376,3 +376,45 @@ def test_a_symbol_day_with_no_refused_bar_says_so():
     text = "\n".join(R.render_one([], [], "locked", "AAA:2026-09-11", 0.1))
     assert "NO REFUSED BAR ON THIS SYMBOL-DAY" in text
     assert "did not occur" in text or "shape did not occur" in text
+
+
+# --- the archive source -------------------------------------------------------
+
+def test_the_archive_source_declares_that_it_is_not_the_live_tape():
+    """Volumes on XNAS.BASIC are ~55% of consolidated and the capture is not
+    constant bar to bar. Prices are unaffected, which is why the trade can
+    still be priced -- but which bars QUALIFIED carries that uncertainty and
+    the report must say so."""
+    class Full:
+        entry_time = "2026-09-11 07:35:00"
+        exit_time = "2026-09-11 07:48:00"
+        entry_price, exit_price, qty = 7.48, 8.20, 100
+        reason, bars_held = "trailing_stop", 13
+        gross, commission, net = 72.0, 1.40, 70.60
+    text = "\n".join(R.render_one(
+        [{"symbol": "TNON", "date": "2026-09-11", "trades": [Full()]}],
+        [], "floor_sole", "TNON:2026-09-11", 0.1, "archive"))
+    assert "NOT THE BARS THE LIVE TRADER SAW" in text
+    assert "55.2% capture" in text
+    assert "PRICES are prices" in text
+    assert "bars from: archive" in text
+
+
+def test_the_cache_source_makes_no_such_caveat():
+    class Full:
+        entry_time = "2026-09-11 07:35:00"
+        exit_time = "2026-09-11 07:48:00"
+        entry_price, exit_price, qty = 7.48, 8.20, 100
+        reason, bars_held = "trailing_stop", 13
+        gross, commission, net = 72.0, 1.40, 70.60
+    text = "\n".join(R.render_one(
+        [{"symbol": "TNON", "date": "2026-09-11", "trades": [Full()]}],
+        [], "floor_sole", "TNON:2026-09-11", 0.1, "cache"))
+    assert "NOT THE BARS THE LIVE TRADER SAW" not in text
+    assert "bars from: cache" in text
+
+
+def test_the_source_choices_are_the_two_that_exist():
+    p = R.build_parser()
+    assert p.parse_args([]).source == "cache"
+    assert p.parse_args(["--source", "archive"]).source == "archive"
