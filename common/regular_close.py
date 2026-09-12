@@ -132,9 +132,13 @@ def score(got: list[dict]) -> dict[str, dict]:
     return out
 
 
-def render(got: list[dict], sc: dict, missing: list[str]) -> list[str]:
+def render(got: list[dict], sc: dict, missing: list[str],
+           dataset: str = "XNAS.BASIC",
+           daily_dataset: str = "XNAS.BASIC") -> list[str]:
     disc = [g for g in got if g["discriminating"]]
     L = ["WHICH PRINT IS THE REGULAR-SESSION CLOSE?", "",
+         f"  minute bars from {dataset}; the close currently in use is "
+         f"{daily_dataset} ohlcv-1d",
          f"  {len(got)} truth row(s) from TradingView, "
          f"{len(disc)} of them DISCRIMINATING",
          "  a row discriminates only when our ohlcv-1d close already",
@@ -213,11 +217,14 @@ def render(got: list[dict], sc: dict, missing: list[str]) -> list[str]:
           "  Not a repair. Nothing here rewrites prior_close, and --emit only",
           "  writes the closes for the sessions actually pulled.",
           "",
-          "  Not a claim about cross-listed names. ACVA is NYSE and TPET is",
-          "  AMEX; the archive is XNAS.BASIC, which carries them only through",
-          "  Nasdaq-venue prints. If those rows match, the tape is adequate",
-          "  for them; if only the Nasdaq-listed rows match, the repair needs",
-          "  a consolidated source and this says so rather than averaging.",
+          "  Not a claim about any OTHER dataset. ACVA is NYSE and TPET is",
+          "  AMEX, and an official close is set by the LISTING venue's closing",
+          "  auction -- which a Nasdaq-only tape does not carry at all. So a",
+          "  failure here may mean the construction is wrong OR that this",
+          "  dataset cannot answer the question. Re-run with --dataset on a",
+          "  consolidated feed before blaming the construction; if only the",
+          "  Nasdaq-listed rows match, that IS the answer and the repair needs",
+          "  a consolidated source.",
           "",
           "  Not out of sample. These eleven rows were read while chasing this",
           "  defect. A construction validated on them is validated on the",
@@ -228,13 +235,25 @@ def render(got: list[dict], sc: dict, missing: list[str]) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--archive", default=None)
-    p.add_argument("--dataset", default="XNAS.BASIC")
+    p.add_argument("--dataset", default="XNAS.BASIC",
+                   help="the dataset the MINUTE bars come from. Worth varying: "
+                        "XNAS.BASIC is Nasdaq-only, and an official close for "
+                        "a NYSE- or AMEX-listed name is set by THAT venue's "
+                        "closing auction, which this tape does not carry.")
+    p.add_argument("--daily-dataset", default="XNAS.BASIC",
+                   help="the dataset whose ohlcv-1d close is the one in USE -- "
+                        "the source of the defect. Held fixed while --dataset "
+                        "varies, because whether a row discriminates is a fact "
+                        "about the close we currently divide by, not about the "
+                        "candidate being tested.")
     p.add_argument("--window", default="15:55-16:05",
                    help="the ET window pulled by databento_universe --window")
     p.add_argument("--emit", action="store_true",
                    help="write var/state/regular_close.json for the sessions "
                         "present, using the winning construction")
-    p.add_argument("--out", default="var/reports/regular_close.txt")
+    p.add_argument("--out", default=None,
+                   help="default: var/reports/regular_close_<dataset>.txt, so "
+                        "two datasets do not clobber each other")
     return p
 
 
@@ -255,7 +274,7 @@ def main(argv=None) -> int:
             f"--window {a.window} --start 2026-09-08 --end 2026-09-12\n"
             "It prints the cost and does nothing without --confirm.")
 
-    daily = daily_frame(archive, a.dataset)
+    daily = daily_frame(archive, a.daily_dataset)
     dkey = {(r.date, r.symbol): float(r.close) for r in daily.itertuples()} \
         if not daily.empty else {}
 
@@ -282,8 +301,11 @@ def main(argv=None) -> int:
                     "discriminating": abs(dly - truth) > TOL})
 
     sc = score(got)
-    emit("\n".join(render(got, sc, missing)), a.out,
-         header=f"common.regular_close  dataset={a.dataset} window={a.window}")
+    out = a.out or ("var/reports/regular_close_"
+                    f"{a.dataset.replace('.', '_')}.txt")
+    emit("\n".join(render(got, sc, missing, a.dataset, a.daily_dataset)), out,
+         header=f"common.regular_close  minutes={a.dataset} "
+                f"daily={a.daily_dataset} window={a.window}")
 
     if a.emit:
         winners = [n for n, s in sc.items() if s["of"] and s["hit"] == s["of"]]

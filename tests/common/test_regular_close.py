@@ -198,3 +198,33 @@ def test_the_truth_table_carries_an_exchange_for_every_row():
     for day, sym, exch, px in R.TRUTH:
         assert exch in {"NYSE", "NASDAQ", "AMEX"}, (sym, exch)
         assert px > 0
+
+
+# --- the dataset question ----------------------------------------------------
+
+def test_the_report_names_which_dataset_the_minutes_CAME_FROM():
+    """Two datasets are scored against one truth table. A report that did not
+    say which tape it read would be two indistinguishable files."""
+    got = two_rows(
+        {"last_bar_before_1600": 7.30, "bar_at_1600": 7.22,
+         "last_bar_at_or_before_1600": 7.22},
+        {"last_bar_before_1600": 1.83, "bar_at_1600": 1.81,
+         "last_bar_at_or_before_1600": 1.81})
+    text = "\n".join(R.render(got, R.score(got), [], "EQUS.MINI", "XNAS.BASIC"))
+    assert "minute bars from EQUS.MINI" in text
+    assert "currently in use is XNAS.BASIC" in text
+
+
+def test_a_failure_does_not_blame_the_construction_by_default():
+    """On a Nasdaq-only tape a NYSE name's official close is absent entirely,
+    so "no candidate matched" may be a statement about the DATASET. The report
+    must offer that reading rather than only the construction one."""
+    got = two_rows(
+        {"last_bar_before_1600": 9.9, "bar_at_1600": 9.8,
+         "last_bar_at_or_before_1600": 9.8},
+        {"last_bar_before_1600": 9.9, "bar_at_1600": 9.8,
+         "last_bar_at_or_before_1600": 9.8})
+    text = "\n".join(R.render(got, R.score(got), []))
+    assert "NONE of the candidates" in text
+    assert "cannot answer the question" in text
+    assert "before blaming the construction" in text
