@@ -83,6 +83,39 @@ TRUTH = [
     ("2026-09-09", "TPET", "AMEX", 1.81),
     ("2026-09-10", "TPET", "AMEX", 2.02),
     ("2026-09-11", "TPET", "AMEX", 1.88),
+    # Added after the first scored run, which put ALL THREE of its misses on
+    # TPET while every ACVA and ISPC row matched. Three misses on one of three
+    # names is not a finding, and it has two readings that the first table
+    # cannot separate:
+    #
+    #   LISTING VENUE   TPET is NYSE Arca. Its closing cross happens on a
+    #                   venue XNAS.BASIC does not carry, so the "first print
+    #                   after 16:00" on this tape is just whatever Nasdaq
+    #                   printed, not the official close.
+    #   LIQUIDITY       TPET is also the thinnest name in the table.
+    #
+    # These four are all NASDAQ-listed and span two orders of magnitude of
+    # volume -- XRTX trades ~10k shares on a quiet day, TNON and FTFT trade
+    # tens of millions. If the thin Nasdaq name matches, liquidity is not the
+    # problem and TPET's failure is about where it lists; if XRTX fails too,
+    # it is thinness and the repair degrades for exactly the small caps this
+    # screen is for.
+    ("2026-09-08", "TNON", "NASDAQ", 3.36),
+    ("2026-09-09", "TNON", "NASDAQ", 2.44),
+    ("2026-09-10", "TNON", "NASDAQ", 5.30),
+    ("2026-09-11", "TNON", "NASDAQ", 5.93),
+    ("2026-09-08", "FTFT", "NASDAQ", 1.31),
+    ("2026-09-09", "FTFT", "NASDAQ", 2.09),
+    ("2026-09-10", "FTFT", "NASDAQ", 2.05),
+    ("2026-09-11", "FTFT", "NASDAQ", 2.88),
+    ("2026-09-08", "XRTX", "NASDAQ", 2.28),
+    ("2026-09-09", "XRTX", "NASDAQ", 2.158),
+    ("2026-09-10", "XRTX", "NASDAQ", 2.11),
+    ("2026-09-11", "XRTX", "NASDAQ", 2.33),
+    ("2026-09-08", "SUNE", "NASDAQ", 2.37),
+    ("2026-09-09", "SUNE", "NASDAQ", 4.51),
+    ("2026-09-10", "SUNE", "NASDAQ", 3.37),
+    ("2026-09-11", "SUNE", "NASDAQ", 3.20),
 ]
 
 TOL = 0.005          # half a cent: a match is a match to the printed cent
@@ -202,6 +235,35 @@ def render(got: list[dict], sc: dict, missing: list[str],
     for n, s in sc.items():
         L.append(f"  {n:<30} {s['hit']}/{s['of']}")
 
+    # Split by listing venue. An official close is set by the LISTING venue's
+    # cross, so a construction that works on Nasdaq names and fails elsewhere
+    # is not a broken construction -- it is a tape that does not carry the
+    # other venues. Pooling the two hides exactly that.
+    by_ex = {}
+    for g in got:
+        if g["discriminating"]:
+            by_ex.setdefault(g.get("exchange") or "?", []).append(g)
+    if len(by_ex) > 1:
+        L += ["", "THE SAME SCORE, SPLIT BY LISTING VENUE", "",
+              f"  (the archive is a NASDAQ tape)", "",
+              f"  {'candidate':<30}" +
+              "".join(f"{e:>12}" for e in sorted(by_ex))]
+        for n in sc:
+            cells = []
+            for e in sorted(by_ex):
+                rows_e = by_ex[e]
+                hit = sum(1 for g in rows_e
+                          if g["cand"].get(n) is not None
+                          and abs(g["cand"][n] - g["truth"]) <= TOL)
+                cells.append(f"{hit}/{len(rows_e)}".rjust(12))
+            L.append(f"  {n:<30}" + "".join(cells))
+        L += ["",
+              "  A candidate that is perfect on NASDAQ and imperfect elsewhere",
+              "  says the CONSTRUCTION is right and the TAPE is partial. That",
+              "  is a known, bounded degradation for cross-listed names, not a",
+              "  reason to reject the repair -- but it must be stated wherever",
+              "  the repaired closes are used, not discovered later."]
+
     winners = [n for n, s in sc.items() if s["of"] and s["hit"] == s["of"]]
     L += ["", "VERDICT", ""]
     if len(winners) == 1:
@@ -307,7 +369,7 @@ def main(argv=None) -> int:
 
     got, missing = [], []
     cache: dict[str, pd.DataFrame] = {}
-    for day, sym, _exch, truth in TRUTH:
+    for day, sym, _exch, truth in TRUTH:  # noqa: B007
         p = slices.get(day)
         if p is None:
             missing.append(f"{day} {sym}: no {a.window} slice")
@@ -324,6 +386,7 @@ def main(argv=None) -> int:
             missing.append(f"{day} {sym}: no daily bar to compare against")
             continue
         got.append({"date": day, "symbol": sym, "truth": truth, "daily": dly,
+                    "exchange": _exch,
                     "cand": candidates(rows.sort_index(kind="mergesort")),
                     "discriminating": abs(dly - truth) > TOL})
 

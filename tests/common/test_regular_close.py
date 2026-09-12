@@ -63,9 +63,10 @@ def test_an_empty_frame_yields_no_candidates():
 
 # --- what must not count -----------------------------------------------------
 
-def row(date, sym, truth, daily, cand):
+def row(date, sym, truth, daily, cand, exchange="NASDAQ"):
     return {"date": date, "symbol": sym, "truth": truth, "daily": daily,
-            "cand": cand, "discriminating": abs(daily - truth) > R.TOL}
+            "exchange": exchange, "cand": cand,
+            "discriminating": abs(daily - truth) > R.TOL}
 
 
 def test_a_quiet_day_is_NOT_discriminating():
@@ -112,8 +113,8 @@ def test_no_discriminating_row_is_reported_as_such_not_as_a_pass():
 # --- the verdict -------------------------------------------------------------
 
 def two_rows(cand_a, cand_b):
-    return [row("2026-09-10", "ACVA", 7.22, 10.38, cand_a),
-            row("2026-09-09", "TPET", 1.81, 1.86, cand_b)]
+    return [row("2026-09-10", "ACVA", 7.22, 10.38, cand_a, "NYSE"),
+            row("2026-09-09", "TPET", 1.81, 1.86, cand_b, "AMEX")]
 
 
 def test_a_single_perfect_construction_wins():
@@ -281,3 +282,35 @@ def test_all_five_candidates_are_scored():
                        "last_bar_at_or_before_1600", "auction_else_last"}
     assert sc["bar_at_1600"]["hit"] == 0
     assert sc["auction_else_last"]["hit"] == 1
+
+
+# --- the venue split ---------------------------------------------------------
+
+def test_the_score_is_split_by_listing_venue_when_venues_differ():
+    """An official close is set by the LISTING venue's cross. A construction
+    that is perfect on NASDAQ and imperfect elsewhere is a partial TAPE, not a
+    broken construction, and pooling the two hides exactly that."""
+    got = [row("2026-09-10", "ISPC", 1.50, 1.43,
+               {"auction_else_last": 1.50}, "NASDAQ"),
+           row("2026-09-09", "TPET", 1.81, 1.86,
+               {"auction_else_last": 1.82}, "AMEX")]
+    text = "\n".join(R.render(got, R.score(got), []))
+    assert "SPLIT BY LISTING VENUE" in text
+    assert "NASDAQ" in text and "AMEX" in text
+    assert "1/1" in text and "0/1" in text
+    assert "partial" in text
+
+
+def test_no_split_is_printed_when_every_row_lists_on_one_venue():
+    got = [row("2026-09-10", "ISPC", 1.50, 1.43,
+               {"auction_else_last": 1.50}, "NASDAQ")]
+    text = "\n".join(R.render(got, R.score(got), []))
+    assert "SPLIT BY LISTING VENUE" not in text
+
+
+def test_the_truth_table_spans_both_venues_and_a_thin_nasdaq_name():
+    """The second batch exists to separate "wrong venue" from "thin tape". If
+    every added row were a liquid NASDAQ name it could not do that."""
+    ex = {sym: e for _d, sym, e, _p in R.TRUTH}
+    assert {"NASDAQ", "NYSE", "AMEX"} <= set(ex.values())
+    assert "XRTX" in ex and ex["XRTX"] == "NASDAQ"
