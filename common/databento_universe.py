@@ -41,6 +41,7 @@ import argparse
 import sys
 from datetime import date, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import json
 
@@ -54,6 +55,7 @@ from common.dbn_io import symbology_path
 # be unioned by hand -- correct consolidated OHLC across ten publishers is a
 # real piece of work, and getting it wrong yields plausible wrong bars rather
 # than an error. Start here; treat the deep history as a later regime test.
+ET = ZoneInfo("America/New_York")
 DEFAULT_DATASET = "EQUS.MINI"
 DEFAULT_START = "2023-03-28"
 
@@ -101,6 +103,50 @@ def day_chunks(start: str, end: str, window: str) -> list[tuple[str, str, str]]:
 
 def chunk_path(root: Path, dataset: str, schema: str, label: str) -> Path:
     return root / dataset / schema / f"{label}.dbn.zst"
+
+
+def chunk_last_bar(path: Path) -> str | None:
+    """The ET date of the last bar in a chunk, or None if it cannot be read.
+
+    None on any failure, deliberately: this decides whether to RE-BUY a chunk,
+    and an unreadable file must not be re-purchased on the strength of a
+    parsing error.
+    """
+    try:
+        from common.dbn_io import read_dbn
+        df = read_dbn(path)
+        if df.empty:
+            return None
+        return str(df.index.max().tz_convert(ET).date())
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
+def chunk_ends_before(path: Path, want_end: str) -> bool:
+    """Is this chunk short of the window it claims to cover?
+
+    A PARTIAL CHUNK IS NOT A PRESENT CHUNK. Month chunks fetched mid-month are
+    frozen at the day they were pulled, and a skip-if-present guard then
+    preserves that truncation forever: every later run reports success while
+    the data stops short of where it should.
+
+    That is not hypothetical. `XNAS.BASIC/ohlcv-1d/2026-09.dbn.zst` was pulled
+    on the 5th, held four sessions, and was skipped by every run afterwards.
+    `screen_sim` then dropped four sessions for having no prior REGULAR close
+    while the minute slices for exactly those sessions sat on disk, and the
+    check that needed them reported "outside the archive window".
+
+    The comparison allows two days of slack, because the true last session
+    before `want_end` depends on market holidays this function cannot know. A
+    chunk inside that slack is treated as complete; the cost of being wrong is
+    one re-priced chunk, which the estimate gate then shows before anything is
+    bought.
+    """
+    last = chunk_last_bar(path)
+    if last is None:
+        return False
+    want = date.fromisoformat(want_end[:10])
+    return (want - date.fromisoformat(last)).days > 2
 
 
 def save_symbology(client, path: Path) -> bool:
@@ -173,6 +219,12 @@ def main(argv=None) -> int:
     ap.add_argument("--end", default=date.today().isoformat())
     ap.add_argument("--archive", default=str(default_archive()),
                     help="archive root (default: %(default)s)")
+    ap.add_argument("--refresh-partial", action=argparse.BooleanOptionalAction,
+                    default=True,
+                    help="re-fetch a chunk on disk whose last bar falls short "
+                         "of the window it claims to cover. On by default: a "
+                         "month chunk pulled mid-month is frozen there, and "
+                         "skip-if-present hides it forever.")
     ap.add_argument("--max-cost", type=float, default=5.00)
     ap.add_argument("--confirm", action="store_true")
     ap.add_argument("--resymbolize", action="store_true",
@@ -220,12 +272,15 @@ def main(argv=None) -> int:
           f"{len(chunks)} {kind}\narchive {root}/\n")
 
     client = client_probe
-    todo, usd, nbytes, skipped, empty = [], 0.0, 0, 0, 0
+    todo, usd, nbytes, skipped, empty, short = [], 0.0, 0, 0, 0, []
     for label, lo, hi in chunks:
         out = chunk_path(root, a.dataset, a.schema, label)
         if out.exists():
-            skipped += 1
-            continue
+            if a.refresh_partial and chunk_ends_before(out, hi):
+                short.append((label, chunk_last_bar(out)))
+            else:
+                skipped += 1
+                continue
         kw = dict(dataset=a.dataset, schema=a.schema, symbols="ALL_SYMBOLS",
                   stype_in="raw_symbol", start=lo, end=hi)
         try:
@@ -247,7 +302,15 @@ def main(argv=None) -> int:
         if not a.window:
             print(f"  {label}  {b/1e6:>9.1f} MB   ${c:>8.4f}")
 
+    if short:
+        print("\nPARTIAL CHUNKS ON DISK -- these will be RE-FETCHED:\n")
+        for label, last in short:
+            print(f"  {label}  last bar {last}")
+        print("\n  A chunk fetched mid-period is frozen where it was pulled,"
+              "\n  and skip-if-present then preserves that truncation forever."
+              "\n  Pass --no-refresh-partial to keep them as they are.")
     print(f"\nalready on disk, skipped : {skipped}")
+    print(f"partial, to re-fetch     : {len(short)}")
     print(f"empty (holiday/no data)  : {empty}")
     print(f"to download              : {len(todo)}")
     print(f"ESTIMATED SIZE           : {nbytes/1e6:,.1f} MB")
@@ -262,8 +325,16 @@ def main(argv=None) -> int:
         return 0
 
     print()
+    refetched = {lbl for lbl, _ in short}
     entries, written = {}, 0
     for label, lo, hi, out, _c, _b in todo:
+        if label in refetched:
+            # save_symbology() early-returns when the sidecar exists, so a
+            # re-fetched chunk would keep the SHORT chunk's mapping and every
+            # newly-arrived instrument id would resolve to symbol=None -- the
+            # exact failure that docstring warns about, reintroduced by the
+            # fix for a different one.
+            symbology_path(out).unlink(missing_ok=True)
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_suffix(".partial")
         try:

@@ -106,7 +106,7 @@ def test_sample_agreement_is_clean_on_the_real_pair():
 
 def test_the_report_voids_itself_if_the_fast_path_disagrees():
     out = "\n".join(SS.render([{"date": "2026-03-02", "universe": []}], 1, CFG,
-                              60, (10, 3, ("t", ["A"], ["B"])), 1.0, 0))
+                              60, (10, 3, ("t", ["A"], ["B"])), 1.0, []))
     assert "DOES NOT REPRODUCE THE REFERENCE" in out
     assert "void" in out
 
@@ -273,14 +273,14 @@ def test_the_report_leads_with_the_entry_floor():
                            "best_rank": int(r.best_rank),
                            "ticks_on": int(r.ticks_on)}
                           for r in uni.itertuples()]}]
-    out = "\n".join(SS.render(rows, 1, CFG, 60, (5, 0, None), 1.0, 0))
+    out = "\n".join(SS.render(rows, 1, CFG, 60, (5, 0, None), 1.0, []))
     assert "WHEN A NAME FIRST CLEARS THE SCREEN" in out
     assert "entry floor" in out
     assert "could not" in out and "04:00" in out
 
 
 def test_the_report_says_it_is_a_universe_and_not_a_result():
-    out = "\n".join(SS.render([], 0, CFG, 60, (5, 0, None), 1.0, 0))
+    out = "\n".join(SS.render([], 0, CFG, 60, (5, 0, None), 1.0, []))
     assert "It is a UNIVERSE" in out
     assert "+$4.72" in out and "-$9.81" in out
 
@@ -288,7 +288,7 @@ def test_the_report_says_it_is_a_universe_and_not_a_result():
 def test_the_report_states_the_scaled_volume_threshold():
     """The only clause that depends on an ESTIMATE rather than a printed price,
     so it is the only one whose error can move the universe."""
-    out = "\n".join(SS.render([], 0, CFG, 60, (5, 0, None), 1.0, 0))
+    out = "\n".join(SS.render([], 0, CFG, 60, (5, 0, None), 1.0, []))
     assert f"{CFG.volume_min_on_tape:,}" in out
     assert "capture" in out
 
@@ -342,3 +342,33 @@ def test_the_unit_helper_agrees_with_pandas_on_a_known_instant():
     for unit in ("us", "ns"):
         got = SS._utc_ns(idx.as_unit(unit))[0]
         assert got == pd.Timestamp("2026-03-02 09:00:00", tz="UTC").value
+
+
+def test_skipped_sessions_are_NAMED_not_counted_as_names():
+    """Counted SESSIONS and labelled "names dropped" until 2026-09-12. Four
+    whole sessions missing from the universe read as four tickers, and the
+    check that needed them reported "outside the archive window" instead."""
+    out = "\n".join(SS.render([{"date": "2026-03-02", "universe": []}], 1, CFG,
+                              60, (5, 0, None), 1.0,
+                              ["2026-09-08", "2026-09-09", "2026-09-10",
+                               "2026-09-11"]))
+    assert "SESSIONS SKIPPED" in out
+    assert "names dropped" not in out
+    for d in ("2026-09-08", "2026-09-11"):
+        assert d in out
+    assert "daily archive is short, not the minute one" in out
+    assert "ohlcv-1d" in out
+
+
+def test_no_skipped_sessions_prints_no_remedy_block():
+    out = "\n".join(SS.render([{"date": "2026-03-02", "universe": []}], 1, CFG,
+                              60, (5, 0, None), 1.0, []))
+    assert "SESSIONS SKIPPED, no prior close  0" in out
+    assert "daily archive is short" not in out
+
+
+def test_a_long_skip_list_is_truncated_with_a_count():
+    out = "\n".join(SS.render([{"date": "2026-03-02", "universe": []}], 1, CFG,
+                              60, (5, 0, None), 1.0,
+                              [f"2026-01-{d:02d}" for d in range(1, 21)]))
+    assert "and 8 more" in out

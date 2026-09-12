@@ -391,7 +391,26 @@ def render(rows, sessions, cfg, cadence_s, agree, elapsed, no_prior) -> list[str
          f"                p90           {per_sorted[int(0.9 * len(per_sorted))] if per_sorted else 0}",
          f"                max           {max(per) if per else 0}",
          f"  sessions with none          {sum(1 for n in per if n == 0)}",
-         f"  names dropped, no prior close   {no_prior:,}", ""]
+         f"  SESSIONS SKIPPED, no prior close  {len(no_prior):,}", ""]
+    if no_prior:
+        # Counted SESSIONS and labelled "names dropped" until 2026-09-12, which
+        # made four whole sessions missing from the universe read as four
+        # tickers. They were skipped because the DAILY archive -- where the
+        # prior REGULAR close comes from -- stopped before them, while their
+        # minute slices sat on disk; `screen_validate` then reported those
+        # sessions as "outside the archive window".
+        L += ["  These sessions have minute slices but NO PRIOR REGULAR CLOSE,",
+              "  so premarket_change cannot be computed and the whole session",
+              "  is skipped. The daily archive is short, not the minute one:",
+              ""]
+        for d in no_prior[:12]:
+            L.append(f"    {d}")
+        if len(no_prior) > 12:
+            L.append(f"    ... and {len(no_prior) - 12} more")
+        L += ["",
+              "    python -m common.databento_universe --dataset XNAS.BASIC \\",
+              "        --schema ohlcv-1d --start <first month> --confirm",
+              ""]
 
     seen = [r for row in rows for r in row["universe"]]
     if seen:
@@ -485,12 +504,12 @@ def main(argv=None) -> int:
                for d, g in pc.groupby("date")}
 
     t0 = time.time()
-    rows, no_prior, agree = [], 0, (0, 0, None)
+    rows, no_prior, agree = [], [], (0, 0, None)
     for i, path in enumerate(slices):
         date_str = date_of(path)
         prior = by_date.get(date_str)
         if prior is None:
-            no_prior += 1
+            no_prior.append(date_str)
             continue
         try:
             bars = read_dbn(path)
