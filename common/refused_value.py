@@ -165,7 +165,26 @@ def render(refused: list[dict], control: list[dict], population: str,
     agree = (ha["per"] > 0) == (hb["per"] > 0) if hb["n"] else None
 
     L += ["VERDICT", ""]
-    if r["per"] < 0:
+    # THE HALVES ARE CHECKED FIRST, WHATEVER THE SIGN.
+    #
+    # The first version tested `per < 0` before the split, so any pooled
+    # negative short-circuited into "settled" -- and `locked` pooled at
+    # (0.06) with halves of (3.39) and +2.70. A figure that small, with the
+    # halves disagreeing in sign, is not a settled loss; it is an unstable
+    # measurement that happened to land a few cents below zero. The standing
+    # evidence rule says a split disagreement refuses a verdict, and putting
+    # the sign test first quietly exempted every negative result from it.
+    if agree is False:
+        L += ["  NO VERDICT. The two halves disagree in sign "
+              f"({acct(ha['per'], 1).strip()} early, "
+              f"{acct(hb['per'], 1).strip()} late), so the per-trade figure is",
+              "  not stable over the period. The pooled number "
+              f"({acct(r['per'], 1).strip()}) is an",
+              "  artefact of when the sample was drawn, in either direction.",
+              "",
+              "  This is a REFUSAL, not a negative result. It does not clear",
+              "  the mechanic and it does not condemn it.", ""]
+    elif r["per"] < 0:
         L += [f"  The refused bars LOSE {acct(r['per'], 1).strip()} a trade at "
               "$4.26.", "",
               "  That settles it without the concurrency cap being consulted:",
@@ -177,11 +196,6 @@ def render(refused: list[dict], control: list[dict], population: str,
             L += ["  They are also WORSE than MCL's own entries "
                   f"({acct(c['per'], 1).strip()}), so the rule is not merely",
                   "  declining average bars -- it is declining bad ones.", ""]
-    elif agree is False:
-        L += ["  NO VERDICT. The two halves disagree in sign, so the",
-              "  per-trade figure is not stable over the period and a",
-              "  positive pooled number here would be an artefact of when",
-              "  the sample was drawn.", ""]
     else:
         L += [f"  The refused bars make {acct(r['per'], 1).strip()} a trade at "
               f"$4.26, against MCL's {acct(c['per'], 1).strip()}.", "",

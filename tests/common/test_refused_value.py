@@ -278,3 +278,35 @@ def test_the_exit_used_is_the_STRATEGYS_trailing_stop():
     assert t.reason in {"trailing_stop", "session_end", "apex_reversal",
                         "target", "ladder", "window_close", "flat_at_close"}, \
         f"unexpected exit reason {t.reason!r}"
+
+
+# --- the halves outrank the sign ----------------------------------------------
+
+def test_a_SMALL_negative_with_disagreeing_halves_refuses_a_verdict():
+    """The `locked` run pooled at (0.06) with halves of (3.39) and +2.70. The
+    first version tested the sign first, so every pooled negative -- however
+    small, however unstable -- short-circuited into 'settled' and skipped the
+    standing evidence rule entirely."""
+    text = "\n".join(R.render(
+        rows([-30.0] * 6, "2026-09-01") + rows([30.0] * 6, "2026-09-11"),
+        rows([5.0] * 6), "locked", "p.json", 2, 0, 0.1))
+    assert "NO VERDICT" in text
+    assert "REFUSAL, not a negative result" in text
+    assert "does not clear" in text and "does not condemn" in text
+
+
+def test_a_LARGE_negative_with_agreeing_halves_still_settles_it():
+    """The refusal must not swallow a real result."""
+    text = "\n".join(R.render(
+        rows([-40.0] * 6, "2026-09-01") + rows([-35.0] * 6, "2026-09-11"),
+        rows([5.0] * 6), "floor_sole", "p.json", 2, 0, 0.1))
+    assert "LOSE" in text
+    assert "NO VERDICT" not in text
+
+
+def test_the_refusal_prints_BOTH_half_figures():
+    """A refusal that did not show the two numbers would be unactionable."""
+    text = "\n".join(R.render(
+        rows([-30.0] * 6, "2026-09-01") + rows([30.0] * 6, "2026-09-11"),
+        rows([5.0] * 6), "locked", "p.json", 2, 0, 0.1))
+    assert "early" in text and "late" in text
