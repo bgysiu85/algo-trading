@@ -314,3 +314,45 @@ def test_the_truth_table_spans_both_venues_and_a_thin_nasdaq_name():
     ex = {sym: e for _d, sym, e, _p in R.TRUTH}
     assert {"NASDAQ", "NYSE", "AMEX"} <= set(ex.values())
     assert "XRTX" in ex and ex["XRTX"] == "NASDAQ"
+
+
+# --- the end-of-day candidate -------------------------------------------------
+
+def test_the_eod_candidate_is_scored_when_present():
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38,
+               {"ohlcv_eod_close": 7.22, "auction_else_last": 7.22})]
+    sc = R.score(got)
+    assert "ohlcv_eod_close" in sc
+    assert sc["ohlcv_eod_close"]["hit"] == 1
+
+
+def test_the_eod_candidate_is_absent_when_it_was_not_asked_for():
+    """It must not appear as 0/n and read as a failed candidate when the bars
+    were simply never pulled."""
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38,
+               {"auction_else_last": 7.22})]
+    assert "ohlcv_eod_close" not in R.score(got)
+
+
+def test_a_missing_eod_bar_scores_as_a_MISS_not_as_the_daily_close():
+    """Falling back to ohlcv-1d for an absent eod bar would make the new
+    candidate score exactly as well as the thing it is replacing -- a control
+    indistinguishable from the failure it detects."""
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38,
+               {"ohlcv_eod_close": None, "auction_else_last": 7.22})]
+    sc = R.score(got)
+    assert sc["ohlcv_eod_close"]["hit"] == 0
+    assert sc["ohlcv_eod_close"]["of"] == 1
+
+
+def test_an_eod_bar_that_is_just_the_extended_close_scores_ZERO():
+    """The whole risk of this route: a schema named `ohlcv-eod` may aggregate
+    the extended session too, which is exactly what ohlcv-1d does. Availability
+    is not validation, and the scorer must be able to say so."""
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38,
+               {"ohlcv_eod_close": 10.38, "auction_else_last": 7.22}),
+           row("2026-09-09", "SUNE", 4.51, 3.89,
+               {"ohlcv_eod_close": 3.89, "auction_else_last": 4.51})]
+    sc = R.score(got)
+    assert sc["ohlcv_eod_close"]["hit"] == 0
+    assert sc["auction_else_last"]["hit"] == 2

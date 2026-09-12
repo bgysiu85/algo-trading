@@ -121,6 +121,41 @@ TRUTH = [
 TOL = 0.005          # half a cent: a match is a match to the printed cent
 
 
+def _daily_takes_schema() -> bool:
+    """Does dbn_io.daily_frame accept a schema override yet?
+
+    Asked rather than assumed: this module must work against the loader as it
+    IS, and a TypeError here would read as "no eod bars" -- a wrong answer that
+    looks like a missing file.
+    """
+    import inspect
+
+    from common.dbn_io import daily_frame
+    return "schema" in inspect.signature(daily_frame).parameters
+
+
+def _eod_frame(archive, dataset):
+    """ohlcv-eod through the same parsing path as ohlcv-1d.
+
+    daily_frame hard-codes "ohlcv-1d", so this reproduces it for the eod
+    directory rather than re-implementing the symbol resolution and the
+    duplicate check, both of which have already cost this project a run.
+    """
+    from pathlib import Path
+
+    from common.dbn_io import daily_frame as _df
+    src = Path(archive) / dataset / "ohlcv-eod"
+    if not src.exists():
+        return None
+    import shutil
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        link = Path(tmp) / dataset / "ohlcv-1d"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, link)
+        return _df(Path(tmp), dataset)
+
+
 def candidates(rows: pd.DataFrame) -> dict[str, float | None]:
     """Every defensible reading of "the close", from one symbol-day's minutes.
 
@@ -177,6 +212,8 @@ def score(got: list[dict]) -> dict[str, dict]:
     """Per-candidate hit rate, counting ONLY discriminating rows."""
     names = ["last_bar_before_1600", "open_at_1600", "bar_at_1600",
              "last_bar_at_or_before_1600", "auction_else_last"]
+    if any("ohlcv_eod_close" in g.get("cand", {}) for g in got):
+        names.insert(0, "ohlcv_eod_close")
     out = {}
     for n in names:
         disc = [g for g in got if g["discriminating"]]
@@ -337,6 +374,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "candidate being tested.")
     p.add_argument("--window", default="15:55-16:05",
                    help="the ET window pulled by databento_universe --window")
+    p.add_argument("--eod", action="store_true",
+                   help="also score the close of the ohlcv-eod bars in the "
+                        "archive, if any. An end-of-day schema is a DIFFERENT "
+                        "object from ohlcv-1d and may already be the regular "
+                        "close -- if it is, the repair is a daily-sized pull "
+                        "and no reconstruction at all. Availability is not "
+                        "validation: ohlcv-1d is also called a daily bar.")
     p.add_argument("--emit", action="store_true",
                    help="write var/state/regular_close.json for the sessions "
                         "present, using the winning construction")
@@ -367,6 +411,21 @@ def main(argv=None) -> int:
     dkey = {(r.date, r.symbol): float(r.close) for r in daily.itertuples()} \
         if not daily.empty else {}
 
+    # ohlcv-eod, read through the same loader as ohlcv-1d so a difference
+    # between them is a difference in the DATA, not in how it was parsed.
+    eod: dict[tuple[str, str], float] = {}
+    if a.eod:
+        e = daily_frame(archive, a.dataset, schema="ohlcv-eod") \
+            if _daily_takes_schema() else _eod_frame(archive, a.dataset)
+        if e is None or e.empty:
+            print(f"  --eod: no ohlcv-eod bars in {archive}/{a.dataset}/. "
+                  "Pull them first:\n"
+                  f"    python -m common.databento_universe "
+                  f"--dataset {a.dataset} --schema ohlcv-eod "
+                  f"--start 2026-09-08 --end 2026-09-12")
+        else:
+            eod = {(r.date, r.symbol): float(r.close) for r in e.itertuples()}
+
     got, missing = [], []
     cache: dict[str, pd.DataFrame] = {}
     for day, sym, _exch, truth in TRUTH:  # noqa: B007
@@ -385,9 +444,14 @@ def main(argv=None) -> int:
         if dly is None:
             missing.append(f"{day} {sym}: no daily bar to compare against")
             continue
+        cand = candidates(rows.sort_index(kind="mergesort"))
+        if a.eod:
+            # None, not the daily close, when the eod bar is absent for this
+            # symbol-day. Falling back to ohlcv-1d here would make the new
+            # candidate score exactly as well as the thing it is replacing.
+            cand["ohlcv_eod_close"] = eod.get((day, sym))
         got.append({"date": day, "symbol": sym, "truth": truth, "daily": dly,
-                    "exchange": _exch,
-                    "cand": candidates(rows.sort_index(kind="mergesort")),
+                    "exchange": _exch, "cand": cand,
                     "discriminating": abs(dly - truth) > TOL})
 
     sc = score(got)
