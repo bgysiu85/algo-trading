@@ -13,17 +13,24 @@ look at -- and whether the winners and losers differ on any of it.
 WHY THIS IS THE MOST DANGEROUS MODULE IN THE PROJECT
 ------------------------------------------------------
 It is a SEARCH OVER FEATURES for something that separates outcomes we already
-know. With 482 entries, 13 features and five buckets each, that is 65
-comparisons; at the usual thresholds roughly three will look meaningful by
-chance alone. Run it, pick the best-looking split, add it as a condition, and
-the backtest improves and the live account does not. That is the standard way
-a strategy is destroyed, and it looks like progress the entire time.
+know. With 482 entries, 22 features and four buckets each over two halves,
+that is 176 comparisons; at the usual thresholds several will look meaningful
+by chance alone. Run it, pick the best-looking split, add it as a condition,
+and the backtest improves and the live account does not. That is the standard
+way a strategy is destroyed, and it looks like progress the entire time.
 
 So this module is built to describe, NEVER to choose:
 
-  * THE FEATURE LIST IS FIXED IN THIS FILE, before any outcome was looked at.
-    Adding a feature after seeing the results is a different experiment and
-    has to say so.
+  * THE FEATURE LIST IS FIXED IN THIS FILE before the run it is used for, and
+    WHEN each entry was fixed is recorded in it. The first thirteen were
+    written before any outcome was seen. Nine more were added on 2026-09-12,
+    AFTER the first report -- a second experiment, marked as one in FEATURES,
+    each chosen for a mechanical reason rather than because the first pass
+    made it look promising. Widening a search is allowed; pretending the
+    widened list was pre-registered is not.
+  * MULTIPLICITY IS COUNTED BY FAMILY, not by column. `rsi_slope` and
+    `mfi_slope` are one idea measured twice; counting them as two findings
+    doubles the apparent evidence for a single pattern.
   * EVERY FEATURE IS REPORTED, including the flat ones. Reporting only what
     separated is the selection this module exists to resist.
   * EVERY RESULT IS SPLIT train/test by date. A split that holds on one half
@@ -37,10 +44,14 @@ So this module is built to describe, NEVER to choose:
 
 WHAT WOULD MAKE A RESULT WORTH ANYTHING
 -----------------------------------------
-A feature is worth a second look only if the SAME direction appears in both
-halves, the effect is larger than friction ($4.26/round trip), and the bucket
-counts are not tiny. All three, not any one. Even then it is a hypothesis to be
-registered and tested -- not a condition to add.
+A feature is worth a second look only if it is MONOTONE across its buckets the
+same way in BOTH halves, the top-to-bottom effect is larger than friction
+($4.26/round trip) in both, and the bucket counts are not tiny. All three, not
+any one. Monotonicity was added after the first run, which passed `macd_level`
+on ends that differed while its middles ran (6.58) / 7.40 / (10.11) / 3.27:
+two ends differing is what noise looks like, four buckets in order is rarer.
+Even then it is a hypothesis to be registered and tested -- not a condition to
+add.
 
 NO LOOK-AHEAD
 -------------
@@ -62,6 +73,8 @@ from common.report_io import emit
 
 ET = ZoneInfo("America/New_York")
 FRICTION = 4.26
+# Read off the strategy so the trail-fit feature moves if the trail does.
+from strategy.mcl.mcl import TRAIL_PCT as MCL_TRAIL  # noqa: E402
 QUANTILES = 4          # quartiles: five buckets is thinner than this data bears
 
 
@@ -86,6 +99,46 @@ FEATURES = {
                  "of the move had already happened.",
     "range_pct": "mean(high-low)/close over the last 14 bars, in percent. "
                  "Recent volatility.",
+
+    # --- added 2026-09-12, AFTER the first run. A second experiment, and it
+    # says so: the first thirteen were fixed before any outcome was seen,
+    # these nine were chosen knowing what the first pass showed. Each was
+    # picked for a MECHANICAL reason to matter, not because it looked
+    # promising -- nothing from the first report guided the choice.
+    "dollar_vol_session": "price x cumulative session volume, in $. Nothing "
+                          "in the entry rule knows whether the name was "
+                          "tradeable at all.",
+    "dollar_vol_bar": "price x this bar's volume, in $.",
+    "tape_density": "bars printed / minutes elapsed since the session's first "
+                    "bar, in percent. A thin tape is a different market.",
+    "trail_over_range": "the 5% trail distance / the mean bar range. How many "
+                        "typical bars of movement the stop allows before it "
+                        "is hit -- under ~1 the stop is inside the noise.",
+    "close_in_bar": "(close - low) / (high - low) of the ENTRY bar. MCL fills "
+                    "at the close, so 1.0 is paying the top tick of a spike.",
+    "body_ratio": "|close - open| / (high - low). Decisive bar or a wick.",
+    "vwap_dist": "close / session VWAP - 1, in percent. Absent from the entry "
+                 "rule entirely.",
+    "ma20_dist": "close / the 20-bar mean - 1, in percent.",
+    "ma20_slope": "the 20-bar mean now / 3 bars ago - 1, in percent.",
+}
+
+# Correlated columns counted ONCE. `rsi_slope` and `mfi_slope` are both "how
+# fast is the indicator rising" and the first report showed them carrying the
+# same pattern in the same half -- reading that as two findings doubles the
+# apparent evidence. The multiplicity denominator is families, not columns.
+FAMILIES = {
+    "volume headroom": ["vol_over_trail", "vol_multiple", "floor_margin"],
+    "momentum level": ["macd_margin", "macd_level", "rsi", "mfi"],
+    "momentum slope": ["rsi_slope", "mfi_slope"],
+    "timing": ["mins_since_open"],
+    "price level": ["price"],
+    "extension": ["extension"],
+    "volatility": ["range_pct"],
+    "liquidity": ["dollar_vol_session", "dollar_vol_bar", "tape_density"],
+    "trail fit": ["trail_over_range"],
+    "bar shape": ["close_in_bar", "body_ratio"],
+    "trend": ["vwap_dist", "ma20_dist", "ma20_slope"],
 }
 
 
@@ -105,6 +158,33 @@ def features_at(sig: pd.DataFrame, i: int) -> dict:
     rng = ((tail["high"] - tail["low"]) / tail["close"]).mean() * 100.0 \
         if {"high", "low"} <= set(past.columns) else float("nan")
     ta, pv = float(r["trail_avg"]), float(r["prev_vol"])
+
+    # Session-to-date aggregates. All from `same_day`, which ends at bar i.
+    cum_vol = float(same_day["volume"].sum()) if len(same_day) else 0.0
+    o = float(r["open"]) if "open" in sig.columns else float("nan")
+    hi_, lo_ = float(r["high"]), float(r["low"])
+    span = hi_ - lo_
+    if len(same_day) and {"high", "low"} <= set(same_day.columns):
+        typ = (same_day["high"] + same_day["low"] + same_day["close"]) / 3.0
+        vv = same_day["volume"]
+        vwap = float((typ * vv).sum() / vv.sum()) if float(vv.sum()) else float("nan")
+        # PRINTED BARS OVER ELAPSED MINUTES, not the share of rows with volume.
+        # The cache holds only the minutes that printed -- a minute with no
+        # trade is an ABSENT ROW, not a zero-volume one -- so
+        # (volume > 0).mean() is 100% on a frame full of holes and 100% on a
+        # frame with none. That is a measurement whose output is identical to
+        # the thing it is supposed to detect.
+        span_min = ((same_day.index[-1] - same_day.index[0]).total_seconds()
+                    / 60.0 + 1.0)
+        printed = len(same_day) / span_min * 100.0 if span_min > 0 else float("nan")
+    else:
+        vwap, printed = float("nan"), float("nan")
+    ma20 = float(past["close"].iloc[-20:].mean()) if len(past) >= 20 else float("nan")
+    ma20_prev = (float(past["close"].iloc[-23:-3].mean())
+                 if len(past) >= 23 else float("nan"))
+    mean_range = float((tail["high"] - tail["low"]).mean()) \
+        if {"high", "low"} <= set(past.columns) else float("nan")
+
     return {
         "vol_over_trail": float(r["volume"]) / ta if ta else float("nan"),
         "vol_multiple": float(r["volume"]) / pv if pv else float("nan"),
@@ -122,6 +202,27 @@ def features_at(sig: pd.DataFrame, i: int) -> dict:
         "extension": (float(r["close"]) / first_close - 1.0) * 100.0
         if first_close == first_close and first_close else float("nan"),
         "range_pct": float(rng),
+        "dollar_vol_session": float(r["close"]) * cum_vol,
+        "dollar_vol_bar": float(r["close"]) * float(r["volume"]),
+        "tape_density": printed,
+        # A stop inside one bar's noise is a different instrument from a stop
+        # three bars wide, whatever the percentage says.
+        "trail_over_range": ((MCL_TRAIL / 100.0) * float(r["close"]) / mean_range
+                             if mean_range and mean_range == mean_range
+                             else float("nan")),
+        # NaN, not 0.5, on a zero-range bar: 0.5 would read as "entered mid-bar"
+        # on a bar that had no range at all.
+        "close_in_bar": ((float(r["close"]) - lo_) / span if span > 0
+                         else float("nan")),
+        "body_ratio": (abs(float(r["close"]) - o) / span
+                       if span > 0 and o == o else float("nan")),
+        "vwap_dist": ((float(r["close"]) / vwap - 1.0) * 100.0
+                      if vwap == vwap and vwap else float("nan")),
+        "ma20_dist": ((float(r["close"]) / ma20 - 1.0) * 100.0
+                      if ma20 == ma20 and ma20 else float("nan")),
+        "ma20_slope": ((ma20 / ma20_prev - 1.0) * 100.0
+                       if ma20 == ma20 and ma20_prev == ma20_prev and ma20_prev
+                       else float("nan")),
     }
 
 
@@ -147,6 +248,55 @@ def buckets(rows: list[dict], name: str, q: int = QUANTILES) -> list[dict]:
                     "mean": sum(nets) / len(nets),
                     "win": sum(1 for x in nets if x > 0) / len(nets) * 100.0})
     return out
+
+
+def monotone(bs: list[dict]) -> int:
+    """+1 rising, -1 falling, 0 neither, across the bucket MEANS.
+
+    Top-minus-bottom is the weak test and it is what let `macd_level` through
+    on the first run: its middles ran (6.58) / 7.40 / (10.11) / 3.27, which is
+    noise with two ends that happened to differ. A clean progression across
+    all four buckets IN BOTH HALVES is far rarer by chance, and requiring it
+    is the cheapest real tightening available.
+    """
+    if len(bs) < 3:
+        return 0
+    d = [bs[k + 1]["mean"] - bs[k]["mean"] for k in range(len(bs) - 1)]
+    if all(x > 0 for x in d):
+        return 1
+    if all(x < 0 for x in d):
+        return -1
+    return 0
+
+
+def tier(ba: list[dict], bb: list[dict]) -> tuple[str, str]:
+    """(tier, why) for one feature, from its two halves.
+
+    CANDIDATE   monotone the same way in both halves, and top-vs-bottom
+                exceeds friction in both. Nothing weaker is called a
+                candidate, because nothing weaker has survived this project
+                before.
+    WEAK        direction agrees and the effect is large, but the buckets in
+                between do not line up.
+    NOTHING     everything else. Printed anyway.
+    """
+    if not ba or not bb:
+        return "NOTHING", "too few trades to bucket"
+    da = ba[-1]["mean"] - ba[0]["mean"]
+    db = bb[-1]["mean"] - bb[0]["mean"]
+    same = (da > 0) == (db > 0)
+    big = min(abs(da), abs(db)) > FRICTION
+    ma, mb = monotone(ba), monotone(bb)
+    if ma and ma == mb and same and big:
+        return "CANDIDATE", ("monotone the same way in both halves, and both "
+                             f"ends differ by more than ${FRICTION:.2f}")
+    if same and big:
+        return "WEAK", ("ends agree and both exceed friction, but the buckets "
+                        "between them do not line up -- two ends differing is "
+                        "what noise looks like")
+    if same:
+        return "NOTHING", f"ends agree but the smaller is under ${FRICTION:.2f}"
+    return "NOTHING", "the halves DISAGREE in direction"
 
 
 def split(rows: list[dict]) -> tuple[list, list]:
@@ -183,6 +333,7 @@ def render(rows: list[dict], population: str, pairs_path: str,
           f"  {'win rate':<22}{base_win:>9.1f}%", ""]
 
     a, b = split(rows)
+    tiers: dict[str, str] = {}
     L += ["EVERY FEATURE, BOTH HALVES  (nothing is ranked, nothing omitted)",
           ""]
     for f, desc in FEATURES.items():
@@ -197,22 +348,38 @@ def render(rows: list[dict], population: str, pairs_path: str,
                 f" n={x['n']} {acct(x['mean'], 1).strip()}"
                 f" {x['win']:.0f}%" for x in bs)
             L.append(f"    {label:<6} {cells}")
-        # Does the direction agree across halves? Reported, never ranked.
         ba, bb = buckets(a, f), buckets(b, f)
+        tl, why = tier(ba, bb)
+        tiers[f] = tl
         if ba and bb:
             da = ba[-1]["mean"] - ba[0]["mean"]
             db = bb[-1]["mean"] - bb[0]["mean"]
-            same = (da > 0) == (db > 0)
-            big = min(abs(da), abs(db)) > FRICTION
-            note = ("top-vs-bottom agrees in direction" if same
-                    else "top-vs-bottom DISAGREES between halves")
-            if same and big:
-                note += f", and both exceed ${FRICTION:.2f}"
-            elif same:
-                note += f", but the smaller is under ${FRICTION:.2f}"
             L += ["", f"    {acct(da, 1).strip()} early / "
-                      f"{acct(db, 1).strip()} late  -- {note}"]
+                      f"{acct(db, 1).strip()} late   [{tl}] {why}"]
+        else:
+            L += ["", f"    [{tl}] {why}"]
         L.append("")
+
+    # Families, not columns. Correlated features carrying one pattern would
+    # otherwise be counted as separate evidence for it.
+    cand_fams = sorted({fam for fam, cols in FAMILIES.items()
+                        if any(tiers.get(c) == "CANDIDATE" for c in cols)})
+    weak_fams = sorted({fam for fam, cols in FAMILIES.items()
+                        if any(tiers.get(c) == "WEAK" for c in cols)
+                        and fam not in cand_fams})
+    L += ["", "TIERS, COUNTED BY FAMILY", "",
+          f"  {len(FAMILIES)} families over {len(FEATURES)} columns. "
+          "Correlated columns",
+          "  carrying one pattern are ONE piece of evidence, not several.", "",
+          f"  CANDIDATE  {len(cand_fams)}   "
+          + (", ".join(cand_fams) if cand_fams else "none"),
+          f"  WEAK       {len(weak_fams)}   "
+          + (", ".join(weak_fams) if weak_fams else "none"), ""]
+    if not cand_fams:
+        L += ["  NO family cleared the bar. That is a result, not a failure:",
+              "  it says the winners and losers are not separated by anything",
+              "  on this list, and it costs nothing -- unlike adding a",
+              "  condition that was never there.", ""]
 
     L += ["HOW TO READ THIS, AND HOW NOT TO", "",
           f"  {len(FEATURES) * QUANTILES * 2} comparisons were made. At any "
@@ -223,9 +390,14 @@ def render(rows: list[dict], population: str, pairs_path: str,
           "  selection this module exists to resist.",
           "",
           "  A feature is worth a second look ONLY if all three hold:",
-          "    1. the same direction in both halves,",
+          "    1. MONOTONE across the buckets, the same way in both halves,",
           f"    2. an effect larger than ${FRICTION:.2f} in BOTH halves,",
           "    3. bucket counts that are not tiny.",
+          "",
+          "  Monotonicity was added after the first run, which passed",
+          "  `macd_level` on ends that differed while its middles ran",
+          "  (6.58) / 7.40 / (10.11) / 3.27. Two ends differing is what noise",
+          "  looks like; four buckets in order is much rarer.",
           "",
           "  Even then it is a HYPOTHESIS, not a condition. The next step is",
           "  to register it, then test it -- not to add it and re-run the",

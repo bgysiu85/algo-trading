@@ -85,6 +85,32 @@ def test_an_early_bar_yields_nan_slopes_rather_than_a_wrong_number():
     assert got["mfi_slope"] != got["mfi_slope"]
 
 
+def test_tape_density_measures_HOLES_not_rows():
+    """The cache holds only the minutes that PRINTED -- a minute with no trade
+    is an absent row, not a zero-volume one. An earlier version measured
+    (volume > 0).mean(), which is 100% on a frame full of holes and 100% on a
+    frame with none: a detector whose output is identical to the thing it is
+    meant to detect."""
+    full = real_sig()
+    dense = F.features_at(full, 150)["tape_density"]
+    assert dense == pytest.approx(100.0)
+
+    holed = full.iloc[[k for k in range(len(full)) if k % 2 == 0 or k > 150]]
+    i = list(holed.index).index(full.index[150])
+    assert F.features_at(holed, i)["tape_density"] < 60.0
+
+
+def test_tape_density_is_not_confused_by_the_PREVIOUS_session():
+    """The frame is a 3-day superset. Elapsed minutes must be measured from
+    this session's first bar, not the superset's."""
+    one = real_sig(n=120)
+    prior = one.copy()
+    prior.index = prior.index - timedelta(days=1)
+    both = pd.concat([prior, one])
+    i = len(both) - 1
+    assert F.features_at(both, i)["tape_density"] == pytest.approx(100.0)
+
+
 # --- the buckets --------------------------------------------------------------
 
 def rows_for(vals, nets, dates=None):
@@ -181,20 +207,109 @@ def test_the_base_rate_is_stated_before_any_feature():
 
 def test_the_three_conditions_for_a_second_look_are_stated():
     text = "\n".join(F.render(full_rows(), "entries", "p.json", 0, 0.1))
-    assert "same direction in both halves" in text
+    assert "MONOTONE across the buckets, the same way in both halves" in text
     assert f"${F.FRICTION:.2f} in BOTH halves" in text
     assert "HYPOTHESIS, not a condition" in text
 
 
-def test_a_disagreement_between_halves_is_LABELLED_as_such():
-    rows = ([{**{f: 0.0 for f in F.FEATURES}, "vol_over_trail": float(i),
+def halves_disagreeing_rows():
+    """Rising feature, rising net in the early half and falling in the late
+    one. The two halves cannot both be right about it."""
+    return ([{**{f: 0.0 for f in F.FEATURES}, "vol_over_trail": float(i),
               "net": float(i) * 3, "date": "2026-09-01", "symbol": "A"}
              for i in range(60)]
             + [{**{f: 0.0 for f in F.FEATURES}, "vol_over_trail": float(i),
                 "net": -float(i) * 3, "date": "2026-09-11", "symbol": "A"}
                for i in range(60)])
-    text = "\n".join(F.render(rows, "entries", "p.json", 0, 0.1))
-    assert "DISAGREES between halves" in text
+
+
+def test_a_disagreement_between_halves_is_LABELLED_as_such():
+    text = "\n".join(F.render(halves_disagreeing_rows(),
+                              "entries", "p.json", 0, 0.1))
+    assert "the halves DISAGREE in direction" in text
+
+
+def test_a_disagreement_between_halves_can_never_be_a_candidate():
+    """The label is cosmetic; the tier is what a reader acts on."""
+    rows = halves_disagreeing_rows()
+    a, b = F.split(rows)
+    tl, _ = F.tier(F.buckets(a, "vol_over_trail"),
+                   F.buckets(b, "vol_over_trail"))
+    assert tl == "NOTHING"
+
+
+# --- monotonicity, added after the first run ----------------------------------
+
+def bs(*means):
+    return [{"mean": m, "n": 10, "lo": i, "hi": i + 1, "win": 30.0}
+            for i, m in enumerate(means)]
+
+
+def test_monotone_reports_rising_falling_and_neither():
+    assert F.monotone(bs(1.0, 2.0, 3.0, 4.0)) == 1
+    assert F.monotone(bs(4.0, 3.0, 2.0, 1.0)) == -1
+    assert F.monotone(bs(1.0, 5.0, 2.0, 9.0)) == 0
+
+
+def test_the_macd_level_shape_that_prompted_monotonicity_is_not_monotone():
+    """The first run passed `macd_level` on ends alone while its middles ran
+    (6.58) / 7.40 / (10.11) / 3.27. That shape must not clear the bar now."""
+    assert F.monotone(bs(-6.58, 7.40, -10.11, 3.27)) == 0
+
+
+def test_big_ends_with_ragged_middles_are_WEAK_not_CANDIDATE():
+    ragged = bs(-6.58, 7.40, -10.11, 3.27)     # ends +9.85, middles disordered
+    tl, why = F.tier(ragged, ragged)
+    assert tl == "WEAK"
+    assert "do not line up" in why
+
+
+def test_monotone_in_both_halves_and_past_friction_is_a_CANDIDATE():
+    tl, _ = F.tier(bs(0.0, 4.0, 8.0, 12.0), bs(1.0, 3.0, 6.0, 9.0))
+    assert tl == "CANDIDATE"
+
+
+def test_monotone_the_OTHER_way_in_the_second_half_is_not_a_candidate():
+    tl, _ = F.tier(bs(0.0, 4.0, 8.0, 12.0), bs(12.0, 8.0, 4.0, 0.0))
+    assert tl != "CANDIDATE"
+
+
+def test_an_effect_under_friction_is_never_a_candidate():
+    """A separation smaller than the cost of trading it is not a finding."""
+    small = bs(0.0, 0.5, 1.0, 1.5)             # ends differ by 1.50 < 4.26
+    tl, why = F.tier(small, small)
+    assert tl == "NOTHING"
+    assert f"${F.FRICTION:.2f}" in why
+
+
+def test_too_few_trades_to_bucket_is_NOTHING_not_a_silent_pass():
+    assert F.tier([], bs(1.0, 2.0, 3.0, 4.0))[0] == "NOTHING"
+    assert F.tier(bs(1.0, 2.0, 3.0, 4.0), [])[0] == "NOTHING"
+
+
+# --- multiplicity is counted by family, not by column -------------------------
+
+def test_every_feature_belongs_to_exactly_one_family():
+    """A column outside FAMILIES would clear the bar and be counted by
+    nothing; a family naming a column that does not exist would be counted
+    as evidence that cannot arrive."""
+    claimed = [c for cols in F.FAMILIES.values() for c in cols]
+    assert sorted(claimed) == sorted(F.FEATURES), "family map and FEATURES differ"
+    assert len(claimed) == len(set(claimed)), "a column is in two families"
+
+
+def test_the_family_count_is_in_the_report():
+    text = "\n".join(F.render(full_rows(), "entries", "p.json", 0, 0.1))
+    assert "TIERS, COUNTED BY FAMILY" in text
+    assert f"{len(F.FAMILIES)} families over {len(F.FEATURES)} columns" in text
+
+
+def test_no_candidate_is_reported_as_a_result_not_a_failure():
+    """Noise in, nothing out -- and the report has to say so out loud, or a
+    reader will go looking for the finding that is not there."""
+    text = "\n".join(F.render(full_rows(), "entries", "p.json", 0, 0.1))
+    assert "CANDIDATE  0" in text
+    assert "NO family cleared the bar" in text
 
 
 def test_the_holdout_is_named_as_untouched():
