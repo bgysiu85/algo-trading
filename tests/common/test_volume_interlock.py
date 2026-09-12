@@ -272,3 +272,71 @@ def test_no_bars_and_too_short_are_counted_separately():
     src = inspect.getsource(mod.main)
     assert "no_bars" in src and "too_short" in src
     assert "had no cached file" in src
+
+
+# --- the decision-relevant pair ----------------------------------------------
+
+def test_floor_sole_is_the_TNON_0735_shape():
+    """Everything else approved; c_vol held; c_floor alone refused it."""
+    d = frame([(1, 1, 1, 1, 0, 20_000.0, 45_000.0, 158_000.0)])
+    r = V.per_session(d, MCL)
+    assert r["floor_sole"] == 1 and r["vol_sole"] == 0
+
+
+def test_vol_sole_is_the_follow_through_shape():
+    d = frame([(1, 1, 1, 0, 1, 158_000.0, 45_000.0, 169_000.0)])
+    r = V.per_session(d, MCL)
+    assert r["vol_sole"] == 1 and r["floor_sole"] == 0
+
+
+def test_a_bar_the_INDICATORS_rejected_is_neither():
+    """This is the whole correction. The raw hand-off counted these; they
+    could never have entered whatever the volume did."""
+    d = frame([(0, 1, 1, 1, 0, 20_000.0, 45_000.0, 158_000.0),
+               (1, 0, 1, 0, 1, 158_000.0, 45_000.0, 169_000.0)])
+    r = V.per_session(d, MCL)
+    assert r["floor_sole"] == 0 and r["vol_sole"] == 0
+    assert r["handoff"] == 1, "the raw count still sees it -- that is the point"
+
+
+def test_locked_needs_the_ignition_AND_the_follow_through():
+    d = frame([(1, 1, 1, 1, 0, 20_000.0, 45_000.0, 158_000.0),
+               (1, 1, 1, 0, 1, 158_000.0, 45_000.0, 169_000.0)])
+    assert V.per_session(d, MCL)["locked"] == 1
+
+
+def test_an_ignition_with_no_valid_follow_through_is_not_locked():
+    """If the next bar was rejected by MACD anyway, no run was lost to the
+    volume pair."""
+    d = frame([(1, 1, 1, 1, 0, 20_000.0, 45_000.0, 158_000.0),
+               (0, 1, 1, 0, 1, 158_000.0, 45_000.0, 169_000.0)])
+    r = V.per_session(d, MCL)
+    assert r["floor_sole"] == 1 and r["locked"] == 0
+
+
+def test_a_bar_that_ENTERED_is_neither_sole_blocked_nor_locked():
+    d = frame([(1, 1, 1, 1, 1, 50_000.0, 45_000.0, 158_000.0)])
+    r = V.per_session(d, MCL)
+    assert r["floor_sole"] == 0 and r["vol_sole"] == 0 and r["locked"] == 0
+    assert r["entries"] == 1
+
+
+def test_the_report_tells_the_reader_which_number_to_use():
+    rows = [{"bars": 300, "judgeable": 100, "window_empty": 50, "handoff": 40,
+             "floor_sole": 6, "vol_sole": 9, "locked": 4, "entries": 2,
+             "ratios": [0.5, 1.2, 2.0, 3.0, 9.0], "symbol": "A",
+             "date": "2026-09-11"}]
+    text = "\n".join(V.render(rows, "p.json", MCL, 0, 0.1))
+    assert "the TNON 07:35 shape" in text
+    assert "IGNITION REFUSED, RUN LOCKED OUT" in text
+    assert "WHY IT IS THE WEAKEST NUMBER HERE" in text
+    assert "Read section 2, not this" in text
+
+
+def test_the_raw_handoff_is_kept_not_deleted():
+    """Removing the first number reported would quietly change the answer."""
+    rows = [{"bars": 300, "judgeable": 100, "window_empty": 50, "handoff": 40,
+             "floor_sole": 6, "vol_sole": 9, "locked": 4, "entries": 2,
+             "ratios": [1.2], "symbol": "A", "date": "d"}]
+    text = "\n".join(V.render(rows, "p.json", MCL, 0, 0.1))
+    assert "hand-off bars (all bars)" in text and "40" in text

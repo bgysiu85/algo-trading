@@ -105,19 +105,40 @@ def per_session(sig: pd.DataFrame, mcl) -> dict:
     ratio = sig["volume"] / sig["trail_avg"]
     empty = base & (ratio < opens_at(mcl))
 
-    # The hand-off: N clears the multiple and fails the floor, N+1 the reverse.
-    # Measured on ALL bars, not only those passing the other conditions --
-    # the shape is about the two volume rules, and requiring the indicators to
-    # agree on BOTH bars would count a different, rarer thing.
+    # The hand-off, measured on ALL bars. KEPT, but it is the weakest of the
+    # numbers here and the report says so: given a 3x spike at N, bar N+1
+    # almost cannot help clearing the floor and failing the multiple, so this
+    # count is close to "spikes after a quiet bar" rather than a coincidence
+    # of two rules. It also counts bars the indicators had already rejected,
+    # which could never have entered whatever the volume did.
     a = sig["c_vol"] & ~sig["c_floor"]
     b = (~sig["c_vol"] & sig["c_floor"]).shift(-1, fill_value=False)
     handoff = a & b & warm
+
+    # THE DECISION-RELEVANT PAIR. Restricted to bars the other three
+    # conditions APPROVED, so every one of these is a bar that would have
+    # entered but for a single volume rule.
+    #
+    #   floor_sole  the TNON 07:35 shape: a burst everything else approved,
+    #               refused because its PREDECESSOR was too quiet.
+    #   vol_sole    TNON 07:36 onward: the follow-through, refused because
+    #               its predecessor was now too loud.
+    floor_sole = base & sig["c_vol"] & ~sig["c_floor"]
+    vol_sole = base & ~sig["c_vol"] & sig["c_floor"]
+
+    # The costly shape is a floor_sole bar whose NEXT bar is vol_sole: an
+    # ignition refused, and the follow-through locked out behind it. That is
+    # a run lost, not a bar.
+    locked = floor_sole & vol_sole.shift(-1, fill_value=False)
 
     return {
         "bars": int(len(sig)),
         "judgeable": int(base.sum()),
         "window_empty": int(empty.sum()),
         "handoff": int(handoff.sum()),
+        "floor_sole": int(floor_sole.sum()),
+        "vol_sole": int(vol_sole.sum()),
+        "locked": int(locked.sum()),
         "entries": int(sig["entry"].sum()) if "entry" in sig else 0,
         "ratios": [float(x) for x in ratio[base].dropna()],
     }
@@ -161,14 +182,44 @@ def render(rows: list[dict], pairs_path: str, mcl, skipped: int,
           "  On an empty-window bar NO prev_vol could have satisfied both",
           "  conditions. The block is arithmetic, not timing.", ""]
 
-    L += ["2. THE HAND-OFF", "",
-          "  Bar N clears the multiple and fails the floor; bar N+1 does the",
-          "  reverse. This is what cost TNON its 13-minute run.", "",
-          f"  {'hand-off bars':<34}{hand:>10,}",
+    fs = sum(r.get("floor_sole", 0) for r in rows)
+    vs = sum(r.get("vol_sole", 0) for r in rows)
+    lk = sum(r.get("locked", 0) for r in rows)
+    lk_days = sum(1 for r in rows if r.get("locked"))
+
+    L += ["2. ONE VOLUME RULE, ALONE, AGAINST AN OTHERWISE-VALID BAR", "",
+          "  Bars the other three conditions APPROVED, refused by exactly one",
+          "  of the volume pair. Every one of these would have entered.", "",
+          f"  {'c_floor alone blocked it':<34}{fs:>10,}   "
+          f"{fs / judge * 100:.1f}% of judgeable   <- the TNON 07:35 shape",
+          f"  {'c_vol alone blocked it':<34}{vs:>10,}   "
+          f"{vs / judge * 100:.1f}% of judgeable   <- the follow-through",
+          "",
+          f"  {'IGNITION REFUSED, RUN LOCKED OUT':<34}{lk:>10,}",
+          f"  {'per symbol-day':<34}{lk / n_sd:>10.2f}",
+          f"  {'symbol-days with at least one':<34}{lk_days:>10,}   "
+          f"{lk_days / n_sd * 100:.1f}%", "",
+          "  The last one is the TNON shape end to end: a burst refused by",
+          "  the floor, with the follow-through bar behind it refused by the",
+          "  multiple. A run lost, not a bar.", ""]
+
+    L += ["2b. THE RAW HAND-OFF, AND WHY IT IS THE WEAKEST NUMBER HERE", "",
+          f"  {'hand-off bars (all bars)':<34}{hand:>10,}",
           f"  {'per symbol-day':<34}{hand / n_sd:>10.2f}",
           f"  {'symbol-days with at least one':<34}"
           f"{sum(1 for r in rows if r['handoff']):>10,}   "
-          f"{sum(1 for r in rows if r['handoff']) / n_sd * 100:.1f}%", ""]
+          f"{sum(1 for r in rows if r['handoff']) / n_sd * 100:.1f}%", "",
+          "  This counts the shape WITHOUT requiring the other three",
+          "  conditions, and it overstates. Given a 3x spike at bar N, bar",
+          "  N+1 can hardly avoid clearing the floor and failing the multiple",
+          "  -- a second consecutive 3x is rare -- so the pair is close to",
+          "  tautological and the count is nearer to 'spikes after a quiet",
+          "  bar' than to a coincidence of two rules. It also counts bars the",
+          "  indicators had already rejected, which could never have entered",
+          "  whatever the volume did.",
+          "",
+          "  It is kept because it was the first number reported and removing",
+          "  it would quietly change the answer. Read section 2, not this.", ""]
 
     L += ["3. HEADROOM  (volume / trail_avg on judgeable bars)", ""]
     q = [0.10, 0.25, 0.50, 0.75, 0.90]
