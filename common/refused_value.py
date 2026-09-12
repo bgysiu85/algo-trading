@@ -224,6 +224,22 @@ def render(refused: list[dict], control: list[dict], population: str,
     return L
 
 
+def et_hhmm(ts) -> str:
+    """A timestamp as HH:MM in EASTERN time.
+
+    Trade.entry_time is str(a UTC Timestamp). Slicing characters 11:16 off it
+    prints UTC while every other time in this project -- the session window,
+    the why_no_entry table, Ben's own screenshots -- is ET. The first run of
+    --only reported the TNON entry at "11:35", which is 07:35 ET: the right
+    trade under a label four hours wrong, and indistinguishable from a wrong
+    trade unless the reader happened to notice the offset.
+    """
+    t = pd.Timestamp(ts)
+    if t.tzinfo is None:
+        t = t.tz_localize("UTC")
+    return t.tz_convert(ET).strftime("%H:%M")
+
+
 def render_one(refused: list[dict], control: list[dict], population: str,
                only: str, elapsed: float, source: str = "cache") -> list[str]:
     """One symbol-day, every trade listed in full.
@@ -258,9 +274,9 @@ def render_one(refused: list[dict], control: list[dict], population: str,
 
     L += ["THE REFUSED TRADE(S)", ""]
     for t in ts:
-        L += [f"  entry   {str(t.entry_time)[11:16]}  "
+        L += [f"  entry   {et_hhmm(t.entry_time)} ET  "
               f"{acct(t.entry_price, 1).strip()}  x{t.qty}",
-              f"  exit    {str(t.exit_time)[11:16]}  "
+              f"  exit    {et_hhmm(t.exit_time)} ET  "
               f"{acct(t.exit_price, 1).strip()}   ({t.reason})",
               f"  held    {t.bars_held} bar(s)",
               f"  gross   {acct(t.gross, 1).strip()}",
@@ -277,20 +293,34 @@ def render_one(refused: list[dict], control: list[dict], population: str,
         L += ["  No entries. The refused trade is not competing with one.", ""]
     else:
         for t in ct:
-            L.append(f"  entry {str(t.entry_time)[11:16]} "
+            L.append(f"  entry {et_hhmm(t.entry_time)} ET "
                      f"{acct(t.entry_price, 1).strip()} -> exit "
-                     f"{str(t.exit_time)[11:16]} "
+                     f"{et_hhmm(t.exit_time)} ET "
                      f"{acct(t.exit_price, 1).strip()}  net "
                      f"{acct(t.net, 1).strip()}  ({t.reason})")
         tot = sum(x.net - 4.26 for x in ct)
         L += ["", f"  rule's total at $4.26: {acct(tot, 1).strip()}", ""]
 
     tot_r = sum(t.net - 4.26 for t in ts)
+    tot_c = sum(x.net - 4.26 for x in ct) if ct else 0.0
     L += ["THE COMPARISON", "",
-          f"  refused bar(s) at $4.26   {acct(tot_r, 12)}",
-          f"  the rule's own entries    "
-          f"{acct(sum(x.net - 4.26 for x in ct), 12) if ct else f'{0.00:>12.2f}'}",
-          ""]
+          f"  ALL refused bar(s) at $4.26  {acct(tot_r, 12)}   "
+          f"over {len(ts)} trade(s)",
+          f"  the rule's own entries       {acct(tot_c, 12)}   "
+          f"over {len(ct)} trade(s)", ""]
+    best = max(ts, key=lambda t: t.net)
+    if len(ts) > 1:
+        L += [f"  the BEST single refusal      {acct(best.net - 4.26, 12)}   "
+              f"({et_hhmm(best.entry_time)} ET)", "",
+              "  The rule would have taken ALL of the refused bars, not the",
+              "  best one. Reading the best figure alone is the same selection",
+              "  the whole population test exists to defeat -- on one day",
+              "  instead of one dataset.", ""]
+        if tot_r < tot_c:
+            L += ["  ON THIS SYMBOL-DAY, taking every refused bar would have",
+                  f"  made LESS than the rule made ({acct(tot_r, 1).strip()} "
+                  f"against {acct(tot_c, 1).strip()}) -- even though the day",
+                  "  is the one chosen because a refusal ran.", ""]
 
     L += ["WHAT THIS CANNOT BE USED FOR", "",
           "  This case was chosen AFTER its outcome was known. That is the",

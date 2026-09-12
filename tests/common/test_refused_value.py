@@ -322,8 +322,9 @@ def test_only_parses_symbol_and_date():
 
 def test_the_single_case_view_lists_the_trade_in_full():
     class Full:
-        entry_time = "2026-09-11 07:35:00"
-        exit_time = "2026-09-11 07:48:00"
+        # UTC, as Trade stores it. 11:35 UTC IS 07:35 ET -- the real TNON bar.
+        entry_time = "2026-09-11 11:35:00+00:00"
+        exit_time = "2026-09-11 11:48:00+00:00"
         entry_price, exit_price, qty = 7.48, 8.20, 100
         reason, bars_held = "trailing_stop", 13
         gross, commission, net = 72.0, 1.40, 70.60
@@ -341,8 +342,9 @@ def test_the_single_case_view_STATES_the_selection_bias():
     """The whole risk of answering this question: one case chosen because its
     outcome was known cannot be evidence about the rule."""
     class Full:
-        entry_time = "2026-09-11 07:35:00"
-        exit_time = "2026-09-11 07:48:00"
+        # UTC, as Trade stores it. 11:35 UTC IS 07:35 ET -- the real TNON bar.
+        entry_time = "2026-09-11 11:35:00+00:00"
+        exit_time = "2026-09-11 11:48:00+00:00"
         entry_price, exit_price, qty = 7.48, 8.20, 100
         reason, bars_held = "trailing_stop", 13
         gross, commission, net = 72.0, 1.40, 70.60
@@ -360,8 +362,9 @@ def test_the_single_case_view_has_NO_verdict_section():
     answers 'what was that trade worth'. Sharing a verdict would let the
     second masquerade as the first."""
     class Full:
-        entry_time = "2026-09-11 07:35:00"
-        exit_time = "2026-09-11 07:48:00"
+        # UTC, as Trade stores it. 11:35 UTC IS 07:35 ET -- the real TNON bar.
+        entry_time = "2026-09-11 11:35:00+00:00"
+        exit_time = "2026-09-11 11:48:00+00:00"
         entry_price, exit_price, qty = 7.48, 8.20, 100
         reason, bars_held = "trailing_stop", 13
         gross, commission, net = 72.0, 1.40, 70.60
@@ -386,8 +389,9 @@ def test_the_archive_source_declares_that_it_is_not_the_live_tape():
     still be priced -- but which bars QUALIFIED carries that uncertainty and
     the report must say so."""
     class Full:
-        entry_time = "2026-09-11 07:35:00"
-        exit_time = "2026-09-11 07:48:00"
+        # UTC, as Trade stores it. 11:35 UTC IS 07:35 ET -- the real TNON bar.
+        entry_time = "2026-09-11 11:35:00+00:00"
+        exit_time = "2026-09-11 11:48:00+00:00"
         entry_price, exit_price, qty = 7.48, 8.20, 100
         reason, bars_held = "trailing_stop", 13
         gross, commission, net = 72.0, 1.40, 70.60
@@ -402,8 +406,9 @@ def test_the_archive_source_declares_that_it_is_not_the_live_tape():
 
 def test_the_cache_source_makes_no_such_caveat():
     class Full:
-        entry_time = "2026-09-11 07:35:00"
-        exit_time = "2026-09-11 07:48:00"
+        # UTC, as Trade stores it. 11:35 UTC IS 07:35 ET -- the real TNON bar.
+        entry_time = "2026-09-11 11:35:00+00:00"
+        exit_time = "2026-09-11 11:48:00+00:00"
         entry_price, exit_price, qty = 7.48, 8.20, 100
         reason, bars_held = "trailing_stop", 13
         gross, commission, net = 72.0, 1.40, 70.60
@@ -418,3 +423,72 @@ def test_the_source_choices_are_the_two_that_exist():
     p = R.build_parser()
     assert p.parse_args([]).source == "cache"
     assert p.parse_args(["--source", "archive"]).source == "archive"
+
+
+# --- times are ET, not UTC ----------------------------------------------------
+
+def test_times_render_in_EASTERN_not_utc():
+    """Trade.entry_time is str(a UTC Timestamp). The first --only run printed
+    the TNON entry as "11:35" -- the right trade under a label four hours
+    wrong, and indistinguishable from a wrong trade unless the reader noticed
+    the offset. Every other time in this project is ET."""
+    assert R.et_hhmm("2026-09-11 11:35:00+00:00") == "07:35"
+    assert R.et_hhmm("2026-09-11 11:48:00+00:00") == "07:48"
+
+
+def test_a_naive_timestamp_is_treated_as_UTC_not_as_local():
+    """Guessing local here would shift every figure by the machine's offset,
+    and Ben's machine is UTC+10."""
+    assert R.et_hhmm("2026-09-11 11:35:00") == "07:35"
+
+
+def test_the_report_labels_the_times_as_ET():
+    class Full:
+        entry_time = "2026-09-11 11:35:00+00:00"
+        exit_time = "2026-09-11 11:48:00+00:00"
+        entry_price, exit_price, qty = 7.49, 8.37, 100
+        reason, bars_held = "trailing_stop", 13
+        gross, commission, net = 88.31, 1.38, 86.93
+    text = "\n".join(R.render_one(
+        [{"symbol": "TNON", "date": "2026-09-11", "trades": [Full()]}],
+        [], "floor_sole", "TNON:2026-09-11", 0.1))
+    assert "07:35 ET" in text and "07:48 ET" in text
+
+
+# --- the best refusal is not the refusal ---------------------------------------
+
+def test_the_comparison_names_the_BEST_single_refusal_and_warns_about_it():
+    """TNON 09-11 has three floor_sole bars: +82.67, (39.84) and (10.82).
+    Quoting the winner alone is the same selection the population test exists
+    to defeat, applied to one day instead of one dataset."""
+    def tr(h, m, net):
+        class X:
+            entry_time = f"2026-09-11 {h:02d}:{m:02d}:00+00:00"
+            exit_time = f"2026-09-11 {h:02d}:{m + 5:02d}:00+00:00"
+            entry_price, exit_price, qty = 7.0, 7.5, 100
+            reason, bars_held = "trailing_stop", 5
+            gross, commission = net + 1.4, 1.4
+        X.net = net
+        return X()
+    ts = [tr(12, 4, -35.58), tr(11, 35, 86.93), tr(16, 31, -6.56)]
+    ct = [tr(13, 3, 67.38)]
+    text = "\n".join(R.render_one(
+        [{"symbol": "TNON", "date": "2026-09-11", "trades": ts}],
+        [{"symbol": "TNON", "date": "2026-09-11", "trades": ct}],
+        "floor_sole", "TNON:2026-09-11", 0.1))
+    assert "the BEST single refusal" in text
+    assert "would have taken ALL of the refused bars" in text
+    assert "made LESS than the rule made" in text
+
+
+def test_no_best_line_when_there_is_only_one_refusal():
+    class Full:
+        entry_time = "2026-09-11 11:35:00+00:00"
+        exit_time = "2026-09-11 11:48:00+00:00"
+        entry_price, exit_price, qty = 7.49, 8.37, 100
+        reason, bars_held = "trailing_stop", 13
+        gross, commission, net = 88.31, 1.38, 86.93
+    text = "\n".join(R.render_one(
+        [{"symbol": "TNON", "date": "2026-09-11", "trades": [Full()]}],
+        [], "floor_sole", "TNON:2026-09-11", 0.1))
+    assert "the BEST single refusal" not in text
