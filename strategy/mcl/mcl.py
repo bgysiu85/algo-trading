@@ -397,6 +397,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      entry_delay_bars: int = 0,
                      max_hold_bars: int | None = None,
                      not_before: dtime | None = None,
+                     entry_bars: "pd.Series | None" = None,
                      ladder: "PL.LadderConfig | None" = None,
                      target_exit: "TE.TargetExit | None" = None) -> list[Trade]:
     """Run one pre-market session.
@@ -533,6 +534,23 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     entry_allowed = ([True] * len(sig) if not_before is None
                      else [t >= not_before for t in local.time])
 
+    # `entry_bars` REPLACES the rule's own entry signal, bar for bar. It exists
+    # so a refused bar can be PRICED with this exact exit model instead of a
+    # second implementation of the exit written next to the question -- which
+    # is how the live path and the backtest drifted apart for three days.
+    #
+    # It is a replacement rather than an addition on purpose. "Enter where the
+    # rule said no" and "enter where the rule said yes OR where I say so" are
+    # different populations, and a union would quietly mix a control into its
+    # own treatment.
+    #
+    # None leaves the rule untouched, so the default path is bit-identical.
+    if entry_bars is None:
+        take = None
+    else:
+        aligned = entry_bars.reindex(sig.index, fill_value=False)
+        take = [bool(x) for x in aligned]
+
     trades: list[Trade] = []
     pos = None
     rows = sig.reset_index()
@@ -546,7 +564,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         last_of_session = (k == len(idx) - 1)
 
         if pos is None:
-            if row["entry"] and entry_allowed[i]:
+            fires = row["entry"] if take is None else take[i]
+            if fires and entry_allowed[i]:
                 # ENTRY LATENCY. entry_delay_bars=0 is the rule as backtested:
                 # the signal bar closes and we are filled at that close. LIVE,
                 # measured 2026-09-09, the order leaves SIXTY SECONDS after the
