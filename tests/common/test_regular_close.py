@@ -356,3 +356,55 @@ def test_an_eod_bar_that_is_just_the_extended_close_scores_ZERO():
     sc = R.score(got)
     assert sc["ohlcv_eod_close"]["hit"] == 0
     assert sc["auction_else_last"]["hit"] == 2
+
+
+# --- the statistics route -----------------------------------------------------
+
+def test_the_stat_type_ints_are_the_databento_ones():
+    """They are restated as constants so the module loads without databento.
+    A restated constant is a second source of truth, so it is pinned."""
+    db = pytest.importorskip("databento")
+    assert R.STAT_CLOSE_PRICE == int(db.StatType.CLOSE_PRICE)
+    assert R.STAT_UNCROSSING_PRICE == int(db.StatType.UNCROSSING_PRICE)
+
+
+def test_the_stat_candidates_are_scored_when_present():
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38,
+               {"stats_uncrossing": 7.22, "stats_close_price": 7.22,
+                "auction_else_last": 7.22})]
+    sc = R.score(got)
+    assert sc["stats_uncrossing"]["hit"] == 1
+    assert sc["stats_close_price"]["hit"] == 1
+
+
+def test_a_missing_statistic_scores_as_a_MISS_not_as_the_daily_close():
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38,
+               {"stats_uncrossing": None, "auction_else_last": 7.22})]
+    sc = R.score(got)
+    assert sc["stats_uncrossing"]["hit"] == 0
+    assert sc["stats_uncrossing"]["of"] == 1
+
+
+def test_the_census_is_printed_so_an_empty_filter_is_visible():
+    """A stat_type filter that matches nothing returns {} — indistinguishable
+    from a schema carrying no closes. The counts distinguish them."""
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38,
+               {"stats_uncrossing": None, "auction_else_last": 7.22})]
+    text = "\n".join(R.render(got, R.score(got), [], st_census={16: 4821, 1: 37}))
+    assert "STAT TYPES PRESENT" in text
+    assert "UNCROSSING_PRICE" in text
+    assert "4,821" in text
+
+
+def test_a_census_without_either_close_statistic_says_so():
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38,
+               {"stats_uncrossing": None, "auction_else_last": 7.22})]
+    text = "\n".join(R.render(got, R.score(got), [], st_census={1: 37, 3: 12}))
+    assert "NEITHER close statistic appears" in text
+    assert "not an empty result" in text
+
+
+def test_no_census_section_when_stats_were_not_requested():
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38, {"auction_else_last": 7.22})]
+    text = "\n".join(R.render(got, R.score(got), []))
+    assert "STAT TYPES PRESENT" not in text

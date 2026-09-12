@@ -156,6 +156,55 @@ def _eod_frame(archive, dataset):
         return _df(Path(tmp), dataset)
 
 
+# Databento StatType ints. Named as constants rather than imported so this
+# module still loads without the databento package, and so a reader can see
+# which numbers are being filtered on without a second lookup.
+STAT_CLOSE_PRICE = 11
+STAT_UNCROSSING_PRICE = 16
+
+
+def stats_closes(archive, dataset: str) -> tuple[dict, dict, dict]:
+    """({(date, symbol): close}, {...: uncrossing}, {stat_type: count}).
+
+    `ohlcv-eod` is NOT offered on XNAS.BASIC, so the published-number route is
+    the statistics schema. It carries CLOSE_PRICE (11) and UNCROSSING_PRICE
+    (16) -- the auction print itself, rather than a bar boundary guessed at.
+
+    The third return value is the census of every stat_type present. A filter
+    that matches nothing returns an empty dict, which is indistinguishable from
+    a schema that has no closes in it -- so the counts are carried out and
+    printed. This module has already been caught once by a control whose empty
+    answer looked like a clean one.
+    """
+    from pathlib import Path
+
+    from common.dbn_io import read_dbn
+    d = Path(archive) / dataset / "statistics"
+    if not d.exists():
+        return {}, {}, {}
+    close, uncross, census = {}, {}, {}
+    for f in sorted(d.glob("*.dbn.zst")):
+        df = read_dbn(f)
+        if df.empty or "stat_type" not in df:
+            continue
+        local = df.tz_convert(ET) if df.index.tz is not None else df
+        local = local.assign(_date=[t.strftime("%Y-%m-%d")
+                                    for t in local.index])
+        for st, g in local.groupby("stat_type"):
+            census[int(st)] = census.get(int(st), 0) + len(g)
+        for st, target in ((STAT_CLOSE_PRICE, close),
+                           (STAT_UNCROSSING_PRICE, uncross)):
+            rows = local[local["stat_type"] == st]
+            for r in rows.itertuples():
+                sym = getattr(r, "symbol", None)
+                if sym is None or sym != sym:
+                    continue
+                px = float(r.price)
+                if px > 0:
+                    target[(r._date, str(sym))] = px
+    return close, uncross, census
+
+
 def candidates(rows: pd.DataFrame) -> dict[str, float | None]:
     """Every defensible reading of "the close", from one symbol-day's minutes.
 
@@ -212,8 +261,9 @@ def score(got: list[dict]) -> dict[str, dict]:
     """Per-candidate hit rate, counting ONLY discriminating rows."""
     names = ["last_bar_before_1600", "open_at_1600", "bar_at_1600",
              "last_bar_at_or_before_1600", "auction_else_last"]
-    if any("ohlcv_eod_close" in g.get("cand", {}) for g in got):
-        names.insert(0, "ohlcv_eod_close")
+    for extra in ("ohlcv_eod_close", "stats_uncrossing", "stats_close_price"):
+        if any(extra in g.get("cand", {}) for g in got):
+            names.insert(0, extra)
     out = {}
     for n in names:
         disc = [g for g in got if g["discriminating"]]
@@ -227,7 +277,8 @@ def score(got: list[dict]) -> dict[str, dict]:
 
 def render(got: list[dict], sc: dict, missing: list[str],
            dataset: str = "XNAS.BASIC",
-           daily_dataset: str = "XNAS.BASIC") -> list[str]:
+           daily_dataset: str = "XNAS.BASIC",
+           st_census: dict | None = None) -> list[str]:
     disc = [g for g in got if g["discriminating"]]
     L = ["WHICH PRINT IS THE REGULAR-SESSION CLOSE?", "",
          f"  minute bars from {dataset}; the close currently in use is "
@@ -267,6 +318,20 @@ def render(got: list[dict], sc: dict, missing: list[str],
                  f"{f(c.get('open_at_1600'), 12)}"
                  f"{f(c.get('bar_at_1600'), 13)}"
                  f"{f(c.get('auction_else_last'), 11)}{mark}")
+
+    if st_census:
+        L += ["", "STAT TYPES PRESENT (a filter matching nothing looks exactly",
+              "like a schema with no closes in it, so the census is printed)",
+              ""]
+        for st, n in sorted(st_census.items()):
+            label = {STAT_CLOSE_PRICE: "  <- CLOSE_PRICE",
+                     STAT_UNCROSSING_PRICE: "  <- UNCROSSING_PRICE"}.get(st, "")
+            L.append(f"  stat_type {st:<4}{n:>9,} record(s){label}")
+        if STAT_CLOSE_PRICE not in st_census \
+                and STAT_UNCROSSING_PRICE not in st_census:
+            L += ["", "  NEITHER close statistic appears. The schema is here",
+                  "  and does not carry what this needs; that is a finding,",
+                  "  not an empty result."]
 
     L += ["", "SCORE, on discriminating rows only", ""]
     for n, s in sc.items():
@@ -374,6 +439,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "candidate being tested.")
     p.add_argument("--window", default="15:55-16:05",
                    help="the ET window pulled by databento_universe --window")
+    p.add_argument("--stats", action="store_true",
+                   help="also score the statistics schema's CLOSE_PRICE and "
+                        "UNCROSSING_PRICE. ohlcv-eod is not offered on "
+                        "XNAS.BASIC, and `trades` prices at 14.7 GB for five "
+                        "sessions against statistics' 2.3 MB, so this is the "
+                        "route that is both cheapest and most direct.")
     p.add_argument("--eod", action="store_true",
                    help="also score the close of the ohlcv-eod bars in the "
                         "archive, if any. An end-of-day schema is a DIFFERENT "
@@ -413,6 +484,18 @@ def main(argv=None) -> int:
 
     # ohlcv-eod, read through the same loader as ohlcv-1d so a difference
     # between them is a difference in the DATA, not in how it was parsed.
+    st_close: dict = {}
+    st_uncross: dict = {}
+    st_census: dict = {}
+    if a.stats:
+        st_close, st_uncross, st_census = stats_closes(archive, a.dataset)
+        if not st_census:
+            print(f"  --stats: no statistics bars in {archive}/{a.dataset}/. "
+                  "Pull them first:\n"
+                  f"    python -m common.databento_universe "
+                  f"--dataset {a.dataset} --schema statistics "
+                  f"--start 2026-09-08 --end 2026-09-12")
+
     eod: dict[tuple[str, str], float] = {}
     if a.eod:
         e = daily_frame(archive, a.dataset, schema="ohlcv-eod") \
@@ -445,6 +528,12 @@ def main(argv=None) -> int:
             missing.append(f"{day} {sym}: no daily bar to compare against")
             continue
         cand = candidates(rows.sort_index(kind="mergesort"))
+        if a.stats:
+            # None, never the daily close, when the statistic is absent. A
+            # fallback here would make the candidate score as well as the
+            # thing it replaces -- the defect shape this project keeps finding.
+            cand["stats_close_price"] = st_close.get((day, sym))
+            cand["stats_uncrossing"] = st_uncross.get((day, sym))
         if a.eod:
             # None, not the daily close, when the eod bar is absent for this
             # symbol-day. Falling back to ohlcv-1d here would make the new
@@ -457,7 +546,8 @@ def main(argv=None) -> int:
     sc = score(got)
     out = a.out or ("var/reports/regular_close_"
                     f"{a.dataset.replace('.', '_')}.txt")
-    emit("\n".join(render(got, sc, missing, a.dataset, a.daily_dataset)), out,
+    emit("\n".join(render(got, sc, missing, a.dataset, a.daily_dataset,
+                          st_census)), out,
          header=f"common.regular_close  minutes={a.dataset} "
                 f"daily={a.daily_dataset} window={a.window}")
 
