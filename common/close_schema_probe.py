@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date
+from common.report_io import emit
 
 WANT = {
     "ohlcv-eod": "an end-of-day bar distinct from ohlcv-1d -- if its close is "
@@ -60,6 +60,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--end", default="2026-09-12")
     p.add_argument("--window", default="15:55-16:05",
                    help="only used to price the intraday candidates")
+    p.add_argument("--out", default="var/reports/close_schema_probe.txt",
+                   help="every other module in this project writes its result "
+                        "to a file; this one printed to the terminal and cost "
+                        "a round trip getting the output back.")
     return p
 
 
@@ -70,58 +74,68 @@ def main(argv=None) -> int:
     db = require_databento()
     client = db.Historical(_key())
 
-    print(f"{a.dataset}   {a.start} -> {a.end}\n")
+    L = ["WHICH SCHEMAS COULD ANSWER THE CLOSE QUESTION?", "",
+         f"  {a.dataset}   {a.start} -> {a.end}",
+         "  nothing is downloaded by this module", ""]
     try:
         have = sorted(client.metadata.list_schemas(dataset=a.dataset))
     except Exception as e:  # noqa: BLE001
         sys.exit(f"could not list schemas: {_scrub(e)}")
 
-    print("SCHEMAS THIS DATASET OFFERS\n")
-    for s in have:
-        note = WANT.get(s, "")
-        star = " <-" if s in WANT else "   "
-        print(f"  {s:<14}{star} {note}")
+    L += ["SCHEMAS THIS DATASET OFFERS", ""]
+    for name in have:
+        note = WANT.get(name, "")
+        star = " <-" if name in WANT else "   "
+        L.append(f"  {name:<14}{star} {note}")
 
-    print("\nTHE ONES THAT COULD ANSWER THE CLOSE QUESTION\n")
-    hits = [s for s in ("ohlcv-eod", "statistics", "trades") if s in have]
+    L += ["", "THE ONES THAT COULD ANSWER THE CLOSE QUESTION", ""]
+    hits = [x for x in ("ohlcv-eod", "statistics", "trades") if x in have]
     if not hits:
-        print("  none of ohlcv-eod / statistics / trades is available here.")
-        print("  The minute reconstruction is the only route on this dataset.")
+        L += ["  none of ohlcv-eod / statistics / trades is available here.",
+              "  The minute reconstruction is the only route on this dataset."]
+        emit("\n".join(L), a.out, header=f"common.close_schema_probe  "
+                                        f"dataset={a.dataset}")
         return 0
 
     # Price each candidate over the SAME range, so the comparison is a
     # comparison. A daily schema is priced whole-day; the intraday ones only
     # over the window, which is how they would actually be pulled.
-    print(f"  {'schema':<14}{'billable':>12}{'cost':>10}   how it would be pulled")
-    for s in hits:
-        kw = dict(dataset=a.dataset, schema=s, symbols="ALL_SYMBOLS",
+    L.append(f"  {'schema':<14}{'billable':>12}{'cost':>10}   "
+             "how it would be pulled")
+    for name in hits:
+        kw = dict(dataset=a.dataset, schema=name, symbols="ALL_SYMBOLS",
                   stype_in="raw_symbol", start=a.start, end=a.end)
-        how = "whole days"
         try:
             c = float(client.metadata.get_cost(**kw))
             b = int(client.metadata.get_billable_size(**kw))
         except Exception as e:  # noqa: BLE001
-            print(f"  {s:<14}{'ESTIMATE FAILED':>22}   {_scrub(e)}")
+            L.append(f"  {name:<14}{'ESTIMATE FAILED':>22}   {_scrub(e)}")
             continue
-        print(f"  {s:<14}{b / 1e6:>10.1f} MB{c:>10.4f}   {how}")
+        L.append(f"  {name:<14}{b / 1e6:>10.1f} MB{c:>10.4f}   whole days")
 
-    print("\nWHAT TO DO WITH THIS\n")
+    L += ["", "WHAT TO DO WITH THIS", ""]
     if "ohlcv-eod" in have:
-        print("  ohlcv-eod exists. Pull it for these five sessions and score it")
-        print("  against the same truth table BEFORE pulling trades:\n")
-        print(f"    python -m common.databento_universe --dataset {a.dataset} \\")
-        print(f"        --schema ohlcv-eod --start {a.start} --end {a.end}")
-        print(f"    python -m common.regular_close --dataset {a.dataset} --eod\n")
-        print("  If its close reproduces the truth rows, the repair is a")
-        print("  DAILY pull over 552 sessions rather than ~2 GB of minutes,")
-        print("  and prior_closes() changes by one schema name.\n")
+        L += ["  ohlcv-eod exists. Pull it for these sessions and score it",
+              "  against the same truth table BEFORE pulling trades:", "",
+              f"    python -m common.databento_universe "
+              f"--dataset {a.dataset} \\",
+              f"        --schema ohlcv-eod --start {a.start} --end {a.end}",
+              f"    python -m common.regular_close "
+              f"--dataset {a.dataset} --eod", "",
+              "  If its close reproduces the truth rows, the repair is a",
+              "  DAILY pull over 552 sessions rather than ~2 GB of minutes,",
+              "  and prior_closes() changes by one schema name.", ""]
     if "statistics" in have:
-        print("  statistics exists and carries UNCROSSING_PRICE, which is the")
-        print("  auction print itself. Second choice only because it needs a")
-        print("  stat-type filter and ohlcv-eod, if correct, needs nothing.\n")
-    print("  NEITHER IS VALIDATED BY BEING AVAILABLE. A schema called")
-    print("  `ohlcv-eod` may still aggregate the extended session -- that is")
-    print("  exactly the mistake ohlcv-1d already made. Score it.")
+        L += ["  statistics exists and carries UNCROSSING_PRICE, which is the",
+              "  auction print itself. Second choice only because it needs a",
+              "  stat-type filter, and ohlcv-eod -- if correct -- needs",
+              "  nothing at all.", ""]
+    L += ["  NEITHER IS VALIDATED BY BEING AVAILABLE. A schema called",
+          "  `ohlcv-eod` may still aggregate the extended session -- that is",
+          "  exactly the mistake ohlcv-1d already made, and it is the whole",
+          "  defect under repair. Score it before trusting it."]
+    emit("\n".join(L), a.out,
+         header=f"common.close_schema_probe  dataset={a.dataset}")
     return 0
 
 
