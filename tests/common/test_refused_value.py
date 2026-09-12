@@ -310,3 +310,69 @@ def test_the_refusal_prints_BOTH_half_figures():
         rows([-30.0] * 6, "2026-09-01") + rows([30.0] * 6, "2026-09-11"),
         rows([5.0] * 6), "locked", "p.json", 2, 0, 0.1))
     assert "early" in text and "late" in text
+
+
+# --- the single-case view -----------------------------------------------------
+
+def test_only_parses_symbol_and_date():
+    p = R.build_parser()
+    assert p.parse_args(["--only", "TNON:2026-09-11"]).only == "TNON:2026-09-11"
+    assert p.parse_args([]).only is None
+
+
+def test_the_single_case_view_lists_the_trade_in_full():
+    class Full:
+        entry_time = "2026-09-11 07:35:00"
+        exit_time = "2026-09-11 07:48:00"
+        entry_price, exit_price, qty = 7.48, 8.20, 100
+        reason, bars_held = "trailing_stop", 13
+        gross, commission, net = 72.0, 1.40, 70.60
+    text = "\n".join(R.render_one(
+        [{"symbol": "TNON", "date": "2026-09-11", "trades": [Full()]}],
+        [], "floor_sole", "TNON:2026-09-11", 0.1))
+    assert "07:35" in text and "07:48" in text
+    assert "trailing_stop" in text
+    assert "13 bar(s)" in text
+    for f in ("1.00", "4.26", "8.92"):
+        assert f in text
+
+
+def test_the_single_case_view_STATES_the_selection_bias():
+    """The whole risk of answering this question: one case chosen because its
+    outcome was known cannot be evidence about the rule."""
+    class Full:
+        entry_time = "2026-09-11 07:35:00"
+        exit_time = "2026-09-11 07:48:00"
+        entry_price, exit_price, qty = 7.48, 8.20, 100
+        reason, bars_held = "trailing_stop", 13
+        gross, commission, net = 72.0, 1.40, 70.60
+    text = "\n".join(R.render_one(
+        [{"symbol": "TNON", "date": "2026-09-11", "trades": [Full()]}],
+        [], "floor_sole", "TNON:2026-09-11", 0.1))
+    assert "chosen AFTER its outcome was known" in text
+    assert "selection bias" in text
+    assert "(3.41)" in text, "the population result must be restated here"
+    assert "however large the" in text
+
+
+def test_the_single_case_view_has_NO_verdict_section():
+    """The aggregate view answers 'should the mechanic change'. This one
+    answers 'what was that trade worth'. Sharing a verdict would let the
+    second masquerade as the first."""
+    class Full:
+        entry_time = "2026-09-11 07:35:00"
+        exit_time = "2026-09-11 07:48:00"
+        entry_price, exit_price, qty = 7.48, 8.20, 100
+        reason, bars_held = "trailing_stop", 13
+        gross, commission, net = 72.0, 1.40, 70.60
+    text = "\n".join(R.render_one(
+        [{"symbol": "TNON", "date": "2026-09-11", "trades": [Full()]}],
+        [], "floor_sole", "TNON:2026-09-11", 0.1))
+    assert "VERDICT" not in text
+    assert "No variant needs writing" not in text
+
+
+def test_a_symbol_day_with_no_refused_bar_says_so():
+    text = "\n".join(R.render_one([], [], "locked", "AAA:2026-09-11", 0.1))
+    assert "NO REFUSED BAR ON THIS SYMBOL-DAY" in text
+    assert "did not occur" in text or "shape did not occur" in text

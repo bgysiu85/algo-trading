@@ -224,12 +224,97 @@ def render(refused: list[dict], control: list[dict], population: str,
     return L
 
 
+def render_one(refused: list[dict], control: list[dict], population: str,
+               only: str, elapsed: float) -> list[str]:
+    """One symbol-day, every trade listed in full.
+
+    Separate from `render` because the aggregate view answers "is this
+    mechanic worth changing" and this one answers "what was THAT trade worth".
+    They are different questions and the second cannot be evidence for the
+    first, so they do not share a verdict.
+    """
+    L = ["ONE SYMBOL-DAY, PRICED IN FULL", "",
+         f"  {only}   population: {population}",
+         "  entered at the refused bar's close, exited by MCL's OWN exit",
+         f"  elapsed {elapsed:.1f}s", ""]
+
+    ts = [t for row in refused for t in row["trades"]]
+    if not ts:
+        return L + [
+            "NO REFUSED BAR ON THIS SYMBOL-DAY", "",
+            f"  No bar matched the `{population}` population here. Either the",
+            "  bars are not cached, or the shape did not occur. Check the",
+            "  `volume_interlock` report for this name before reading",
+            "  anything into it.", ""]
+
+    L += ["THE REFUSED TRADE(S)", ""]
+    for t in ts:
+        L += [f"  entry   {str(t.entry_time)[11:16]}  "
+              f"{acct(t.entry_price, 1).strip()}  x{t.qty}",
+              f"  exit    {str(t.exit_time)[11:16]}  "
+              f"{acct(t.exit_price, 1).strip()}   ({t.reason})",
+              f"  held    {t.bars_held} bar(s)",
+              f"  gross   {acct(t.gross, 1).strip()}",
+              f"  commission {acct(t.commission, 1).strip()}",
+              f"  net     {acct(t.net, 1).strip()}   BEFORE slippage", ""]
+        L.append("  net after slippage:")
+        for f in FRICTIONS:
+            L.append(f"    ${f:>5.2f}/round trip{acct(t.net - f, 12)}")
+        L.append("")
+
+    ct = [t for row in control for t in row["trades"]]
+    L += ["WHAT THE RULE ITSELF DID ON THIS SYMBOL-DAY", ""]
+    if not ct:
+        L += ["  No entries. The refused trade is not competing with one.", ""]
+    else:
+        for t in ct:
+            L.append(f"  entry {str(t.entry_time)[11:16]} "
+                     f"{acct(t.entry_price, 1).strip()} -> exit "
+                     f"{str(t.exit_time)[11:16]} "
+                     f"{acct(t.exit_price, 1).strip()}  net "
+                     f"{acct(t.net, 1).strip()}  ({t.reason})")
+        tot = sum(x.net - 4.26 for x in ct)
+        L += ["", f"  rule's total at $4.26: {acct(tot, 1).strip()}", ""]
+
+    tot_r = sum(t.net - 4.26 for t in ts)
+    L += ["THE COMPARISON", "",
+          f"  refused bar(s) at $4.26   {acct(tot_r, 12)}",
+          f"  the rule's own entries    "
+          f"{acct(sum(x.net - 4.26 for x in ct), 12) if ct else f'{0.00:>12.2f}'}",
+          ""]
+
+    L += ["WHAT THIS CANNOT BE USED FOR", "",
+          "  This case was chosen AFTER its outcome was known. That is the",
+          "  definition of selection bias, and it holds however large the",
+          "  number above turns out to be: picking the one refusal that ran",
+          "  and pricing it says nothing about the population it came from.",
+          "",
+          "  The population WAS priced, over 308 trades on 168 symbol-days:",
+          "  the bars c_floor refuses lose (3.41) each at $4.26 against the",
+          "  rule's own +0.37. A single profitable counter-example does not",
+          "  move that, and a rule that is right on average will be wrong on",
+          "  specific days -- that is what an average is.",
+          "",
+          "  It also assumes the position was available: no concurrency cap,",
+          "  no competing name, no effect on what the book held next.",
+          "",
+          "  What it IS good for: checking that the machinery prices a known",
+          "  case the way the tape says it should, and knowing the size of",
+          "  the thing being given up on the days the rule is wrong."]
+    return L
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--pairs", default="var/state/traded_pairs.json")
     p.add_argument("--cache", default="bar_cache")
     p.add_argument("--population", default="floor_sole",
                    choices=["floor_sole", "locked"])
+    p.add_argument("--only", default=None, metavar="SYMBOL:DATE",
+                   help="price ONE symbol-day and list every trade in full, "
+                        "e.g. TNON:2026-09-11. Uses the identical machinery; "
+                        "the report states that a single case chosen AFTER "
+                        "its outcome was known is not evidence about the rule.")
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--out", default=None)
     return p
@@ -244,7 +329,13 @@ def main(argv=None) -> int:
                                  slice_sessions, window_dir)
     from strategy.mcl import mcl as MCL
 
-    pairs = load_pairs(Path(a.pairs))
+    if a.only:
+        if ":" not in a.only:
+            sys.exit("--only wants SYMBOL:DATE, e.g. TNON:2026-09-11")
+        sym, day_s = a.only.split(":", 1)
+        pairs = [{"symbol": sym.upper().strip(), "date": day_s.strip()}]
+    else:
+        pairs = load_pairs(Path(a.pairs))
     if a.limit:
         pairs = pairs[:a.limit]
     cache = window_dir(Path(a.cache), SHARED_DURATION, SHARED_END_HHMM)
@@ -285,6 +376,15 @@ def main(argv=None) -> int:
     if not refused and not control:
         sys.exit(f"no usable bars for any of {len(pairs)} symbol-day(s) under "
                  f"{cache}/")
+
+    if a.only:
+        out = a.out or ("var/reports/refused_value_"
+                        f"{a.only.replace(':', '_')}.txt")
+        emit("\n".join(render_one(refused, control, a.population, a.only,
+                                  time.time() - t0)),
+             out, header=f"common.refused_value  only={a.only} "
+                         f"population={a.population}")
+        return 0
 
     out = a.out or f"var/reports/refused_value_{a.population}.txt"
     emit("\n".join(render(refused, control, a.population, a.pairs,
