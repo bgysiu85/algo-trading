@@ -74,7 +74,9 @@ def test_load_bars_counts_only_bars_BEFORE_the_session(tmp_path):
     df = frame()
     p = tmp_path / "b.csv"
     df.to_csv(p)
-    _, warmup = W.load_bars("AAA", D.isoformat(), tmp_path, str(p))
+    _, warmup = W.load_bars("AAA", D.isoformat(), source="cache",
+                            cache=tmp_path, archive=tmp_path,
+                            dataset="XNAS.BASIC", csv=str(p))
     assert warmup == 330, "warm-up count included the session's own bars"
 
 
@@ -152,3 +154,78 @@ def test_only_session_bars_are_examined():
 def test_an_unknown_strategy_exits_rather_than_guessing():
     with pytest.raises(SystemExit):
         W.engine("vw9")
+
+
+# --- the Databento source ---------------------------------------------------
+
+def test_the_archive_source_prepends_the_prior_session_for_warm_up(monkeypatch,
+                                                                   tmp_path):
+    """A 04:00 session has nothing behind it, so the prior slice is what makes
+    the 60-bar volume floor computable at all."""
+    import common.dbn_io as DIO
+    import common.screen_sim as SS
+    from pathlib import Path
+
+    df = frame(days=2)
+    day0, day1 = sorted(set(df.index.tz_convert(ET).date))
+    by = {str(d): df[df.index.tz_convert(ET).date == d] for d in (day0, day1)}
+    paths = [Path(f"{d}_0400_0930.dbn.zst") for d in by]
+    monkeypatch.setattr(SS, "window_slices", lambda a, ds: paths)
+    monkeypatch.setattr(SS, "date_of", lambda p: p.name[:10])
+    monkeypatch.setattr(DIO, "read_dbn", lambda p: by[p.name[:10]])
+
+    got = W.from_archive("AAA", str(day1), tmp_path, "XNAS.BASIC")
+    local = got.index.tz_convert(ET)
+    assert set(local.date) == {day0, day1}, "prior session was not prepended"
+    assert (local.date < day1).sum() >= W.MIN_WARMUP_BARS
+
+
+def test_a_date_outside_the_archive_names_the_pull_command(monkeypatch,
+                                                          tmp_path):
+    import common.screen_sim as SS
+    from pathlib import Path
+    monkeypatch.setattr(SS, "window_slices",
+                        lambda a, ds: [Path("2026-09-03_0400_0930.dbn.zst")])
+    monkeypatch.setattr(SS, "date_of", lambda p: p.name[:10])
+    with pytest.raises(SystemExit) as e:
+        W.from_archive("AAA", "2026-09-11", tmp_path, "XNAS.BASIC")
+    assert "databento_universe" in str(e.value)
+
+
+def test_a_symbol_absent_from_the_tape_is_not_read_as_untraded(monkeypatch,
+                                                               tmp_path):
+    import common.dbn_io as DIO
+    import common.screen_sim as SS
+    from pathlib import Path
+    df = frame(days=1)
+    monkeypatch.setattr(SS, "window_slices",
+                        lambda a, ds: [Path(f"{D}_0400_0930.dbn.zst")])
+    monkeypatch.setattr(SS, "date_of", lambda p: p.name[:10])
+    monkeypatch.setattr(DIO, "read_dbn", lambda p: df)
+    with pytest.raises(SystemExit) as e:
+        W.from_archive("ZZZ", D.isoformat(), tmp_path, "XNAS.BASIC")
+    assert "not the same as a name that did not trade" in str(e.value)
+
+
+def test_the_archive_report_says_these_are_not_the_live_traders_bars():
+    """IB's feed against XNAS.BASIC at 55.2% capture. The report must say so,
+    and say why a RATIO condition survives it where an absolute one would not."""
+    out, _ = run(frame())
+    out = "\n".join(W.render("mcl", "AAA", D.isoformat(),
+                             W.rows(MCL.signals(frame(), require_macd_pos=True),
+                                    D.isoformat(), MCL,
+                                    ("c_macd", "c_mfi", "c_rsi", "c_vol",
+                                     "c_floor"), dtime(4, 0), dtime(9, 30)),
+                             ("c_macd", "c_mfi", "c_rsi", "c_vol", "c_floor"),
+                             330, dtime(4, 0), dtime(9, 30), MCL,
+                             source="archive"))
+    assert "NOT THE BARS THE LIVE TRADER SAW" in out
+    assert "RATIOS" in out and "1.8x" in out
+
+
+def test_the_cache_source_does_not_carry_the_tape_caveat():
+    out = "\n".join(W.render("mcl", "AAA", D.isoformat(), [],
+                             ("c_macd",), 330, dtime(4, 0), dtime(9, 30), MCL,
+                             source="cache"))
+    assert "NOT THE BARS THE LIVE TRADER SAW" not in out
+    assert "bars from: cache" in out

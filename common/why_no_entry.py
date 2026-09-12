@@ -99,10 +99,53 @@ def explain(name: str) -> dict[str, str]:
     }
 
 
-def load_bars(symbol: str, day: str, cache: Path, csv: str | None):
+def from_archive(symbol: str, day: str, archive: Path, dataset: str):
+    """The symbol's bars from the Databento window slices, with the prior
+    session in front of them for warm-up.
+
+    THE DEFAULT SOURCE, and not only because IB Gateway can be down. The
+    slices are the same files `screen_sim` screened, so a name diagnosed here is
+    diagnosed on the tape the point-in-time universe was built from, and no
+    broker connection is involved.
+
+    The prior slice is prepended because MCL's volume floor is a 60-bar mean and
+    a session that starts at 04:00 has nothing behind it -- see the warm-up
+    guard in `render`.
+    """
+    from common.dbn_io import read_dbn
+    from common.screen_sim import date_of, window_slices
+
+    slices = {date_of(p): p for p in window_slices(archive, dataset)}
+    if not slices:
+        sys.exit(f"no 04:00-09:30 window slices under {archive}/{dataset}.")
+    days = sorted(slices)
+    if day not in slices:
+        sys.exit(
+            f"{day} is not in the archive ({days[0]} .. {days[-1]}).\n"
+            f"Pull it first:\n"
+            f"  python -m common.databento_universe --dataset {dataset} "
+            f"--schema ohlcv-1m \\\n"
+            f"      --window 04:00-09:30 --start {day} --end {day} --confirm")
+    i = days.index(day)
+    parts = []
+    for d in days[max(0, i - 1):i + 1]:
+        bars = read_dbn(slices[d])
+        parts.append(bars[bars["symbol"] == symbol])
+    df = pd.concat(parts).sort_index()
+    if df.empty:
+        sys.exit(f"{symbol} has no bars in the {day} slice. Check the ticker -- "
+                 f"a name absent from this tape is not the same as a name that "
+                 f"did not trade.")
+    return df
+
+
+def load_bars(symbol: str, day: str, *, source: str, cache: Path,
+              archive: Path, dataset: str, csv: str | None):
     """The bars, plus how many of them precede the session under test."""
     if csv:
         df = pd.read_csv(csv, index_col=0, parse_dates=[0])
+    elif source == "archive":
+        df = from_archive(symbol, day, archive, dataset)
     else:
         from common.cache_io import load_cached_bars
         d = window_dir(cache, SHARED_DURATION, SHARED_END_HHMM)
@@ -110,11 +153,15 @@ def load_bars(symbol: str, day: str, cache: Path, csv: str | None):
         if df is None:
             sys.exit(
                 f"no cached bars for {symbol} {day} under {d}.\n"
-                f"Fetch them first:\n"
+                f"Either fetch them from IB:\n"
                 f'  python -c "import json,pathlib; '
                 f"pathlib.Path('var/state/one_pair.json').write_text("
                 f"json.dumps([{{'symbol':'{symbol}','date':'{day}'}}]))\"\n"
-                f"  python -m common.data_ib --pairs var/state/one_pair.json")
+                f"  python -m common.data_ib --pairs var/state/one_pair.json\n"
+                f"or use the Databento slices, which need no broker "
+                f"connection:\n"
+                f"  python -m common.why_no_entry --symbol {symbol} "
+                f"--date {day} --source archive")
     df.index = (df.index.tz_localize("UTC") if df.index.tz is None
                 else df.index.tz_convert("UTC"))
     df = df.sort_index()
@@ -143,11 +190,23 @@ def rows(sig: pd.DataFrame, day: str, mod, conds: tuple[str, ...],
 
 def render(name: str, symbol: str, day: str, recs: list[dict],
            conds: tuple[str, ...], warmup: int, lo: dtime, hi: dtime,
-           mod) -> list[str]:
+           mod, source: str = "archive") -> list[str]:
     why = explain(name)
     L = [f"WHY NO ENTRY -- {name.upper()} on {symbol}, {day}", "",
          f"  {len(recs)} in-session bars, {mod.SESSION_START}-{mod.SESSION_END} ET",
-         f"  {warmup} bars of warm-up before the session", ""]
+         f"  {warmup} bars of warm-up before the session",
+         f"  bars from: {source}", ""]
+    if source == "archive":
+        L += ["  NOT THE BARS THE LIVE TRADER SAW. It ran on IB's feed; these",
+              "  are XNAS.BASIC at a measured 55.2% capture, so every volume",
+              "  here is roughly half the consolidated figure.",
+              "",
+              "  That is survivable for this question and would not be for",
+              "  every question: MCL's volume conditions are both RATIOS -- this",
+              "  bar against the previous, the previous against a trailing mean",
+              "  -- and a capture ratio that is roughly constant across a few",
+              "  minutes cancels in a ratio. An ABSOLUTE volume threshold",
+              "  diagnosed on this tape would be wrong by about 1.8x.", ""]
 
     if warmup < MIN_WARMUP_BARS:
         return L + [
@@ -228,9 +287,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--symbol", required=True)
     p.add_argument("--date", required=True, metavar="YYYY-MM-DD")
     p.add_argument("--strategy", default="mcl")
+    p.add_argument("--source", default="archive", choices=["archive", "cache"],
+                   help="archive = the Databento 04:00-09:30 window slices "
+                        "screen_sim uses, no broker connection needed "
+                        "(default); cache = the IB bar_cache")
+    p.add_argument("--archive", default=None,
+                   help="archive root (default: the configured one)")
+    p.add_argument("--dataset", default="XNAS.BASIC")
     p.add_argument("--cache", default="bar_cache")
     p.add_argument("--csv", default=None,
-                   help="read bars from this CSV instead of the cache")
+                   help="read bars from this file instead of either source")
     p.add_argument("--from", dest="lo", default="04:00", metavar="HH:MM")
     p.add_argument("--to", dest="hi", default="09:30", metavar="HH:MM")
     p.add_argument("--out", default=None)
@@ -245,13 +311,19 @@ def main(argv=None) -> int:
     hi = datetime.strptime(a.hi, "%H:%M").time()
     out = a.out or f"var/reports/why_no_entry_{name}_{a.symbol}_{a.date}.txt"
 
-    df, warmup = load_bars(a.symbol, a.date, Path(a.cache), a.csv)
+    from common.databento_fetch import default_archive
+    archive = Path(a.archive) if a.archive else default_archive()
+    df, warmup = load_bars(a.symbol, a.date, source=a.source,
+                           cache=Path(a.cache), archive=archive,
+                           dataset=a.dataset, csv=a.csv)
     sig = (mod.signals(df, require_macd_pos=True) if name == "mcl"
            else mod.signals(mod.to_5m(df) if not mod._looks_5m(df) else df))
     recs = rows(sig, a.date, mod, conds, lo, hi)
+    src = "CSV" if a.csv else a.source
     emit("\n".join(render(name, a.symbol, a.date, recs, conds, warmup, lo, hi,
-                          mod)),
-         out, header=f"common.why_no_entry  {name} {a.symbol} {a.date}")
+                          mod, source=src)),
+         out, header=f"common.why_no_entry  {name} {a.symbol} {a.date}  "
+                     f"source={src}")
     return 0
 
 
