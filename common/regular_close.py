@@ -184,24 +184,41 @@ def stats_closes(archive, dataset: str) -> tuple[dict, dict, dict]:
         return {}, {}, {}
     close, uncross, census = {}, {}, {}
     for f in sorted(d.glob("*.dbn.zst")):
-        df = read_dbn(f)
-        if df.empty or "stat_type" not in df:
-            continue
-        local = df.tz_convert(ET) if df.index.tz is not None else df
-        local = local.assign(_date=[t.strftime("%Y-%m-%d")
+        c, u, n = stats_from_frame(read_dbn(f))
+        close.update(c)
+        uncross.update(u)
+        for st, k in n.items():
+            census[st] = census.get(st, 0) + k
+    return close, uncross, census
+
+
+def stats_from_frame(df: pd.DataFrame) -> tuple[dict, dict, dict]:
+    """One statistics frame -> (closes, uncrossings, stat_type census).
+
+    Split out of `stats_closes` so it can be tested without a .dbn.zst on
+    disk. The first version was only reachable through a real file, so the
+    only defect in it -- a column named `_date`, which `itertuples` renames to
+    a positional field and makes unreachable -- could not be caught by any
+    test and surfaced as an AttributeError on Ben's machine instead.
+    """
+    if df is None or df.empty or "stat_type" not in df:
+        return {}, {}, {}
+    local = df.tz_convert(ET) if df.index.tz is not None else df
+    # NO leading underscore: pandas' itertuples renames any column that is not
+    # a valid identifier -- underscore-prefixed included -- to _1, _2, ...
+    local = local.assign(sess_date=[t.strftime("%Y-%m-%d")
                                     for t in local.index])
-        for st, g in local.groupby("stat_type"):
-            census[int(st)] = census.get(int(st), 0) + len(g)
-        for st, target in ((STAT_CLOSE_PRICE, close),
-                           (STAT_UNCROSSING_PRICE, uncross)):
-            rows = local[local["stat_type"] == st]
-            for r in rows.itertuples():
-                sym = getattr(r, "symbol", None)
-                if sym is None or sym != sym:
-                    continue
-                px = float(r.price)
-                if px > 0:
-                    target[(r._date, str(sym))] = px
+    census = {int(st): int(len(g)) for st, g in local.groupby("stat_type")}
+    close, uncross = {}, {}
+    for st, target in ((STAT_CLOSE_PRICE, close),
+                       (STAT_UNCROSSING_PRICE, uncross)):
+        for r in local[local["stat_type"] == st].itertuples():
+            sym = getattr(r, "symbol", None)
+            if sym is None or sym != sym:
+                continue
+            px = float(r.price)
+            if px > 0:
+                target[(r.sess_date, str(sym))] = px
     return close, uncross, census
 
 

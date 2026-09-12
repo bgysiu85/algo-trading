@@ -408,3 +408,55 @@ def test_no_census_section_when_stats_were_not_requested():
     got = [row("2026-09-10", "ACVA", 7.22, 10.38, {"auction_else_last": 7.22})]
     text = "\n".join(R.render(got, R.score(got), []))
     assert "STAT TYPES PRESENT" not in text
+
+
+# --- the statistics READER, exercised for real --------------------------------
+
+def stats_frame(rows, day="2026-09-10"):
+    """rows = [(stat_type, symbol, price)] as a statistics frame."""
+    idx = pd.DatetimeIndex([
+        pd.Timestamp(f"{day} 16:00:00", tz=ET).tz_convert("UTC")
+    ] * len(rows))
+    return pd.DataFrame({"stat_type": [t for t, _, _ in rows],
+                         "symbol": [s for _, s, _ in rows],
+                         "price": [p for _, _, p in rows]}, index=idx)
+
+
+def test_the_reader_pulls_both_close_statistics_out():
+    """This path was only reachable through a real .dbn.zst, so its one defect
+    -- a column named `_date`, which itertuples renames to a positional field
+    -- could not be caught by any test and surfaced as an AttributeError on
+    Ben's machine. It is reachable now."""
+    c, u, census = R.stats_from_frame(stats_frame([
+        (R.STAT_CLOSE_PRICE, "ACVA", 7.22),
+        (R.STAT_UNCROSSING_PRICE, "ACVA", 7.22),
+        (R.STAT_UNCROSSING_PRICE, "ISPC", 1.50),
+        (1, "ACVA", 7.36)]))
+    assert c == {("2026-09-10", "ACVA"): 7.22}
+    assert u == {("2026-09-10", "ACVA"): 7.22, ("2026-09-10", "ISPC"): 1.50}
+    assert census == {1: 1, R.STAT_CLOSE_PRICE: 1, R.STAT_UNCROSSING_PRICE: 2}
+
+
+def test_the_reader_censuses_stat_types_it_does_not_use():
+    _c, _u, census = R.stats_from_frame(stats_frame([(1, "AAA", 5.0),
+                                                     (3, "AAA", 5.1)]))
+    assert census == {1: 1, 3: 1}
+
+
+def test_a_zero_or_negative_price_is_dropped_not_stored():
+    c, _u, _n = R.stats_from_frame(stats_frame([
+        (R.STAT_CLOSE_PRICE, "AAA", 0.0),
+        (R.STAT_CLOSE_PRICE, "BBB", 2.5)]))
+    assert c == {("2026-09-10", "BBB"): 2.5}
+
+
+def test_a_row_with_no_symbol_is_skipped():
+    c, _u, _n = R.stats_from_frame(stats_frame([
+        (R.STAT_CLOSE_PRICE, None, 2.5),
+        (R.STAT_CLOSE_PRICE, "BBB", 2.5)]))
+    assert c == {("2026-09-10", "BBB"): 2.5}
+
+
+def test_an_empty_or_schemaless_frame_returns_three_empties():
+    assert R.stats_from_frame(pd.DataFrame()) == ({}, {}, {})
+    assert R.stats_from_frame(None) == ({}, {}, {})
