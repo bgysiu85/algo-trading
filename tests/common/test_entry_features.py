@@ -17,6 +17,7 @@ what it must REFUSE to do:
 from __future__ import annotations
 
 from datetime import datetime, time as dtime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -85,16 +86,26 @@ def test_an_early_bar_yields_nan_slopes_rather_than_a_wrong_number():
     assert got["mfi_slope"] != got["mfi_slope"]
 
 
-def test_tape_density_measures_HOLES_not_rows():
-    """The cache holds only the minutes that PRINTED -- a minute with no trade
-    is an absent row, not a zero-volume one. An earlier version measured
-    (volume > 0).mean(), which is 100% on a frame full of holes and 100% on a
-    frame with none: a detector whose output is identical to the thing it is
-    meant to detect."""
-    full = real_sig()
-    dense = F.features_at(full, 150)["tape_density"]
-    assert dense == pytest.approx(100.0)
+def test_tape_density_counts_DEAD_minutes_however_they_are_stored():
+    """A dead minute reaches us two ways and both must count against the
+    density. I shipped a version that handled only one: it assumed a dead
+    minute was an ABSENT row, but this cache gap-fills, so a dead minute is
+    present with volume 0 (LGHL 2026-05-21: 1,999 of 2,770 bars). It read
+    100.00 for every one of the 482 entries.
 
+    Traded minutes over elapsed minutes is right either way, which is the
+    point -- it does not depend on being right about the storage."""
+    full = real_sig()
+    assert F.features_at(full, 150)["tape_density"] == pytest.approx(100.0)
+
+    # dead minutes stored as ZERO-VOLUME ROWS
+    zeroed = full.copy()
+    v = zeroed["volume"].to_numpy(dtype=float, copy=True)
+    v[:151:2] = 0.0
+    zeroed["volume"] = v
+    assert F.features_at(zeroed, 150)["tape_density"] < 60.0
+
+    # dead minutes stored as ABSENT ROWS
     holed = full.iloc[[k for k in range(len(full)) if k % 2 == 0 or k > 150]]
     i = list(holed.index).index(full.index[150])
     assert F.features_at(holed, i)["tape_density"] < 60.0
@@ -128,6 +139,53 @@ def test_bucket_edges_come_from_the_data_not_round_numbers():
 
 def test_too_few_trades_yields_no_buckets_rather_than_thin_ones():
     assert F.buckets(rows_for([1, 2, 3], [1.0, 2.0, 3.0]), "vol_over_trail") == []
+
+
+def test_a_CONSTANT_feature_is_refused_not_bucketed():
+    """`tape_density` came back 100.00 for all 482 entries -- every archive
+    frame is gap-free. It was bucketed anyway and printed a top-vs-bottom of
+    (10.97) across four buckets all labelled [100.00-100.00]. Sorting a run of
+    identical values does not reorder it, so that number was the ENTRY ORDER
+    of the pairs file wearing a feature's name."""
+    rng = np.random.default_rng(7)
+    nets = [float(rng.normal(0, 20)) for _ in range(60)]
+    rows = rows_for([100.0] * 60, nets)
+    assert F.buckets(rows, "vol_over_trail") == []
+    assert "NO VARIATION" in F.why_not_bucketable(rows, "vol_over_trail")
+
+
+def test_a_constant_feature_cannot_reach_a_tier():
+    rng = np.random.default_rng(7)
+    rows = rows_for([100.0] * 60, [float(rng.normal(0, 20)) for _ in range(60)])
+    a = F.buckets(rows, "vol_over_trail")
+    assert F.tier(a, a)[0] == "NOTHING"
+
+
+def test_a_boundary_inside_a_run_of_ties_is_refused():
+    """Partial ties are fine; a boundary landing inside one is not, because
+    which trade falls either side of it is decided by list order."""
+    vals = [1.0] * 40 + list(range(2, 22))     # lower half is all 1.0
+    rows = rows_for([float(v) for v in vals], [1.0] * 60)
+    assert F.buckets(rows, "vol_over_trail") == []
+    assert "list order" in F.why_not_bucketable(rows, "vol_over_trail")
+
+
+def test_ordinary_ties_still_bucket():
+    """The check must not throw away a coarse but real feature -- minutes
+    since open has ties everywhere and is perfectly bucketable."""
+    vals = [float(v) for v in sorted(list(range(20)) * 3)]
+    assert len(F.buckets(rows_for(vals, [1.0] * 60), "vol_over_trail")) == F.QUANTILES
+
+
+def test_the_report_states_WHY_a_feature_could_not_be_bucketed():
+    """A generic 'too few trades' on a constant feature would hide the defect
+    behind the one explanation that collecting more data would fix."""
+    rows = [{**{f: 0.0 for f in F.FEATURES}, "vol_over_trail": 100.0,
+             "net": float(i % 7) - 3.0,
+             "date": "2026-09-01" if i < 60 else "2026-09-11", "symbol": "A"}
+            for i in range(120)]
+    text = "\n".join(F.render(rows, "entries", "p.json", 0, 0.1))
+    assert "NO VARIATION" in text
 
 
 def test_nan_values_are_excluded_not_bucketed_as_zero():
@@ -327,6 +385,75 @@ def test_the_report_says_it_is_not_a_model():
 def test_an_empty_population_is_named_not_scored():
     text = "\n".join(F.render([], "entries", "p.json", 0, 0.1))
     assert "NOTHING TO DESCRIBE" in text
+
+
+# --- placing one bar against the population -----------------------------------
+
+def graded_rows(n=200):
+    """vol_over_trail 0..n, net rising with it, split across two dates."""
+    return [{**{f: float(i) for f in F.FEATURES},
+             "net": float(i) - n / 2.0,
+             "date": "2026-09-01" if i < n // 2 else "2026-09-11",
+             "symbol": "A"} for i in range(n)]
+
+
+def test_locate_puts_a_value_in_the_right_quartile():
+    rows = graded_rows()
+    assert F.locate(rows, "vol_over_trail", 5.0)["k"] == 0
+    assert F.locate(rows, "vol_over_trail", 195.0)["k"] == F.QUANTILES - 1
+    assert F.locate(rows, "vol_over_trail", 100.0)["k"] in (1, 2)
+
+
+def test_locate_beyond_the_population_lands_in_the_end_bucket():
+    """A bar more extreme than anything traded must not fall through."""
+    rows = graded_rows()
+    assert F.locate(rows, "vol_over_trail", 1e9)["k"] == F.QUANTILES - 1
+    assert F.locate(rows, "vol_over_trail", -1e9)["k"] == 0
+
+
+def test_locate_refuses_a_feature_that_could_not_be_bucketed():
+    rows = rows_for([100.0] * 60, [1.0] * 60)
+    assert F.locate(rows, "vol_over_trail", 100.0) is None
+
+
+def test_locate_refuses_a_missing_value():
+    assert F.locate(graded_rows(), "vol_over_trail", float("nan")) is None
+
+
+def test_the_one_bar_report_says_it_can_only_DISCONFIRM():
+    """The whole hazard: 22 features on a sample of one, chosen after its
+    outcome was known. If the page lets that read as evidence it is worse
+    than not existing."""
+    rows = graded_rows()
+    got = {f: 5.0 for f in F.FEATURES}
+    text = "\n".join(F.render_where(rows, got, "TNON 2026-09-11 07:35",
+                                    "entries"))
+    assert "NOT evidence" in text
+    assert "sample of one" in text
+    assert "chosen because its outcome" in text
+
+
+def test_the_one_bar_report_counts_the_MIDDLE_quartiles():
+    """The useful number is how many features could NOT have caught it."""
+    rows = graded_rows()
+    got = {f: 100.0 for f in F.FEATURES}      # middle on every feature
+    text = "\n".join(F.render_where(rows, got, "X", "entries"))
+    assert f"{len(F.FEATURES)} of {len(F.FEATURES)} features put this bar in " \
+           "a MIDDLE quartile" in text
+
+
+def test_the_one_bar_report_never_ranks_or_recommends():
+    rows = graded_rows()
+    got = {f: 5.0 for f in F.FEATURES}
+    low = "\n".join(F.render_where(rows, got, "X", "entries")).lower()
+    for banned in ("would have caught", "add this condition", "best",
+                   "strongest", "recommend"):
+        assert banned not in low, f"the one-bar page suggests acting: {banned!r}"
+
+
+def test_where_spec_is_parsed_strictly():
+    with pytest.raises(SystemExit):
+        F.where_bar("TNON-2026-09-11-0735", "cache", None, None, Path("x"))
 
 
 # --- the population default ---------------------------------------------------

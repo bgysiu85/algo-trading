@@ -109,8 +109,8 @@ FEATURES = {
                           "in the entry rule knows whether the name was "
                           "tradeable at all.",
     "dollar_vol_bar": "price x this bar's volume, in $.",
-    "tape_density": "bars printed / minutes elapsed since the session's first "
-                    "bar, in percent. A thin tape is a different market.",
+    "tape_density": "minutes that TRADED / minutes elapsed since the session's "
+                    "first bar, in percent. A thin tape is a different market.",
     "trail_over_range": "the 5% trail distance / the mean bar range. How many "
                         "typical bars of movement the stop allows before it "
                         "is hit -- under ~1 the stop is inside the noise.",
@@ -168,15 +168,23 @@ def features_at(sig: pd.DataFrame, i: int) -> dict:
         typ = (same_day["high"] + same_day["low"] + same_day["close"]) / 3.0
         vv = same_day["volume"]
         vwap = float((typ * vv).sum() / vv.sum()) if float(vv.sum()) else float("nan")
-        # PRINTED BARS OVER ELAPSED MINUTES, not the share of rows with volume.
-        # The cache holds only the minutes that printed -- a minute with no
-        # trade is an ABSENT ROW, not a zero-volume one -- so
-        # (volume > 0).mean() is 100% on a frame full of holes and 100% on a
-        # frame with none. That is a measurement whose output is identical to
-        # the thing it is supposed to detect.
+        # MINUTES THAT TRADED over minutes ELAPSED. Both halves matter, and I
+        # got this wrong once in each direction:
+        #
+        #   (volume > 0).mean()          misses absent rows
+        #   len(same_day) / elapsed      misses zero-volume rows
+        #
+        # I shipped the second on the theory that a dead minute is an absent
+        # row. It is not, in this cache: the archive frames are gap-filled and
+        # a dead minute is present with volume 0 -- LGHL 2026-05-21 has 1,999
+        # of 2,770 bars at zero. So the second form read 100.00 for all 482
+        # entries, which is how it got caught. Counting TRADED minutes against
+        # ELAPSED ones is right whichever way a frame is stored, so it does not
+        # depend on my being right about the storage.
         span_min = ((same_day.index[-1] - same_day.index[0]).total_seconds()
                     / 60.0 + 1.0)
-        printed = len(same_day) / span_min * 100.0 if span_min > 0 else float("nan")
+        traded = float((same_day["volume"] > 0).sum())
+        printed = traded / span_min * 100.0 if span_min > 0 else float("nan")
     else:
         vwap, printed = float("nan"), float("nan")
     ma20 = float(past["close"].iloc[-20:].mean()) if len(past) >= 20 else float("nan")
@@ -226,16 +234,51 @@ def features_at(sig: pd.DataFrame, i: int) -> dict:
     }
 
 
+def why_not_bucketable(rows: list[dict], name: str, q: int = QUANTILES) -> str:
+    """"" if this feature can be bucketed, else the reason it cannot.
+
+    The second reason is the one that bit. `tape_density` came back 100.00 for
+    all 482 entries -- every archive frame is gap-free, so the feature measures
+    nothing on this data. It was bucketed anyway, and printed
+
+        [100.00-100.00] (3.33)  [100.00-100.00] (5.39)
+        [100.00-100.00] 17.71   [100.00-100.00] (14.30)
+
+    with a top-vs-bottom of (10.97). Those four means are real, but which
+    trade landed in which bucket was decided by LIST ORDER, because sorting a
+    run of identical values does not reorder it. That is not a measurement of
+    anything; it is the entry order of the pairs file wearing a feature's name,
+    and it was large enough to have been read as a finding.
+
+    A boundary that falls INSIDE a run of identical values has the same defect
+    in miniature, so the check is on the boundaries, not just on the extremes.
+    """
+    vals = sorted(r[name] for r in rows
+                  if r.get(name) is not None and r[name] == r[name])
+    if len(vals) < q * 5:
+        return "too few trades to bucket"
+    n = len(vals)
+    edges = [vals[n * k // q] for k in range(q)]
+    if edges[0] == vals[-1]:
+        return f"NO VARIATION -- every entry is {edges[0]:,.2f}"
+    if any(a == b for a, b in zip(edges, edges[1:])):
+        return ("too few distinct values: a bucket boundary falls inside a run "
+                "of identical values, so membership would be decided by list "
+                "order")
+    return ""
+
+
 def buckets(rows: list[dict], name: str, q: int = QUANTILES) -> list[dict]:
     """Quantile buckets of one feature, with the outcome in each.
 
     Edges come from the data, not from round numbers: a hand-chosen threshold
-    is already a fitted parameter.
+    is already a fitted parameter. Returns [] when the data cannot carry the
+    split -- see why_not_bucketable.
     """
+    if why_not_bucketable(rows, name, q):
+        return []
     vals = [(r[name], r["net"]) for r in rows
             if r.get(name) is not None and r[name] == r[name]]
-    if len(vals) < q * 5:
-        return []
     vals.sort(key=lambda x: x[0])
     out, n = [], len(vals)
     for k in range(q):
@@ -281,7 +324,9 @@ def tier(ba: list[dict], bb: list[dict]) -> tuple[str, str]:
     NOTHING     everything else. Printed anyway.
     """
     if not ba or not bb:
-        return "NOTHING", "too few trades to bucket"
+        # Not necessarily "too few trades" -- the half may have been refused
+        # for having no spread. The per-half line above says which.
+        return "NOTHING", "a half could not be bucketed (reason above)"
     da = ba[-1]["mean"] - ba[0]["mean"]
     db = bb[-1]["mean"] - bb[0]["mean"]
     same = (da > 0) == (db > 0)
@@ -341,7 +386,10 @@ def render(rows: list[dict], population: str, pairs_path: str,
         for label, part in (("early", a), ("late", b)):
             bs = buckets(part, f)
             if not bs:
-                L.append(f"    {label:<6} too few trades to bucket")
+                # The REASON, not a generic line. "too few trades" and "this
+                # feature is a constant" are different facts about the study
+                # and only one of them is fixable by collecting more data.
+                L.append(f"    {label:<6} {why_not_bucketable(part, f)}")
                 continue
             cells = "  ".join(
                 f"[{acct(x['lo'], 1).strip()}-{acct(x['hi'], 1).strip()}]"
@@ -419,6 +467,77 @@ def render(rows: list[dict], population: str, pairs_path: str,
     return L
 
 
+def locate(rows: list[dict], name: str, v: float,
+           q: int = QUANTILES) -> dict | None:
+    """Which bucket of the POOLED population `v` falls in, and what that
+    bucket did. None if the feature cannot be bucketed or v is absent."""
+    if v is None or v != v or why_not_bucketable(rows, name, q):
+        return None
+    bs = buckets(rows, name, q)
+    if not bs:
+        return None
+    for k, b in enumerate(bs):
+        if v <= b["hi"] or k == len(bs) - 1:
+            return {**b, "k": k, "of": len(bs)}
+    return None
+
+
+def render_where(rows: list[dict], got: dict, label: str,
+                 population: str) -> list[str]:
+    """One bar, placed against the population on every feature.
+
+    THIS CAN ONLY DISCONFIRM. The bar was chosen because its outcome was
+    already known, so a feature that happens to flag it is one of 22 tried on
+    a sample of one -- no evidence at all. A feature that does NOT flag it is
+    worth something: it rules that feature out as the thing that would have
+    caught this bar.
+    """
+    L = [f"WHERE DOES {label} SIT?", "",
+         f"  measured against the {len(rows):,} {population} in the report, "
+         "pooled.",
+         "  Quartile 1 is the lowest quarter of the population on that "
+         "feature.", ""]
+    base = sum(r["net"] for r in rows) / len(rows)
+    L += [f"  population mean net {acct(base, 1).strip()}", ""]
+    flagged, ruled_out, unusable = [], [], []
+    for f in FEATURES:
+        v = got.get(f)
+        b = locate(rows, f, v)
+        if b is None:
+            unusable.append(f)
+            L.append(f"  {f:<20} {'n/a':>14}   not bucketable, or no value")
+            continue
+        tag = f"Q{b['k'] + 1}/{b['of']}"
+        L.append(f"  {f:<20} {v:>14,.2f}   {tag}  that quartile: "
+                 f"{acct(b['mean'], 1).strip()} mean, {b['win']:.0f}% win")
+        # "Extreme" = the top or bottom quartile. Anything in the middle two
+        # is, by construction, unremarkable.
+        if b["k"] in (0, b["of"] - 1):
+            flagged.append(f)
+        else:
+            ruled_out.append(f)
+    L += ["", "WHAT THIS DOES AND DOES NOT SHOW", "",
+          f"  {len(ruled_out)} of {len(FEATURES)} features put this bar in a "
+          "MIDDLE quartile.",
+          "  On those, it is indistinguishable from the population -- they",
+          "  could not have separated it however they were thresholded.",
+          ""]
+    if flagged:
+        L += [f"  {len(flagged)} put it in an outer quartile: "
+              + ", ".join(flagged), "",
+              "  That is NOT evidence. This bar was chosen because its outcome",
+              "  was known, 22 features were tried on it, and a sample of one",
+              "  has no halves to disagree. Roughly half of any bar's features",
+              "  land in an outer quartile by construction.", ""]
+    if unusable:
+        L += ["  not bucketable here: " + ", ".join(unusable), ""]
+    L += ["  The usable direction is the negative one. If the features that",
+          "  would have to fire are the ones sitting in the middle, then",
+          "  nothing on this list is the missing condition, and the search",
+          "  has to widen or stop -- which is worth knowing either way."]
+    return L
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--pairs", default="var/state/traded_pairs.json")
@@ -431,7 +550,64 @@ def build_parser() -> argparse.ArgumentParser:
                         "the floor_sole population, for comparison.")
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--out", default=None)
+    p.add_argument("--where", default=None, metavar="SYM:DATE@HHMM",
+                   help="also place ONE bar against the population, e.g. "
+                        "TNON:2026-09-11@07:35. HHMM is ET. The bar need not "
+                        "be an entry.")
+    p.add_argument("--source", default="cache", choices=["cache", "archive"],
+                   help="where the --where bar comes from. `archive` reaches "
+                        "sessions the bar cache has not got.")
+    p.add_argument("--archive", default=None)
+    # XNAS.BASIC, not the EQUS.MINI default in databento_universe: the archive
+    # was pulled as XNAS.BASIC and the two are different tapes.
+    p.add_argument("--dataset", default="XNAS.BASIC")
     return p
+
+
+def where_bar(spec: str, source: str, archive, dataset, cache_dir):
+    """(features, label) for one SYM:DATE@HHMM bar, or exit with why not."""
+    from common.cache_io import (BACKTEST_END_HHMM, BACKTEST_SESSIONS,
+                                 check_sessions, load_cached_bars,
+                                 slice_sessions)
+    from strategy.mcl import mcl as MCL
+
+    try:
+        sym_date, hhmm = spec.split("@")
+        sym, date_str = sym_date.split(":")
+        hh, mm = int(hhmm[:2]), int(hhmm[-2:])
+    except ValueError:
+        sys.exit(f"--where wants SYM:DATE@HHMM, got {spec!r}")
+    sym, day = sym.upper(), datetime.strptime(date_str, "%Y-%m-%d").date()
+
+    if source == "archive":
+        from common.why_no_entry import from_archive
+        bars = from_archive(sym, date_str, archive, dataset)
+        if bars is None or bars.empty:
+            sys.exit(f"no archive bars for {sym} {date_str} under {archive}/")
+        sl = bars
+    else:
+        bars = load_cached_bars(cache_dir, sym, date_str)
+        if bars is None or bars.empty:
+            sys.exit(f"no cached bars for {sym} {date_str} under {cache_dir}/")
+        bars.index = (bars.index.tz_localize("UTC") if bars.index.tz is None
+                      else bars.index.tz_convert("UTC"))
+        bars = bars.sort_index()
+        end_h, end_m = int(BACKTEST_END_HHMM[:2]), int(BACKTEST_END_HHMM[2:])
+        want_end = datetime.combine(day, datetime.min.time()).replace(
+            hour=end_h, minute=end_m, tzinfo=ET)
+        if check_sessions(bars, want_end, BACKTEST_SESSIONS) < BACKTEST_SESSIONS:
+            sys.exit(f"{sym} {date_str}: fewer than {BACKTEST_SESSIONS} "
+                     "sessions cached -- try --source archive")
+        sl = slice_sessions(bars, want_end, BACKTEST_SESSIONS)
+
+    sig = MCL.signals(sl)
+    local = sig.index.tz_convert(ET)
+    hits = [k for k, t in enumerate(local)
+            if t.date() == day and t.hour == hh and t.minute == mm]
+    if not hits:
+        sys.exit(f"{sym} {date_str}: no bar at {hh:02d}:{mm:02d} ET")
+    i = hits[0]
+    return features_at(sig, i), f"{sym} {date_str} {hh:02d}:{mm:02d} ET"
 
 
 def main(argv=None) -> int:
@@ -496,10 +672,19 @@ def main(argv=None) -> int:
         sys.exit(f"no entries found for {len(pairs)} symbol-day(s) under "
                  f"{cache}/")
 
+    text = render(rows, a.population, a.pairs, skipped, time.time() - t0)
+    head = f"common.entry_features  population={a.population}"
+    if a.where:
+        archive = None
+        if a.source == "archive":
+            from common.databento_fetch import default_archive
+            archive = Path(a.archive) if a.archive else default_archive()
+        got, label = where_bar(a.where, a.source, archive, a.dataset, cache)
+        text = render_where(rows, got, label, a.population) + ["", ""] + text
+        head += f"  where={a.where}"
+
     out = a.out or f"var/reports/entry_features_{a.population}.txt"
-    emit("\n".join(render(rows, a.population, a.pairs, skipped,
-                          time.time() - t0)),
-         out, header=f"common.entry_features  population={a.population}")
+    emit("\n".join(text), out, header=head)
     return 0
 
 
