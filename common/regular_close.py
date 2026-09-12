@@ -120,6 +120,24 @@ TRUTH = [
 
 TOL = 0.005          # half a cent: a match is a match to the printed cent
 
+# Rows checked against a THIRD source after the two-method flag raised them.
+# TradingView's daily close is one number; its own intraday bars are another
+# view of the same session, and where they agree the truth row is corroborated
+# rather than merely asserted.
+#
+# XRTX 2026-09-10: the 15:30-16:00 ET bar closes at 2.11 on TradingView's own
+# 30-minute series, matching its daily close. So the flag was a FALSE ALARM --
+# raised correctly, resolved against the extraction. `last_bar_before_1600`
+# gets this row exactly (2.11); `open_at_1600` and Nasdaq's published
+# CLOSE_PRICE both give 2.18, an after-hours print.
+#
+# That is also the strongest evidence about stat_type 11: it is NOT reliably
+# the official regular-session close. Together with its 0/2 on NYSE-listed
+# rows, the statistics route is weaker than the minute route, not stronger.
+THIRD_SOURCE = {
+    ("2026-09-10", "XRTX"): (2.11, "TV 30-minute bars, 15:30-16:00 ET"),
+}
+
 
 def _daily_takes_schema() -> bool:
     """Does dbn_io.daily_frame accept a schema override yet?
@@ -417,6 +435,20 @@ def render(got: list[dict], sc: dict, missing: list[str],
             L.append(f"  {g['date']}  {g['symbol']:<6} both methods "
                      f"{acct(v, 1).strip():<7} truth "
                      f"{acct(g['truth'], 1).strip():<7} ({g['exchange']})")
+        checked = [(g, v) for g, v in agree_vs_truth
+                   if (g["date"], g["symbol"]) in THIRD_SOURCE]
+        if checked:
+            L += ["", "  CHECKED AGAINST A THIRD SOURCE:", ""]
+            for g, v in checked:
+                px, how = THIRD_SOURCE[(g["date"], g["symbol"])]
+                ok = "CONFIRMS THE TRUTH" if abs(px - g["truth"]) <= TOL \
+                    else "contradicts the truth"
+                L.append(f"    {g['date']}  {g['symbol']:<6} "
+                         f"{acct(px, 1).strip():<7} {ok}  ({how})")
+            L += ["",
+                  "    A confirmed truth row means the flag was a FALSE ALARM",
+                  "    -- raised correctly, and resolved AGAINST the",
+                  "    extraction. The row is a real miss."]
         L += ["",
               "  Nasdaq's published CLOSE_PRICE and a close derived from the",
               "  minute bars are two different methods. Where they agree and",

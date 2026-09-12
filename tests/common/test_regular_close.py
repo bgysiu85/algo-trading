@@ -541,3 +541,34 @@ def test_agreement_WITH_the_truth_is_not_flagged():
                {"auction_else_last": 7.22, "stats_close_price": 7.22})]
     text = "\n".join(R.render(got, R.score(got), []))
     assert "WHERE TWO METHODS AGREE" not in text
+
+
+# --- the third source ---------------------------------------------------------
+
+def test_a_third_source_CONFIRMING_the_truth_marks_the_flag_a_false_alarm():
+    """The two-method flag exists to raise a row for checking, not to win it.
+    When the third source backs TradingView, the row is a real miss and the
+    report has to say so rather than leaving the doubt hanging."""
+    got = [row("2026-09-10", "XRTX", 2.11, 2.44,
+               {"auction_else_last": 2.18, "stats_close_price": 2.18})]
+    text = "\n".join(R.render(got, R.score(got), []))
+    assert "CHECKED AGAINST A THIRD SOURCE" in text
+    assert "CONFIRMS THE TRUTH" in text
+    assert "FALSE ALARM" in text
+    assert "real miss" in text
+
+
+def test_an_unchecked_row_is_not_claimed_to_be_confirmed():
+    got = [row("2026-09-10", "FTFT", 2.05, 2.11,
+               {"auction_else_last": 2.03, "stats_close_price": 2.03})]
+    text = "\n".join(R.render(got, R.score(got), []))
+    assert "WHERE TWO METHODS AGREE" in text
+    assert "CHECKED AGAINST A THIRD SOURCE" not in text
+
+
+def test_the_third_source_record_carries_its_provenance():
+    """A number with no stated source is the thing this project keeps being
+    burned by."""
+    for key, (px, how) in R.THIRD_SOURCE.items():
+        assert px > 0
+        assert how and len(how) > 10
