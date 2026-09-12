@@ -422,3 +422,22 @@ def test_the_early_arms_hit_rate_is_not_labelled_as_tape_coverage():
     i = o.index("EARLY NAMES ONLY")
     seg = o[i:i + 400]
     assert "produced at least one trade" in seg
+
+
+def test_the_h0_reference_matches_the_universe_it_is_quoted_against():
+    """The constants pin a universe SIZE. Extending the archive changed it from
+    4,997 to 5,021 symbol-days, which is exactly the drift the staleness guard
+    exists to catch -- and exactly the drift that would otherwise compare MCL
+    against a control measured somewhere else."""
+    assert P.H0_PIT_OFFERED == 5_021
+    assert P.H0_PIT_TRADES == 4_590
+    assert P.H0_PIT_NET == pytest.approx(-72_306.0)
+    # per trade and per symbol-day, the two the verdict actually uses
+    assert P.H0_PIT_NET / P.H0_PIT_TRADES == pytest.approx(-15.75, abs=0.01)
+    assert P.H0_PIT_NET / P.H0_PIT_OFFERED == pytest.approx(-14.40, abs=0.01)
+
+
+def test_the_knowable_reference_is_internally_consistent():
+    assert P.H0_KNOWABLE_NET / P.H0_KNOWABLE_TRADES == pytest.approx(-14.70,
+                                                                     abs=0.01)
+    assert P.H0_KNOWABLE_TRADES <= P.H0_KNOWABLE_OFFERED

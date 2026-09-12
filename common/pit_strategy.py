@@ -105,13 +105,13 @@ ENTRY_FLOOR_ARM = dtime(4, 30)   # what "early" means, matching H0's entry time
 # guard: if this run's universe does not offer exactly that many symbol-days, the
 # reference belongs to a different universe file and the report says so instead
 # of quietly comparing two things.
-H0_PIT_NET = -72_086.0        # AS SCREENED, at $4.26
-H0_PIT_TRADES = 4_568
-H0_PIT_OFFERED = 4_997
-H0_KNOWABLE_NET = -10_440.0   # KNOWABLE AT 04:30, at $4.26
-H0_KNOWABLE_TRADES = 713
-H0_KNOWABLE_OFFERED = 789
-H0_REFERENCE_SOURCE = "var/reports/pit_h0.txt, 2026-09-11"
+H0_PIT_NET = -72_306.0        # AS SCREENED, at $4.26
+H0_PIT_TRADES = 4_590
+H0_PIT_OFFERED = 5_021
+H0_KNOWABLE_NET = -10_612.0   # KNOWABLE AT 04:30, at $4.26
+H0_KNOWABLE_TRADES = 722
+H0_KNOWABLE_OFFERED = 798
+H0_REFERENCE_SOURCE = "var/reports/pit_h0.txt, 2026-09-12"
 
 # The warm-up the published backtests use, imported rather than restated: 2
 # sessions total means the target day plus one prior. If cache_io changes, this
