@@ -288,7 +288,13 @@ def score(got: list[dict]) -> dict[str, dict]:
                if g["cand"].get(n) is not None
                and abs(g["cand"][n] - g["truth"]) <= TOL]
         miss = [g for g in disc if g not in hit]
-        out[n] = {"hit": len(hit), "of": len(disc), "misses": miss}
+        # A candidate that produced NO value on any row scored 0 because it
+        # was never there, not because it was wrong -- and 0/24 reads
+        # identically either way. UNCROSSING_PRICE is exactly this case: the
+        # statistic is absent from XNAS.BASIC, and the census proves it.
+        present = any(g["cand"].get(n) is not None for g in disc)
+        out[n] = {"hit": len(hit), "of": len(disc), "misses": miss,
+                  "present": present}
     return out
 
 
@@ -319,10 +325,11 @@ def render(got: list[dict], sc: dict, missing: list[str],
             "  particular names were quiet after hours. Pull a session where",
             "  a name ran post-close and re-run.", ""]
 
+    has_stats = any("stats_close_price" in g.get("cand", {}) for g in got)
     L += ["PER ROW", "",
           f"  {'date':<12}{'symbol':<7}{'ours(1d)':>10}{'truth':>8}"
-          f"{'bef 16:00':>11}{'open 16:00':>12}{'close 16:00':>13}"
-          f"{'auc|last':>11}   "]
+          f"{'bef 16:00':>11}{'open 16:00':>12}{'auc|last':>11}"
+          + (f"{'STAT close':>12}" if has_stats else "") + "   "]
     for g in sorted(got, key=lambda g: (g["date"], g["symbol"])):
         c = g["cand"]
 
@@ -333,8 +340,9 @@ def render(got: list[dict], sc: dict, missing: list[str],
                  f"{acct(g['truth'], 8)}"
                  f"{f(c.get('last_bar_before_1600'), 11)}"
                  f"{f(c.get('open_at_1600'), 12)}"
-                 f"{f(c.get('bar_at_1600'), 13)}"
-                 f"{f(c.get('auction_else_last'), 11)}{mark}")
+                 f"{f(c.get('auction_else_last'), 11)}"
+                 + (f(c.get("stats_close_price"), 12) if has_stats else "")
+                 + mark)
 
     if st_census:
         L += ["", "STAT TYPES PRESENT (a filter matching nothing looks exactly",
@@ -352,6 +360,10 @@ def render(got: list[dict], sc: dict, missing: list[str],
 
     L += ["", "SCORE, on discriminating rows only", ""]
     for n, s in sc.items():
+        if not s.get("present", True):
+            L.append(f"  {n:<30} {'n/a':>5}   never produced a value -- "
+                     "ABSENT, not wrong")
+            continue
         L.append(f"  {n:<30} {s['hit']}/{s['of']}")
 
     # Split by listing venue. An official close is set by the LISTING venue's
@@ -383,7 +395,42 @@ def render(got: list[dict], sc: dict, missing: list[str],
               "  reason to reject the repair -- but it must be stated wherever",
               "  the repaired closes are used, not discovered later."]
 
-    winners = [n for n, s in sc.items() if s["of"] and s["hit"] == s["of"]]
+    # Nasdaq's PUBLISHED close statistic and a close DERIVED from minute bars
+    # are two different methods over the same tape. Where they agree with each
+    # other and both differ from TradingView, the extraction is not what is in
+    # question -- the truth row is. Conflating the two would have this module
+    # chasing its own inputs.
+    agree_vs_truth = []
+    for g in got:
+        if not g["discriminating"]:
+            continue
+        a_ = g["cand"].get("auction_else_last")
+        b_ = g["cand"].get("stats_close_price")
+        if a_ is None or b_ is None:
+            continue
+        if abs(a_ - b_) <= TOL and abs(a_ - g["truth"]) > TOL:
+            agree_vs_truth.append((g, a_))
+    if agree_vs_truth:
+        L += ["", "WHERE TWO METHODS AGREE AND THE TRUTH DOES NOT", ""]
+        for g, v in sorted(agree_vs_truth,
+                           key=lambda x: (x[0]["date"], x[0]["symbol"])):
+            L.append(f"  {g['date']}  {g['symbol']:<6} both methods "
+                     f"{acct(v, 1).strip():<7} truth "
+                     f"{acct(g['truth'], 1).strip():<7} ({g['exchange']})")
+        L += ["",
+              "  Nasdaq's published CLOSE_PRICE and a close derived from the",
+              "  minute bars are two different methods. Where they agree and",
+              "  TradingView does not, what is in question is the TRUTH ROW,",
+              "  not the extraction.",
+              "",
+              "  They are NOT fully independent -- both read the same",
+              "  XNAS.BASIC tape -- so agreement shows the extraction is",
+              "  consistent, not that the number is the official consolidated",
+              "  close. Settling it needs a third source; until then these",
+              "  rows are neither a pass nor a failure."]
+
+    winners = [n for n, s in sc.items()
+               if s["of"] and s.get("present", True) and s["hit"] == s["of"]]
     L += ["", "VERDICT", ""]
     if len(winners) == 1:
         L += [f"  {winners[0]}", "",

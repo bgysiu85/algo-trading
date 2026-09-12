@@ -460,3 +460,84 @@ def test_a_row_with_no_symbol_is_skipped():
 def test_an_empty_or_schemaless_frame_returns_three_empties():
     assert R.stats_from_frame(pd.DataFrame()) == ({}, {}, {})
     assert R.stats_from_frame(None) == ({}, {}, {})
+
+
+# --- absent is not wrong ------------------------------------------------------
+
+def test_a_candidate_that_never_produced_a_value_reads_as_ABSENT():
+    """UNCROSSING_PRICE is not carried on XNAS.BASIC at all. Scoring it 0/24
+    puts it beside a candidate that WAS present and got every row wrong, and
+    the two are not the same claim."""
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38,
+               {"stats_uncrossing": None, "auction_else_last": 7.22}),
+           row("2026-09-09", "SUNE", 4.51, 3.89,
+               {"stats_uncrossing": None, "auction_else_last": 4.51})]
+    sc = R.score(got)
+    assert sc["stats_uncrossing"]["present"] is False
+    assert sc["auction_else_last"]["present"] is True
+    text = "\n".join(R.render(got, sc, []))
+    assert "ABSENT, not wrong" in text
+    assert "stats_uncrossing                 n/a" in text
+
+
+def test_an_absent_candidate_can_never_win_the_verdict():
+    """0/0 is vacuously perfect. A candidate that produced nothing must not be
+    picked as the construction to rebuild 552 sessions on."""
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38,
+               {"stats_uncrossing": None, "auction_else_last": 7.22})]
+    text = "\n".join(R.render(got, R.score(got), []))
+    tail = text.split("VERDICT")[1]
+    assert "stats_uncrossing" not in tail
+
+
+def test_a_present_candidate_that_gets_everything_wrong_still_scores_zero():
+    """The other half: ABSENT must not become a way to hide a real failure."""
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38,
+               {"stats_close_price": 9.99, "auction_else_last": 7.22})]
+    sc = R.score(got)
+    assert sc["stats_close_price"]["present"] is True
+    assert sc["stats_close_price"]["hit"] == 0
+    # asserted on THIS candidate's line -- the others really are absent from
+    # this fixture and correctly say so, so a global check would pass or fail
+    # for the wrong reason.
+    line = next(x for x in R.render(got, sc, [])
+                if x.strip().startswith("stats_close_price"))
+    assert "0/1" in line and "ABSENT" not in line
+
+
+# --- two methods against the truth --------------------------------------------
+
+def test_two_methods_agreeing_against_the_truth_is_reported_separately():
+    """A published statistic and a bar-derived close agreeing with each other
+    while TradingView differs puts the TRUTH ROW in question, not the
+    extraction."""
+    got = [row("2026-09-10", "FTFT", 2.05, 2.11,
+               {"auction_else_last": 2.03, "stats_close_price": 2.03})]
+    text = "\n".join(R.render(got, R.score(got), []))
+    assert "WHERE TWO METHODS AGREE AND THE TRUTH DOES NOT" in text
+    assert "2026-09-10  FTFT" in text
+    assert "neither a pass nor a failure" in text
+
+
+def test_the_agreement_note_states_they_are_NOT_independent():
+    """Both read the same tape. Agreement shows consistency, not correctness,
+    and claiming otherwise would be the strongest overreach available here."""
+    got = [row("2026-09-10", "FTFT", 2.05, 2.11,
+               {"auction_else_last": 2.03, "stats_close_price": 2.03})]
+    text = "\n".join(R.render(got, R.score(got), []))
+    assert "NOT fully independent" in text
+    assert "third source" in text
+
+
+def test_methods_that_DISAGREE_are_not_reported_as_agreement():
+    got = [row("2026-09-10", "FTFT", 2.05, 2.11,
+               {"auction_else_last": 2.03, "stats_close_price": 2.07})]
+    text = "\n".join(R.render(got, R.score(got), []))
+    assert "WHERE TWO METHODS AGREE" not in text
+
+
+def test_agreement_WITH_the_truth_is_not_flagged():
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38,
+               {"auction_else_last": 7.22, "stats_close_price": 7.22})]
+    text = "\n".join(R.render(got, R.score(got), []))
+    assert "WHERE TWO METHODS AGREE" not in text
