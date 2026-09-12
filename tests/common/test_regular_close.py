@@ -228,3 +228,56 @@ def test_a_failure_does_not_blame_the_construction_by_default():
     assert "NONE of the candidates" in text
     assert "cannot answer the question" in text
     assert "before blaming the construction" in text
+
+
+# --- the candidate the FIRST run forced ---------------------------------------
+
+def minutes_oc(spec, day="2026-09-10", symbol="AAA"):
+    """spec = [(HH, MM, open, close)] as ET bar STARTS."""
+    idx = pd.DatetimeIndex([
+        pd.Timestamp(datetime.combine(pd.Timestamp(day).date(),
+                                      dtime(h, m), tzinfo=ET)).tz_convert("UTC")
+        for h, m, _, _ in spec])
+    return pd.DataFrame({"symbol": symbol,
+                         "open": [o for _, _, o, _ in spec],
+                         "close": [c for _, _, _, c in spec]}, index=idx)
+
+
+def test_the_1600_bar_CLOSE_is_not_the_auction():
+    """ACVA 2026-09-10, from the real tape: the market closed at 7.22 and the
+    16:00-16:01 bar closed at 10.45, because that minute also holds the first
+    EXTENDED-hours prints and the name was already away. The auction is the
+    FIRST trade in that minute."""
+    c = R.candidates(minutes_oc([(15, 59, 7.25, 7.24),
+                                 (16, 0, 7.22, 10.45)]))
+    assert c["bar_at_1600"] == pytest.approx(10.45)
+    assert c["open_at_1600"] == pytest.approx(7.22)
+    assert c["auction_else_last"] == pytest.approx(7.22)
+
+
+def test_auction_else_last_falls_back_when_there_is_no_1600_print():
+    """A thin name that did not trade in the closing minute has no cross, and
+    its official close is the last continuous trade."""
+    c = R.candidates(minutes_oc([(15, 58, 1.82, 1.81), (15, 59, 1.81, 1.80)]))
+    assert c["open_at_1600"] is None
+    assert c["auction_else_last"] == pytest.approx(1.80)
+
+
+def test_a_frame_without_an_open_column_yields_None_not_a_close():
+    """Silently substituting the close would make the auction candidate a
+    duplicate of one that already failed."""
+    c = R.candidates(minutes([(15, 59, 7.30), (16, 0, 10.45)]))
+    assert c["open_at_1600"] is None
+    assert c["auction_else_last"] == pytest.approx(7.30)
+
+
+def test_all_five_candidates_are_scored():
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38,
+               {"last_bar_before_1600": 7.22, "open_at_1600": 7.22,
+                "bar_at_1600": 10.45, "last_bar_at_or_before_1600": 10.45,
+                "auction_else_last": 7.22})]
+    sc = R.score(got)
+    assert set(sc) == {"last_bar_before_1600", "open_at_1600", "bar_at_1600",
+                       "last_bar_at_or_before_1600", "auction_else_last"}
+    assert sc["bar_at_1600"]["hit"] == 0
+    assert sc["auction_else_last"]["hit"] == 1

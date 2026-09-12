@@ -100,27 +100,50 @@ def candidates(rows: pd.DataFrame) -> dict[str, float | None]:
     at_or_before = local[[x <= CLOSE_T for x in t]]
     strictly_before = local[[x < CLOSE_T for x in t]]
     at_close = local[[x == CLOSE_T for x in t]]
+    def first_open(frame):
+        if frame.empty or "open" not in frame:
+            return None
+        return float(frame["open"].iloc[0])
+
     return {
         # The bar STARTING at 15:59 -- the last one that closes at or before
         # 16:00 under a [start, start+1m) convention. This is the last
         # continuous print and EXCLUDES the closing cross.
         "last_bar_before_1600": (float(strictly_before["close"].iloc[-1])
                                  if not strictly_before.empty else None),
-        # The bar STARTING at 16:00, which under the same convention is where
-        # a 16:00:00.000 auction print lands.
+        # The OPEN of the bar starting at 16:00 -- the FIRST print at or after
+        # 16:00:00.000, which is the closing cross itself.
+        #
+        # This candidate was added after the first run, because that run showed
+        # the one below is not what I claimed it was. ACVA 2026-09-10 closed at
+        # 7.22 on the market; the 16:00 bar's CLOSE on this tape is 10.45,
+        # because 16:00:00-16:00:59 also contains the first EXTENDED-hours
+        # prints and a name running post-close is already away. The auction is
+        # the first trade in that minute, not the last.
+        "open_at_1600": first_open(at_close),
+        # The bar STARTING at 16:00, read at its close. Kept so the report
+        # still shows why it fails rather than quietly dropping a candidate
+        # that a later reader would think to try.
         "bar_at_1600": (float(at_close["close"].iloc[0])
                         if not at_close.empty else None),
         # Whichever of those is later -- the reading that takes the auction
         # when it exists and falls back when it does not.
         "last_bar_at_or_before_1600": (float(at_or_before["close"].iloc[-1])
                                        if not at_or_before.empty else None),
+        # The last continuous print, with the auction preferred when the tape
+        # carries one. This is what an official close IS: the cross if there
+        # was one, otherwise the last trade of the session.
+        "auction_else_last": (first_open(at_close) if first_open(at_close)
+                              is not None else
+                              (float(strictly_before["close"].iloc[-1])
+                               if not strictly_before.empty else None)),
     }
 
 
 def score(got: list[dict]) -> dict[str, dict]:
     """Per-candidate hit rate, counting ONLY discriminating rows."""
-    names = ["last_bar_before_1600", "bar_at_1600",
-             "last_bar_at_or_before_1600"]
+    names = ["last_bar_before_1600", "open_at_1600", "bar_at_1600",
+             "last_bar_at_or_before_1600", "auction_else_last"]
     out = {}
     for n in names:
         disc = [g for g in got if g["discriminating"]]
@@ -160,16 +183,20 @@ def render(got: list[dict], sc: dict, missing: list[str],
 
     L += ["PER ROW", "",
           f"  {'date':<12}{'symbol':<7}{'ours(1d)':>10}{'truth':>8}"
-          f"{'bef 16:00':>11}{'at 16:00':>10}{'at-or-bef':>11}   "]
+          f"{'bef 16:00':>11}{'open 16:00':>12}{'close 16:00':>13}"
+          f"{'auc|last':>11}   "]
     for g in sorted(got, key=lambda g: (g["date"], g["symbol"])):
         c = g["cand"]
-        def f(v):
-            return acct(v, 10) if v is not None else f"{'-':>10}"
+
+        def f(v, w):
+            return acct(v, w) if v is not None else f"{'-':>{w}}"
         mark = "" if g["discriminating"] else "   (not discriminating)"
         L.append(f"  {g['date']:<12}{g['symbol']:<7}{acct(g['daily'], 10)}"
-                 f"{acct(g['truth'], 8)}{f(c.get('last_bar_before_1600'))[-11:]}"
-                 f"{f(c.get('bar_at_1600'))}"
-                 f"{f(c.get('last_bar_at_or_before_1600'))[-11:]}{mark}")
+                 f"{acct(g['truth'], 8)}"
+                 f"{f(c.get('last_bar_before_1600'), 11)}"
+                 f"{f(c.get('open_at_1600'), 12)}"
+                 f"{f(c.get('bar_at_1600'), 13)}"
+                 f"{f(c.get('auction_else_last'), 11)}{mark}")
 
     L += ["", "SCORE, on discriminating rows only", ""]
     for n, s in sc.items():
@@ -186,7 +213,7 @@ def render(got: list[dict], sc: dict, missing: list[str],
         L += [f"  AMBIGUOUS -- {len(winners)} candidates are perfect: "
               f"{', '.join(winners)}", "",
               "  They did not differ on any row tested. Do NOT pick one."]
-        if set(winners) == {"bar_at_1600", "last_bar_at_or_before_1600"}:
+        if set(winners) <= {"bar_at_1600", "last_bar_at_or_before_1600"}:
             L += ["",
                   "  These two are IDENTICAL BY CONSTRUCTION whenever a 16:00",
                   "  bar exists -- the fallback only differs when the name did",
