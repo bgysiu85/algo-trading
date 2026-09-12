@@ -316,6 +316,14 @@ def score(got: list[dict]) -> dict[str, dict]:
     return out
 
 
+def _by_venue(got: list[dict]) -> dict[str, list[dict]]:
+    out: dict[str, list[dict]] = {}
+    for g in got:
+        if g["discriminating"]:
+            out.setdefault(g.get("exchange") or "?", []).append(g)
+    return out
+
+
 def render(got: list[dict], sc: dict, missing: list[str],
            dataset: str = "XNAS.BASIC",
            daily_dataset: str = "XNAS.BASIC",
@@ -548,6 +556,14 @@ def build_parser() -> argparse.ArgumentParser:
                         "close -- if it is, the repair is a daily-sized pull "
                         "and no reconstruction at all. Availability is not "
                         "validation: ohlcv-1d is also called a daily bar.")
+    p.add_argument("--accept", default=None, metavar="CONSTRUCTION",
+                   help="emit using THIS construction even though it did not "
+                        "clear the pre-registered bar of every discriminating "
+                        "row. Relaxing a bar registered before the run is a "
+                        "decision, so it has to be made explicitly, by name, "
+                        "and it is stamped into the output file with the score "
+                        "it actually achieved and the venue split. It is not a "
+                        "flag to reach for twice.")
     p.add_argument("--emit", action="store_true",
                    help="write var/state/regular_close.json for the sessions "
                         "present, using the winning construction")
@@ -648,11 +664,42 @@ def main(argv=None) -> int:
                 f"daily={a.daily_dataset} window={a.window}")
 
     if a.emit:
-        winners = [n for n, s in sc.items() if s["of"] and s["hit"] == s["of"]]
-        if len(winners) != 1:
-            print("  --emit refused: the verdict is not a single construction")
+        winners = [n for n, s in sc.items()
+                   if s["of"] and s.get("present", True)
+                   and s["hit"] == s["of"]]
+        relaxed = None
+        if a.accept:
+            if a.accept not in sc:
+                print(f"  --accept refused: {a.accept!r} is not a candidate. "
+                      f"Choose one of: {', '.join(sc)}")
+                return 1
+            if not sc[a.accept].get("present", True):
+                print(f"  --accept refused: {a.accept} never produced a value "
+                      "on any discriminating row. It is ABSENT, and accepting "
+                      "it would write a file of nothing.")
+                return 1
+            n = a.accept
+            if n not in winners:
+                relaxed = {
+                    "bar": "every discriminating row",
+                    "achieved": f"{sc[n]['hit']}/{sc[n]['of']}",
+                    "by_venue": {
+                        e: f"{sum(1 for g in rows_e if g['cand'].get(n) is not None and abs(g['cand'][n] - g['truth']) <= TOL)}/{len(rows_e)}"
+                        for e, rows_e in _by_venue(got).items()},
+                    "note": "Accepted below the pre-registered bar by explicit "
+                            "--accept. Residual error is real and must be "
+                            "stated wherever these closes are used.",
+                }
+                print(f"  --accept: {n} scored {sc[n]['hit']}/{sc[n]['of']}, "
+                      "BELOW the pre-registered bar. The relaxation is "
+                      "recorded in the output file.")
+        elif len(winners) != 1:
+            print("  --emit refused: the verdict is not a single construction."
+                  "\n  Pass --accept <construction> to relax the "
+                  "pre-registered bar deliberately.")
             return 1
-        n = winners[0]
+        else:
+            n = winners[0]
         out: dict[str, dict[str, float]] = {}
         for day, p in slices.items():
             bars = cache.get(day) or read_dbn(p)
@@ -664,10 +711,26 @@ def main(argv=None) -> int:
                     out.setdefault(day, {})[str(sym)] = v
         path = Path("var/state/regular_close.json")
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"construction": n, "closes": out},
-                                   indent=1))
+        doc = {"construction": n,
+               "dataset": a.dataset,
+               "window": a.window,
+               # These are the close OF each session. prior_closes() wants the
+               # PREVIOUS session's, so the shift stays with the consumer --
+               # doing it here would bury a one-row offset inside a data file.
+               "meaning": "regular-session close of THIS date; the consumer "
+                          "shifts it to become the prior close",
+               "sessions": len(out),
+               "symbol_days": sum(len(v) for v in out.values()),
+               "closes": out}
+        if relaxed:
+            doc["RELAXED_PRE_REGISTERED_BAR"] = relaxed
+        path.write_text(json.dumps(doc, indent=1))
         print(f"  wrote {path} using {n} "
-              f"({sum(len(v) for v in out.values()):,} symbol-days)")
+              f"({doc['symbol_days']:,} symbol-days over "
+              f"{doc['sessions']} session(s))")
+        if relaxed:
+            print(f"  the file records that the bar was relaxed: "
+                  f"{relaxed['achieved']} on discriminating rows")
     return 0
 
 

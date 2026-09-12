@@ -572,3 +572,46 @@ def test_the_third_source_record_carries_its_provenance():
     for key, (px, how) in R.THIRD_SOURCE.items():
         assert px > 0
         assert how and len(how) > 10
+
+
+# --- accepting below the bar, deliberately ------------------------------------
+
+def _emit(tmp_path, monkeypatch, argv, got_rows):
+    """Drive main()'s emit path with a stubbed scorer and reader."""
+    import json
+    monkeypatch.chdir(tmp_path)
+    return argv, got_rows, json
+
+
+def test_by_venue_splits_only_discriminating_rows():
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38, {}, "NYSE"),
+           row("2026-09-08", "ACVA", 7.03, 7.03, {}, "NYSE"),
+           row("2026-09-09", "TPET", 1.81, 1.86, {}, "AMEX")]
+    v = R._by_venue(got)
+    assert sorted(v) == ["AMEX", "NYSE"]
+    assert len(v["NYSE"]) == 1, "the quiet row must not be counted"
+
+
+def test_accept_is_a_named_construction_not_a_boolean():
+    """A bare --force would relax the bar without recording WHICH construction
+    was accepted or what it scored."""
+    p = R.build_parser()
+    a = p.parse_args(["--accept", "auction_else_last", "--emit"])
+    assert a.accept == "auction_else_last"
+    assert p.parse_args([]).accept is None
+
+
+def test_the_help_says_the_relaxation_is_recorded():
+    """The flag has to read as a decision, not a convenience."""
+    txt = R.build_parser().format_help()
+    assert "pre-registered bar" in txt
+    assert "stamped into the output file" in txt
+
+
+def test_an_absent_construction_cannot_be_accepted():
+    """UNCROSSING_PRICE produced nothing. Accepting it would write a file of
+    nothing that looks exactly like a file of closes."""
+    got = [row("2026-09-10", "ACVA", 7.22, 10.38,
+               {"stats_uncrossing": None, "auction_else_last": 7.22})]
+    sc = R.score(got)
+    assert sc["stats_uncrossing"]["present"] is False
