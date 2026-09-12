@@ -118,6 +118,8 @@ def examine(daily: pd.DataFrame, pc: pd.DataFrame, slices: dict[str, Path],
         lo, hi = max(0, i - AROUND), min(len(dates), i + AROUND + 1)
 
     rec["rows"] = [{"date": r.date, "close": float(r.close),
+                    "high": float(getattr(r, "high", float("nan"))),
+                    "low": float(getattr(r, "low", float("nan"))),
                     "volume": float(getattr(r, "volume", float("nan"))),
                     "target": r.date == date}
                    for r in sym.iloc[lo:hi].itertuples()]
@@ -168,7 +170,8 @@ def render(recs: list[dict], cfg: ScreenConfig) -> list[str]:
         used = r["used"]
         L.append(f"  prior_close in use: "
                  f"{'none -- dropped before any clause' if used is None else acct(used, 1).strip()}")
-        L += ["", f"    {'daily date':<14}{'close':>10}{'off high':>11}   ",
+        L += ["", f"    {'daily date':<14}{'high':>9}{'low':>9}{'close':>10}"
+                   f"{'off high':>11}   ",
               ]
         for row in r["rows"]:
             ch = row.get("change_from")
@@ -180,8 +183,12 @@ def render(recs: list[dict], cfg: ScreenConfig) -> list[str]:
             if ch is not None and ch >= LIVE_CLAIM:
                 mark.append(f"consistent with +{LIVE_CLAIM:.0f}%")
             chs = acct(ch, 10) + "%" if ch is not None else f"{'-':>11}"
-            L.append(f"    {row['date']:<14}{acct(row['close'], 10)}{chs}   "
-                     + "  ".join(mark))
+            hi = (acct(row["high"], 9) if row.get("high") == row.get("high")
+                  else f"{'-':>9}")
+            lo_ = (acct(row["low"], 9) if row.get("low") == row.get("low")
+                   else f"{'-':>9}")
+            L.append(f"    {row['date']:<14}{hi}{lo_}{acct(row['close'], 10)}"
+                     f"{chs}   " + "  ".join(mark))
 
         if not r["satisfies"]:
             L += ["", "    NO nearby daily close makes the live claim true. An",
@@ -194,7 +201,28 @@ def render(recs: list[dict], cfg: ScreenConfig) -> list[str]:
         else:
             L += ["", "    Consistent baseline(s): " + ", ".join(r["satisfies"])]
 
-    L += ["", "", "HOW TO READ THIS", "",
+    L += ["", "", "THE DAILY RANGE IS PRINTED FOR ONE REASON", "",
+          "  `tape_conflict` found ZERO contradictions between the minute",
+          "  slices and the daily bars over 3,406,462 symbol-days. Our two",
+          "  files agree with each other and disagree with the market, which",
+          "  rules out a corrupt file and leaves one source being wrong the",
+          "  same way everywhere.",
+          "",
+          "  The candidate: Databento's ohlcv-1d aggregates the WHOLE feed,",
+          "  so its close is the last print of the extended day (20:00 ET),",
+          "  while TradingView's premarket_change divides by the official",
+          "  16:00 REGULAR close. A name that runs after hours then carries",
+          "  an inflated prior_close here, which DEFLATES its computed",
+          "  premarket change -- one-directionally, which is exactly the 16",
+          "  missed against 2 sim-only that `screen_validate` found.",
+          "",
+          "  THE ROW THAT DECIDES IT is ACVA 2026-09-10. The market traded",
+          "  o 7.36 h 7.39 l 7.00 c 7.22 that session. If the bar below",
+          "  shows a HIGH near 10.46 -- a level the regular session never",
+          "  reached -- our daily bar covers hours TradingView's does not,",
+          "  and the defect is named. If it shows h 7.39, the bar is simply",
+          "  wrong and this is a different problem.", "",
+          "HOW TO READ THIS", "",
           "  If the consistent baseline is the SAME row for every name and it",
           "  is not the row in use, the offset is named and the fix is a",
           "  correctness fix -- no pre-registration, because it is not a",
