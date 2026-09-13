@@ -615,3 +615,45 @@ def test_an_absent_construction_cannot_be_accepted():
                {"stats_uncrossing": None, "auction_else_last": 7.22})]
     sc = R.score(got)
     assert sc["stats_uncrossing"]["present"] is False
+
+
+# --- the emit loop's cached-day path ------------------------------------------
+
+def test_a_dataframe_has_no_truth_value_so_the_or_idiom_is_a_bug():
+    """The bug this pins, stated as the language fact it rests on.
+
+    `--emit` read its bars as `cache.get(day) or read_dbn(p)`. For an uncached
+    day `.get` returns None and the fallback runs; for a CACHED day it returns
+    a DataFrame, and `df or x` calls __bool__, which pandas refuses. The cached
+    days are the TRUTH days -- 2026-09-08..11 -- which sit at the END of a
+    chronological walk, so a real run ground through ~548 sessions in silence
+    and then died having written nothing.
+    """
+    import pandas as pd
+    with pytest.raises(ValueError, match="truth value"):
+        _ = pd.DataFrame({"a": [1]}) or "fallback"
+
+
+def test_the_emit_loop_reads_a_cached_day_without_raising():
+    """The fix, exercised the way the loop exercises it. A plain membership
+    test has no truth-value problem and returns the cached frame."""
+    import pandas as pd
+    frame = pd.DataFrame({"symbol": ["ACVA"], "close": [7.22]})
+    cache = {"2026-09-10": frame}
+
+    def pick(day, cached, fallback):
+        return cached[day] if day in cached else fallback
+
+    assert pick("2026-09-10", cache, "READ") is frame
+    assert pick("2024-07-01", cache, "READ") == "READ"
+
+
+def test_an_EMPTY_cached_frame_is_still_used_not_silently_re_read():
+    """The `or` idiom would also have fallen through on an empty frame --
+    re-reading a file already known to hold nothing, and quietly disagreeing
+    with the scoring pass about what that day contained."""
+    import pandas as pd
+    empty = pd.DataFrame(columns=["symbol", "close"])
+    cache = {"2026-09-10": empty}
+    got = cache["2026-09-10"] if "2026-09-10" in cache else "RE-READ"
+    assert got is empty

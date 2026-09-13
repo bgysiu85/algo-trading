@@ -55,6 +55,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from datetime import time as dtime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -701,14 +702,29 @@ def main(argv=None) -> int:
         else:
             n = winners[0]
         out: dict[str, dict[str, float]] = {}
-        for day, p in slices.items():
-            bars = cache.get(day) or read_dbn(p)
+        t_emit = time.time()
+        print(f"  emitting {n} for {len(slices):,} session(s) -- the slow "
+              "part, and it prints as it goes", flush=True)
+        for k_day, (day, p) in enumerate(sorted(slices.items()), 1):
+            # `cache[day] if day in cache else ...`, NOT `cache.get(day) or`.
+            # A DataFrame has no truth value, so `df or fallback` raises
+            # ValueError -- and ONLY for the handful of days the scoring loop
+            # already cached, which are the TRUTH days and therefore sit at the
+            # END of a chronological walk. The run ground through ~548 sessions
+            # in silence and then died on 2026-09-08 having written nothing.
+            bars = cache[day] if day in cache else read_dbn(p)
             if bars.empty:
                 continue
             for sym, g in bars.groupby("symbol"):
                 v = candidates(g.sort_index(kind="mergesort")).get(n)
                 if v is not None:
                     out.setdefault(day, {})[str(sym)] = v
+            if k_day % 25 == 0 or k_day == len(slices):
+                el = time.time() - t_emit
+                eta = (len(slices) - k_day) / (k_day / el) / 60.0 if el else 0.0
+                print(f"    [{k_day:>4}/{len(slices)}] {day}  "
+                      f"{sum(len(v) for v in out.values()):>8,} closes  "
+                      f"{el / 60:>5.1f} min  ~{eta:>5.1f} min left", flush=True)
         path = Path("var/state/regular_close.json")
         path.parent.mkdir(parents=True, exist_ok=True)
         doc = {"construction": n,
