@@ -634,6 +634,51 @@ def test_a_dataframe_has_no_truth_value_so_the_or_idiom_is_a_bug():
         _ = pd.DataFrame({"a": [1]}) or "fallback"
 
 
+def test_emit_day_is_pure_so_the_pool_needs_no_discipline():
+    """Parallelising is only safe because a session carries nothing: no
+    warm-up, no state from the day before, no randomness. Two calls on the
+    same slice must agree exactly, or --jobs would change the answer."""
+    import pandas as pd
+    frame = pd.DataFrame(
+        {"symbol": ["ACVA", "ACVA"], "open": [7.20, 7.22],
+         "high": [7.25, 7.30], "low": [7.18, 7.20], "close": [7.22, 7.28],
+         "volume": [1000.0, 2000.0]},
+        index=pd.DatetimeIndex(
+            ["2026-09-10T19:59:00Z", "2026-09-10T20:00:00Z"]))
+
+    calls = []
+
+    def fake_read(path):
+        calls.append(path)
+        return frame
+
+    import common.dbn_io as dbn
+    orig = dbn.read_dbn
+    dbn.read_dbn = fake_read
+    try:
+        a = R.emit_day(("2026-09-10_1555_1605.dbn.zst", "open_at_1600"))
+        b = R.emit_day(("2026-09-10_1555_1605.dbn.zst", "open_at_1600"))
+    finally:
+        dbn.read_dbn = orig
+    assert a == b
+    assert a[0] == "2026-09-10"
+    assert len(calls) == 2, "each call must read its own slice, not share one"
+
+
+def test_emit_day_names_the_session_from_the_FILENAME():
+    """The day is the file's, not the frame's. A slice whose bars land either
+    side of midnight UTC would otherwise be filed under two dates."""
+    import pandas as pd
+    import common.dbn_io as dbn
+    orig = dbn.read_dbn
+    dbn.read_dbn = lambda p: pd.DataFrame()
+    try:
+        day, got = R.emit_day(("/x/y/2024-07-01_1555_1605.dbn.zst", "x"))
+    finally:
+        dbn.read_dbn = orig
+    assert day == "2024-07-01" and got == {}
+
+
 def test_the_emit_loop_reads_a_cached_day_without_raising():
     """The fix, exercised the way the loop exercises it. A plain membership
     test has no truth-value problem and returns the cached frame."""

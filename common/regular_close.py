@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import time as dtime
@@ -528,6 +529,33 @@ def render(got: list[dict], sc: dict, missing: list[str],
     return L
 
 
+
+def emit_day(args: tuple) -> tuple[str, dict[str, float]]:
+    """One session's closes under one construction. Module-level and picklable
+    so a process pool can run it, and the SINGLE implementation -- the
+    sequential path calls it too, so the two cannot drift.
+
+    It re-reads its own slice rather than taking a cached frame. The four TRUTH
+    days are already in memory upstairs, but passing DataFrames to workers is
+    expensive and the cache is what produced the `df or fallback` crash in the
+    first place. Four extra file reads out of 552 is not a cost worth keeping a
+    failure mode for.
+    """
+    from common.dbn_io import read_dbn
+
+    path, construction = args
+    day = Path(path).name[:10]
+    bars = read_dbn(Path(path))
+    if bars.empty:
+        return day, {}
+    got: dict[str, float] = {}
+    for sym, g in bars.groupby("symbol"):
+        v = candidates(g.sort_index(kind="mergesort")).get(construction)
+        if v is not None:
+            got[str(sym)] = float(v)
+    return day, got
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--archive", default=None)
@@ -565,6 +593,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "and it is stamped into the output file with the score "
                         "it actually achieved and the venue split. It is not a "
                         "flag to reach for twice.")
+    p.add_argument("--jobs", type=int, default=0,
+                   help="worker processes for --emit. Each session is wholly "
+                        "independent -- no warm-up, no carried state, no "
+                        "randomness -- so the answer cannot depend on how "
+                        "many are used. 0 means one per core.")
     p.add_argument("--emit", action="store_true",
                    help="write var/state/regular_close.json for the sessions "
                         "present, using the winning construction")
@@ -703,28 +736,39 @@ def main(argv=None) -> int:
             n = winners[0]
         out: dict[str, dict[str, float]] = {}
         t_emit = time.time()
-        print(f"  emitting {n} for {len(slices):,} session(s) -- the slow "
-              "part, and it prints as it goes", flush=True)
-        for k_day, (day, p) in enumerate(sorted(slices.items()), 1):
-            # `cache[day] if day in cache else ...`, NOT `cache.get(day) or`.
-            # A DataFrame has no truth value, so `df or fallback` raises
-            # ValueError -- and ONLY for the handful of days the scoring loop
-            # already cached, which are the TRUTH days and therefore sit at the
-            # END of a chronological walk. The run ground through ~548 sessions
-            # in silence and then died on 2026-09-08 having written nothing.
-            bars = cache[day] if day in cache else read_dbn(p)
-            if bars.empty:
-                continue
-            for sym, g in bars.groupby("symbol"):
-                v = candidates(g.sort_index(kind="mergesort")).get(n)
-                if v is not None:
-                    out.setdefault(day, {})[str(sym)] = v
-            if k_day % 25 == 0 or k_day == len(slices):
-                el = time.time() - t_emit
-                eta = (len(slices) - k_day) / (k_day / el) / 60.0 if el else 0.0
-                print(f"    [{k_day:>4}/{len(slices)}] {day}  "
+        tasks = [(str(p), n) for _day, p in sorted(slices.items())]
+        jobs = (os.cpu_count() or 1) if a.jobs == 0 else max(1, a.jobs)
+        print(f"  emitting {n} for {len(tasks):,} session(s) on {jobs} "
+              "worker(s) -- the slow part, and it prints as it goes",
+              flush=True)
+
+        def took(k: int, day: str) -> None:
+            el = time.time() - t_emit
+            eta = (len(tasks) - k) / (k / el) / 60.0 if el and k else 0.0
+            if k % 25 == 0 or k == len(tasks):
+                print(f"    [{k:>4}/{len(tasks)}] {day}  "
                       f"{sum(len(v) for v in out.values()):>8,} closes  "
                       f"{el / 60:>5.1f} min  ~{eta:>5.1f} min left", flush=True)
+
+        if jobs == 1:
+            for k, t in enumerate(tasks, 1):
+                day, got = emit_day(t)
+                if got:
+                    out[day] = got
+                took(k, day)
+        else:
+            # Days are wholly independent here -- no warm-up, no carried state,
+            # and no randomness -- so the pool needs no seeding discipline and
+            # the merged result cannot depend on completion order: it is a dict
+            # keyed by day.
+            from concurrent.futures import ProcessPoolExecutor
+            with ProcessPoolExecutor(max_workers=jobs) as ex:
+                for k, (day, got) in enumerate(ex.map(emit_day, tasks,
+                                                      chunksize=4), 1):
+                    if got:
+                        out[day] = got
+                    took(k, day)
+
         path = Path("var/state/regular_close.json")
         path.parent.mkdir(parents=True, exist_ok=True)
         doc = {"construction": n,
