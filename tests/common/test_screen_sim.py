@@ -533,11 +533,12 @@ class _Rep:
         self.attrs = {"construction": construction, "relaxed": relaxed}
 
 
-def _render(mode=None, mix=None, rep=None):
+def _render(mode=None, mix=None, rep=None, pair_mix=None):
     from common.screen_at import ScreenConfig
     rows = [{"date": "2026-09-10", "universe": [], "agree": (0, 0, None)}]
     return "\n".join(SS.render(rows, 1, ScreenConfig(), 60, (0, 0, None),
-                               1.0, [], mode=mode, mix=mix, rep=rep))
+                               1.0, [], mode=mode, mix=mix, rep=rep,
+                               pair_mix=pair_mix))
 
 
 def test_the_REPORT_names_the_prior_close_mode_not_only_stdout():
@@ -578,3 +579,21 @@ def test_a_render_without_provenance_still_works():
     text = _render()
     assert "THE PRIOR CLOSE THIS RAN AGAINST" not in text
     assert "THE UNIVERSE" in text
+
+
+def test_the_universe_report_breaks_down_the_NAMES_THAT_QUALIFIED():
+    """The 92.4% figure is over every prior close in the archive. What matters
+    is the mix among the handful of names that actually reached the universe,
+    which can be a completely different proportion."""
+    text = _render(mode="repaired", mix={"repaired": 5_812_430,
+                                         "daily": 474_729},
+                   pair_mix={"repaired": 20, "daily": 2})
+    assert "NAMES THAT ACTUALLY REACHED THE UNIVERSE" in text
+    assert "repaired=20" in text and "daily=2" in text
+    assert "2 of 22 (9.1%)" in text
+    assert "prior_source" in text
+
+
+def test_the_universe_breakdown_is_omitted_when_there_is_none():
+    text = _render(mode="repaired", mix={"repaired": 10})
+    assert "NAMES THAT ACTUALLY REACHED" not in text

@@ -476,7 +476,7 @@ def date_of(path: Path) -> str:
 
 
 def render(rows, sessions, cfg, cadence_s, agree, elapsed, no_prior,
-           mode=None, mix=None, rep=None) -> list[str]:
+           mode=None, mix=None, rep=None, pair_mix=None) -> list[str]:
     per = [len(r["universe"]) for r in rows]
     per_sorted = sorted(per)
     total = sum(per)
@@ -514,6 +514,17 @@ def render(rows, sessions, cfg, cadence_s, agree, elapsed, no_prior,
             L += ["  *** THIS RUN USED THE DEFECTIVE EXTENDED-HOURS CLOSE ***",
                   "      Every premarket_change here divides by the 20:00 "
                   "print, not the 16:00 one."]
+        if pair_mix:
+            tot = sum(pair_mix.values())
+            L += ["",
+                  "  OF THE NAMES THAT ACTUALLY REACHED THE UNIVERSE:",
+                  "  " + "  ".join(f"{k}={v:,}" for k, v in sorted(pair_mix.items()))]
+            bad = tot - pair_mix.get("repaired", 0)
+            L.append(f"  {bad:,} of {tot:,} ({bad / tot * 100:.1f}%) were "
+                     "selected against a close that is not the repaired one."
+                     if tot else "  none")
+            L += ["  Each row in the universe file carries `prior_source`, so",
+                  "  this can be filtered downstream without re-running."]
         L.append("")
 
     L += ["THE UNIVERSE", "",
@@ -647,6 +658,12 @@ def main(argv=None) -> int:
                  "close on purpose.")
     pc = prior_closes(daily, rep, require_repaired=a.prior_close == "require")
     mix = source_mix(pc)
+    # (date, symbol) -> where that name's prior close came from, so the
+    # universe file can carry it per row. 7.6% of prior closes are still the
+    # defective 20:00 figure, and WHICH names those are is decidable later
+    # only if it is recorded now.
+    src_by_date = {d: g.set_index("symbol")["prior_source"]
+                   for d, g in pc.groupby("date")}
     print(f"  prior close: mode={a.prior_close}  " +
           "  ".join(f"{k}={v:,}" for k, v in sorted(mix.items())), flush=True)
     if rep is not None and rep.attrs.get("construction"):
@@ -694,8 +711,20 @@ def main(argv=None) -> int:
 
     pairs = [{"symbol": u["symbol"], "date": r["date"],
               "first_seen": u["first_seen"], "first_rank": u["first_rank"],
-              "best_rank": u["best_rank"], "ticks_on": u["ticks_on"]}
+              "best_rank": u["best_rank"], "ticks_on": u["ticks_on"],
+              # Per NAME, not per run. A universe built on a 92.4% repaired
+              # mix is only usable later if each row says which baseline its
+              # premarket_change was computed against -- otherwise choosing
+              # between `repaired` and `require` means re-running everything.
+              "prior_source": str(src_by_date.get(r["date"], {}).get(
+                  u["symbol"], "unknown"))}
              for r in rows for u in r["universe"]]
+    pair_mix: dict[str, int] = {}
+    for q in pairs:
+        pair_mix[q["prior_source"]] = pair_mix.get(q["prior_source"], 0) + 1
+    print("  universe by prior-close source: "
+          + "  ".join(f"{k}={v:,}" for k, v in sorted(pair_mix.items())),
+          flush=True)
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(pairs, indent=1))
@@ -703,7 +732,8 @@ def main(argv=None) -> int:
 
     emit("\n".join(render(rows, len(rows), cfg, a.cadence, agree,
                           time.time() - t0, no_prior,
-                          mode=a.prior_close, mix=mix, rep=rep)),
+                          mode=a.prior_close, mix=mix, rep=rep,
+                          pair_mix=pair_mix)),
          a.report,
          header=f"common.screen_sim  archive={archive}/{a.dataset}  "
                 f"cadence={a.cadence}s  capture={cfg.capture:.3f}  "
