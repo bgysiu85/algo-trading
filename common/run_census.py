@@ -360,9 +360,14 @@ def main(argv=None) -> int:
                      f"{archive}/{a.dataset}/ohlcv-1m.")
         if a.limit:
             slices = slices[-a.limit:]
-        for path in slices:
+        for k_slice, path in enumerate(slices, 1):
             day = date_of(path)
             frame = read_dbn(path)
+            el = time.time() - t0
+            eta = (len(slices) - k_slice) / (k_slice / el) / 60.0 if el else 0.0
+            print(f"  [{k_slice:>4}/{len(slices)}] {day}  {bars:>12,} bars  "
+                  f"{el / 60:>5.1f} min elapsed  ~{eta:>5.1f} min left",
+                  flush=True)
             if frame.empty:
                 continue
             days.add(day)

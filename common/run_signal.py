@@ -59,8 +59,8 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
-from common.entry_features import (FAMILIES, FEATURES, features_at, monotone,
-                                   why_not_bucketable)
+from common.entry_features import (FAMILIES, FEATURES, features_at,
+                                   frame_ctx, monotone, why_not_bucketable)
 from common.report_io import emit
 from common.run_census import (MAX_PRICE, MIN_BARS, MIN_PRICE, runs_in)
 
@@ -115,10 +115,10 @@ def label_and_sample(sig: pd.DataFrame, cell: tuple[float, int], adverse: float,
 
 
 def collect(sig: pd.DataFrame, idx: list[int], is_case: bool, symbol: str,
-            date_str: str, weight: float) -> list[dict]:
+            date_str: str, weight: float, ctx: dict | None = None) -> list[dict]:
     out = []
     for i in idx:
-        f = features_at(sig, i)
+        f = features_at(sig, i, ctx)
         f.update(case=1 if is_case else 0, weight=weight,
                  symbol=symbol, date=date_str)
         out.append(f)
@@ -436,8 +436,9 @@ def main(argv=None) -> int:
         n_ctrl = len(controls)
         pool = elig - len(starts)
         w = (pool / n_ctrl) if n_ctrl else 1.0
-        rows.extend(collect(sig, starts, True, symbol, date_str, 1.0))
-        rows.extend(collect(sig, controls, False, symbol, date_str, w))
+        ctx = frame_ctx(sig)
+        rows.extend(collect(sig, starts, True, symbol, date_str, 1.0, ctx))
+        rows.extend(collect(sig, controls, False, symbol, date_str, w, ctx))
         days.add(date_str)
 
     def usable(df: pd.DataFrame) -> str:
@@ -459,7 +460,10 @@ def main(argv=None) -> int:
         if a.limit:
             pairs = pairs[:a.limit]
         cache = window_dir(Path(a.cache), SHARED_DURATION, SHARED_END_HHMM)
-        for p in pairs:
+        for k_pair, p in enumerate(pairs, 1):
+            if k_pair % 50 == 0 or k_pair == len(pairs):
+                print(f"  [{k_pair:>5}/{len(pairs)}] {len(rows):>9,} rows  "
+                      f"{(time.time() - t0) / 60:.1f} min", flush=True)
             df = load_cached_bars(cache, p["symbol"], p["date"])
             sym_days += 1
             if df is None or df.empty:
@@ -500,9 +504,17 @@ def main(argv=None) -> int:
         if a.limit:
             slices = slices[-a.limit:]
         prev: dict[str, pd.DataFrame] = {}
-        for path in slices:
+        # A job this long that prints nothing is indistinguishable from a hung
+        # one -- which is exactly how it was reported. One line per slice.
+        for k_slice, path in enumerate(slices, 1):
             day = date_of(path)
             frame = read_dbn(path)
+            el = time.time() - t0
+            rate = k_slice / el if el else 0.0
+            eta = (len(slices) - k_slice) / rate / 60.0 if rate else 0.0
+            print(f"  [{k_slice:>4}/{len(slices)}] {day}  "
+                  f"{len(rows):>9,} rows  {el / 60:>5.1f} min elapsed  "
+                  f"~{eta:>5.1f} min left", flush=True)
             cur: dict[str, pd.DataFrame] = {}
             for sym, df in frame.groupby("symbol"):
                 cur[str(sym)] = df.sort_index()

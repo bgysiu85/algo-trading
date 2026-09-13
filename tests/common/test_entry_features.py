@@ -471,3 +471,71 @@ def test_the_feature_list_is_a_module_constant():
     src = inspect.getsource(F)
     assert "FEATURES = {" in src
     assert src.index("FEATURES = {") < src.index("def features_at")
+
+
+# --- the fast path must be the same path --------------------------------------
+
+def test_ctx_matches_the_slow_path_exactly():
+    """THE test that makes the optimisation safe.
+
+    features_at was O(i) in the bar index -- it resliced and re-converted the
+    whole history for every bar -- which was fine for 482 entries and 2.5
+    hours for the archive. frame_ctx precomputes the prefix aggregates once.
+    An optimisation of a measurement is only worth having if it is the SAME
+    measurement, so this walks a real frame bar by bar and demands every
+    feature agree, NaN for NaN.
+    """
+    sig = real_sig(n=300)
+    ctx = F.frame_ctx(sig)
+    for i in range(0, len(sig), 7):
+        slow = F.features_at(sig, i)
+        fast = F.features_at(sig, i, ctx)
+        assert set(slow) == set(fast)
+        for k in slow:
+            a, b = slow[k], fast[k]
+            if a != a and b != b:
+                continue
+            assert a == pytest.approx(b, rel=1e-9, abs=1e-9), \
+                f"bar {i}: {k} slow={a!r} fast={b!r}"
+
+
+def test_ctx_matches_the_slow_path_across_a_DAY_BOUNDARY():
+    """The session-to-date aggregates are the part most likely to drift: the
+    fast path finds the day's first bar by a cumulative-max over date changes
+    rather than by comparing dates in Python."""
+    one = real_sig(n=200)
+    prior = one.copy()
+    prior.index = prior.index - timedelta(days=1)
+    both = pd.concat([prior, one])
+    ctx = F.frame_ctx(both)
+    for i in (199, 200, 201, 205, 250, len(both) - 1):
+        slow, fast = F.features_at(both, i), F.features_at(both, i, ctx)
+        for k in slow:
+            a, b = slow[k], fast[k]
+            if a != a and b != b:
+                continue
+            assert a == pytest.approx(b, rel=1e-9, abs=1e-9), \
+                f"bar {i} ({'first of day' if i == 200 else 'mid'}): {k}"
+
+
+def test_the_fast_path_still_cannot_see_the_future():
+    """The no-look-ahead guarantee has to survive the rewrite, and a context
+    built over the WHOLE frame is exactly how it could be lost."""
+    sig = real_sig()
+    i = 150
+    ctx = F.frame_ctx(sig)
+    before = F.features_at(sig, i, ctx)
+
+    tampered = sig.copy()
+    rng = np.random.default_rng(99)
+    for col in ("close", "high", "low", "volume", "macd", "macd_sig",
+                "rsi", "mfi", "prev_vol", "trail_avg"):
+        vals = tampered[col].to_numpy(dtype=float, copy=True)
+        vals[i + 1:] = rng.normal(1000, 500, len(vals) - i - 1)
+        tampered[col] = vals
+    after = F.features_at(tampered, i, F.frame_ctx(tampered))
+
+    for k in before:
+        assert before[k] == after[k] or (before[k] != before[k]
+                                         and after[k] != after[k]), \
+            f"feature {k} changed when the FUTURE changed -- it looks ahead"

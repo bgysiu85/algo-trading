@@ -66,6 +66,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 
 from common.report_fmt import acct
@@ -142,12 +143,114 @@ FAMILIES = {
 }
 
 
-def features_at(sig: pd.DataFrame, i: int) -> dict:
+def frame_ctx(sig: pd.DataFrame) -> dict:
+    """Everything that can be computed ONCE per frame instead of once per bar.
+
+    `features_at` was written per-bar and was O(i) in the bar index: it sliced
+    `sig.iloc[:i+1]`, converted that whole slice's index to ET, and ran a Python
+    comprehension over its dates -- for every bar. Fine for 482 entries, and
+    2.5 hours for the archive, which is how it was found.
+
+    Every quantity here is a PREFIX aggregate, so a bar still sees only itself
+    and the bars before it. The session-to-date sums become differences of
+    cumulative sums and the rolling means become one pandas pass. Nothing is
+    approximated: `test_ctx_matches_the_slow_path_exactly` asserts the two
+    paths agree bar for bar on a real frame.
+    """
+    local = sig.index.tz_convert(ET)
+    dates = np.array([d.toordinal() for d in local.date])
+    # First index of each bar's own ET day.
+    newday = np.r_[True, dates[1:] != dates[:-1]]
+    day_start = np.maximum.accumulate(np.where(newday, np.arange(len(dates)), 0))
+
+    vol = sig["volume"].to_numpy(dtype=float)
+    close = sig["close"].to_numpy(dtype=float)
+    have_hl = {"high", "low"} <= set(sig.columns)
+    high = sig["high"].to_numpy(dtype=float) if have_hl else close
+    low = sig["low"].to_numpy(dtype=float) if have_hl else close
+    typ = (high + low + close) / 3.0
+
+    def pre(a):
+        return np.r_[0.0, np.cumsum(a)]
+
+    ctx = {
+        "local": local,
+        "day_start": day_start,
+        "have_hl": have_hl,
+        "close": close, "high": high, "low": low, "vol": vol,
+        "open": (sig["open"].to_numpy(dtype=float) if "open" in sig.columns
+                 else np.full(len(sig), np.nan)),
+        "macd": sig["macd"].to_numpy(dtype=float),
+        "macd_sig": sig["macd_sig"].to_numpy(dtype=float),
+        "rsi": sig["rsi"].to_numpy(dtype=float),
+        "mfi": sig["mfi"].to_numpy(dtype=float),
+        "trail_avg": sig["trail_avg"].to_numpy(dtype=float),
+        "prev_vol": sig["prev_vol"].to_numpy(dtype=float),
+        "c_vol": pre(vol),
+        "c_tv": pre(typ * vol),
+        "c_traded": pre((vol > 0).astype(float)),
+        # Minutes from the frame's first bar, via a Timedelta division
+        # rather than raw integers: `.asi8` is whatever resolution the
+        # index happens to carry, and on a datetime64[us] index the
+        # nanosecond assumption was off by a thousand -- tape_density
+        # came back as 16,680%.
+        "epoch_min": ((sig.index - sig.index[0]) / pd.Timedelta(minutes=1)
+                      ).to_numpy(dtype=float),
+    }
+    s = pd.Series(close)
+    ctx["ma20"] = s.rolling(20).mean().to_numpy()
+    if have_hl:
+        rng = pd.Series((high - low) / close)
+        ctx["rng14"] = rng.rolling(14, min_periods=1).mean().to_numpy() * 100.0
+        ctx["mrange14"] = pd.Series(high - low).rolling(
+            14, min_periods=1).mean().to_numpy()
+    else:
+        ctx["rng14"] = np.full(len(sig), np.nan)
+        ctx["mrange14"] = np.full(len(sig), np.nan)
+    return ctx
+
+
+def _features_fast(sig: pd.DataFrame, i: int, c: dict) -> dict:
+    """features_at via the precomputed context. Same numbers, O(1)."""
+    d0 = int(c["day_start"][i])
+    cum_vol = c["c_vol"][i + 1] - c["c_vol"][d0]
+    tv = c["c_tv"][i + 1] - c["c_tv"][d0]
+    traded = c["c_traded"][i + 1] - c["c_traded"][d0]
+    vwap = (tv / cum_vol) if cum_vol else float("nan")
+    span_min = c["epoch_min"][i] - c["epoch_min"][d0] + 1.0
+    printed = (traded / span_min * 100.0) if span_min > 0 else float("nan")
+    if not c["have_hl"]:
+        vwap = printed = float("nan")
+    first_close = c["close"][d0]
+    rng = c["rng14"][i]
+    mean_range = c["mrange14"][i]
+    ma20 = c["ma20"][i] if i >= 19 else float("nan")
+    ma20_prev = c["ma20"][i - 3] if i >= 22 else float("nan")
+    cl, o = c["close"][i], c["open"][i]
+    hi_, lo_ = c["high"][i], c["low"][i]
+    span = hi_ - lo_
+    ta, pv = c["trail_avg"][i], c["prev_vol"][i]
+    lt = c["local"][i]
+    return _assemble(cl, o, hi_, lo_, span, ta, pv, c["vol"][i],
+                     c["macd"][i], c["macd_sig"][i], c["rsi"][i], c["mfi"][i],
+                     (c["rsi"][i] - c["rsi"][i - 3]) if i >= 3 else float("nan"),
+                     (c["mfi"][i] - c["mfi"][i - 3]) if i >= 3 else float("nan"),
+                     lt.hour * 60 + lt.minute - 240, first_close, rng,
+                     cum_vol, printed, mean_range, vwap, ma20, ma20_prev)
+
+
+def features_at(sig: pd.DataFrame, i: int, ctx: dict | None = None) -> dict:
     """Every feature at bar `i`, from that bar and the ones BEFORE it.
 
     Nothing here may read sig.iloc[i+1:]. A test shuffles the future and
     asserts the output is identical.
+
+    Pass `ctx` from `frame_ctx(sig)` when looping over many bars of one frame:
+    same numbers, without the per-bar reslice. Omit it and this takes the
+    original path, which the equivalence test uses as the reference.
     """
+    if ctx is not None:
+        return _features_fast(sig, i, ctx)
     r = sig.iloc[i]
     past = sig.iloc[:i + 1]
     local = past.index.tz_convert(ET)
@@ -193,40 +296,58 @@ def features_at(sig: pd.DataFrame, i: int) -> dict:
     mean_range = float((tail["high"] - tail["low"]).mean()) \
         if {"high", "low"} <= set(past.columns) else float("nan")
 
+    return _assemble(
+        float(r["close"]), o, hi_, lo_, span, ta, pv, float(r["volume"]),
+        float(r["macd"]), float(r["macd_sig"]), float(r["rsi"]), float(r["mfi"]),
+        (float(r["rsi"]) - float(sig["rsi"].iloc[i - 3])) if i >= 3
+        else float("nan"),
+        (float(r["mfi"]) - float(sig["mfi"].iloc[i - 3])) if i >= 3
+        else float("nan"),
+        local[-1].hour * 60 + local[-1].minute - 240,
+        first_close, float(rng), cum_vol, printed, mean_range, vwap,
+        ma20, ma20_prev)
+
+
+def _assemble(cl, o, hi_, lo_, span, ta, pv, vol, macd, macd_sig, rsi, mfi,
+              rsi_slope, mfi_slope, mins, first_close, rng, cum_vol, printed,
+              mean_range, vwap, ma20, ma20_prev) -> dict:
+    """The feature dictionary itself, shared by both paths.
+
+    Factored out so the fast path cannot drift from the slow one in the
+    ARITHMETIC. What the equivalence test then has to check is only that the
+    two paths derive the same INPUTS, which is the part that could differ.
+    """
     return {
-        "vol_over_trail": float(r["volume"]) / ta if ta else float("nan"),
-        "vol_multiple": float(r["volume"]) / pv if pv else float("nan"),
+        "vol_over_trail": vol / ta if ta else float("nan"),
+        "vol_multiple": vol / pv if pv else float("nan"),
         "floor_margin": pv / ta if ta else float("nan"),
-        "macd_margin": float(r["macd"]) - float(r["macd_sig"]),
-        "macd_level": float(r["macd"]),
-        "rsi": float(r["rsi"]),
-        "rsi_slope": float(r["rsi"]) - float(sig["rsi"].iloc[i - 3]) if i >= 3
-        else float("nan"),
-        "mfi": float(r["mfi"]),
-        "mfi_slope": float(r["mfi"]) - float(sig["mfi"].iloc[i - 3]) if i >= 3
-        else float("nan"),
-        "mins_since_open": local[-1].hour * 60 + local[-1].minute - 240,
-        "price": float(r["close"]),
-        "extension": (float(r["close"]) / first_close - 1.0) * 100.0
+        "macd_margin": macd - macd_sig,
+        "macd_level": macd,
+        "rsi": rsi,
+        "rsi_slope": rsi_slope,
+        "mfi": mfi,
+        "mfi_slope": mfi_slope,
+        "mins_since_open": mins,
+        "price": cl,
+        "extension": (cl / first_close - 1.0) * 100.0
         if first_close == first_close and first_close else float("nan"),
         "range_pct": float(rng),
-        "dollar_vol_session": float(r["close"]) * cum_vol,
-        "dollar_vol_bar": float(r["close"]) * float(r["volume"]),
+        "dollar_vol_session": cl * cum_vol,
+        "dollar_vol_bar": cl * vol,
         "tape_density": printed,
         # A stop inside one bar's noise is a different instrument from a stop
         # three bars wide, whatever the percentage says.
-        "trail_over_range": ((MCL_TRAIL / 100.0) * float(r["close"]) / mean_range
+        "trail_over_range": ((MCL_TRAIL / 100.0) * cl / mean_range
                              if mean_range and mean_range == mean_range
                              else float("nan")),
         # NaN, not 0.5, on a zero-range bar: 0.5 would read as "entered mid-bar"
         # on a bar that had no range at all.
-        "close_in_bar": ((float(r["close"]) - lo_) / span if span > 0
-                         else float("nan")),
-        "body_ratio": (abs(float(r["close"]) - o) / span
+        "close_in_bar": ((cl - lo_) / span if span > 0 else float("nan")),
+        "body_ratio": (abs(cl - o) / span
                        if span > 0 and o == o else float("nan")),
-        "vwap_dist": ((float(r["close"]) / vwap - 1.0) * 100.0
+        "vwap_dist": ((cl / vwap - 1.0) * 100.0
                       if vwap == vwap and vwap else float("nan")),
-        "ma20_dist": ((float(r["close"]) / ma20 - 1.0) * 100.0
+        "ma20_dist": ((cl / ma20 - 1.0) * 100.0
                       if ma20 == ma20 and ma20 else float("nan")),
         "ma20_slope": ((ma20 / ma20_prev - 1.0) * 100.0
                        if ma20 == ma20 and ma20_prev == ma20_prev and ma20_prev
@@ -648,6 +769,7 @@ def main(argv=None) -> int:
             continue
 
         sig = MCL.signals(sl)
+        ctx = frame_ctx(sig)
         mask = (sig["entry"] if a.population == "entries"
                 else refused_mask(sig, "floor_sole"))
         trades = MCL.backtest_session(sl, day, ET,
@@ -663,7 +785,7 @@ def main(argv=None) -> int:
             t = by_ts.get(str(ts))
             if t is None:
                 continue
-            f = features_at(sig, i)
+            f = features_at(sig, i, ctx)
             f.update(symbol=p["symbol"], date=p["date"],
                      net=t.net - FRICTION)
             rows.append(f)
