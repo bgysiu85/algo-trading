@@ -51,7 +51,9 @@ it. Precision and recall are as far as this goes, deliberately.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import zlib
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -112,6 +114,22 @@ def label_and_sample(sig: pd.DataFrame, cell: tuple[float, int], adverse: float,
     controls = ([] if k == 0
                 else sorted(rng.choice(pool, size=k, replace=False).tolist()))
     return starts, controls, len(eligible)
+
+
+def rng_for(seed: int, day: str, symbol: str) -> np.random.Generator:
+    """A generator fixed by (seed, day, symbol), not by processing order.
+
+    The first version threaded ONE generator through every symbol-day in
+    sequence, so which bars became controls depended on the order they were
+    reached -- which means on the number of workers. Two runs of the same seed
+    could then disagree, and the only way to reproduce a report would be to
+    remember how many cores it was run on.
+
+    zlib.crc32, not hash(): Python salts hash() per process, so a
+    process-pool worker would seed differently from the parent.
+    """
+    key = zlib.crc32(f"{day}:{symbol}".encode()) & 0xFFFFFFFF
+    return np.random.default_rng([int(seed), key])
 
 
 def collect(sig: pd.DataFrame, idx: list[int], is_case: bool, symbol: str,
@@ -238,6 +256,84 @@ def tier(ba: list[dict], bb: list[dict], base_a: float, base_b: float
         return "NOTHING", (f"ends agree but the smaller lift is {min(ea, eb):.2f}x, "
                            f"under {MIN_LIFT:.2f}x")
     return "NOTHING", "the halves DISAGREE in direction"
+
+
+
+def _usable(df, warm: int) -> str:
+    if len(df) < MIN_BARS + warm:
+        return "short"
+    c = df["close"].to_numpy(dtype=float)
+    if not np.isfinite(c).all():
+        return "nan"
+    if c.min() < MIN_PRICE:
+        return "under $1"
+    if c.max() > MAX_PRICE:
+        return "reverse-split price"
+    return ""
+
+
+def process_slice(args: tuple) -> dict:
+    """One archive day, start to finish. Module-level and picklable so a
+    process pool can run it; the sequential path calls it too, so there is one
+    implementation rather than two that can drift.
+
+    The previous day is RE-READ here rather than carried in from the caller.
+    That costs one extra decode per day and is what makes the days independent
+    -- without it the warm-up is a chain and nothing can be parallel.
+    """
+    from common.dbn_io import read_dbn
+    from strategy.mcl import mcl as MCL
+
+    (path, prev_path, cell, adverse, warm, seed) = args
+    day = Path(path).name[:10]
+    frame = read_dbn(path)
+    rows: list[dict] = []
+    skips: dict[str, int] = {}
+    bars = sym_days = 0
+    if frame.empty:
+        return {"day": day, "rows": rows, "skips": skips, "bars": 0,
+                "sym_days": 0, "used": False}
+
+    back: dict[str, pd.DataFrame] = {}
+    if prev_path:
+        pf = read_dbn(prev_path)
+        if not pf.empty:
+            for sym, d in pf.groupby("symbol"):
+                back[str(sym)] = d.sort_index()
+
+    used = False
+    for sym, df in frame.groupby("symbol"):
+        sym = str(sym)
+        df = df.sort_index()
+        sym_days += 1
+        b = back.get(sym)
+        full = pd.concat([b, df]) if b is not None else df
+        why = _usable(full, warm)
+        if why:
+            skips[why] = skips.get(why, 0) + 1
+            continue
+        first = len(full) - len(df)
+        base = max(0, first - warm)
+        raw = full.iloc[base:]
+        hi = len(full) - base
+        starts, controls, elig = label_and_sample(
+            raw, cell, adverse, rng_for(seed, day, sym), warm, hi)
+        if not elig:
+            skips["no eligible bars"] = skips.get("no eligible bars", 0) + 1
+            continue
+        bars += elig
+        if not starts:
+            skips["no run start"] = skips.get("no run start", 0) + 1
+            continue
+        sig = MCL.signals(full).iloc[base:]
+        ctx = frame_ctx(sig)
+        n_ctrl = len(controls)
+        w = ((elig - len(starts)) / n_ctrl) if n_ctrl else 1.0
+        rows.extend(collect(sig, starts, True, sym, day, 1.0, ctx))
+        rows.extend(collect(sig, controls, False, sym, day, w, ctx))
+        used = True
+    return {"day": day, "rows": rows, "skips": skips, "bars": bars,
+            "sym_days": sym_days, "used": used}
 
 
 def render(rows: list[dict], cell: tuple[float, int], adverse: float,
@@ -397,6 +493,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="the control sample is random; the seed is recorded "
                         "so the run reproduces.")
     p.add_argument("--limit", type=int, default=0)
+    p.add_argument("--jobs", type=int, default=1,
+                   help="worker processes for --source archive. Each day is "
+                        "independent once its warm-up day is re-read, and the "
+                        "control sample is seeded per symbol-day, so the "
+                        "answer does not depend on how many are used. 0 means "
+                        "one per core.")
     p.add_argument("--out", default=None)
     return p
 
@@ -409,7 +511,6 @@ def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
     cell = parse_cell(a.cell)
     adverse = A_PCT if a.adverse is None else a.adverse
-    rng = np.random.default_rng(a.seed)
     warm = MCL.MIN_BARS_REQUIRED
 
     rows: list[dict] = []
@@ -418,11 +519,24 @@ def main(argv=None) -> int:
     days: set[str] = set()
     t0 = time.time()
 
-    def one(sig: pd.DataFrame, symbol: str, date_str: str,
+    def one(raw: pd.DataFrame, make_sig, symbol: str, date_str: str,
             hi: int | None = None) -> None:
+        """Label first, build indicators only if there is something to label.
+
+        LABELLING NEEDS ONLY close AND low -- no indicators at all -- while
+        MCL.signals costs ~12 ms whatever the frame size, because the cost is
+        pandas per-call overhead rather than bars. The first version computed
+        signals for every symbol-day and then threw ~85% of them away, since
+        most symbol-days have no run start: 79 minutes of the archive run was
+        indicator maths for bars that were never going to be used.
+
+        `make_sig` is therefore a thunk, called only past the no-starts gate.
+        Eligible bars are still counted for every symbol-day -- that is the
+        denominator, and skipping it would inflate every rate on the page.
+        """
         nonlocal bars
-        starts, controls, elig = label_and_sample(sig, cell, adverse, rng,
-                                                  warm, hi)
+        starts, controls, elig = label_and_sample(
+            raw, cell, adverse, rng_for(a.seed, date_str, symbol), warm, hi)
         if not elig:
             skips["no eligible bars"] = skips.get("no eligible bars", 0) + 1
             return
@@ -433,6 +547,7 @@ def main(argv=None) -> int:
             # and counted, rather than folded in with an invented weight.
             skips["no run start"] = skips.get("no run start", 0) + 1
             return
+        sig = make_sig()
         n_ctrl = len(controls)
         pool = elig - len(starts)
         w = (pool / n_ctrl) if n_ctrl else 1.0
@@ -476,10 +591,9 @@ def main(argv=None) -> int:
             if why:
                 skips[why] = skips.get(why, 0) + 1
                 continue
-            sig = MCL.signals(df)
             # Label only this session's premarket bars; the prior session is
             # present for warm-up and must not contribute cases or controls.
-            local = sig.index.tz_convert(ET)
+            local = df.index.tz_convert(ET)
             day = datetime.strptime(p["date"], "%Y-%m-%d").date()
             keep = np.array([(t.date() == day and 240 <= t.hour * 60 + t.minute
                               < 570) for t in local])
@@ -491,7 +605,8 @@ def main(argv=None) -> int:
             base = max(0, first - warm)
             # The frame runs to 20:00; a case or control may only START inside
             # 04:00-09:30, which is what the header claims.
-            one(sig.iloc[base:], p["symbol"], p["date"], hi=last - base + 1)
+            one(df.iloc[base:], lambda d=df, b=base: MCL.signals(d).iloc[b:],
+                p["symbol"], p["date"], hi=last - base + 1)
     else:
         from common.databento_fetch import default_archive
         from common.dbn_io import read_dbn
@@ -503,36 +618,40 @@ def main(argv=None) -> int:
                      f"{archive}/{a.dataset}/ohlcv-1m.")
         if a.limit:
             slices = slices[-a.limit:]
-        prev: dict[str, pd.DataFrame] = {}
-        # A job this long that prints nothing is indistinguishable from a hung
-        # one -- which is exactly how it was reported. One line per slice.
-        for k_slice, path in enumerate(slices, 1):
-            day = date_of(path)
-            frame = read_dbn(path)
+        tasks = [(str(path), str(slices[k - 1]) if k else "",
+                  cell, adverse, warm, a.seed)
+                 for k, path in enumerate(slices)]
+        jobs = (os.cpu_count() or 1) if a.jobs == 0 else max(1, a.jobs)
+
+        def absorb(res: dict, k: int) -> None:
+            nonlocal bars, sym_days
+            rows.extend(res["rows"])
+            bars += res["bars"]
+            sym_days += res["sym_days"]
+            for why, n_ in res["skips"].items():
+                skips[why] = skips.get(why, 0) + n_
+            if res["used"]:
+                days.add(res["day"])
             el = time.time() - t0
-            rate = k_slice / el if el else 0.0
-            eta = (len(slices) - k_slice) / rate / 60.0 if rate else 0.0
-            print(f"  [{k_slice:>4}/{len(slices)}] {day}  "
-                  f"{len(rows):>9,} rows  {el / 60:>5.1f} min elapsed  "
-                  f"~{eta:>5.1f} min left", flush=True)
-            cur: dict[str, pd.DataFrame] = {}
-            for sym, df in frame.groupby("symbol"):
-                cur[str(sym)] = df.sort_index()
-            for sym, df in cur.items():
-                sym_days += 1
-                # The prior session is prepended for warm-up: a 04:00 start has
-                # nothing behind it and MCL's indicators would be undefined.
-                back = prev.get(sym)
-                full = pd.concat([back, df]) if back is not None else df
-                why = usable(full)
-                if why:
-                    skips[why] = skips.get(why, 0) + 1
-                    continue
-                sig = MCL.signals(full)
-                first = len(sig) - len(df)
-                base = max(0, first - warm)
-                one(sig.iloc[base:], sym, day, hi=len(sig) - base)
-            prev = cur
+            eta = (len(tasks) - k) / (k / el) / 60.0 if el and k else 0.0
+            print(f"  [{k:>4}/{len(tasks)}] {res['day']}  {len(rows):>9,} rows"
+                  f"  {el / 60:>5.1f} min elapsed  ~{eta:>5.1f} min left",
+                  flush=True)
+
+        if jobs == 1:
+            for k, t in enumerate(tasks, 1):
+                absorb(process_slice(t), k)
+        else:
+            # Days are independent because each worker re-reads its own warm-up
+            # day, and the control sample is seeded per symbol-day rather than
+            # by arrival order -- so the answer is the same at any --jobs.
+            print(f"  {jobs} worker process(es) over {len(tasks)} slice(s)",
+                  flush=True)
+            from concurrent.futures import ProcessPoolExecutor
+            with ProcessPoolExecutor(max_workers=jobs) as ex:
+                for k, res in enumerate(ex.map(process_slice, tasks,
+                                               chunksize=1), 1):
+                    absorb(res, k)
 
     if not rows:
         sys.exit(f"no run starts found in {sym_days:,} symbol-day(s).")

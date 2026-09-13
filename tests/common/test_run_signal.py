@@ -349,3 +349,56 @@ def test_the_forward_window_may_still_read_past_that_bound():
     rng = np.random.default_rng(9)
     starts, _, _ = S.label_and_sample(sig, (5.0, 15), 5.0, rng, 40, 66)
     assert starts, "a run starting inside the bound was dropped"
+
+
+# --- parallelism must not change the answer -----------------------------------
+
+def test_rng_for_depends_only_on_its_key_not_on_call_order():
+    """The first version threaded ONE generator through every symbol-day, so
+    which bars became controls depended on the order they were reached -- and
+    therefore on the worker count."""
+    a1 = S.rng_for(0, "2026-09-11", "TNON").integers(0, 10_000, 5).tolist()
+    _ = S.rng_for(0, "2026-01-02", "AAAA").integers(0, 10_000, 99)
+    a2 = S.rng_for(0, "2026-09-11", "TNON").integers(0, 10_000, 5).tolist()
+    assert a1 == a2
+
+
+def test_rng_for_separates_symbols_and_days_and_seeds():
+    draw = lambda *k: S.rng_for(*k).integers(0, 10_000, 5).tolist()
+    base = draw(0, "2026-09-11", "TNON")
+    assert draw(0, "2026-09-11", "ACVA") != base
+    assert draw(0, "2026-09-10", "TNON") != base
+    assert draw(1, "2026-09-11", "TNON") != base
+
+
+def test_rng_for_is_stable_ACROSS_PROCESSES():
+    """Python salts hash() per process, so a hash-keyed seed would give a pool
+    worker a different sample from the parent -- silently, and only when
+    --jobs > 1."""
+    import subprocess
+    import sys as _sys
+    code = ("from common.run_signal import rng_for;"
+            "print(rng_for(0,'2026-09-11','TNON').integers(0,10_000,5).tolist())")
+    out = subprocess.run([_sys.executable, "-c", code], capture_output=True,
+                         text=True, cwd=".")
+    assert out.returncode == 0, out.stderr
+    here = S.rng_for(0, "2026-09-11", "TNON").integers(0, 10_000, 5).tolist()
+    assert out.stdout.strip() == str(here)
+
+
+def test_the_report_is_invariant_to_ROW_ORDER():
+    """Workers finish in whatever order they finish. If bucket membership
+    could turn on list order, --jobs would quietly change the findings."""
+    import random
+    rows = report_rows(800)
+    a = "\n".join(S.render(rows, (8.0, 15), 5.0, 10_000, 2, 50, {}, "cache", 0.1))
+    shuffled = rows[:]
+    random.Random(3).shuffle(shuffled)
+    b = "\n".join(S.render(shuffled, (8.0, 15), 5.0, 10_000, 2, 50, {},
+                           "cache", 0.1))
+    assert a == b
+
+
+def test_jobs_zero_means_one_per_core():
+    assert S.build_parser().parse_args(["--jobs", "0"]).jobs == 0
+    assert S.build_parser().parse_args([]).jobs == 1
