@@ -475,7 +475,8 @@ def date_of(path: Path) -> str:
     return path.name[:10]
 
 
-def render(rows, sessions, cfg, cadence_s, agree, elapsed, no_prior) -> list[str]:
+def render(rows, sessions, cfg, cadence_s, agree, elapsed, no_prior,
+           mode=None, mix=None, rep=None) -> list[str]:
     per = [len(r["universe"]) for r in rows]
     per_sorted = sorted(per)
     total = sum(per)
@@ -488,8 +489,34 @@ def render(rows, sessions, cfg, cadence_s, agree, elapsed, no_prior) -> list[str
          f"  volume threshold scaled to our tape at capture "
          f"{cfg.capture:.3f}: {cfg.volume_min_on_tape:,}",
          f"  top {cfg.max_symbols} by pre-market change, ties by symbol",
-         f"  elapsed {elapsed:.1f}s", "",
-         "THE UNIVERSE", "",
+         f"  elapsed {elapsed:.1f}s", ""]
+
+    # WHICH CLOSE THIS RAN AGAINST, in the report and not only on stdout.
+    # The mode, the repaired/daily mix and the relaxation were printed to the
+    # terminal, where they scroll away, while the durable artifact -- the thing
+    # read later and quoted into project docs -- said nothing. Two runs of this
+    # report, one on the repaired closes and one on the defective ones, were
+    # byte-comparable and not comparable at all. The same defect the
+    # prior_source column exists to prevent, one level out.
+    if mode:
+        L += ["THE PRIOR CLOSE THIS RAN AGAINST", "",
+              f"  mode: {mode}"]
+        if mix:
+            L += ["  " + "  ".join(f"{k}={v:,}" for k, v in sorted(mix.items()))]
+            tot = sum(mix.values())
+            rp = mix.get("repaired", 0)
+            L.append(f"  repaired coverage: {rp / tot * 100:.1f}% of "
+                     f"{tot:,} prior closes" if tot else "  no prior closes")
+        if rep is not None and rep.attrs.get("construction"):
+            L.append(f"  construction: {rep.attrs['construction']}")
+        L += relaxation_banner(rep)
+        if mode == "daily":
+            L += ["  *** THIS RUN USED THE DEFECTIVE EXTENDED-HOURS CLOSE ***",
+                  "      Every premarket_change here divides by the 20:00 "
+                  "print, not the 16:00 one."]
+        L.append("")
+
+    L += ["THE UNIVERSE", "",
          f"  symbol-days                 {total:,}",
          f"  per session   mean          {total / sessions if sessions else 0:.1f}",
          f"                median        {per_sorted[len(per_sorted) // 2] if per_sorted else 0}",
@@ -675,10 +702,12 @@ def main(argv=None) -> int:
     print(f"\nwrote {len(pairs):,} symbol-days to {out}")
 
     emit("\n".join(render(rows, len(rows), cfg, a.cadence, agree,
-                          time.time() - t0, no_prior)),
+                          time.time() - t0, no_prior,
+                          mode=a.prior_close, mix=mix, rep=rep)),
          a.report,
          header=f"common.screen_sim  archive={archive}/{a.dataset}  "
-                f"cadence={a.cadence}s  capture={cfg.capture:.3f}"
+                f"cadence={a.cadence}s  capture={cfg.capture:.3f}  "
+                f"prior_close={a.prior_close}"
                 + (f"  LIMIT {a.limit}" if a.limit else ""))
     return 0
 

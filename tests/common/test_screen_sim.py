@@ -524,3 +524,57 @@ def test_an_unrelaxed_file_produces_no_banner(tmp_path):
 
 def test_the_banner_survives_a_missing_file():
     assert SS.relaxation_banner(None) == []
+
+
+# --- the report must say which close it ran against ---------------------------
+
+class _Rep:
+    def __init__(self, relaxed=None, construction="auction_else_last"):
+        self.attrs = {"construction": construction, "relaxed": relaxed}
+
+
+def _render(mode=None, mix=None, rep=None):
+    from common.screen_at import ScreenConfig
+    rows = [{"date": "2026-09-10", "universe": [], "agree": (0, 0, None)}]
+    return "\n".join(SS.render(rows, 1, ScreenConfig(), 60, (0, 0, None),
+                               1.0, [], mode=mode, mix=mix, rep=rep))
+
+
+def test_the_REPORT_names_the_prior_close_mode_not_only_stdout():
+    """The mode, the mix and the relaxation were printed to a terminal that
+    scrolls away, while the durable artifact said nothing. Two runs -- one on
+    the repaired closes, one on the defective ones -- were byte-comparable and
+    not comparable at all."""
+    text = _render(mode="repaired", mix={"repaired": 900, "daily": 100})
+    assert "THE PRIOR CLOSE THIS RAN AGAINST" in text
+    assert "mode: repaired" in text
+    assert "repaired=900" in text and "daily=100" in text
+
+
+def test_the_report_states_the_repaired_COVERAGE_as_a_share():
+    text = _render(mode="repaired", mix={"repaired": 900, "daily": 100})
+    assert "90.0% of 1,000 prior closes" in text
+
+
+def test_a_daily_mode_run_is_marked_as_DEFECTIVE_in_the_report():
+    """`--prior-close daily` is legitimate and must never look like the fixed
+    run six months from now."""
+    text = _render(mode="daily", mix={"daily": 1000})
+    assert "DEFECTIVE EXTENDED-HOURS CLOSE" in text
+    assert "20:00" in text
+
+
+def test_the_relaxation_reaches_the_REPORT_too():
+    rep = _Rep(relaxed={"achieved": "19/24", "bar": "rows",
+                        "by_venue": {"AMEX": "0/3", "NASDAQ": "17/19"}})
+    text = _render(mode="repaired", mix={"repaired": 10}, rep=rep)
+    assert "BELOW THE PRE-REGISTERED BAR" in text
+    assert "AMEX 0/3" in text
+
+
+def test_a_render_without_provenance_still_works():
+    """Callers that pass nothing (tests, older code) must not crash -- they
+    simply get no provenance section."""
+    text = _render()
+    assert "THE PRIOR CLOSE THIS RAN AGAINST" not in text
+    assert "THE UNIVERSE" in text
