@@ -304,3 +304,51 @@ def test_a_day_that_scored_nothing_is_out_of_the_provenance_mix_too():
     _res, universe, n = P.merge(got, by_date)
     assert n == 1
     assert P.source_mix(universe) == {"repaired": 1}
+
+
+# --- the constants other modules quote ---------------------------------------
+
+def test_the_report_emits_the_constants_pit_strategy_wants():
+    """Every earlier refresh of these was a hand-transcription out of the
+    table. A hand-transcribed control constant is the same defect shape as the
+    rest -- a number that looks like it came from the measurement."""
+    out = "\n".join(P.render(result(1.0), 100, 500, "2026-05-01", 8.0, 1.0,
+                             mix={"repaired": 500}, n_knowable=120))
+    for k in ("H0_PIT_NET", "H0_PIT_TRADES", "H0_PIT_OFFERED",
+              "H0_KNOWABLE_NET", "H0_KNOWABLE_TRADES", "H0_KNOWABLE_OFFERED",
+              "H0_REFERENCE_SOURCE"):
+        assert f"  {k} = " in out, k
+    assert "H0_PIT_OFFERED = 500" in out
+    assert "H0_KNOWABLE_OFFERED = 120" in out
+    assert "repaired=500" in out
+
+
+def test_the_emitted_constants_are_the_dollar_4_26_column():
+    """$4.26 is the figure pit_strategy compares against. Emitting any other
+    friction here would put a number in the file that the table does not
+    contain."""
+    res = result(1.0)
+    out = "\n".join(P.render(res, 100, 500, "2026-05-01", 8.0, 1.0,
+                             mix={"repaired": 500}, n_knowable=120))
+    s = P.score(res["as_screened"], "2026-05-01", 4.26)
+    assert f"H0_PIT_NET = {s['net']:_.1f}" in out
+    assert f"H0_PIT_TRADES = {s['n']:_}" in out
+
+
+def test_knowable_offered_counts_only_names_on_the_list_by_0430():
+    """The KNOWABLE denominator is not the universe size -- run_day skips a
+    name whose first_seen is later, so counting all of them would deflate the
+    per-symbol-day figure by the late share."""
+    uni = [rec(h=4, m=0), rec(sym="B", h=4, m=30), rec(sym="C", h=4, m=31),
+           rec(sym="D", h=7, m=0)]
+    assert P.knowable_offered(uni) == 2
+    scored = [t for r in uni
+              for t in P.run_day(session(), D.isoformat(), [r],
+                                 as_screened=False, trail=8.0)]
+    assert len({t["symbol"] for t in scored}) <= P.knowable_offered(uni)
+
+
+def test_a_run_that_did_not_compute_knowable_offered_says_so(monkeypatch):
+    out = "\n".join(P.render(result(1.0), 100, 500, "2026-05-01", 8.0, 1.0,
+                             mix={"repaired": 500}))
+    assert "H0_KNOWABLE_OFFERED = ?" in out and "not computed" in out

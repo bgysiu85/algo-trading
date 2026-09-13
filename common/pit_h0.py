@@ -149,6 +149,17 @@ def run_day(bars: pd.DataFrame, day: str, universe: list[dict], *,
     return out
 
 
+def knowable_offered(universe: list[dict]) -> int:
+    """How many scored symbol-days the KNOWABLE variant was even offered.
+
+    `run_day` skips a name whose `first_seen` is after 04:30, so the KNOWABLE
+    denominator is not `n_universe` -- and `pit_strategy.H0_KNOWABLE_OFFERED`
+    is a denominator its producer never printed, which means it reached the
+    constant by hand. It is emitted now.
+    """
+    return sum(1 for rec in universe if first_seen_time(rec) <= H.ENTRY_FROM)
+
+
 def merge(got: dict[str, tuple], by_date: dict[str, list[dict]]) -> tuple:
     """Assemble the pool's per-day results in DAY order, not completion order.
 
@@ -229,7 +240,7 @@ def halves_split(dates) -> str:
 
 def render(res: dict, n_sessions: int, n_universe: int, split: str,
            trail: float, elapsed: float, mix: dict[str, int] | None = None,
-           jobs: int = 1) -> list[str]:
+           jobs: int = 1, n_knowable: int | None = None) -> list[str]:
     L = ["H0 ON THE POINT-IN-TIME UNIVERSE", "",
          f"  {n_sessions} sessions, {n_universe:,} screened symbol-days",
          f"  H0 as registered: one entry per symbol-session, {trail:g}% trail "
@@ -355,6 +366,29 @@ def render(res: dict, n_sessions: int, n_universe: int, split: str,
           "",
           "  Not a strategy result. H0 is the control every entry rule is read",
           "  against, and on the old universe every one of them made it worse."]
+
+    # The constants, rendered as the lines that go into pit_strategy. Every
+    # earlier refresh of these was a hand-transcription out of the table above,
+    # and a hand-transcribed control constant is the same defect shape as the
+    # rest: a number that looks like it came from the measurement.
+    ks = score(res["knowable"], split, 4.26)
+    as_ = score(res["as_screened"], split, 4.26)
+    L += ["", "THE CONSTANTS, AS pit_strategy WANTS THEM", "",
+          "  Paste over the H0_* block. The universe line is not decoration --",
+          "  the staleness guard compares OFFERED and nothing else, so two",
+          "  universes of this size built on different prior closes would pass",
+          "  it silently.", "",
+          f"  H0_PIT_NET = {as_['net']:_.1f}",
+          f"  H0_PIT_TRADES = {as_['n']:_}",
+          f"  H0_PIT_OFFERED = {n_universe:_}",
+          f"  H0_KNOWABLE_NET = {ks['net']:_.1f}",
+          f"  H0_KNOWABLE_TRADES = {ks['n']:_}",
+          f"  H0_KNOWABLE_OFFERED = "
+          + (f"{n_knowable:_}" if n_knowable is not None else "?  # not computed"),
+          "  H0_REFERENCE_SOURCE = \"var/reports/pit_h0.txt, "
+          + datetime.now().date().isoformat() + ", "
+          + (("/".join(f"{k}={v:,}" for k, v in sorted(mix.items())))
+             if mix else "provenance unknown") + "\""]
     return L
 
 
@@ -426,7 +460,7 @@ def main(argv=None) -> int:
     split = halves_split([t["date"] for t in res["as_screened"]])
     emit("\n".join(render(res, len(days), n_universe, split, a.trail,
                           time.time() - t0, mix=source_mix(universe),
-                          jobs=jobs)),
+                          jobs=jobs, n_knowable=knowable_offered(universe))),
          a.out, header=f"common.pit_h0  pairs={a.pairs}  trail={a.trail:g}"
                        + (f"  LIMIT {a.limit}" if a.limit else ""))
     return 0
