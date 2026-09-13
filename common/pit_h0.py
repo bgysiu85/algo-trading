@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from collections import defaultdict
@@ -104,6 +105,22 @@ def first_seen_time(rec: dict):
     return pd.Timestamp(rec["first_seen"]).tz_convert(ET).time()
 
 
+def source_mix(universe: list[dict]) -> dict[str, int]:
+    """How many of the scored symbol-days came from a repaired prior close.
+
+    What this module produces is a control constant other modules quote, and a
+    control constant that does not say which universe it was scored on is the
+    defect `screen_sim` already had: two numbers that look comparable and are
+    not. `screen_sim` writes `prior_source` on every pair row precisely so the
+    provenance can be carried this far.
+    """
+    mix: dict[str, int] = {}
+    for rec in universe:
+        mix[str(rec.get("prior_source", "unknown"))] = mix.get(
+            str(rec.get("prior_source", "unknown")), 0) + 1
+    return mix
+
+
 def run_day(bars: pd.DataFrame, day: str, universe: list[dict], *,
             as_screened: bool, trail: float) -> list[dict]:
     """H0 over one session's point-in-time universe."""
@@ -130,6 +147,54 @@ def run_day(bars: pd.DataFrame, day: str, universe: list[dict], *,
                        first_rank=rec["first_rank"])
             out.append(row)
     return out
+
+
+def merge(got: dict[str, tuple], by_date: dict[str, list[dict]]) -> tuple:
+    """Assemble the pool's per-day results in DAY order, not completion order.
+
+    Unlike a dict-of-closes this module SUMS floats, and float addition is not
+    associative: a pool that finished 2026-04-02 before 2026-04-01 would give a
+    net differing in the last cents from the sequential run, and a control
+    constant that moves when you change `--jobs` is not a constant.
+    """
+    res: dict[str, list[dict]] = {"knowable": [], "as_screened": []}
+    universe: list[dict] = []
+    n_universe = 0
+    for day in sorted(got):
+        kn, asc, nu = got[day]
+        res["knowable"] += kn
+        res["as_screened"] += asc
+        n_universe += nu
+        if nu:
+            # The mix must describe exactly the rows `n_universe` counts. A day
+            # whose slice read empty contributes neither, or the provenance
+            # percentages would be computed over a wider universe than the one
+            # the constants were scored on.
+            universe += by_date[day]
+    return res, universe, n_universe
+
+
+def h0_day(args: tuple) -> tuple:
+    """One session's H0, both variants. Module-level and picklable so a process
+    pool can run it, and the SINGLE implementation -- the sequential path calls
+    it too, so the two cannot drift.
+
+    It re-reads its own slice rather than being handed a frame: shipping a
+    session's bars to a worker costs more than the worker's whole job.
+    """
+    from common.dbn_io import read_dbn
+
+    path, day, universe, trail = args
+    try:
+        bars = read_dbn(Path(path))
+    except Exception as e:                                  # noqa: BLE001
+        return day, [], [], 0, f"unreadable ({type(e).__name__}: {e})"
+    if bars.empty:
+        return day, [], [], 0, ""
+    return (day,
+            run_day(bars, day, universe, as_screened=False, trail=trail),
+            run_day(bars, day, universe, as_screened=True, trail=trail),
+            len(universe), "")
 
 
 def score(trades: list[dict], split: str, friction: float) -> dict:
@@ -163,17 +228,46 @@ def halves_split(dates) -> str:
 
 
 def render(res: dict, n_sessions: int, n_universe: int, split: str,
-           trail: float, elapsed: float) -> list[str]:
+           trail: float, elapsed: float, mix: dict[str, int] | None = None,
+           jobs: int = 1) -> list[str]:
     L = ["H0 ON THE POINT-IN-TIME UNIVERSE", "",
          f"  {n_sessions} sessions, {n_universe:,} screened symbol-days",
          f"  H0 as registered: one entry per symbol-session, {trail:g}% trail "
          f"from the peak, flat at 09:30, {H.ENTRY_SHARES} shares",
          f"  halves split at {split} (derived)",
-         f"  elapsed {elapsed:.1f}s", "",
-         "  THE BRACKETS THIS IS MEASURED AGAINST, at $4.26 friction:",
-         f"    stage-2 survivors (whole day known)   {BRACKET_SURVIVORS:+.2f}/trade",
-         f"    stage-2 rejects                       {BRACKET_REJECTS:+.2f}/trade",
-         ""]
+         f"  elapsed {elapsed:.1f}s on {jobs} worker(s)", ""]
+
+    # THE UNIVERSE THIS WAS SCORED ON, in the report rather than on stdout.
+    # `H0_PIT_OFFERED` in pit_strategy is pinned to the symbol-day count below
+    # and nothing else; if two universes of the same size were built against
+    # different prior closes, the staleness guard would not fire and the
+    # comparison would be silently wrong. The mix is what distinguishes them.
+    L += ["THE UNIVERSE THIS WAS SCORED ON", ""]
+    if mix:
+        total = sum(mix.values()) or 1
+        for k in sorted(mix):
+            L.append(f"  prior close {k:<10}{mix[k]:>8,}  "
+                     f"{100.0 * mix[k] / total:>5.1f}%")
+        if "unknown" in mix:
+            L += ["",
+                  "  UNKNOWN rows come from a pairs file written before "
+                  "`prior_source`",
+                  "  existed. Re-run `python -m common.screen_sim` before "
+                  "quoting these",
+                  "  constants against a repaired universe."]
+    else:
+        L.append("  no prior-close provenance in the pairs file")
+    L += ["",
+          f"  Quote these constants as: {n_universe:,} symbol-days, "
+          + ("/".join(f"{k}={v:,}" for k, v in sorted(mix.items()))
+             if mix else "provenance unknown"),
+          "",
+          "  THE BRACKETS THIS IS MEASURED AGAINST, at $4.26 friction:",
+          f"    stage-2 survivors (whole day known)   "
+          f"{BRACKET_SURVIVORS:+.2f}/trade",
+          f"    stage-2 rejects                       "
+          f"{BRACKET_REJECTS:+.2f}/trade",
+          ""]
 
     for label, trades in (("KNOWABLE AT 04:30", res["knowable"]),
                           ("AS SCREENED", res["as_screened"])):
@@ -271,6 +365,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dataset", default="XNAS.BASIC")
     p.add_argument("--trail", type=float, default=H.TRAIL_PRIMARY)
     p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--jobs", type=int, default=0,
+                   help="worker processes; 0 means one per core. Sessions are "
+                        "wholly independent here -- no warm-up, no carried "
+                        "state, no randomness -- so the only thing the pool "
+                        "can change is completion ORDER, and the merge below "
+                        "removes that.")
     p.add_argument("--out", default="var/reports/pit_h0.txt")
     return p
 
@@ -278,7 +378,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
     from common.databento_fetch import default_archive
-    from common.dbn_io import read_dbn
     from common.screen_sim import window_slices, date_of
 
     archive = Path(a.archive) if a.archive else default_archive()
@@ -286,35 +385,48 @@ def main(argv=None) -> int:
     slices = {date_of(p): p for p in window_slices(archive, a.dataset)}
 
     t0 = time.time()
-    res = {"knowable": [], "as_screened": []}
     days = sorted(by_date)
     if a.limit:
         days = days[:a.limit]
-    n_universe = 0
-    for i, day in enumerate(days, 1):
-        path = slices.get(day)
-        if path is None:
-            continue
-        try:
-            bars = read_dbn(path)
-        except Exception as e:                              # noqa: BLE001
-            print(f"  {day}: unreadable ({type(e).__name__}: {e})")
-            continue
-        if bars.empty:
-            continue
-        uni = by_date[day]
-        n_universe += len(uni)
-        res["knowable"] += run_day(bars, day, uni, as_screened=False,
-                                   trail=a.trail)
-        res["as_screened"] += run_day(bars, day, uni, as_screened=True,
-                                      trail=a.trail)
-        if i % 25 == 0:
-            print(f"  {i}/{len(days)}  {day}  "
-                  f"{len(res['as_screened']):,} trades")
+    tasks = [(str(slices[day]), day, by_date[day], a.trail)
+             for day in days if day in slices]
+    jobs = (os.cpu_count() or 1) if a.jobs == 0 else max(1, a.jobs)
+    print(f"  H0 over {len(tasks):,} session(s) on {jobs} worker(s) -- "
+          "both variants per session", flush=True)
+
+    got: dict[str, tuple[list, list, int]] = {}
+
+    def took(k: int, day: str) -> None:
+        el = time.time() - t0
+        eta = (len(tasks) - k) / (k / el) / 60.0 if el and k else 0.0
+        if k % 25 == 0 or k == len(tasks):
+            n = sum(len(v[1]) for v in got.values())
+            print(f"    [{k:>4}/{len(tasks)}] {day}  {n:>7,} trades  "
+                  f"{el / 60:>5.1f} min  ~{eta:>5.1f} min left", flush=True)
+
+    def take(res: tuple, k: int) -> None:
+        day, kn, asc, nu, err = res
+        if err:
+            print(f"  {day}: {err}", flush=True)
+        else:
+            got[day] = (kn, asc, nu)
+        took(k, day)
+
+    if jobs == 1:
+        for k, t in enumerate(tasks, 1):
+            take(h0_day(t), k)
+    else:
+        from concurrent.futures import ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=jobs) as ex:
+            for k, r in enumerate(ex.map(h0_day, tasks, chunksize=4), 1):
+                take(r, k)
+
+    res, universe, n_universe = merge(got, by_date)
 
     split = halves_split([t["date"] for t in res["as_screened"]])
     emit("\n".join(render(res, len(days), n_universe, split, a.trail,
-                          time.time() - t0)),
+                          time.time() - t0, mix=source_mix(universe),
+                          jobs=jobs)),
          a.out, header=f"common.pit_h0  pairs={a.pairs}  trail={a.trail:g}"
                        + (f"  LIMIT {a.limit}" if a.limit else ""))
     return 0
