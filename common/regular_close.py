@@ -69,6 +69,13 @@ from common.report_io import emit
 ET = ZoneInfo("America/New_York")
 CLOSE_T = dtime(16, 0)
 
+# The key the emitted file records a relaxed bar under. EXPORTED, and imported
+# by the consumer, because this was written here as a literal and read there as
+# a different literal ("relaxed") -- so the file carried "AMEX 0/3, residual
+# error is real and must be stated wherever these closes are used" and the
+# module that used them printed nothing at all. A shared name cannot drift.
+RELAXED_KEY = "RELAXED_PRE_REGISTERED_BAR"
+
 # Regular-session closes read from TradingView by hand, 2026-09-12. The
 # exchange is recorded because two of these are NOT Nasdaq-listed and the
 # archive is XNAS.BASIC -- a cross-listed name reaches this tape only through
@@ -783,7 +790,7 @@ def main(argv=None) -> int:
                "symbol_days": sum(len(v) for v in out.values()),
                "closes": out}
         if relaxed:
-            doc["RELAXED_PRE_REGISTERED_BAR"] = relaxed
+            doc[RELAXED_KEY] = relaxed
         path.write_text(json.dumps(doc, indent=1))
         print(f"  wrote {path} using {n} "
               f"({doc['symbol_days']:,} symbol-days over "

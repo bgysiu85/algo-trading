@@ -103,15 +103,56 @@ def load_repaired(path: Path | str = REPAIRED_CLOSES) -> pd.DataFrame | None:
     p = Path(path)
     if not p.exists():
         return None
+    from common.regular_close import RELAXED_KEY
+
     doc = json.loads(p.read_text())
     closes = doc.get("closes") or {}
-    rows = [{"symbol": str(sym), "date": str(day), "close": float(v)}
-            for day, per_sym in closes.items() for sym, v in per_sym.items()]
-    if not rows:
+    if not closes:
         return None
-    out = pd.DataFrame(rows)
+    # Flat columns, not a list of 5.8 million dicts. The real file holds
+    # 5,827,698 closes over 552 sessions -- the whole tape, not just the
+    # screened names -- and the comprehension that built one dict per row took
+    # 13.6 seconds and several times the memory of the result.
+    syms: list[str] = []
+    days: list[str] = []
+    vals: list[float] = []
+    for day, per_sym in closes.items():
+        k = list(per_sym.keys())
+        syms.extend(k)
+        vals.extend(per_sym.values())
+        days.extend([day] * len(k))
+    out = pd.DataFrame({"symbol": syms, "date": days, "close": vals})
+    out["close"] = out["close"].astype(float)
     out.attrs["construction"] = doc.get("construction")
-    out.attrs["relaxed"] = doc.get("relaxed")
+    out.attrs["relaxed"] = doc.get(RELAXED_KEY)
+    return out
+
+
+
+def relaxation_banner(rep) -> list[str]:
+    """What the repaired closes do NOT deliver, stated every time they are used.
+
+    The emitted file asks for this in so many words -- "Residual error is real
+    and must be stated wherever these closes are used" -- and the first
+    consumer read the wrong key and printed nothing. Loud, and by venue,
+    because the residual is not spread evenly: AMEX is 0/3.
+    """
+    if rep is None or not rep.attrs.get("relaxed"):
+        return []
+    r = rep.attrs["relaxed"]
+    out = ["  *** THESE CLOSES WERE ACCEPTED BELOW THE PRE-REGISTERED BAR ***",
+           f"      construction {rep.attrs.get('construction')}  "
+           f"scored {r.get('achieved')} on {r.get('bar')}"]
+    by = r.get("by_venue") or {}
+    if by:
+        out.append("      by listing venue: "
+                   + "  ".join(f"{k} {v}" for k, v in sorted(by.items())))
+        worst = [k for k, v in by.items()
+                 if v.split("/")[0] == "0" and v.split("/")[1] != "0"]
+        if worst:
+            out.append(f"      {', '.join(sorted(worst))}: NOT ONE ROW MATCHED. "
+                       "Names listed there carry the old defect in full.")
+    out.append("      Every figure downstream of this inherits that residual.")
     return out
 
 
@@ -138,13 +179,17 @@ def prior_closes(daily: pd.DataFrame, repaired: pd.DataFrame | None = None,
     d = daily[["symbol", "date", "close"]].copy().sort_values(["symbol", "date"])
     d["src"] = "daily"
     if repaired is not None and not repaired.empty:
-        key = (repaired.drop_duplicates(["symbol", "date"])
-               .set_index(["symbol", "date"])["close"])
-        idx = pd.MultiIndex.from_arrays([d["symbol"], d["date"]])
-        hit = idx.isin(key.index)
-        if hit.any():
-            d.loc[hit, "close"] = key.reindex(idx[hit]).to_numpy()
-            d.loc[hit, "src"] = "repaired"
+        # A hash join, not a MultiIndex membership test: both sides are ~6
+        # million rows and the index route builds two of them to answer a
+        # question merge answers in one pass.
+        rep = (repaired.drop_duplicates(["symbol", "date"])
+               .rename(columns={"close": "_repaired"}))
+        d = d.merge(rep[["symbol", "date", "_repaired"]],
+                    on=["symbol", "date"], how="left")
+        hit = d["_repaired"].notna()
+        d.loc[hit, "close"] = d.loc[hit, "_repaired"]
+        d.loc[hit, "src"] = "repaired"
+        d = d.drop(columns=["_repaired"]).sort_values(["symbol", "date"])
     # The shift carries the SOURCE along with the value, so `prior_source`
     # describes the close actually being divided by, not the row it sits on.
     d["prior_close"] = d.groupby("symbol")["close"].shift(1)
@@ -578,9 +623,9 @@ def main(argv=None) -> int:
     print(f"  prior close: mode={a.prior_close}  " +
           "  ".join(f"{k}={v:,}" for k, v in sorted(mix.items())), flush=True)
     if rep is not None and rep.attrs.get("construction"):
-        print(f"  construction: {rep.attrs['construction']}"
-              + ("  (ACCEPTED BELOW THE PRE-REGISTERED BAR)"
-                 if rep.attrs.get("relaxed") else ""), flush=True)
+        print(f"  construction: {rep.attrs['construction']}", flush=True)
+    for line in relaxation_banner(rep):
+        print(line, flush=True)
     by_date = {d: g.set_index("symbol")["prior_close"]
                for d, g in pc.groupby("date")}
 

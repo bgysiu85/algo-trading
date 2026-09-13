@@ -442,10 +442,15 @@ def test_load_repaired_returns_None_when_it_was_never_emitted(tmp_path):
 
 
 def test_load_repaired_reads_the_construction_and_the_relaxation(tmp_path):
+    """This test used to write the key the READER expected rather than the one
+    the WRITER emits, so it passed while agreeing with the bug. It now takes
+    the key from the writer's own module, which is the only version of this
+    test that could have caught it."""
+    from common.regular_close import RELAXED_KEY
     p = tmp_path / "rc.json"
     p.write_text(json.dumps({
         "construction": "auction_else_last",
-        "relaxed": {"achieved": "19/24"},
+        RELAXED_KEY: {"achieved": "19/24"},
         "closes": {"2026-09-10": {"ACVA": 7.22, "TNON": 5.30}},
     }))
     got = SS.load_repaired(p)
@@ -458,3 +463,64 @@ def test_load_repaired_treats_an_empty_closes_block_as_nothing(tmp_path):
     p = tmp_path / "rc.json"
     p.write_text(json.dumps({"construction": "x", "closes": {}}))
     assert SS.load_repaired(p) is None
+
+
+# --- the relaxation must survive the trip from writer to reader ---------------
+
+def test_the_relaxation_key_is_SHARED_not_retyped():
+    """The writer recorded the relaxation under RELAXED_PRE_REGISTERED_BAR and
+    the reader looked for "relaxed". So the file carried "AMEX 0/3, residual
+    error is real and must be stated wherever these closes are used" and the
+    module using those closes printed nothing. One name, imported."""
+    from common.regular_close import RELAXED_KEY
+    import inspect
+    src = inspect.getsource(SS.load_repaired)
+    assert "RELAXED_KEY" in src
+    assert '"relaxed")' not in src.replace('attrs["relaxed"]', "")
+    assert RELAXED_KEY == "RELAXED_PRE_REGISTERED_BAR"
+
+
+def test_a_relaxed_file_produces_a_LOUD_banner(tmp_path):
+    from common.regular_close import RELAXED_KEY
+    p = tmp_path / "rc.json"
+    p.write_text(json.dumps({
+        "construction": "auction_else_last",
+        RELAXED_KEY: {"bar": "every discriminating row", "achieved": "19/24",
+                      "by_venue": {"NYSE": "2/2", "NASDAQ": "17/19",
+                                   "AMEX": "0/3"}},
+        "closes": {"2026-09-10": {"ACVA": 7.22}},
+    }))
+    text = "\n".join(SS.relaxation_banner(SS.load_repaired(p)))
+    assert "BELOW THE PRE-REGISTERED BAR" in text
+    assert "19/24" in text
+    assert "AMEX 0/3" in text
+    assert "NOT ONE ROW MATCHED" in text, "a 0/n venue must be called out"
+
+
+def test_a_venue_that_matched_is_not_called_out_as_a_failure():
+    class Fake:
+        attrs = {"construction": "x",
+                 "relaxed": {"achieved": "24/24", "bar": "rows",
+                             "by_venue": {"NASDAQ": "19/19"}}}
+    text = "\n".join(SS.relaxation_banner(Fake()))
+    assert "NOT ONE ROW MATCHED" not in text
+
+
+def test_a_venue_with_no_rows_at_all_is_not_a_failure():
+    """0/0 is 'nothing to test here', not 'everything failed'."""
+    class Fake:
+        attrs = {"construction": "x",
+                 "relaxed": {"achieved": "2/2", "bar": "rows",
+                             "by_venue": {"AMEX": "0/0"}}}
+    assert "NOT ONE ROW MATCHED" not in "\n".join(SS.relaxation_banner(Fake()))
+
+
+def test_an_unrelaxed_file_produces_no_banner(tmp_path):
+    p = tmp_path / "rc.json"
+    p.write_text(json.dumps({"construction": "auction_else_last",
+                             "closes": {"2026-09-10": {"ACVA": 7.22}}}))
+    assert SS.relaxation_banner(SS.load_repaired(p)) == []
+
+
+def test_the_banner_survives_a_missing_file():
+    assert SS.relaxation_banner(None) == []

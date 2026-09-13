@@ -56,6 +56,7 @@ from common.report_fmt import acct
 from common.report_io import emit
 from common.screen_sim import (SCREEN_END, SCREEN_START, ScreenConfig,
                                accumulate, date_of, load_repaired, prior_closes,
+                               relaxation_banner,
                                source_mix, ticks,
                                window_slices)
 from common.screen_validate import collect, load_sim
@@ -249,6 +250,8 @@ def main(argv=None) -> int:
     print(f"  prior close: mode={a.prior_close}  " +
           "  ".join(f"{k}={v:,}" for k, v in sorted(source_mix(pc).items())),
           flush=True)
+    for line in relaxation_banner(rep):
+        print(line, flush=True)
     by_date = {d: g.set_index("symbol")["prior_close"]
                for d, g in pc.groupby("date")}
     slices = {date_of(p): p for p in window_slices(archive, a.dataset)}
