@@ -17,6 +17,7 @@ in the project. Two properties carry the whole thing:
 """
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -372,3 +373,88 @@ def test_a_long_skip_list_is_truncated_with_a_count():
                               60, (5, 0, None), 1.0,
                               [f"2026-01-{d:02d}" for d in range(1, 21)]))
     assert "and 8 more" in out
+
+
+# --- the repaired prior close, and the provenance that has to travel with it --
+
+def _daily(rows):
+    return pd.DataFrame(rows, columns=["symbol", "date", "close"])
+
+
+DAILY = _daily([
+    ("ACVA", "2026-09-09", 7.37), ("ACVA", "2026-09-10", 10.38),
+    ("ACVA", "2026-09-11", 10.42),
+    ("TNON", "2026-09-09", 3.02), ("TNON", "2026-09-10", 5.88),
+    ("TNON", "2026-09-11", 5.44),
+])
+
+
+def test_without_a_repair_the_daily_close_is_used_and_SAYS_SO():
+    pc = SS.prior_closes(DAILY)
+    assert set(pc["prior_source"]) == {"daily"}
+    row = pc[(pc.symbol == "ACVA") & (pc.date == "2026-09-11")].iloc[0]
+    assert row["prior_close"] == 10.38          # the defective 20:00 close
+
+
+def test_a_repaired_close_replaces_the_daily_one_for_the_SHIFTED_row():
+    """The repair gives the close OF 09-10; it must land as the PRIOR close of
+    09-11. An off-by-one here silently rebases every premarket_change."""
+    rep = _daily([("ACVA", "2026-09-10", 7.22)])
+    pc = SS.prior_closes(DAILY, rep)
+    row = pc[(pc.symbol == "ACVA") & (pc.date == "2026-09-11")].iloc[0]
+    assert row["prior_close"] == 7.22
+    assert row["prior_source"] == "repaired"
+
+
+def test_the_repair_does_not_leak_onto_a_row_it_does_not_cover():
+    rep = _daily([("ACVA", "2026-09-10", 7.22)])
+    pc = SS.prior_closes(DAILY, rep)
+    other = pc[(pc.symbol == "TNON") & (pc.date == "2026-09-11")].iloc[0]
+    assert other["prior_close"] == 5.88
+    assert other["prior_source"] == "daily"
+
+
+def test_a_MIXED_run_is_visible_in_the_rows_not_only_in_a_caveat():
+    """Mixing 16:00 closes with 20:00 ones computes premarket_change against
+    two baselines. The run may do it; it may not do it silently."""
+    rep = _daily([("ACVA", "2026-09-10", 7.22)])
+    mix = SS.source_mix(SS.prior_closes(DAILY, rep))
+    assert mix["repaired"] >= 1 and mix["daily"] >= 1
+
+
+def test_require_repaired_drops_the_uncovered_rows():
+    rep = _daily([("ACVA", "2026-09-10", 7.22)])
+    pc = SS.prior_closes(DAILY, rep, require_repaired=True)
+    assert set(pc["prior_source"]) == {"repaired"}
+    assert set(pc["symbol"]) == {"ACVA"}
+
+
+def test_a_name_with_no_prior_session_is_still_dropped():
+    rep = _daily([("ACVA", "2026-09-09", 7.30)])
+    pc = SS.prior_closes(DAILY, rep)
+    assert not ((pc.symbol == "ACVA") & (pc.date == "2026-09-09")).any()
+
+
+def test_load_repaired_returns_None_when_it_was_never_emitted(tmp_path):
+    """None, not an empty frame: 'never emitted' and 'emitted nothing' are
+    different facts and the caller decides what to do about each."""
+    assert SS.load_repaired(tmp_path / "nope.json") is None
+
+
+def test_load_repaired_reads_the_construction_and_the_relaxation(tmp_path):
+    p = tmp_path / "rc.json"
+    p.write_text(json.dumps({
+        "construction": "auction_else_last",
+        "relaxed": {"achieved": "19/24"},
+        "closes": {"2026-09-10": {"ACVA": 7.22, "TNON": 5.30}},
+    }))
+    got = SS.load_repaired(p)
+    assert len(got) == 2
+    assert got.attrs["construction"] == "auction_else_last"
+    assert got.attrs["relaxed"]["achieved"] == "19/24"
+
+
+def test_load_repaired_treats_an_empty_closes_block_as_nothing(tmp_path):
+    p = tmp_path / "rc.json"
+    p.write_text(json.dumps({"construction": "x", "closes": {}}))
+    assert SS.load_repaired(p) is None

@@ -89,17 +89,77 @@ SCREEN_START = "04:00"
 SCREEN_END = "09:30"
 
 
-def prior_closes(daily: pd.DataFrame) -> pd.DataFrame:
-    """symbol, date -> the PREVIOUS session's close.
+REPAIRED_CLOSES = Path("var/state/regular_close.json")
+
+
+def load_repaired(path: Path | str = REPAIRED_CLOSES) -> pd.DataFrame | None:
+    """The repaired regular-session closes, or None if never emitted.
+
+    `regular_close --emit` writes the close OF each date and says in the file
+    that the consumer owns the shift. That is deliberate: burying a one-row
+    offset inside a data file is how an off-by-one becomes invisible. The shift
+    happens in prior_closes(), once, beside the daily frame's own.
+    """
+    p = Path(path)
+    if not p.exists():
+        return None
+    doc = json.loads(p.read_text())
+    closes = doc.get("closes") or {}
+    rows = [{"symbol": str(sym), "date": str(day), "close": float(v)}
+            for day, per_sym in closes.items() for sym, v in per_sym.items()]
+    if not rows:
+        return None
+    out = pd.DataFrame(rows)
+    out.attrs["construction"] = doc.get("construction")
+    out.attrs["relaxed"] = doc.get("relaxed")
+    return out
+
+
+def prior_closes(daily: pd.DataFrame, repaired: pd.DataFrame | None = None,
+                 require_repaired: bool = False) -> pd.DataFrame:
+    """symbol, date -> the PREVIOUS session's close, AND WHERE IT CAME FROM.
 
     `tv_screener`'s `premarket_change` is measured against the previous REGULAR
-    close, which is what a daily bar's close is. A per-symbol shift, so a name's
-    first day in the archive has no prior close and is dropped downstream rather
-    than being handed a 0% change.
+    close. A daily bar's close is not that: Databento's `ohlcv-1d` aggregates
+    through 20:00, so it carries extended-hours prints. That is the confirmed
+    `prior_close` defect -- ACVA 2026-09-10 came back at 10.38 where the market
+    closed at 7.22.
+
+    `repaired` supplies corrected closes for the sessions that have them. Where
+    it does not cover a row the daily close is used AND THE ROW SAYS SO: every
+    row carries `prior_source`, because a run that silently mixes 16:00 closes
+    with 20:00 ones computes premarket_change against two different baselines
+    and calls the results comparable. That is this project's recurring defect
+    shape, and a column is harder to forget than a caveat.
+
+    `require_repaired` drops the uncovered rows instead -- the clean but
+    smaller population.
     """
     d = daily[["symbol", "date", "close"]].copy().sort_values(["symbol", "date"])
+    d["src"] = "daily"
+    if repaired is not None and not repaired.empty:
+        key = (repaired.drop_duplicates(["symbol", "date"])
+               .set_index(["symbol", "date"])["close"])
+        idx = pd.MultiIndex.from_arrays([d["symbol"], d["date"]])
+        hit = idx.isin(key.index)
+        if hit.any():
+            d.loc[hit, "close"] = key.reindex(idx[hit]).to_numpy()
+            d.loc[hit, "src"] = "repaired"
+    # The shift carries the SOURCE along with the value, so `prior_source`
+    # describes the close actually being divided by, not the row it sits on.
     d["prior_close"] = d.groupby("symbol")["close"].shift(1)
-    return d[d["prior_close"].notna() & (d["prior_close"] > 0)]
+    d["prior_source"] = d.groupby("symbol")["src"].shift(1)
+    out = d[d["prior_close"].notna() & (d["prior_close"] > 0)]
+    if require_repaired:
+        out = out[out["prior_source"] == "repaired"]
+    return out
+
+
+def source_mix(pc: pd.DataFrame) -> dict[str, int]:
+    """How many prior closes came from where. Printed, never assumed."""
+    if "prior_source" not in pc.columns:
+        return {}
+    return {str(k): int(v) for k, v in pc["prior_source"].value_counts().items()}
 
 
 def accumulate(bars: pd.DataFrame, cfg: ScreenConfig) -> pd.DataFrame:
@@ -469,6 +529,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=None,
                    help="first N sessions only -- TIME IT before committing "
                         "to the whole archive")
+    p.add_argument("--prior-close", default="repaired",
+                   choices=["daily", "repaired", "require"],
+                   help="`daily` is the OLD behaviour and carries the "
+                        "confirmed extended-hours defect. `repaired` prefers "
+                        "var/state/regular_close.json and falls back to the "
+                        "daily close, reporting the mix. `require` drops rows "
+                        "the repair does not cover.")
     p.add_argument("--out", default="var/state/screen_pairs_pit.json")
     p.add_argument("--report", default="var/reports/screen_sim.txt")
     return p
@@ -499,7 +566,21 @@ def main(argv=None) -> int:
         sys.exit(f"no daily bars under {archive}/{a.daily_dataset} -- the "
                  "prior REGULAR close is what premarket_change measures "
                  "against and there is no substitute for it")
-    pc = prior_closes(daily)
+    rep = None if a.prior_close == "daily" else load_repaired()
+    if a.prior_close != "daily" and rep is None:
+        sys.exit("var/state/regular_close.json is not there. Emit it first:\n"
+                 "  python -m common.regular_close --dataset XNAS.BASIC "
+                 "--emit --accept auction_else_last\n"
+                 "or pass --prior-close daily to run with the DEFECTIVE "
+                 "close on purpose.")
+    pc = prior_closes(daily, rep, require_repaired=a.prior_close == "require")
+    mix = source_mix(pc)
+    print(f"  prior close: mode={a.prior_close}  " +
+          "  ".join(f"{k}={v:,}" for k, v in sorted(mix.items())), flush=True)
+    if rep is not None and rep.attrs.get("construction"):
+        print(f"  construction: {rep.attrs['construction']}"
+              + ("  (ACCEPTED BELOW THE PRE-REGISTERED BAR)"
+                 if rep.attrs.get("relaxed") else ""), flush=True)
     by_date = {d: g.set_index("symbol")["prior_close"]
                for d, g in pc.groupby("date")}
 

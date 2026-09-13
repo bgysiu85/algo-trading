@@ -55,7 +55,8 @@ import pandas as pd
 from common.report_fmt import acct
 from common.report_io import emit
 from common.screen_sim import (SCREEN_END, SCREEN_START, ScreenConfig,
-                               accumulate, date_of, prior_closes, ticks,
+                               accumulate, date_of, load_repaired, prior_closes,
+                               source_mix, ticks,
                                window_slices)
 from common.screen_validate import collect, load_sim
 
@@ -208,6 +209,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--watchlists", default="var/archive")
     p.add_argument("--pairs", default="var/state/screen_pairs_pit.json")
     p.add_argument("--cadence", type=int, default=60)
+    p.add_argument("--prior-close", default="repaired",
+                   choices=["daily", "repaired", "require"],
+                   help="must match whatever screen_sim was run with. Two "
+                        "modules disagreeing about which close they divide by "
+                        "is the same defect one level up.")
     p.add_argument("--out", default="var/reports/screen_miss.txt")
     return p
 
@@ -234,7 +240,15 @@ def main(argv=None) -> int:
         return 0
 
     daily = daily_frame(archive, a.daily_dataset)
-    pc = prior_closes(daily)
+    rep = None if a.prior_close == "daily" else load_repaired()
+    if a.prior_close != "daily" and rep is None:
+        sys.exit("var/state/regular_close.json is not there. Emit it first "
+                 "with common.regular_close --emit, or pass --prior-close "
+                 "daily to use the DEFECTIVE close on purpose.")
+    pc = prior_closes(daily, rep, require_repaired=a.prior_close == "require")
+    print(f"  prior close: mode={a.prior_close}  " +
+          "  ".join(f"{k}={v:,}" for k, v in sorted(source_mix(pc).items())),
+          flush=True)
     by_date = {d: g.set_index("symbol")["prior_close"]
                for d, g in pc.groupby("date")}
     slices = {date_of(p): p for p in window_slices(archive, a.dataset)}
