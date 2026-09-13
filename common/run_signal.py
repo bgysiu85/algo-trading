@@ -68,7 +68,6 @@ from common.run_census import (MAX_PRICE, MIN_BARS, MIN_PRICE, runs_in)
 
 ET = ZoneInfo("America/New_York")
 QUANTILES = 4
-CONTROLS_PER_CASE = 6      # non-starts sampled per run start, before weighting
 MIN_LIFT = 1.25            # below this a feature cannot pay for its own
                            # false positives at any threshold worth writing
 
@@ -84,7 +83,7 @@ def parse_cell(s: str) -> tuple[float, int]:
 
 
 def label_and_sample(sig: pd.DataFrame, cell: tuple[float, int], adverse: float,
-                     rng: np.random.Generator, warm: int,
+                     rng: np.random.Generator, warm: int, rate: float,
                      hi: int | None = None
                      ) -> tuple[list[int], list[int], int]:
     """(run-start indices, sampled control indices, eligible bar count).
@@ -98,22 +97,34 @@ def label_and_sample(sig: pd.DataFrame, cell: tuple[float, int], adverse: float,
     to 20:00 -- it drew cases and controls from the regular session and after
     hours while the report's header said 04:00-09:30. The forward window may
     still read past `hi`: a run beginning at 09:28 finishes when it finishes.
+
+    CONTROLS ARE SAMPLED AT A FLAT PER-BAR RATE, not as a multiple of this
+    symbol-day's case count, and a day with NO run still contributes them. The
+    first version did the opposite, and on 87 screened sessions it looked
+    fine because nearly every day had a run. On the archive it dropped 369,098
+    of 388,873 usable symbol-days -- 95% of them -- so the "restored base rate"
+    of 1.69% was really the rate WITHIN days that had a run. The unconditional
+    rate is 0.108%: the headline was overstated 15.6x, and every precision
+    under it was conditional on something no rule can know in advance.
+
+    A flat rate makes the weight a constant 1/rate, so the weighted population
+    is every eligible bar, quiet days included.
     """
     close = sig["close"].to_numpy(dtype=float)
     low = sig["low"].to_numpy(dtype=float)
     r, n = cell
     last = len(close) - n if hi is None else min(hi, len(close) - n)
+    if last <= warm:
+        return [], [], 0
     found = runs_in(close, low, adverse, [r], [n])[(r, n)]
     starts = sorted(t for t, _, _ in found if warm <= t < last)
-    eligible = [i for i in range(warm, last)]
-    if not eligible:
-        return [], [], 0
+    eligible = last - warm
     case_set = set(starts)
-    pool = [i for i in eligible if i not in case_set]
-    k = min(len(pool), len(starts) * CONTROLS_PER_CASE)
+    pool = [i for i in range(warm, last) if i not in case_set]
+    k = int(rng.binomial(len(pool), min(1.0, rate))) if pool else 0
     controls = ([] if k == 0
                 else sorted(rng.choice(pool, size=k, replace=False).tolist()))
-    return starts, controls, len(eligible)
+    return starts, controls, eligible
 
 
 def rng_for(seed: int, day: str, symbol: str) -> np.random.Generator:
@@ -284,7 +295,7 @@ def process_slice(args: tuple) -> dict:
     from common.dbn_io import read_dbn
     from strategy.mcl import mcl as MCL
 
-    (path, prev_path, cell, adverse, warm, seed) = args
+    (path, prev_path, cell, adverse, warm, seed, rate, count_only) = args
     day = Path(path).name[:10]
     frame = read_dbn(path)
     rows: list[dict] = []
@@ -317,18 +328,16 @@ def process_slice(args: tuple) -> dict:
         raw = full.iloc[base:]
         hi = len(full) - base
         starts, controls, elig = label_and_sample(
-            raw, cell, adverse, rng_for(seed, day, sym), warm, hi)
+            raw, cell, adverse, rng_for(seed, day, sym), warm, rate, hi)
         if not elig:
             skips["no eligible bars"] = skips.get("no eligible bars", 0) + 1
             continue
         bars += elig
-        if not starts:
-            skips["no run start"] = skips.get("no run start", 0) + 1
+        if count_only or (not starts and not controls):
             continue
         sig = MCL.signals(full).iloc[base:]
         ctx = frame_ctx(sig)
-        n_ctrl = len(controls)
-        w = ((elig - len(starts)) / n_ctrl) if n_ctrl else 1.0
+        w = 1.0 / min(1.0, rate)
         rows.extend(collect(sig, starts, True, sym, day, 1.0, ctx))
         rows.extend(collect(sig, controls, False, sym, day, w, ctx))
         used = True
@@ -361,18 +370,24 @@ def render(rows: list[dict], cell: tuple[float, int], adverse: float,
         return L + ["NOTHING TO SEPARATE", "",
                     "  No run starts in this population.", ""]
 
+    uncond = (n_case / bars * 100.0) if bars else float("nan")
     L += ["THE SAMPLE, AND THE WEIGHT THAT UNDOES IT", "",
-          f"  {'run starts (all of them)':<34}{n_case:>12,}",
-          f"  {'non-starts (sampled)':<34}{n_ctrl:>12,}",
-          f"  {'mean weight on a non-start':<34}"
-          f"{(sum(x['weight'] for x in rows if not x['case']) / n_ctrl):>12.2f}"
-          if n_ctrl else "  (no non-starts sampled)",
-          f"  {'run rate IN THE SAMPLE':<34}"
+          f"  {'run starts (all of them)':<36}{n_case:>12,}",
+          f"  {'non-starts (sampled)':<36}{n_ctrl:>12,}",
+          f"  {'weight on a non-start':<36}"
+          f"{(rows[0]['weight'] if n_ctrl and not rows[0]['case'] else (sum(x['weight'] for x in rows if not x['case']) / n_ctrl if n_ctrl else 1.0)):>12.2f}",
+          f"  {'run rate IN THE SAMPLE':<36}"
           f"{n_case / len(rows) * 100.0:>11.2f}%",
-          f"  {'run rate RESTORED (the real one)':<34}{base:>11.2f}%", "",
-          "  The sample rate is the one that flatters and it is printed only",
-          "  so the correction is visible. Every rate below is the restored",
-          "  one.", ""]
+          f"  {'run rate RESTORED (weighted)':<36}{base:>11.3f}%",
+          f"  {'run rate DIRECT (cases / all bars)':<36}{uncond:>11.3f}%", "",
+          "  The last two are computed different ways and must agree. The",
+          "  sample rate is the one that flatters and is printed only so the",
+          "  correction is visible; every rate below is the restored one.",
+          ""]
+    if uncond == uncond and base == base and uncond and abs(base / uncond - 1) > 0.05:
+        L += ["  *** THESE DISAGREE. The weighted population is not the whole",
+              "  tape, so every rate below is conditional on whatever the",
+              "  sampling left in. Do not read the precision column. ***", ""]
 
     a, b = split(rows)
 
@@ -493,6 +508,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="the control sample is random; the seed is recorded "
                         "so the run reproduces.")
     p.add_argument("--limit", type=int, default=0)
+    p.add_argument("--controls", type=int, default=300_000,
+                   help="target number of sampled non-start bars. The rate is "
+                        "set from the counted total so it is FLAT over every "
+                        "eligible bar, quiet symbol-days included.")
     p.add_argument("--jobs", type=int, default=1,
                    help="worker processes for --source archive. Each day is "
                         "independent once its warm-up day is re-read, and the "
@@ -518,40 +537,40 @@ def main(argv=None) -> int:
     bars = sym_days = 0
     days: set[str] = set()
     t0 = time.time()
+    # PASS 1 counts eligible bars so the control rate can be set from the real
+    # total; PASS 2 samples at that rate. Counting is pure numpy -- no
+    # indicators, no features -- so it is a small fraction of the run, and it
+    # is the only way a FLAT sampling rate can be chosen without knowing the
+    # size of the tape in advance.
+    rate, count_only = 1.0, True
 
     def one(raw: pd.DataFrame, make_sig, symbol: str, date_str: str,
             hi: int | None = None) -> None:
-        """Label first, build indicators only if there is something to label.
+        """Label first, build indicators only if there is something to keep.
 
         LABELLING NEEDS ONLY close AND low -- no indicators at all -- while
         MCL.signals costs ~12 ms whatever the frame size, because the cost is
-        pandas per-call overhead rather than bars. The first version computed
-        signals for every symbol-day and then threw ~85% of them away, since
-        most symbol-days have no run start: 79 minutes of the archive run was
-        indicator maths for bars that were never going to be used.
+        pandas per-call overhead rather than bars. Computing signals for every
+        symbol-day and then discarding most of them was 79 minutes of the
+        archive run spent on bars nobody was going to look at.
 
-        `make_sig` is therefore a thunk, called only past the no-starts gate.
-        Eligible bars are still counted for every symbol-day -- that is the
-        denominator, and skipping it would inflate every rate on the page.
+        Eligible bars are counted for EVERY symbol-day, including the quiet
+        ones that yield neither a case nor a control -- that is the
+        denominator, and dropping it is what made the base rate 15.6x too high.
         """
         nonlocal bars
         starts, controls, elig = label_and_sample(
-            raw, cell, adverse, rng_for(a.seed, date_str, symbol), warm, hi)
+            raw, cell, adverse, rng_for(a.seed, date_str, symbol), warm,
+            rate, hi)
         if not elig:
             skips["no eligible bars"] = skips.get("no eligible bars", 0) + 1
             return
         bars += elig
-        if not starts:
-            # A symbol-day with no run contributes no cases, and its controls
-            # would carry a weight derived from a case count of zero. Skipped,
-            # and counted, rather than folded in with an invented weight.
-            skips["no run start"] = skips.get("no run start", 0) + 1
+        if count_only or (not starts and not controls):
             return
         sig = make_sig()
-        n_ctrl = len(controls)
-        pool = elig - len(starts)
-        w = (pool / n_ctrl) if n_ctrl else 1.0
         ctx = frame_ctx(sig)
+        w = 1.0 / min(1.0, rate)
         rows.extend(collect(sig, starts, True, symbol, date_str, 1.0, ctx))
         rows.extend(collect(sig, controls, False, symbol, date_str, w, ctx))
         days.add(date_str)
@@ -568,90 +587,111 @@ def main(argv=None) -> int:
             return "reverse-split price"
         return ""
 
-    if a.source == "cache":
-        from common.cache_io import (SHARED_DURATION, SHARED_END_HHMM,
-                                     load_cached_bars, load_pairs, window_dir)
-        pairs = load_pairs(Path(a.pairs))
-        if a.limit:
-            pairs = pairs[:a.limit]
-        cache = window_dir(Path(a.cache), SHARED_DURATION, SHARED_END_HHMM)
-        for k_pair, p in enumerate(pairs, 1):
-            if k_pair % 50 == 0 or k_pair == len(pairs):
-                print(f"  [{k_pair:>5}/{len(pairs)}] {len(rows):>9,} rows  "
-                      f"{(time.time() - t0) / 60:.1f} min", flush=True)
-            df = load_cached_bars(cache, p["symbol"], p["date"])
-            sym_days += 1
-            if df is None or df.empty:
-                skips["no bars"] = skips.get("no bars", 0) + 1
-                continue
-            df.index = (df.index.tz_localize("UTC") if df.index.tz is None
-                        else df.index.tz_convert("UTC"))
-            df = df.sort_index()
-            why = usable(df)
-            if why:
-                skips[why] = skips.get(why, 0) + 1
-                continue
-            # Label only this session's premarket bars; the prior session is
-            # present for warm-up and must not contribute cases or controls.
-            local = df.index.tz_convert(ET)
-            day = datetime.strptime(p["date"], "%Y-%m-%d").date()
-            keep = np.array([(t.date() == day and 240 <= t.hour * 60 + t.minute
-                              < 570) for t in local])
-            if keep.sum() < MIN_BARS:
-                skips["short"] = skips.get("short", 0) + 1
-                continue
-            first = int(np.argmax(keep))
-            last = len(keep) - 1 - int(np.argmax(keep[::-1]))
-            base = max(0, first - warm)
-            # The frame runs to 20:00; a case or control may only START inside
-            # 04:00-09:30, which is what the header claims.
-            one(df.iloc[base:], lambda d=df, b=base: MCL.signals(d).iloc[b:],
-                p["symbol"], p["date"], hi=last - base + 1)
-    else:
-        from common.databento_fetch import default_archive
-        from common.dbn_io import read_dbn
-        from common.screen_sim import date_of, window_slices
-        archive = Path(a.archive) if a.archive else default_archive()
-        slices = window_slices(archive, a.dataset)
-        if not slices:
-            sys.exit(f"no 04:00-09:30 window slices under "
-                     f"{archive}/{a.dataset}/ohlcv-1m.")
-        if a.limit:
-            slices = slices[-a.limit:]
-        tasks = [(str(path), str(slices[k - 1]) if k else "",
-                  cell, adverse, warm, a.seed)
-                 for k, path in enumerate(slices)]
-        jobs = (os.cpu_count() or 1) if a.jobs == 0 else max(1, a.jobs)
-
-        def absorb(res: dict, k: int) -> None:
-            nonlocal bars, sym_days
-            rows.extend(res["rows"])
-            bars += res["bars"]
-            sym_days += res["sym_days"]
-            for why, n_ in res["skips"].items():
-                skips[why] = skips.get(why, 0) + n_
-            if res["used"]:
-                days.add(res["day"])
-            el = time.time() - t0
-            eta = (len(tasks) - k) / (k / el) / 60.0 if el and k else 0.0
-            print(f"  [{k:>4}/{len(tasks)}] {res['day']}  {len(rows):>9,} rows"
-                  f"  {el / 60:>5.1f} min elapsed  ~{eta:>5.1f} min left",
-                  flush=True)
-
-        if jobs == 1:
-            for k, t in enumerate(tasks, 1):
-                absorb(process_slice(t), k)
+    def run_pass() -> None:
+        """One sweep of the source. Pass 1 counts, pass 2 samples."""
+        nonlocal bars, sym_days
+        if a.source == "cache":
+            from common.cache_io import (SHARED_DURATION, SHARED_END_HHMM,
+                                         load_cached_bars, load_pairs, window_dir)
+            pairs = load_pairs(Path(a.pairs))
+            if a.limit:
+                pairs = pairs[:a.limit]
+            cache = window_dir(Path(a.cache), SHARED_DURATION, SHARED_END_HHMM)
+            for k_pair, p in enumerate(pairs, 1):
+                if k_pair % 50 == 0 or k_pair == len(pairs):
+                    print(f"  [{k_pair:>5}/{len(pairs)}] {len(rows):>9,} rows  "
+                          f"{(time.time() - t0) / 60:.1f} min", flush=True)
+                df = load_cached_bars(cache, p["symbol"], p["date"])
+                sym_days += 1
+                if df is None or df.empty:
+                    skips["no bars"] = skips.get("no bars", 0) + 1
+                    continue
+                df.index = (df.index.tz_localize("UTC") if df.index.tz is None
+                            else df.index.tz_convert("UTC"))
+                df = df.sort_index()
+                why = usable(df)
+                if why:
+                    skips[why] = skips.get(why, 0) + 1
+                    continue
+                # Label only this session's premarket bars; the prior session is
+                # present for warm-up and must not contribute cases or controls.
+                local = df.index.tz_convert(ET)
+                day = datetime.strptime(p["date"], "%Y-%m-%d").date()
+                keep = np.array([(t.date() == day and 240 <= t.hour * 60 + t.minute
+                                  < 570) for t in local])
+                if keep.sum() < MIN_BARS:
+                    skips["short"] = skips.get("short", 0) + 1
+                    continue
+                first = int(np.argmax(keep))
+                last = len(keep) - 1 - int(np.argmax(keep[::-1]))
+                base = max(0, first - warm)
+                # The frame runs to 20:00; a case or control may only START inside
+                # 04:00-09:30, which is what the header claims.
+                one(df.iloc[base:], lambda d=df, b=base: MCL.signals(d).iloc[b:],
+                    p["symbol"], p["date"], hi=last - base + 1)
         else:
-            # Days are independent because each worker re-reads its own warm-up
-            # day, and the control sample is seeded per symbol-day rather than
-            # by arrival order -- so the answer is the same at any --jobs.
-            print(f"  {jobs} worker process(es) over {len(tasks)} slice(s)",
-                  flush=True)
-            from concurrent.futures import ProcessPoolExecutor
-            with ProcessPoolExecutor(max_workers=jobs) as ex:
-                for k, res in enumerate(ex.map(process_slice, tasks,
-                                               chunksize=1), 1):
-                    absorb(res, k)
+            from common.databento_fetch import default_archive
+            from common.dbn_io import read_dbn
+            from common.screen_sim import date_of, window_slices
+            archive = Path(a.archive) if a.archive else default_archive()
+            slices = window_slices(archive, a.dataset)
+            if not slices:
+                sys.exit(f"no 04:00-09:30 window slices under "
+                         f"{archive}/{a.dataset}/ohlcv-1m.")
+            if a.limit:
+                slices = slices[-a.limit:]
+            tasks = [(str(path), str(slices[k - 1]) if k else "",
+                      cell, adverse, warm, a.seed, rate, count_only)
+                     for k, path in enumerate(slices)]
+            jobs = (os.cpu_count() or 1) if a.jobs == 0 else max(1, a.jobs)
+
+            def absorb(res: dict, k: int) -> None:
+                nonlocal bars, sym_days
+                rows.extend(res["rows"])
+                bars += res["bars"]
+                sym_days += res["sym_days"]
+                for why, n_ in res["skips"].items():
+                    skips[why] = skips.get(why, 0) + n_
+                if res["used"]:
+                    days.add(res["day"])
+                el = time.time() - t0
+                eta = (len(tasks) - k) / (k / el) / 60.0 if el and k else 0.0
+                print(f"  [{k:>4}/{len(tasks)}] {res['day']}  {len(rows):>9,} rows"
+                      f"  {el / 60:>5.1f} min elapsed  ~{eta:>5.1f} min left",
+                      flush=True)
+
+            if jobs == 1:
+                for k, t in enumerate(tasks, 1):
+                    absorb(process_slice(t), k)
+            else:
+                # Days are independent because each worker re-reads its own warm-up
+                # day, and the control sample is seeded per symbol-day rather than
+                # by arrival order -- so the answer is the same at any --jobs.
+                print(f"  {jobs} worker process(es) over {len(tasks)} slice(s)",
+                      flush=True)
+                from concurrent.futures import ProcessPoolExecutor
+                with ProcessPoolExecutor(max_workers=jobs) as ex:
+                    for k, res in enumerate(ex.map(process_slice, tasks,
+                                                   chunksize=1), 1):
+                        absorb(res, k)
+
+
+    # PASS 1 -- count only. Cheap: labelling is numpy on close and low, and
+    # `count_only` stops it ever reaching MCL.signals or features_at.
+    print("  pass 1 of 2: counting eligible bars", flush=True)
+    run_pass()
+    total = bars
+    if not total:
+        sys.exit(f"no eligible bars in {sym_days:,} symbol-day(s).")
+    # A flat rate over every eligible bar, set to land near the control budget.
+    rate = min(1.0, a.controls / float(total))
+    count_only = False
+    rows.clear(); skips.clear(); days.clear()
+    bars = sym_days = 0
+    print(f"  {total:,} eligible bars -> control rate {rate:.5f} "
+          f"(~{int(total * rate):,} controls)", flush=True)
+    print("  pass 2 of 2: sampling and computing features", flush=True)
+    run_pass()
 
     if not rows:
         sys.exit(f"no run starts found in {sym_days:,} symbol-day(s).")

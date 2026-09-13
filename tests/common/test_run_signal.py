@@ -163,7 +163,7 @@ def test_controls_never_include_a_run_start():
     rng = np.random.default_rng(0)
     c = list(10.0 + np.cumsum(rng.normal(0.002, 0.05, 400)))
     sig = sig_frame(c)
-    starts, controls, _ = S.label_and_sample(sig, (5.0, 15), 5.0, rng, 40)
+    starts, controls, _ = S.label_and_sample(sig, (5.0, 15), 5.0, rng, 40, 1.0)
     assert not (set(starts) & set(controls))
 
 
@@ -174,7 +174,7 @@ def test_no_case_or_control_comes_from_the_warm_up_region():
     c = list(10.0 + np.cumsum(rng.normal(0.002, 0.05, 400)))
     sig = sig_frame(c)
     warm = 60
-    starts, controls, _ = S.label_and_sample(sig, (5.0, 15), 5.0, rng, warm)
+    starts, controls, _ = S.label_and_sample(sig, (5.0, 15), 5.0, rng, warm, 1.0)
     assert all(i >= warm for i in starts + controls)
 
 
@@ -185,17 +185,30 @@ def test_no_bar_without_a_full_forward_window_is_eligible():
     c = list(10.0 + np.cumsum(rng.normal(0.002, 0.05, 300)))
     sig = sig_frame(c)
     n = 15
-    starts, controls, _ = S.label_and_sample(sig, (5.0, n), 5.0, rng, 40)
+    starts, controls, _ = S.label_and_sample(sig, (5.0, n), 5.0, rng, 40, 1.0)
     assert all(i < len(sig) - n for i in starts + controls)
 
 
-def test_the_control_sample_is_capped_per_case():
+def test_controls_are_sampled_at_a_FLAT_RATE_not_per_case():
+    """The rate must not depend on how many runs this symbol-day happened to
+    have. Tying it to the case count is what dropped every quiet day from the
+    archive population and made the base rate 15.6x too high."""
     rng = np.random.default_rng(3)
     c = list(10.0 + np.cumsum(rng.normal(0.002, 0.05, 400)))
     sig = sig_frame(c)
-    starts, controls, _ = S.label_and_sample(sig, (5.0, 15), 5.0, rng, 40)
-    if starts:
-        assert len(controls) <= len(starts) * S.CONTROLS_PER_CASE
+    _, controls, elig = S.label_and_sample(sig, (5.0, 15), 5.0, rng, 40, 0.25)
+    assert 0.15 * elig < len(controls) < 0.35 * elig, len(controls)
+
+
+def test_a_symbol_day_with_NO_run_still_contributes_controls():
+    """A flat tape is a real observation: it is a day on which no bar ran, and
+    excluding it makes the denominator the wrong population."""
+    rng = np.random.default_rng(4)
+    sig = sig_frame([10.0] * 300)
+    starts, controls, elig = S.label_and_sample(sig, (8.0, 15), 5.0, rng,
+                                                40, 0.5)
+    assert starts == []
+    assert controls and elig > 0
 
 
 # --- what the report must and must not say ------------------------------------
@@ -336,7 +349,7 @@ def test_no_case_or_control_starts_after_the_premarket_window():
     sig = sig_frame(c)
     hi = 200
     starts, controls, elig = S.label_and_sample(sig, (5.0, 15), 5.0, rng,
-                                                40, hi)
+                                                40, 1.0, hi)
     assert all(i < hi for i in starts + controls)
     assert elig == hi - 40
 
@@ -347,7 +360,7 @@ def test_the_forward_window_may_still_read_past_that_bound():
     c = [10.0] * 60 + [10.0] * 5 + [11.0] * 40
     sig = sig_frame(c)
     rng = np.random.default_rng(9)
-    starts, _, _ = S.label_and_sample(sig, (5.0, 15), 5.0, rng, 40, 66)
+    starts, _, _ = S.label_and_sample(sig, (5.0, 15), 5.0, rng, 40, 1.0, 66)
     assert starts, "a run starting inside the bound was dropped"
 
 
