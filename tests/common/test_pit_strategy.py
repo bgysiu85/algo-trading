@@ -370,14 +370,34 @@ def test_the_two_denominators_are_both_printed():
 def test_a_denominator_disagreement_refuses_a_verdict():
     """The MC5 case from 2026-09-11: a strategy taking MORE trades per
     symbol-day than H0 can look better per trade and worse per opportunity.
-    The first version printed only the per-trade figure and called it a win."""
+    The first version printed only the per-trade figure and called it a win.
+
+    BOTH SIDES ARE LITERAL. The H0 side is the 2026-09-11 reference, not
+    `P.H0_PIT_*` -- this is a historical pair, and reading it against whatever
+    H0 currently happens to be turns a regression test into a coin flip that
+    passes or fails depending on the last universe refresh. Refreshing H0 to
+    the repaired 6,170-day universe is what exposed that: the pair stopped
+    disagreeing and the guard's own test went quiet."""
     per_trade, per_day, agree = P.beats_control(
-        -77_662.0, 5_451, 4_997,
-        P.H0_PIT_NET, P.H0_PIT_TRADES, P.H0_PIT_OFFERED)
+        -77_662.0, 5_451, 4_997,          # MC5, point-in-time
+        -72_306.0, 4_590, 5_021)          # H0, var/reports/pit_h0.txt 09-11
     assert per_trade > 0 > per_day
     assert not agree
 
-    o = out(per=-77_662.0 / 5_451, n=5_451)
+
+def test_the_report_refuses_a_verdict_when_the_denominators_disagree():
+    """The same guard at the rendering level, built against the CURRENT
+    constants: more trades per symbol-day than H0, better per trade, worse per
+    opportunity."""
+    counts = {"stage2": 500, "pit": P.H0_PIT_OFFERED, "early": 100}
+    n = P.H0_PIT_TRADES + 1_400
+    net = P.H0_PIT_NET - 8_700.0
+    _pt, _pd, agree = P.beats_control(net, n, counts["pit"],
+                                      P.H0_PIT_NET, P.H0_PIT_TRADES,
+                                      P.H0_PIT_OFFERED)
+    assert not agree, "the fixture stopped disagreeing -- rebuild it"
+
+    o = out(per=net / n, n=n, counts=counts)
     assert "THE TWO DENOMINATORS DISAGREE" in o
     assert "Neither figure may be quoted alone" in o
     for banned in ("beat the control on both", "do NOT beat the control"):
@@ -425,19 +445,31 @@ def test_the_early_arms_hit_rate_is_not_labelled_as_tape_coverage():
 
 
 def test_the_h0_reference_matches_the_universe_it_is_quoted_against():
-    """The constants pin a universe SIZE. Extending the archive changed it from
-    4,997 to 5,021 symbol-days, which is exactly the drift the staleness guard
-    exists to catch -- and exactly the drift that would otherwise compare MCL
-    against a control measured somewhere else."""
-    assert P.H0_PIT_OFFERED == 5_021
-    assert P.H0_PIT_TRADES == 4_590
-    assert P.H0_PIT_NET == pytest.approx(-72_306.0)
+    """The constants pin a universe SIZE. Extending the archive moved it 4,997
+    -> 5,021, and repairing the prior close moved it 5,021 -> 6,170. Both are
+    exactly the drift the staleness guard exists to catch, and exactly the
+    drift that would otherwise compare MCL against a control measured somewhere
+    else."""
+    assert P.H0_PIT_OFFERED == 6_170
+    assert P.H0_PIT_TRADES == 5_606
+    assert P.H0_PIT_NET == pytest.approx(-86_346.1)
     # per trade and per symbol-day, the two the verdict actually uses
-    assert P.H0_PIT_NET / P.H0_PIT_TRADES == pytest.approx(-15.75, abs=0.01)
-    assert P.H0_PIT_NET / P.H0_PIT_OFFERED == pytest.approx(-14.40, abs=0.01)
+    assert P.H0_PIT_NET / P.H0_PIT_TRADES == pytest.approx(-15.40, abs=0.01)
+    assert P.H0_PIT_NET / P.H0_PIT_OFFERED == pytest.approx(-14.00, abs=0.01)
+
+
+def test_the_reference_names_the_prior_close_its_universe_was_built_on():
+    """The staleness guard compares OFFERED and nothing else, so two universes
+    of this size built on different prior closes would pass it silently. The
+    provenance has to travel with the constants."""
+    assert "repaired" in P.H0_REFERENCE_SOURCE
+    assert "6,132" in P.H0_REFERENCE_SOURCE
 
 
 def test_the_knowable_reference_is_internally_consistent():
-    assert P.H0_KNOWABLE_NET / P.H0_KNOWABLE_TRADES == pytest.approx(-14.70,
+    assert P.H0_KNOWABLE_NET / P.H0_KNOWABLE_TRADES == pytest.approx(-14.06,
                                                                      abs=0.01)
     assert P.H0_KNOWABLE_TRADES <= P.H0_KNOWABLE_OFFERED
+    # A name is only in the KNOWABLE variant if it was on the list by 04:30, so
+    # its denominator is a subset of the universe -- never the whole thing.
+    assert P.H0_KNOWABLE_OFFERED <= P.H0_PIT_OFFERED

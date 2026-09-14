@@ -96,22 +96,31 @@ ET = ZoneInfo("America/New_York")
 QTY = 100
 ENTRY_FLOOR_ARM = dtime(4, 30)   # what "early" means, matching H0's entry time
 
-# H0 on these same two universes, from var/reports/pit_h0.txt generated
-# 2026-09-11. Quoted so the strategy arms can be read against their own control
-# instead of against a bracket from a different tape.
+# H0 on these same two universes, from var/reports/pit_h0.txt. Quoted so the
+# strategy arms can be read against their own control instead of against a
+# bracket from a different tape. The block below is COPIED from that report's
+# own "THE CONSTANTS" section rather than transcribed out of its tables --
+# every earlier refresh was retyped by hand, which is how a figure ends up
+# looking like it came from the measurement.
 #
 # NET AND OFFERED, not per-trade, because the per-trade figure alone cannot be
 # compared safely -- see `beats_control()`. `H0_PIT_OFFERED` is also the staleness
 # guard: if this run's universe does not offer exactly that many symbol-days, the
 # reference belongs to a different universe file and the report says so instead
 # of quietly comparing two things.
-H0_PIT_NET = -72_306.0        # AS SCREENED, at $4.26
-H0_PIT_TRADES = 4_590
-H0_PIT_OFFERED = 5_021
-H0_KNOWABLE_NET = -10_612.0   # KNOWABLE AT 04:30, at $4.26
-H0_KNOWABLE_TRADES = 722
-H0_KNOWABLE_OFFERED = 798
-H0_REFERENCE_SOURCE = "var/reports/pit_h0.txt, 2026-09-12"
+#
+# The guard compares OFFERED and nothing else, so `H0_REFERENCE_SOURCE` carries
+# the prior-close mix: two universes of this size built on different closes
+# would pass the count check silently, and the 2026-09-13 repair moved 99.4% of
+# this one onto a repaired 16:00 close.
+H0_PIT_NET = -86_346.1        # AS SCREENED, at $4.26
+H0_PIT_TRADES = 5_606
+H0_PIT_OFFERED = 6_170
+H0_KNOWABLE_NET = -17_682.1   # KNOWABLE AT 04:30, at $4.26
+H0_KNOWABLE_TRADES = 1_258
+H0_KNOWABLE_OFFERED = 1_394
+H0_REFERENCE_SOURCE = ("var/reports/pit_h0.txt, 2026-09-14, "
+                       "daily=38/repaired=6,132")
 
 # The warm-up the published backtests use, imported rather than restated: 2
 # sessions total means the target day plus one prior. If cache_io changes, this
