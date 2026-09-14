@@ -539,3 +539,24 @@ def test_the_fast_path_still_cannot_see_the_future():
         assert before[k] == after[k] or (before[k] != before[k]
                                          and after[k] != after[k]), \
             f"feature {k} changed when the FUTURE changed -- it looks ahead"
+
+
+def test_buckets_defaults_to_net_so_every_published_figure_is_unchanged():
+    """`outcome` was added for entry_split. If the default moved, every tier in
+    this module's recorded null would silently refer to a different quantity."""
+    rows = [{"f": float(i), "net": float(i) * 2, "other": -float(i),
+             "date": "2026-01-01"} for i in range(40)]
+    assert F.buckets(rows, "f") == F.buckets(rows, "f", outcome="net")
+    alt = F.buckets(rows, "f", outcome="other")
+    assert [b["mean"] for b in alt] == [-b["mean"] / 2 for b in
+                                        F.buckets(rows, "f")]
+
+
+def test_the_quantile_edges_do_not_depend_on_the_outcome_column():
+    """Same feature, same split, whatever is being averaged inside it."""
+    rows = [{"f": float(i), "net": 1.0, "other": float(i % 3),
+             "date": "2026-01-01"} for i in range(40)]
+    a = F.buckets(rows, "f")
+    b = F.buckets(rows, "f", outcome="other")
+    assert [(x["lo"], x["hi"], x["n"]) for x in a] == \
+           [(x["lo"], x["hi"], x["n"]) for x in b]

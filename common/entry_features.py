@@ -389,16 +389,24 @@ def why_not_bucketable(rows: list[dict], name: str, q: int = QUANTILES) -> str:
     return ""
 
 
-def buckets(rows: list[dict], name: str, q: int = QUANTILES) -> list[dict]:
+def buckets(rows: list[dict], name: str, q: int = QUANTILES,
+            outcome: str = "net") -> list[dict]:
     """Quantile buckets of one feature, with the outcome in each.
 
     Edges come from the data, not from round numbers: a hand-chosen threshold
     is already a fitted parameter. Returns [] when the data cannot carry the
     split -- see why_not_bucketable.
+
+    `outcome` names the column being averaged. It defaults to `net` so every
+    published figure from this module is unchanged; `entry_split` passes a 0/1
+    label, for which the bucket mean IS the rate. The bucketing discipline has
+    to be ONE implementation -- a second copy with its own quantile edges and
+    its own tie handling would make a result here incomparable with the 0-of-11
+    null this module already recorded.
     """
     if why_not_bucketable(rows, name, q):
         return []
-    vals = [(r[name], r["net"]) for r in rows
+    vals = [(r[name], r[outcome]) for r in rows
             if r.get(name) is not None and r[name] == r[name]]
     vals.sort(key=lambda x: x[0])
     out, n = [], len(vals)
