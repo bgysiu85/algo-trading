@@ -439,7 +439,8 @@ class FillLog:
         # is the entire point of the exercise. Roll it aside and start clean.
         if not new:
             try:
-                with path.open("r", newline="") as fh:
+                with path.open("r", newline="", encoding="utf-8",
+                               errors="replace") as fh:
                     header = (fh.readline().strip() or "").split(",")
             except OSError:
                 header = []
@@ -452,7 +453,17 @@ class FillLog:
                             path.name, len(header), len(FIELDS), stale.name)
                 new = True
 
-        self.fh = path.open("a", newline="")
+        # ENCODING IS NOT OPTIONAL HERE. Without it Python uses the locale
+        # encoding, which on Ben's machine is cp1252: one non-ASCII character
+        # anywhere in a row -- an em dash in a message, a symbol in a broker
+        # rejection -- is written as a byte no UTF-8 reader can decode, and
+        # churn_count, tv_reconcile and the portal all open this file as UTF-8.
+        # The whole session's log becomes unreadable to them, not just the row.
+        #
+        # Found 2026-09-14 when a CONFIG row carried an em dash. It was latent
+        # long before that: `reject_reason` has always been able to hold
+        # whatever IB sent back.
+        self.fh = path.open("a", newline="", encoding="utf-8")
         self.w = csv.DictWriter(self.fh, fieldnames=FIELDS, extrasaction="ignore")
         if new:
             self.w.writeheader()

@@ -735,3 +735,22 @@ def test_a_trader_without_a_log_is_fine(tmp_path):
     trader = _real_trader_with_real_adapters()
     assert bridge(paper=True).apply(
         trader, {"id": "c1", "type": "stop"}, NOW)["status"] == "applied"
+
+
+def test_the_config_row_text_is_plain_ascii(tmp_path):
+    """The detail comes from ack messages written for humans, which contain em
+    dashes. friction.load opens this file with the locale encoding and Ben
+    opens it in Excel, so a character that renders correctly in one reader and
+    as a blob in another is a permanent small irritation in the one file
+    everything reads. This is machine detail, not prose."""
+    trader = _trader_with_a_log(tmp_path)
+    name = trader.strategies[0].name
+    ui = bridge(paper=True)
+
+    ui.apply(trader, {"id": "c1", "type": "set_setting",
+                      "args": {"key": f"trail_pct:{name}", "value": 8.0}}, NOW)
+
+    row = _config_rows(trader)[0]
+    for field in ("reason", "reject_reason"):
+        row[field].encode("ascii")          # raises if anything slipped through
+    assert "--" in row["reject_reason"] or "-" in row["reject_reason"]

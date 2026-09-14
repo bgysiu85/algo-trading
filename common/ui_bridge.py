@@ -149,6 +149,21 @@ def _rebind_adapter(trader, old, new) -> None:
             st.strategy = new
 
 
+def _ascii(text: str) -> str:
+    """Plain ASCII, for the two free-text columns of a CONFIG row.
+
+    The fill log is written UTF-8 and every reader in this repo should open it
+    the same way -- but `friction.load` opens it with the locale encoding, and a
+    log is also something Ben opens in Excel. An em dash that renders as a
+    mojibake blob in one reader and correctly in another is a small, permanent
+    irritation in the one file everything reads. The text here is machine
+    detail, not prose, so it loses nothing by being ASCII.
+    """
+    return (text or "").replace("\u2014", "--").replace("\u2013", "-") \
+                       .replace("\u2192", "->").encode("ascii", "replace") \
+                       .decode("ascii")
+
+
 class UIBridge:
     """One-way state out, commands back. Constructed by `from_env`."""
 
@@ -506,8 +521,8 @@ class UIBridge:
                           symbol=setting,
                           action=CONFIG_ACTION,
                           status=status,
-                          reason=reason[:32],
-                          reject_reason=(detail or "")[:255],
+                          reason=_ascii(reason)[:32],
+                          reject_reason=_ascii(detail)[:255],
                           trail_pct=trail_pct)
             except Exception:                               # noqa: BLE001
                 LOG.exception("could not write the CONFIG row for %s/%s",

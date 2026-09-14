@@ -109,3 +109,85 @@ def test_the_entry_reads_the_same_attribute_that_stamps_the_position():
     src = inspect.getsource(T.MCLPaperTrader.step_symbol)
     assert "trail_pct=st.strategy.trail_pct" in src, (
         "the Position stamp moved -- _trail_for must follow it")
+
+
+# ---------------------------------------------------------------------------
+# Encoding. Found 2026-09-14: a CONFIG row carried an em dash, FillLog opened
+# the file with the LOCALE encoding (cp1252 on Windows), and the byte it wrote
+# was undecodable to every reader that opens this file as UTF-8 -- which is
+# churn_count, tv_reconcile and the portal. One character, and the whole
+# session's log is unreadable to three of the four readers.
+#
+# Latent long before the CONFIG row: reject_reason has always been able to hold
+# whatever IB sent back.
+
+def test_the_log_is_written_utf8_whatever_the_locale(tmp_path):
+    path = tmp_path / "f.csv"
+    log = T.FillLog(path)
+    log.write(symbol="AAA", action="BUY", reject_reason="em dash — here")
+    log.close()
+
+    # The assertion that matters is that a UTF-8 reader can read it back. On a
+    # cp1252 default this raises UnicodeDecodeError before reaching the row.
+    rows = list(csv.DictReader(path.open(newline="", encoding="utf-8")))
+    assert rows[0]["reject_reason"] == "em dash — here"
+
+
+def test_a_non_ascii_row_does_not_poison_the_whole_file(tmp_path):
+    """The failure mode was not a bad field — it was a bad FILE. Every row
+    after the offending byte becomes unreachable too."""
+    path = tmp_path / "f.csv"
+    log = T.FillLog(path)
+    log.write(symbol="AAA", action="BUY", reject_reason="—")
+    log.write(symbol="BBB", action="SELL", status="FILLED")
+    log.close()
+
+    rows = list(csv.DictReader(path.open(newline="", encoding="utf-8")))
+    assert [r["symbol"] for r in rows] == ["AAA", "BBB"]
+
+
+def test_reading_the_old_header_survives_a_non_ascii_file(tmp_path):
+    """The header check reads the existing file. It must not raise before it
+    can decide to roll the file aside — that would make a damaged log
+    unopenable rather than replaceable."""
+    path = tmp_path / "f.csv"
+    path.write_bytes(b"ts_et,symbol,action\n2026-09-14,AAA,\x97\n")
+
+    log = T.FillLog(path)            # must not raise
+    log.close()
+
+    assert list(csv.DictReader(path.open(newline="", encoding="utf-8")).fieldnames) \
+        == T.FIELDS
+
+
+def test_the_log_names_its_encoding_explicitly(monkeypatch, tmp_path):
+    """The round-trip test above passes on Linux whether or not FillLog names
+    an encoding, because the locale default there IS utf-8 — it fails only on
+    the platform the bug lives on. That is the same trap as writing a Windows
+    junction test with symlink_to.
+
+    The locale default cannot be forced from inside the process: CPython
+    resolves it in C, and patching locale.getpreferredencoding or
+    locale.getencoding does not reach it. So this asserts the thing that
+    DETERMINES the behaviour — that the parameter is passed at all — which
+    fails on every platform if it goes missing.
+    """
+    import pathlib
+
+    seen = []
+    real_open = pathlib.Path.open
+
+    def recording_open(self, *args, **kwargs):
+        seen.append((args, kwargs))
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "open", recording_open)
+    T.FillLog(tmp_path / "f.csv").close()
+
+    appends = [kw for args, kw in seen if "a" in (args[0] if args else kw.get("mode", ""))]
+    assert appends, "FillLog did not open the log for append"
+    assert all(kw.get("encoding", "").lower().replace("-", "") == "utf8"
+               for kw in appends), (
+        f"the fill log was opened without encoding='utf-8': {appends}. On "
+        "Windows that is cp1252, and one non-ASCII byte makes the whole file "
+        "unreadable to every UTF-8 reader.")
