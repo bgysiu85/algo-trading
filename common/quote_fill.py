@@ -74,12 +74,42 @@ FRESH_S = 60
 # there is no quote, rather than a bad one.
 TOLERANCE_S = 1_800
 
+# THE FILL HAPPENS AT THE BAR'S CLOSE, AND THE BAR IS STAMPED AT ITS START.
+# dbn_io says it in its own first paragraph: "ts_event is the interval START. A
+# bar stamped 09:30 covers 09:30:00-09:30:59. Treating it as the end shifts
+# every bar one interval and every entry with it."
+#
+# The first version of this module matched the prevailing quote at the bar's
+# STAMP, which is one minute before the price it was pricing. On bars the rule
+# selects for HAVING MOVED -- a 3x volume spike with MACD and RSI rising -- the
+# quote at the start of the minute is systematically below the close, so the
+# model looked like it paid 12c above the offer and sold 5.75c below the bid,
+# and repricing "at the book" invented +$30.54 per trade out of a one-minute
+# look-back. A correction that turns a losing strategy profitable is the single
+# most dangerous shape an error can take here, and it took an hour to find.
+#
+# So the match instant is the LAST NANOSECOND OF THE BAR, which is the latest
+# moment a print inside it could have happened.
+BAR_SECONDS = {"mcl": 60, "mc5": 300}
+
 DATASET = "XNAS.BASIC"
 SCHEMA = "tcbbo"
 PAIRS = "var/state/screen_pairs_pit.json"
 
 
 # --- the tape ---------------------------------------------------------------
+
+def fill_instant(ts, strategy: str = "mcl"):
+    """The moment a fill at that bar's close actually happened.
+
+    Exclusive of the next bar's stamp: a print at exactly bar_start + 60s
+    belongs to the following minute, and admitting it would reintroduce the
+    same off-by-one-bar in the other direction.
+    """
+    import pandas as pd
+    return (pd.Timestamp(ts) + pd.Timedelta(seconds=BAR_SECONDS[strategy])
+            - pd.Timedelta(nanoseconds=1))
+
 
 def run_day(args: tuple) -> tuple:
     """One session's trades with their timestamps, and the quotes beside them.
@@ -128,11 +158,13 @@ def run_day(args: tuple) -> tuple:
             # against different sides of the book, and folding them into one
             # row would force a choice of which side to keep.
             legs.append({"symbol": rec["symbol"], "date": day, "trade": n,
-                         "side": "BUY", "ts": pd.Timestamp(t.entry_time),
+                         "side": "BUY", "ts": fill_instant(t.entry_time),
+                         "bar_ts": pd.Timestamp(t.entry_time),
                          "model_px": float(t.entry_price),
                          "gross": (t.exit_price - t.entry_price) * QTY})
             legs.append({"symbol": rec["symbol"], "date": day, "trade": n,
-                         "side": "SELL", "ts": pd.Timestamp(t.exit_time),
+                         "side": "SELL", "ts": fill_instant(t.exit_time),
+                         "bar_ts": pd.Timestamp(t.exit_time),
                          "model_px": float(t.exit_price),
                          "gross": (t.exit_price - t.entry_price) * QTY})
     if not legs:
@@ -156,6 +188,7 @@ def run_day(args: tuple) -> tuple:
     for r in m.to_dict("records"):
         row = {k: r[k] for k in ("symbol", "date", "trade", "side",
                                  "model_px", "gross")}
+        row["bar_ts"] = r["bar_ts"]
         if r.get("bid") is None or r["bid"] != r["bid"]:
             row["covered"] = False
         else:
@@ -363,6 +396,8 @@ def render(rows: list[dict], trades: list[dict], n_days: int, n_cov: int,
          f"  {DATASET} {SCHEMA}   elapsed {elapsed:.1f}s on {jobs} worker(s)",
          "",
          "  A VALIDITY CHECK ON PUBLISHED RESULTS, not a search for an edge.",
+         "  Quotes are matched at the LAST NANOSECOND of the bar: the fill is",
+         "  at its close and the bar is stamped at its START.",
          "  The modelled fill -- close +/- one tick, plus a flat",
          f"  ${MEASURED_FRICTION:.2f}/round trip measured on ONE session -- has never been",
          "  checked against what the market was showing at those moments.", ""]
