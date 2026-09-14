@@ -402,7 +402,13 @@ FIELDS = [
     "seconds_to_fill",
     # -- round-trip result, written on the SELL row only --------------------
     "entry_price", "exit_price", "trade_pnl", "trade_pct", "hold_minutes",
-    "reject_reason",        # populated only when IB refused the order outright
+    # THE DETAIL BEHIND THE STATUS, not evidence of a rejection. This comment
+    # used to say "populated only when IB refused the order outright" and that
+    # stopped being true the moment SKIPPED_PAUSED, SKIPPED_CONCURRENCY_CAP and
+    # SKIPPED_PRICE_BAND started writing their own reasons here. A reader that
+    # treats a non-empty reject_reason as "this was rejected" is wrong on three
+    # row shapes already; `status` is the field that says what happened.
+    "reject_reason",
     "macd", "macd_sig", "mfi", "rsi", "vol", "prev_vol", "trail_avg",
     # -- the trail this trade is running, in percent -------------------------
     # NOT the same thing as trail_avg above, which is a volume average. This is
