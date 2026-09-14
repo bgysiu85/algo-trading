@@ -375,6 +375,73 @@ def arm_rows(trades: list[dict], split: str) -> list[str]:
     return L
 
 
+# Pre-registered, before this table was ever printed, and copied from
+# `hold_cap_study.HOLD_BUCKETS` so the two are readable against each other. The
+# 1-bar bucket stands alone because that is the specific claim under test.
+HOLD_BUCKETS = (0, 1, 2, 3, 5, 10, 20, 60, 10_000)
+
+
+def by_hold(trades: list[dict], friction: float = 4.26) -> list[dict]:
+    """P/L by how many bars the trade ran, on whichever arm is passed.
+
+    `exit_candidates_20260911.md` ranks the re-entry-condition exit first on a
+    single finding: 1-bar trades were 107 of 485 at -$36.68 each, and removing
+    them took MCL from +$161 to +$4,086. That was measured on the 485-trade
+    cache, and the same document warns that three findings from that cache have
+    since inverted on a larger universe. This is the same table on the
+    point-in-time one.
+    """
+    out, lo = [], HOLD_BUCKETS[0]
+    total = sum(t["net"] - friction for t in trades) if trades else 0.0
+    for hi in HOLD_BUCKETS[1:]:
+        sel = [t for t in trades if lo <= t.get("bars_held", -1) < hi]
+        if sel:
+            net = sum(t["net"] - friction for t in sel)
+            out.append({"label": f"{lo}-{hi - 1}" if hi < 10_000 else f"{lo}+",
+                        "n": len(sel), "net": net, "per": net / len(sel),
+                        "share_n": len(sel) / len(trades),
+                        "share_net": (net / total) if total else float("nan")})
+        lo = hi
+    return out
+
+
+def hold_section(trades: list[dict]) -> list[str]:
+    """The table, with the arithmetic it invites explicitly disowned."""
+    L = ["HOW LONG THE TRADES RUN", ""]
+    if not trades:
+        return L + ["  No trades in this arm.", ""]
+    # BEFORE bucketing, not after. A missing field defaulting into the first
+    # bucket would report every trade as instantaneous -- a plausible-looking
+    # table with no measurement in it -- and an empty table reads as "no trades"
+    # rather than as "the engine did not tell us".
+    if not any(t.get("bars_held") is not None for t in trades):
+        return L + ["  The engine returned no bars_held. NOT reported as zero "
+                    "bars.", ""]
+    rows = by_hold(trades)
+    if not rows:
+        return L + ["  No trade carries a hold time.", ""]
+    L += [f"  {'bars':>8}{'trades':>9}{'net':>12}{'per':>9}{'% trades':>10}"
+          f"{'% of net':>10}"]
+    for r in rows:
+        L.append(f"  {r['label']:>8}{r['n']:>9}${acct(r['net'], 11, 0)}"
+                 f"${acct(r['per'], 8)}{100 * r['share_n']:>9.1f}%"
+                 f"{100 * r['share_net']:>9.1f}%")
+    one = next((r for r in rows if r["label"] == "1-1"), None)
+    L += ["",
+          "  A BUCKET'S NET IS NOT A RULE. Subtracting one row from the total",
+          "  is not the same as a rule that avoids those trades: an exit frees",
+          "  the slot, and the engine may enter again on the same name. The",
+          "  +$161 -> +$4,086 figure that motivates the re-entry exit is that",
+          "  subtraction, on a 485-trade cache. Read this table as where the",
+          "  money is, never as what removing a row would be worth.", ""]
+    if one:
+        L += [f"  Trades lasting exactly 1 bar: {one['n']:,} "
+              f"({100 * one['share_n']:.1f}% of trades),",
+              f"  {acct(one['per'], 8)}/trade, "
+              f"{100 * one['share_net']:.1f}% of the arm's net.", ""]
+    return L
+
+
 def tail(name: str, arms: dict, split: str) -> list[str]:
     """The closing sections, shared by every exit path from `render`.
 
@@ -384,7 +451,11 @@ def tail(name: str, arms: dict, split: str) -> list[str]:
     "not the published backtest" note is the reader who quotes one against a
     figure from a doc.
     """
-    L = ["SIGN STABILITY ACROSS THE FRICTION RANGE", ""]
+    # On the POINT-IN-TIME arm and nowhere else. The stage-2 arm's holds belong
+    # to trades that could not have been taken, and printing three hold tables
+    # invites reading the leaky one because it is first.
+    L = hold_section(arms.get("pit", []))
+    L += ["SIGN STABILITY ACROSS THE FRICTION RANGE", ""]
     for key, label in (("stage2", "STAGE-2"), ("pit", "POINT-IN-TIME"),
                        ("early", "EARLY ONLY")):
         s = {score(arms[key], split, fv)["net"] > 0 for _, fv in FRICTIONS}

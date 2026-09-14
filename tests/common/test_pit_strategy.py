@@ -503,3 +503,66 @@ def test_no_figure_from_a_superseded_h0_run_survives_in_the_report():
     # report having stopped quoting H0 at all
     assert acct(P.H0_PIT_NET / P.H0_PIT_TRADES, 9) in o
     assert P.H0_REFERENCE_SOURCE in o
+
+
+# --- how long the trades run ------------------------------------------------
+
+def hold_trades(spec):
+    """spec = [(bars_held, net)] -> rows shaped like the arm's trade dicts."""
+    return [{"bars_held": b, "net": n, "date": "2026-05-01", "symbol": "A"}
+            for b, n in spec]
+
+
+def test_the_hold_table_buckets_by_bars_held():
+    rows = P.by_hold(hold_trades([(1, 10.0), (1, 10.0), (4, 30.0), (90, 5.0)]),
+                     friction=0.0)
+    got = {r["label"]: (r["n"], r["net"]) for r in rows}
+    assert got["1-1"] == (2, 20.0)
+    assert got["3-4"] == (1, 30.0)
+    assert got["60+"] == (1, 5.0)
+    assert sum(r["n"] for r in rows) == 4
+
+
+def test_friction_is_charged_per_trade_in_the_hold_table():
+    """Not per bucket. A bucket of many small trades pays more friction than a
+    bucket of few large ones, and that is the whole point of the column."""
+    rows = P.by_hold(hold_trades([(1, 10.0), (1, 10.0)]), friction=4.26)
+    assert rows[0]["net"] == pytest.approx(20.0 - 2 * 4.26)
+
+
+def test_the_table_disowns_the_subtraction_it_invites():
+    """`exit_candidates` ranks the re-entry exit first on '+$161 -> +$4,086',
+    which is a bucket removed from a total rather than a rule simulated. An
+    exit frees the slot and the engine may enter again."""
+    o = "\n".join(P.hold_section(hold_trades([(1, -30.0)] * 40
+                                             + [(8, 20.0)] * 40)))
+    assert "A BUCKET'S NET IS NOT A RULE" in o
+    assert "frees" in o and "the slot" in o
+    assert "never as what removing a row would be worth" in o
+
+
+def test_the_one_bar_bucket_is_called_out_with_its_share_of_the_net():
+    """The claim under test is specifically about 1-bar trades, so the figure
+    that answers it must not have to be reconstructed from the table."""
+    o = "\n".join(P.hold_section(hold_trades([(1, -30.0)] * 40
+                                             + [(8, 20.0)] * 60)))
+    assert "Trades lasting exactly 1 bar: 40" in o
+    assert "40.0% of trades" in o
+
+
+def test_an_engine_without_bars_held_is_refused_not_bucketed_as_zero():
+    """A missing field defaulting into the 0-0 bucket would report every trade
+    as instantaneous -- a plausible-looking table with no measurement in it."""
+    o = "\n".join(P.hold_section([{"net": 1.0}, {"net": 2.0}]))
+    assert "NOT reported as zero bars" in o
+    assert "0-0" not in o
+
+
+def test_the_hold_table_is_the_point_in_time_arm_only():
+    """The stage-2 arm's holds belong to trades that could not have been taken.
+    Three hold tables invites reading the leaky one because it is first."""
+    o = out()
+    assert o.count("HOW LONG THE TRADES RUN") == 1
+    # one table, and it sits with the closing sections rather than beside any
+    # single arm's own block
+    assert o.index("HOW LONG THE TRADES RUN") < o.index("SIGN STABILITY")
