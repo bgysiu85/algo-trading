@@ -754,3 +754,70 @@ def test_the_config_row_text_is_plain_ascii(tmp_path):
     for field in ("reason", "reject_reason"):
         row[field].encode("ascii")          # raises if anything slipped through
     assert "--" in row["reject_reason"] or "-" in row["reject_reason"]
+
+
+# ---------------------------------------------------------------------------
+# Contract 1.4: the round trip's own arithmetic, published rather than implied.
+# trade_pnl is NET of commission and GROSS of measured slippage; one column
+# called "Result" made that unrecoverable by anyone reading the page.
+
+def test_gross_and_commission_are_derived_from_the_row(tmp_path):
+    """The trader stores entry, exit, qty and net. Gross follows from the
+    prices; the fee is the difference. Recomputing the fee from the schedule
+    would be a second calculation that agrees until a schedule changes."""
+    gross, commission = ui_bridge._round_trip_costs(4.00, 4.30, 100, 28.50)
+    assert gross == 30.0
+    assert commission == 1.5
+    assert round(gross - commission, 2) == 28.50
+
+
+def test_a_loss_still_reconciles(tmp_path):
+    gross, commission = ui_bridge._round_trip_costs(9.00, 8.60, 50, -21.20)
+    assert gross == -20.0
+    assert commission == 1.2
+    assert round(gross - commission, 2) == -21.20
+
+
+@pytest.mark.parametrize("entry,net,qty", [
+    (None, 28.5, 100),          # a BUY row, or a log from before entry_price
+    (4.0, None, 100),           # an open position's entry row
+    (4.0, 28.5, 0),             # nothing filled
+])
+def test_an_incomplete_row_reports_nothing_rather_than_guessing(entry, net, qty):
+    """A wrong number in this column is worse than a blank one: the page shows
+    it beside two others that are right, and the reader believes all three."""
+    assert ui_bridge._round_trip_costs(entry, 4.3, qty, net) == (None, None)
+
+
+def test_commission_is_published_as_a_positive_cost():
+    """Signed publication would make 'is this already negative?' a question
+    every consumer has to answer. The page renders the minus sign."""
+    _, commission = ui_bridge._round_trip_costs(4.00, 4.30, 100, 28.50)
+    assert commission > 0
+
+
+def test_the_published_fill_carries_the_whole_round_trip(tmp_path):
+    trader = _real_trader_with_real_adapters()
+    log = __import__("brokers.ibkr.trader", fromlist=["x"]).FillLog(tmp_path / "f.csv")
+    log.write(ts_et="2026-09-14 07:20:00", strategy="MCL", symbol="AAA",
+              action="SELL", status="FILLED", reason="trailing_stop",
+              filled_qty=100, fill_price=4.30, entry_price=4.00,
+              exit_price=4.30, trade_pnl=28.50)
+    log.close()
+    trader.log = log
+
+    fill = ui_bridge.UIBridge._fills_today(trader)[0]
+
+    assert fill["entry_price"] == 4.00
+    assert fill["price"] == 4.30
+    assert fill["gross_pnl"] == 30.0
+    assert fill["commission"] == 1.5
+    assert fill["trade_pnl"] == 28.50
+    assert round(fill["gross_pnl"] - fill["commission"], 2) == fill["trade_pnl"]
+
+
+def test_the_contract_version_says_1_4():
+    """The fields are additive and optional, so a 1.3 relay still accepts this
+    document — but the version has to move or nothing can tell the shapes
+    apart when it matters."""
+    assert ui_bridge.CONTRACT_VERSION == "1.4"
