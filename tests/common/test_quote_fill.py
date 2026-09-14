@@ -343,3 +343,90 @@ def test_the_scoped_price_is_printed_beside_the_universe_one():
     assert "10.0000" in text and "0.5000" in text
     assert "scoped to watchlist" in text
     assert "5.0% of the universe cost" in text
+
+
+# --- the defect this module shipped with ------------------------------------
+
+def test_the_quote_is_matched_at_the_END_of_the_bar():
+    """THE BUG THIS MODULE SHIPPED WITH, AND THE MOST DANGEROUS SHAPE AN ERROR
+    CAN TAKE HERE.
+
+    dbn_io's own first paragraph: "ts_event is the interval START. A bar
+    stamped 09:30 covers 09:30:00-09:30:59." The fill is at the CLOSE. The
+    first version matched the prevailing quote at the bar's STAMP -- a minute
+    early, on bars the rule selects for HAVING MOVED -- so the model appeared
+    to pay 12c above the offer and sell 5.75c below the bid, and repricing at
+    the book invented +$30.54 per trade. A correction that turns a losing
+    strategy profitable is exactly what nobody checks twice.
+    """
+    t = pd.Timestamp("2026-03-02 09:30:00", tz="UTC")
+    got = Q.fill_instant(t, "mcl")
+    assert got > t, "the quote is being matched before the fill happened"
+    assert got < t + pd.Timedelta(seconds=60), (
+        "the match instant reaches into the NEXT bar, which is the same "
+        "off-by-one in the other direction")
+    assert got == t + pd.Timedelta(seconds=60) - pd.Timedelta(nanoseconds=1)
+
+
+def test_the_bar_length_follows_the_strategys_own():
+    from strategy.mc5 import mc5 as MC5
+    assert Q.BAR_SECONDS["mc5"] == MC5.BAR_MINUTES * 60
+    assert Q.BAR_SECONDS["mcl"] == 60
+    t = pd.Timestamp("2026-03-02 09:30:00", tz="UTC")
+    assert Q.fill_instant(t, "mc5") - t == pd.Timedelta(
+        minutes=MC5.BAR_MINUTES) - pd.Timedelta(nanoseconds=1)
+
+
+def test_a_quote_inside_the_bar_is_preferred_to_one_at_its_stamp(monkeypatch):
+    """THE BEHAVIOURAL VERSION. Two quotes, one at the bar's stamp and one just
+    before its close at a different price: the fill must be priced against the
+    later one."""
+    import math
+    from datetime import date, datetime, time as dtime, timedelta
+    from zoneinfo import ZoneInfo
+    ET = ZoneInfo("America/New_York")
+    D = date(2026, 3, 2)
+    idx = []
+    for d in (D - timedelta(days=1), D):
+        b = pd.Timestamp(datetime.combine(d, dtime(4, 0), tzinfo=ET))
+        idx += [(b + timedelta(minutes=i)).tz_convert("UTC") for i in range(330)]
+    close = [4.0 + 0.004 * i + 0.30 * math.sin(2 * math.pi * i / 40)
+             for i in range(len(idx))]
+    vol = [130_000.0 if i % 3 == 0 else 40_000.0 for i in range(len(idx))]
+    df = pd.DataFrame({"symbol": "AAA", "open": close,
+                       "high": [c + 0.02 for c in close],
+                       "low": [c - 0.02 for c in close],
+                       "close": close, "volume": vol},
+                      index=pd.DatetimeIndex(idx))
+    monkeypatch.setattr("common.dbn_io.read_dbn", lambda p: df)
+
+    # A quote at every bar's stamp priced at 1.00/1.02, and one 59s later at
+    # 9.00/9.02. Matching at the stamp picks the first; matching at the close
+    # picks the second, and the two are not confusable.
+    rows = []
+    for ts in idx:
+        rows.append({"ts": ts, "symbol": "AAA", "bid": 1.00, "ask": 1.02,
+                     "bid_sz": 100.0, "ask_sz": 100.0})
+        rows.append({"ts": ts + pd.Timedelta(seconds=59), "symbol": "AAA",
+                     "bid": 9.00, "ask": 9.02, "bid_sz": 100.0,
+                     "ask_sz": 100.0})
+    quotes = pd.DataFrame(rows).sort_values("ts").reset_index(drop=True)
+    monkeypatch.setattr("common.friction_quotes.quotes_for_date",
+                        lambda *a, **k: quotes)
+
+    fs = pd.Timestamp(f"{D.isoformat()}T04:00:00-05:00").tz_convert(
+        "UTC").isoformat()
+    _day, out, _err = Q.run_day(([f"{D.isoformat()}.dbn"], D.isoformat(),
+                                 [{"symbol": "AAA", "date": D.isoformat(),
+                                   "first_seen": fs}], "/archive"))
+    priced = [r for r in out if r.get("covered")]
+    assert priced, "nothing was priced; the test proves nothing"
+    assert all(r["bid"] == 9.00 for r in priced), (
+        "the fill was priced against the quote at the bar's STAMP, one bar "
+        "before the close it is meant to price")
+
+
+def test_the_report_states_where_in_the_bar_the_quote_is_taken():
+    rows = Q.enrich(both())
+    out = "\n".join(Q.render(rows, Q.pairs(rows), 10, 8, 1.0, 1))
+    assert "LAST NANOSECOND" in out and "stamped at its START" in out
