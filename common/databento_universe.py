@@ -301,6 +301,13 @@ def main(argv=None) -> int:
 
     client = client_probe
     todo, usd, nbytes, skipped, empty, short = [], 0.0, 0, 0, 0, []
+    # A CHUNK WHOSE ESTIMATE FAILED IS NOT ONE OF THE FOUR OUTCOMES BELOW.
+    # It was counted in none of them, printed once mid-loop, and the run then
+    # exited 0 reporting "$0.0000" -- so a window reaching past what the
+    # dataset holds looked exactly like a pull with nothing left to fetch.
+    # That is the same two-states-one-report defect as the zero-chunk case,
+    # one level further down.
+    unpriced: list[tuple[str, str]] = []
     for label, lo, hi in chunks:
         out = chunk_path(root, a.dataset, a.schema, label)
         if out.exists():
@@ -315,7 +322,9 @@ def main(argv=None) -> int:
             c = float(client.metadata.get_cost(**kw))
             b = int(client.metadata.get_billable_size(**kw))
         except Exception as e:  # noqa: BLE001
-            print(f"  {label}  ESTIMATE FAILED: {_scrub(e)}")
+            msg = _scrub(e)
+            print(f"  {label}  ESTIMATE FAILED: {msg}")
+            unpriced.append((label, msg))
             continue
         if b == 0:
             # A market holiday inside a weekday chunk, or a symbol-day the
@@ -340,12 +349,24 @@ def main(argv=None) -> int:
     print(f"\nalready on disk, skipped : {skipped}")
     print(f"partial, to re-fetch     : {len(short)}")
     print(f"empty (holiday/no data)  : {empty}")
+    print(f"ESTIMATE FAILED          : {len(unpriced)}")
     print(f"to download              : {len(todo)}")
     print(f"ESTIMATED SIZE           : {nbytes/1e6:,.1f} MB")
     print(f"ESTIMATED COST           : ${usd:,.4f}")
 
+    if unpriced and any("available_end" in m for _lbl, m in unpriced):
+        print("\n  A chunk asked for a window reaching past what the dataset"
+              "\n  holds. On the CURRENT session that is normal and temporary:"
+              "\n  the bound is a TIMESTAMP, not a date, so 04:00-09:30 cannot"
+              "\n  be priced until the session has run past 09:30 ET. Re-run"
+              "\n  after it closes; a narrower --window would be fetched under"
+              "\n  a different label and would not be seen by window_slices().")
+
     if not todo:
-        return 0
+        # EXIT NON-ZERO WHEN NOTHING WAS FETCHED *AND* SOMETHING FAILED. "No
+        # work to do" and "every chunk failed to price" both printed the same
+        # totals and both returned 0.
+        return 1 if unpriced else 0
     if usd > a.max_cost:
         sys.exit(f"\nABORTED: ${usd:,.2f} exceeds --max-cost ${a.max_cost:,.2f}.")
     if not a.confirm:

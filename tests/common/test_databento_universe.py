@@ -201,3 +201,83 @@ def test_a_window_covering_no_days_is_refused_not_reported_as_done(monkeypatch,
     msg = str(ex.value)
     assert "NOTHING TO DO" in msg
     assert "EXCLUSIVE" in msg, "the message must say which end is exclusive"
+
+
+def test_a_chunk_whose_estimate_failed_is_not_a_silent_success(monkeypatch,
+                                                               tmp_path):
+    """THE SAME DEFECT ONE LEVEL DOWN. A chunk whose estimate raised was
+    counted in none of the four outcome buckets, printed once mid-loop, and
+    the run exited 0 reporting "$0.0000" -- so a window reaching past what the
+    dataset holds looked exactly like a pull with nothing left to fetch.
+    """
+    import pytest
+
+    class Fake:
+        class metadata:
+            @staticmethod
+            def get_dataset_range(ds):
+                return {"start": "2024-07-01", "end": "2026-09-14"}
+
+            @staticmethod
+            def get_cost(**kw):
+                raise RuntimeError(
+                    "422 data_end_after_available_end: has data available up "
+                    "to '2026-09-14 12:30:00+00:00'")
+
+            @staticmethod
+            def get_billable_size(**kw):
+                raise RuntimeError("422 data_end_after_available_end")
+
+    monkeypatch.setattr(U, "require_databento", lambda: type(
+        "DB", (), {"Historical": staticmethod(lambda k: Fake())}))
+    monkeypatch.setattr(U, "_key", lambda: "x", raising=False)
+    rc = U.main(["--dataset", "XNAS.BASIC", "--schema", "ohlcv-1m",
+                 "--window", "04:00-09:30", "--start", "2026-09-14",
+                 "--end", "2026-09-15", "--archive", str(tmp_path),
+                 "--confirm"])
+    assert rc != 0, ("every chunk failed to price and the run still exited 0 "
+                     "-- indistinguishable from having nothing to fetch")
+
+
+def test_the_estimate_failure_count_is_in_the_summary(capsys, monkeypatch,
+                                                      tmp_path):
+    """Printed once mid-loop is not reported: the summary is what a person
+    reads, and it listed four outcomes that this one belongs to none of."""
+    import pytest
+
+    class Fake:
+        class metadata:
+            @staticmethod
+            def get_dataset_range(ds):
+                return {"start": "2024-07-01", "end": "2026-09-14"}
+
+            @staticmethod
+            def get_cost(**kw):
+                raise RuntimeError("422 data_end_after_available_end")
+
+            @staticmethod
+            def get_billable_size(**kw):
+                raise RuntimeError("422 data_end_after_available_end")
+
+    monkeypatch.setattr(U, "require_databento", lambda: type(
+        "DB", (), {"Historical": staticmethod(lambda k: Fake())}))
+    monkeypatch.setattr(U, "_key", lambda: "x", raising=False)
+    U.main(["--dataset", "XNAS.BASIC", "--schema", "ohlcv-1m",
+            "--window", "04:00-09:30", "--start", "2026-09-14",
+            "--end", "2026-09-15", "--archive", str(tmp_path), "--confirm"])
+    out = capsys.readouterr().out
+    assert "ESTIMATE FAILED          : 1" in out
+    # and the live-session case is explained rather than left as a 422
+    assert "TIMESTAMP, not a date" in out
+    assert "different label" in out, (
+        "a narrower --window is fetched under a label window_slices() does "
+        "not glob, and that trap has to be named")
+
+
+def test_the_degraded_day_list_was_not_renamed_out_from_under_itself():
+    """`bad` already meant per-chunk degraded days inside the download loop.
+    A second `bad` for failed estimates would have shadowed it and corrupted
+    the manifest's `degraded_days` silently."""
+    src = Path("common/databento_universe.py").read_text(encoding="utf-8")
+    assert '"degraded_days": bad,' in src
+    assert "unpriced.append" in src
