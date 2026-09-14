@@ -122,6 +122,19 @@ H0_KNOWABLE_OFFERED = 1_394
 H0_REFERENCE_SOURCE = ("var/reports/pit_h0.txt, 2026-09-14, "
                        "daily=38/repaired=6,132")
 
+
+def h0_late_qualifiers() -> float:
+    """What H0 says the names the feed surfaces after 04:30 are worth.
+
+    AS SCREENED minus KNOWABLE, per trade, at $4.26. DERIVED from the block
+    above rather than typed into the prose that quotes it: the previous value
+    lived as a literal `$(1.14)` inside a report line, which put it outside
+    everything the staleness guard can see, and it survived a refresh that
+    moved it to $(1.35).
+    """
+    return (H0_PIT_NET / H0_PIT_TRADES
+            - H0_KNOWABLE_NET / H0_KNOWABLE_TRADES)
+
 # The warm-up the published backtests use, imported rather than restated: 2
 # sessions total means the target day plus one prior. If cache_io changes, this
 # changes with it.
@@ -574,9 +587,14 @@ def render(name: str, arms: dict, suppressed: dict, counts: dict,
               f"  ALL NAMES      {acct(pit['per'], 8)}/trade over "
               f"{pit['n']:,}",
               f"  difference     {acct(early['per'] - pit['per'], 8)}", "",
-              "  H0 found the late qualifiers worth $(1.14), i.e. nothing. If",
-              "  this differs, the strategy is selecting on something the",
-              "  screen's ordering already carries.", ""]
+              # DERIVED, not typed. This line carried a hardcoded $(1.14) from
+              # the 5,021-day H0 -- outside the H0_* block, so the staleness
+              # guard never saw it, and it survived a refresh that moved it to
+              # $(1.35). A figure quoted in prose is still a figure.
+              f"  H0 found the late qualifiers worth "
+              f"{acct(h0_late_qualifiers(), 7)}. If this differs, the",
+              "  strategy is selecting on something the screen's ordering",
+              "  already carries.", ""]
 
     return L + tail(name, arms, split)
 

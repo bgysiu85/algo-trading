@@ -21,6 +21,7 @@ import pandas as pd
 import pytest
 
 from common import pit_strategy as P
+from common.report_fmt import acct
 from strategy.mcl import mcl as MCL
 from strategy.mc5 import mc5 as MC5
 
@@ -473,3 +474,32 @@ def test_the_knowable_reference_is_internally_consistent():
     # A name is only in the KNOWABLE variant if it was on the list by 04:30, so
     # its denominator is a subset of the universe -- never the whole thing.
     assert P.H0_KNOWABLE_OFFERED <= P.H0_PIT_OFFERED
+
+
+def test_the_late_qualifier_line_is_derived_not_typed():
+    """It carried a hardcoded $(1.14) from the 5,021-day H0 -- a figure quoted
+    in prose, which puts it outside everything the staleness guard can see. It
+    survived a refresh that moved it to $(1.35)."""
+    assert P.h0_late_qualifiers() == pytest.approx(
+        P.H0_PIT_NET / P.H0_PIT_TRADES
+        - P.H0_KNOWABLE_NET / P.H0_KNOWABLE_TRADES)
+    o = out()
+    assert "late qualifiers worth" in o
+    assert acct(P.h0_late_qualifiers(), 7) in o
+    assert "1.14" not in o, "the stale literal is back"
+
+
+def test_no_figure_from_a_superseded_h0_run_survives_in_the_report():
+    """Every H0 number the report quotes has to come from the H0_* block, so
+    one refresh moves all of them together. Checked on the RENDERED text rather
+    than the source, because that is where a stale literal is indistinguishable
+    from a derived value -- and because the source legitimately names the old
+    figures in the comments explaining why they are gone."""
+    o = out()
+    for stale in ("15.75", "14.70", "14.40", "4,590", "5,021", "72,306",
+                  "10,612", "1.14"):
+        assert stale not in o, f"{stale} is a figure from a superseded H0 run"
+    # and the live ones are present, so the check above cannot pass by the
+    # report having stopped quoting H0 at all
+    assert acct(P.H0_PIT_NET / P.H0_PIT_TRADES, 9) in o
+    assert P.H0_REFERENCE_SOURCE in o
