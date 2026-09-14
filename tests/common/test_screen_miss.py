@@ -233,9 +233,9 @@ def test_an_unrepaired_close_is_a_different_finding_from_a_real_shortfall():
              "prior_source": "repaired"}]
     o = out(rows)
     assert "DID THE REPAIR REACH THEM" in o
-    assert "1 of 2 CHANGE failure(s) are still on an UNREPAIRED close" in o
+    assert "1 of 2 CHANGE failure(s) still divide by a 20:00 close" in o
     assert "Nearest miss: TP" in o and "0.55pp short" in o
-    assert "it is the" in o and "outstanding defect" in o
+    assert "still carries the confirmed defect" in o
 
 
 def test_a_nearest_miss_on_a_repaired_close_is_not_blamed_on_the_divisor():
@@ -243,9 +243,9 @@ def test_a_nearest_miss_on_a_repaired_close_is_not_blamed_on_the_divisor():
              "change": 18.0, "volume": 4e6, "close_at_best": 5.0,
              "prior_source": "repaired"}]
     o = out(rows)
-    assert "IS on a repaired close" in o
-    assert "Extending the repair cannot recover it" in o
-    assert "outstanding defect" not in o
+    assert "inside the construction's own" in o
+    assert "LISTING VENUE" in o
+    assert "Extending the repair cannot recover it" not in o
 
 
 def test_the_prior_source_column_is_printed_per_name():
@@ -267,4 +267,52 @@ def test_a_row_with_no_recorded_source_reads_unknown_not_repaired():
              "change": 5.0, "volume": 4e6, "close_at_best": 5.0}]
     o = out(rows)
     assert "unknown" in [l for l in o.splitlines() if "  Q " in l][0]
-    assert "1 of 1 CHANGE failure(s) are still on an UNREPAIRED close" in o
+    assert "1 of 1 CHANGE failure(s) still divide by a 20:00 close" in o
+
+
+def test_a_repaired_divisor_is_never_reported_as_a_correct_one():
+    """The first version of this section read `repaired` as "this divisor is
+    right" and told the reader extending the repair could not recover the
+    nearest miss. It cannot support that: the construction takes the first
+    print in the 16:00 minute as the cross, and on a name whose cross is on
+    another venue that print is an ordinary trade."""
+    rows = [{"date": "2026-09-10", "symbol": "OK", "why": "CHANGE",
+             "change": 19.45, "volume": 4e6, "close_at_best": 5.0,
+             "prior_source": "repaired"}]
+    o = out(rows)
+    assert "says where a divisor came from, NOT that it is right" in o
+    # The two sentences the first version printed, verbatim. Substring matching
+    # on fragments like "cannot recover" is useless here -- the corrected text
+    # contains that phrase inside a negation, and a test that cannot tell a
+    # claim from its denial is the defect it is meant to catch.
+    for gone in ("so the shortfall is",
+                 "a property of this tape's prints rather than of the divisor",
+                 "Extending the repair cannot recover it"):
+        assert gone not in o, f"the overclaiming sentence is back: {gone}"
+    assert "NOT yet evidence" in o and "LISTING VENUE" in o
+
+
+def test_the_construction_record_travels_in_the_report_not_on_stdout():
+    """The emitted file asks for the residual to be stated wherever these
+    closes are used. A reader holding only the .txt was being asked to trust
+    `repaired` with no sight of what the construction was accepted at."""
+    class Rep:
+        attrs = {"construction": "auction_else_last",
+                 "relaxed": {"achieved": "19/24", "bar": "22/24",
+                             "by_venue": {"AMEX": "0/3", "NASDAQ": "17/19",
+                                          "NYSE": "2/2"}}}
+    rows = [{"date": "2026-09-10", "symbol": "OK", "why": "CHANGE",
+             "change": 19.45, "volume": 4e6, "close_at_best": 5.0,
+             "prior_source": "repaired"}]
+    o = "\n".join(M.render(rows, CFG, 4, 1.0, Rep()))
+    assert "THE CONSTRUCTION'S OWN RECORD" in o
+    assert "19/24" in o
+    assert "AMEX 0/3" in o
+    assert "NOT ONE ROW MATCHED" in o
+
+
+def test_no_construction_record_means_no_section_rather_than_an_empty_one():
+    rows = [{"date": "2026-09-10", "symbol": "OK", "why": "CHANGE",
+             "change": 19.45, "volume": 4e6, "close_at_best": 5.0,
+             "prior_source": "repaired"}]
+    assert "THE CONSTRUCTION'S OWN RECORD" not in out(rows)
