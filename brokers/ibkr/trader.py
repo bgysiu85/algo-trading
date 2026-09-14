@@ -76,7 +76,7 @@ try:
 except ImportError:  # pragma: no cover
     sys.exit("ib_async not installed.  pip install ib_async pandas")
 
-from common import notify
+from common import notify, ui_bridge
 from common import strategy_adapter as SA
 from common.commissions import order_cost
 from strategy.mcl import mcl as S
@@ -404,6 +404,18 @@ FIELDS = [
     "entry_price", "exit_price", "trade_pnl", "trade_pct", "hold_minutes",
     "reject_reason",        # populated only when IB refused the order outright
     "macd", "macd_sig", "mfi", "rsi", "vol", "prev_vol", "trail_avg",
+    # -- the trail this trade is running, in percent -------------------------
+    # NOT the same thing as trail_avg above, which is a volume average. This is
+    # the trailing-stop width, and it is here because the portal can change it
+    # mid-session: without the column, a session where someone moved the trail
+    # from a browser produces rows indistinguishable from rows taken at the
+    # default, in the one ledger every downstream reader uses. Anything later
+    # comparing the live record against a 5% backtest would then be comparing
+    # two populations under one label.
+    #
+    # It cannot be reconstructed afterwards -- the rows that need it are the
+    # ones written during the experiment.
+    "trail_pct",
 ]
 
 
@@ -490,6 +502,13 @@ class MCLPaperTrader:
         self._paced_warned = False
         self._empty_warned_at = 0.0
         self._stop = False
+        # -- the portal (algo-trading-ui), off unless UI_RELAY_URL is set ----
+        # `paused` stops NEW ENTRIES only: an open position is still managed,
+        # its trail still runs, and its exit still fires. Anything else would
+        # mean a button in a browser could leave a position unprotected.
+        self.paused = False
+        self.disabled_strategies: set[str] = set()
+        self.ui = None                  # common.ui_bridge.UIBridge, or None
         # IB delivers the real rejection reason on the error event, not in
         # trade.log — without this we only ever see "Inactive".
         self._errors: dict[int, str] = {}
@@ -911,6 +930,25 @@ class MCLPaperTrader:
 
     # -- order placement --------------------------------------------------
 
+    @staticmethod
+    def _trail_for(st) -> float | None:
+        """The trailing-stop width this row's trade is running, or None.
+
+        On an EXIT the position's own trail is the truth: it is the one that
+        produced the stop, and it can differ from the strategy's current value
+        because the portal may have changed the latter mid-session. On an ENTRY
+        the strategy's value is the truth, because it is what stamps the
+        Position moments later -- see the Position construction in step_symbol,
+        which reads the same attribute.
+
+        None rather than a default when it cannot be known: a wrong number in
+        this column is worse than an empty one, because a reader would believe
+        it.
+        """
+        if getattr(st, "position", None) is not None:
+            return getattr(st.position, "trail_pct", None)
+        return getattr(getattr(st, "strategy", None), "trail_pct", None)
+
     async def marketable_limit(self, st: SymbolState, action: str, qty: int,
                                ref_close: float, reason: str, detail: dict,
                                closing: "Position | None" = None,
@@ -938,6 +976,7 @@ class MCLPaperTrader:
                         trade_pct=round(pct, 3),
                         hold_minutes=round(held, 1))
 
+        trail_pct = self._trail_for(st)
         bid, ask = self.quote(st)
         spread = (ask - bid) if (bid == bid and ask == ask) else float("nan")
         spread_pct = (spread / ask * 100.0) if (ask == ask and ask > 0) else float("nan")
@@ -953,6 +992,7 @@ class MCLPaperTrader:
                            reason=reason, ref_close=ref_close,
                            ref_kind=ref_kind, bid=bid, ask=ask,
                            spread=spread, spread_pct=spread_pct, qty=qty,
+                           trail_pct=trail_pct,
                            status="NO_QUOTE", **detail)
             return None
 
@@ -964,7 +1004,7 @@ class MCLPaperTrader:
                    symbol=st.symbol, action=action, reason=reason,
                    ref_close=ref_close, ref_kind=ref_kind, bid=bid, ask=ask,
                    spread=spread, spread_pct=spread_pct, limit_sent=limit,
-                   qty=qty, **detail)
+                   qty=qty, trail_pct=trail_pct, **detail)
 
         if self.dry_run:
             # Assume the marketable limit fills at its own price. That is the
@@ -1332,6 +1372,23 @@ class MCLPaperTrader:
         if not sig.long_entry:
             return
 
+        # Stopped from the portal. Recorded in the fill log like every other
+        # declined entry, so a later reader can see the signal fired and why it
+        # was not taken -- an absence would look like the strategy never fired.
+        if self.paused or st.strategy.name in self.disabled_strategies:
+            why = ("paused from the portal" if self.paused
+                   else f"{st.strategy.name} disabled from the portal")
+            LOG.info("%s %s entry signal declined — %s",
+                     st.strategy.name, st.symbol, why)
+            self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                           strategy=self._name_of(st),
+                           symbol=st.symbol, action="BUY",
+                           reason="entry_signal", ref_close=round(sig.close, 4),
+                           ref_kind="signal_close",
+                           status="SKIPPED_PAUSED", reject_reason=why,
+                           **detail)
+            return
+
         # Portfolio-level gate. Everything above this point is about THIS
         # symbol; this is the only check that looks at the account as a whole.
         # The bar is already marked evaluated above, which is correct: the
@@ -1482,6 +1539,16 @@ class MCLPaperTrader:
                     await self.step_symbol(st, now_et)
                 except Exception as e:  # noqa: BLE001
                     LOG.exception("%s step failed: %s", st.symbol, e)
+
+            # The portal, if one is configured. It throttles itself, runs its
+            # network calls off this thread, and swallows its own failures --
+            # a relay that is down must be invisible from in here.
+            if self.ui is not None:
+                try:
+                    await self.ui.tick(self, now_et)
+                except Exception as e:  # noqa: BLE001
+                    LOG.warning("portal tick failed: %s", e)
+
             await asyncio.sleep(LOOP_SLEEP_S)
 
         open_pos = [s.symbol for s in self.states.values() if s.position]
@@ -1553,6 +1620,15 @@ async def main_async(args):
     trader = MCLPaperTrader(ib, wl, log, args.dry_run, tg=tg,
                             strategies=strategies,
                             max_positions=getattr(args, "max_positions", None))
+    # The portal, when one is configured. Attached AFTER the DU check above,
+    # so a bridge can never exist on a session that failed it.
+    trader.ui = ui_bridge.UIBridge.from_env(dry_run=bool(args.dry_run))
+    if trader.ui is not None:
+        trader.ui.note_account(accounts[0] if accounts else "")
+        tg.observer = trader.ui.record_message
+        LOG.info("portal: publishing to %s as %s", trader.ui.base_url,
+                 trader.ui.agent_id)
+
     # Read the cap back OFF THE TRADER rather than off the constant or the
     # argument. Those can drift from what is running; this cannot.
     LOG.info("strategies: %s (one book, cap %d across all of them)%s",
