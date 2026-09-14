@@ -79,7 +79,7 @@ ET = ZoneInfo("America/New_York")
 # rule actually applies. The margin is computed against THIS number, so a
 # change to the strategy that is not reflected here fails the test below rather
 # than quietly measuring against a stale threshold.
-CLAUSES = {
+CLAUSES_MCL = {
     "vol_multiple": ("volume / prev_vol", "VOL_MULTIPLE", 3.0),
     "floor_margin": ("prev_vol / trail_avg", "FLOOR_FRACTION", 0.5),
     "macd_margin": ("macd - macd_sig", None, 0.0),
@@ -87,6 +87,26 @@ CLAUSES = {
     "rsi_slope": ("rsi - rsi[3]", None, 0.0),
     "mfi_slope": ("mfi - mfi[3]", None, 0.0),
 }
+
+# MC5's ENTIRE entry, on 5-minute bars. Three clauses, and NONE OF THEM IS A
+# VOLUME TEST: `mc5.signals()` reads only `close`, and `volume` appears once in
+# the whole module, writing a field into a log row. So the "volume headroom"
+# family that MCL carries has no member here at all -- which is the finding,
+# not an omission in this table.
+CLAUSES_MC5 = {
+    "rsi_roc": ("rsi rate of change over 3 bars, %", "ENTRY_RSI_ROC_PCT", 5.0),
+    "ema_gap": ("ema9 - ema21", None, 0.0),
+    "macd_margin": ("macd - macd_sig", None, 0.0),
+}
+
+CLAUSES_BY_STRATEGY = {"mcl": CLAUSES_MCL, "mc5": CLAUSES_MC5}
+
+# The bar the clauses are computed on. PRINTED IN EVERY REPORT, because a
+# `dollar_vol_bar` measured over five minutes and one measured over one minute
+# are two different quantities under one column name -- which is this project's
+# most persistent defect, and putting both strategies in one module is exactly
+# how it would arrive here.
+BAR_MINUTES = {"mcl": 1, "mc5": 5}
 
 # "Within a hair", stated in each column's own units and fixed in advance.
 # A ratio clause is a hair over when it is within 10% of its multiplier; a
@@ -99,6 +119,8 @@ HAIR = {
     "macd_level": ("under 1bp of price", lambda r: abs(r["macd_level_bps"]) < 1.0),
     "rsi_slope": ("under 0.1 RSI points", lambda r: r["rsi_slope"] < 0.1),
     "mfi_slope": ("under 0.1 MFI points", lambda r: r["mfi_slope"] < 0.1),
+    "rsi_roc": ("within 10% of 5.0%", lambda r: r["rsi_roc"] < 5.5),
+    "ema_gap": ("under 1bp of price", lambda r: abs(r["ema_gap_bps"]) < 1.0),
 }
 
 # Absolute liquidity levels, fixed before the run. EVERY row is printed.
@@ -154,14 +176,22 @@ def run_day(args: tuple) -> tuple:
             continue
         if not trades:
             continue
-        sig = MCL.signals(df)
-        ctx = frame_ctx(sig)
-        for t in trades:
-            out.append(margin_row(sig, ctx, t, rec["symbol"], day))
+        if strategy == "mc5":
+            from strategy.mc5 import mc5 as MC5
+            sig = MC5.signals(MC5.to_5m(df))
+            for t in trades:
+                out.append(mc5_row(sig, t, rec["symbol"], day))
+        else:
+            sig = MCL.signals(df)
+            ctx = frame_ctx(sig)
+            for t in trades:
+                out.append(margin_row(sig, ctx, t, rec["symbol"], day,
+                                      CLAUSES_MCL))
     return day, out, ""
 
 
-def margin_row(sig, ctx, t, symbol: str, day: str) -> dict:
+def margin_row(sig, ctx, t, symbol: str, day: str,
+               clauses: dict | None = None) -> dict:
     """One trade's row, located or not. Split out so the NOT-located branch can
     be tested: it is the branch that would otherwise shorten the table in
     silence, and a population that changes without saying so is the failure
@@ -178,10 +208,46 @@ def margin_row(sig, ctx, t, symbol: str, day: str) -> dict:
     m = features_at(sig, int(i), ctx=ctx)
     row["located"] = True
     row["entry_price"] = float(t.entry_price)
-    for col in CLAUSES:
+    for col in (clauses or CLAUSES_MCL):
         row[col] = m.get(col)
+    row["bar_volume"] = float(sig["volume"].iloc[i])
     row["dollar_vol_bar"] = m.get("dollar_vol_bar")
     row["dollar_vol_session"] = m.get("dollar_vol_session")
+    return row
+
+
+def mc5_row(sig, t, symbol: str, day: str) -> dict:
+    """One MC5 trade's row, computed on the FIVE-MINUTE frame it entered on.
+
+    `features_at` is not used and must not be: it is MCL's 1-minute feature
+    set, and running it against a 5-minute frame would compute a table the
+    features were not written for and print it as a measurement. The three
+    columns here are MC5's own three clauses, read off its own signal frame.
+    """
+    import pandas as pd
+
+    row = {"symbol": symbol, "date": day,
+           "gross": (t.exit_price - t.entry_price) * QTY}
+    i = sig.index.searchsorted(pd.Timestamp(t.entry_time))
+    if i >= len(sig) or sig.index[i] != pd.Timestamp(t.entry_time):
+        row["located"] = False
+        return row
+    r = sig.iloc[i]
+    row["located"] = True
+    row["entry_price"] = float(t.entry_price)
+    row["rsi_roc"] = float(r["rsi_roc"])
+    row["ema_gap"] = float(r["ema_fast"]) - float(r["ema_slow"])
+    row["macd_margin"] = float(r["macd"]) - float(r["macd_sig"])
+    row["bar_volume"] = float(r["volume"])
+    row["dollar_vol_bar"] = float(r["close"]) * float(r["volume"])
+    # Session to date, from this frame's own bars on this ET day. Computed
+    # here rather than imported because `features_at`'s version is a
+    # 1-minute prefix sum and this one is a 5-minute one.
+    local = sig.index.tz_convert(ET)
+    day_of = local[i].date()
+    same = sig[[d == day_of for d in local.date]]
+    upto = same[same.index <= sig.index[i]]
+    row["dollar_vol_session"] = float((upto["close"] * upto["volume"]).sum())
     return row
 
 
@@ -195,7 +261,8 @@ def derive(rows: list[dict]) -> list[dict]:
     for r in rows:
         px = r.get("entry_price") or 0.0
         for src, dst in (("macd_margin", "macd_bps"),
-                         ("macd_level", "macd_level_bps")):
+                         ("macd_level", "macd_level_bps"),
+                         ("ema_gap", "ema_gap_bps")):
             v = r.get(src)
             r[dst] = (v / px * 10_000.0) if (px and v is not None) else None
     return rows
@@ -222,7 +289,8 @@ def population(rows: list[dict], strategy: str, n_days: int) -> list[str]:
     return L + [""]
 
 
-def absolute_section(rows: list[dict]) -> list[str]:
+def absolute_section(rows: list[dict], clauses: dict = CLAUSES_MCL,
+                     strategy: str = "mcl") -> list[str]:
     """The raw figures, against the rule's own thresholds.
 
     THIS IS THE SECTION THAT ANSWERS "SHOULD THESE HAVE BEEN ENTERED AT ALL".
@@ -234,7 +302,7 @@ def absolute_section(rows: list[dict]) -> list[str]:
          "  in advance, per column, and printed beside its definition.", "",
          f"  {'clause':<14}{'rule':<26}{'p10':>12}{'p50':>12}{'p90':>12}"
          f"{'a hair':>9}", ""]
-    for col, (expr, const, thr) in CLAUSES.items():
+    for col, (expr, const, thr) in clauses.items():
         vals = sorted(r[col] for r in rows
                       if r.get(col) is not None and r[col] == r[col])
         if not vals:
@@ -249,15 +317,47 @@ def absolute_section(rows: list[dict]) -> list[str]:
                  else f"{100.0 * hair / len(rows):7.1f}%")
         L.append(f"  {col:<14}{rule:<26}{q(.10):>12,.3f}{q(.50):>12,.3f}"
                  f"{q(.90):>12,.3f}{shown:>9}")
-    if any(hair_count(rows, c) is None for c in CLAUSES):
+    if any(hair_count(rows, c) is None for c in clauses):
         L += ["",
               "  *** `n/a` MEANS THE HAIR TEST COULD NOT BE EVALUATED, not that",
               "      no entry was marginal. A column it needs was never",
               "      computed. Treat that row as absent, not as zero. ***"]
     L += [""]
-    for col, (label, _t) in HAIR.items():
-        L.append(f"    a hair, {col:<14} = {label}")
+    for col in clauses:
+        L.append(f"    a hair, {col:<14} = {HAIR[col][0]}")
     L += [""]
+
+    # THE BAR THAT DID NOT TRADE. MCL cannot enter on one by construction --
+    # `c_vol` needs volume >= 3 x prev_vol AND prev_vol > 0, so a zero-volume
+    # bar fails and a zero PREVIOUS bar fails too. MC5 has no such clause, and
+    # the archive frames are gap-filled: a dead minute is PRESENT with volume 0
+    # and the prior close repeated, so a 5-minute bucket of five dead minutes
+    # survives resampling as O=H=L=C with volume 0. Its EMA, MACD and RSI are
+    # then computed on repeated closes.
+    #
+    # A count of zero here is therefore two different facts depending on the
+    # strategy, and the report says which it is rather than printing 0 twice.
+    vols = [r["bar_volume"] for r in rows if r.get("bar_volume") is not None]
+    if vols:
+        L += ["  DID THE ENTRY BAR TRADE AT ALL?", ""]
+        for lo, lab in ((0, "zero volume"), (1, "under 100 shares"),
+                        (100, "under 1,000 shares"),
+                        (1_000, "under 10,000 shares")):
+            hi = {0: 1, 1: 100, 100: 1_000, 1_000: 10_000}[lo]
+            n = sum(1 for v in vols if v < hi)
+            L.append(f"    {lab:<22} {n:>7,}   {100.0*n/len(vols):5.1f}%")
+        if strategy == "mcl":
+            L += ["",
+                  "    Zero is STRUCTURAL for MCL, not measured: `c_vol` needs",
+                  "    volume >= 3 x prev_vol with prev_vol > 0, so neither a",
+                  "    dead bar nor a dead previous bar can pass.", ""]
+        else:
+            L += ["",
+                  "    MC5 HAS NO CLAUSE THAT COULD REFUSE THESE. `signals()`",
+                  "    reads only `close`. A 5-minute bucket of five dead",
+                  "    minutes arrives gap-filled as O=H=L=C with volume 0, and",
+                  "    its EMA, MACD and RSI are computed on repeated closes.",
+                  ""]
 
     # And the absolute liquidity, which no clause looks at at all.
     for col, name in (("dollar_vol_bar", "DOLLARS ON THE ENTRY BAR"),
@@ -324,7 +424,7 @@ def pct_ranks(rows: list[dict], col: str) -> None:
             r[f"{col}_pct"] = 100.0 * bisect.bisect_left(vals, v) / n
 
 
-def add_slack(rows: list[dict]) -> tuple[list[dict], list[str]]:
+def add_slack(rows: list[dict], clauses: dict = CLAUSES_MCL) -> tuple[list[dict], list[str]]:
     """`min_slack` and `binding`: the tightest clause on each entry.
 
     Returns (rows, the columns excluded for having no spread).
@@ -340,7 +440,7 @@ def add_slack(rows: list[dict]) -> tuple[list[dict], list[str]]:
     tightest would still rank 0 and the loosest 100.
     """
     usable, flat = [], []
-    for col in CLAUSES:
+    for col in clauses:
         pct_ranks(rows, col)
         seen = {r[col] for r in rows
                 if r.get(col) is not None and r[col] == r[col]}
@@ -460,9 +560,12 @@ def ladder_section(rows: list[dict]) -> list[str]:
 
 def render(rows: list[dict], strategy: str, n_days: int, elapsed: float,
            jobs: int) -> list[str]:
+    clauses = CLAUSES_BY_STRATEGY[strategy]
+    mins = BAR_MINUTES[strategy]
     L = ["BY HOW MUCH DID EACH ENTRY CLAUSE PASS?", "",
          f"  strategy {strategy.upper()}   outcome: net at "
          f"${MEASURED_FRICTION:.2f}/round trip   {QUANTILES} buckets",
+         f"  every column below is computed on {mins}-MINUTE BARS",
          f"  elapsed {elapsed:.1f}s on {jobs} worker(s)", "",
          "  PRE-REGISTERED: a wider margin over the threshold predicts a better",
          "  net per trade. CLEARS requires a bucket positive after friction in",
@@ -473,8 +576,8 @@ def render(rows: list[dict], strategy: str, n_days: int, elapsed: float,
         return L + ["NO ENTRY BAR WAS LOCATED. Nothing below can be computed.",
                     ""]
 
-    L += absolute_section(located)
-    _rows, flat = add_slack(located)
+    L += absolute_section(located, clauses, strategy)
+    _rows, flat = add_slack(located, clauses)
     L += binding_section(located, flat)
 
     # add_slack FIRST, then with_net: `with_net` copies each row whole, so the
@@ -486,21 +589,20 @@ def render(rows: list[dict], strategy: str, n_days: int, elapsed: float,
     L += ["EACH MARGIN AGAINST OUTCOME", "",
           "  Every column printed, nothing ranked, nothing omitted.", ""]
     verdicts: dict[str, str] = {}
-    for col in list(CLAUSES) + ["min_slack"]:
+    for col in list(clauses) + ["min_slack"]:
         sec, v = one_column(scored, col)
         L += sec
         verdicts[col] = v
 
     fams = {f for f, cols in FAMILIES.items()
-            if any(c in CLAUSES for c in cols)}
+            if any(c in clauses for c in cols)}
     L += ["MULTIPLICITY", "",
-          f"  {len(CLAUSES) + 1} columns x {QUANTILES} buckets x 2 halves = "
-          f"{(len(CLAUSES)+1) * QUANTILES * 2} comparisons.",
-          f"  Counted by family, the six clause columns are {len(fams)} "
-          f"famil(ies): {', '.join(sorted(fams))}.",
-          "  Three of them -- vol_multiple, floor_margin, macd_margin -- were",
-          "  already tested by entry_features on a DIFFERENT population. That",
-          "  is a second look at the same idea, not independent evidence.", ""]
+          f"  {len(clauses) + 1} columns x {QUANTILES} buckets x 2 halves = "
+          f"{(len(clauses)+1) * QUANTILES * 2} comparisons.",
+          f"  Counted by family, the clause columns are {len(fams)} "
+          f"famil(ies): {', '.join(sorted(fams)) or 'none that entry_features names'}.",
+          "  Columns entry_features already tested on a DIFFERENT population",
+          "  are a second look at the same idea, not independent evidence.", ""]
 
     L += ladder_section(scored)
 
@@ -539,10 +641,11 @@ def render(rows: list[dict], strategy: str, n_days: int, elapsed: float,
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    # MCL only. `features_at` is MCL's 1-minute feature set; running it against
-    # MC5's 5-minute frame would compute a table the features were not written
-    # for and print it as a measurement -- the same refusal entry_split makes.
-    p.add_argument("--strategy", default="mcl", choices=["mcl"])
+    # MC5 is measured on ITS OWN three clauses, off its own 5-minute signal
+    # frame. `features_at` is never run against it: that is MCL's 1-minute
+    # feature set, and pointing it at a 5-minute frame would compute a table
+    # the features were not written for and print it as a measurement.
+    p.add_argument("--strategy", default="mcl", choices=["mcl", "mc5"])
     p.add_argument("--pairs", default=PAIRS)
     p.add_argument("--archive", default=None)
     p.add_argument("--dataset", default="XNAS.BASIC")
