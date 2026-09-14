@@ -816,8 +816,149 @@ def test_the_published_fill_carries_the_whole_round_trip(tmp_path):
     assert round(fill["gross_pnl"] - fill["commission"], 2) == fill["trade_pnl"]
 
 
-def test_the_contract_version_says_1_4():
-    """The fields are additive and optional, so a 1.3 relay still accepts this
-    document — but the version has to move or nothing can tell the shapes
-    apart when it matters."""
-    assert ui_bridge.CONTRACT_VERSION == "1.4"
+def test_the_fill_fields_arrived_in_1_4():
+    """They are additive and optional, so an older relay still accepts these
+    documents — but the version has to move or nothing can tell the shapes
+    apart when it matters. Pinned by the fields rather than by the number, so
+    a later minor bump does not make this test a liar."""
+    from packaging.version import Version  # noqa: F401  (import guarded below)
+    assert tuple(int(x) for x in ui_bridge.CONTRACT_VERSION.split(".")) >= (1, 4)
+
+
+# ---------------------------------------------------------------------------
+# Contract 1.5: the bar size each strategy decides on.
+
+def test_each_strategy_publishes_the_bar_size_it_decides_on():
+    """The portal charts a symbol at this interval. Read off the adapter rather
+    than restated anywhere, so a strategy that changes its bar size drags the
+    chart with it — the same rule _from_module follows for every other
+    constant."""
+    from common import strategy_adapter as SA
+
+    trader = _real_trader_with_real_adapters()
+    doc = bridge(paper=True).build_state(trader, NOW)
+
+    published = {s["name"]: s["bar_minutes"] for s in doc["strategies"]}
+    for adapter in SA.build_all(["mcl", "mc5"]):
+        assert published[adapter.name] == adapter.bar_minutes
+
+
+def test_mcl_and_mc5_do_not_publish_the_same_bar_size():
+    """If they did, this test would pass while telling us nothing — and a
+    portal charting a 5-minute strategy on a 1-minute chart looks correct."""
+    from common import strategy_adapter as SA
+
+    mcl, mc5 = SA.build("mcl"), SA.build("mc5")
+    assert mcl.bar_minutes != mc5.bar_minutes, (
+        "these differ today; if they ever agree, the chart test above stops "
+        "being evidence of anything")
+
+
+def test_the_bar_size_arrived_in_1_5():
+    """Pinned by the floor, not the exact number: a later minor bump is an
+    addition, and a test that has to be edited for every addition gets edited
+    without being read."""
+    assert tuple(int(x) for x in ui_bridge.CONTRACT_VERSION.split(".")) >= (1, 5)
+
+
+# ---------------------------------------------------------------------------
+# Contract 1.6: when the round trip opened. The closing row records the exit
+# and the hold, never the entry time.
+
+def _log_with(tmp_path, rows):
+    T = __import__("brokers.ibkr.trader", fromlist=["x"])
+    log = T.FillLog(tmp_path / "f.csv")
+    for row in rows:
+        log.write(**row)
+    log.close()
+
+    class Trader:
+        pass
+    trader = Trader()
+    trader.log = log
+    return trader
+
+
+def test_the_entry_time_comes_from_the_row_that_opened_it(tmp_path):
+    """Exact, not derived: the BUY row has the real timestamp. hold_minutes is
+    stored to one decimal and would only ever be close."""
+    trader = _log_with(tmp_path, [
+        dict(ts_et="2026-09-14 07:21:37", strategy="MCL", symbol="AAA",
+             action="BUY", status="FILLED", filled_qty=100, fill_price=4.02),
+        dict(ts_et="2026-09-14 07:42:05", strategy="MCL", symbol="AAA",
+             action="SELL", status="FILLED", filled_qty=100, fill_price=3.88,
+             entry_price=4.02, exit_price=3.88, trade_pnl=-16.20,
+             hold_minutes=20.5, reason="trailing_stop"),
+    ])
+    closed = [f for f in ui_bridge.UIBridge._fills_today(trader)
+              if f["trade_pnl"] is not None][0]
+
+    assert closed["entry_ts_et"] == "07:21:37"
+    assert closed["ts_et"] == "07:42:05"
+
+
+def test_two_round_trips_in_one_symbol_pair_in_order(tmp_path):
+    """The second SELL must take the second BUY. Matching on symbol alone
+    without consuming the pairing would give both trades the first entry."""
+    rows = []
+    for i, (buy, sell) in enumerate([("07:05:00", "07:15:00"), ("08:10:00", "08:30:00")]):
+        rows.append(dict(ts_et=f"2026-09-14 {buy}", strategy="MCL", symbol="AAA",
+                         action="BUY", status="FILLED", filled_qty=100, fill_price=4.0))
+        rows.append(dict(ts_et=f"2026-09-14 {sell}", strategy="MCL", symbol="AAA",
+                         action="SELL", status="FILLED", filled_qty=100, fill_price=4.1,
+                         entry_price=4.0, exit_price=4.1, trade_pnl=8.0 + i,
+                         hold_minutes=10.0))
+    closed = [f for f in ui_bridge.UIBridge._fills_today(_log_with(tmp_path, rows))
+              if f["trade_pnl"] is not None]
+
+    assert [f["entry_ts_et"] for f in closed] == ["07:05:00", "08:10:00"]
+
+
+def test_a_strategys_entry_is_not_borrowed_by_another(tmp_path):
+    """Both strategies can hold the same symbol. The pairing is keyed on both."""
+    trader = _log_with(tmp_path, [
+        dict(ts_et="2026-09-14 07:00:00", strategy="MCL", symbol="AAA",
+             action="BUY", status="FILLED", filled_qty=100, fill_price=4.0),
+        dict(ts_et="2026-09-14 07:30:00", strategy="MC5", symbol="AAA",
+             action="BUY", status="FILLED", filled_qty=50, fill_price=4.1),
+        dict(ts_et="2026-09-14 08:00:00", strategy="MC5", symbol="AAA",
+             action="SELL", status="FILLED", filled_qty=50, fill_price=4.3,
+             entry_price=4.1, exit_price=4.3, trade_pnl=9.0, hold_minutes=30.0),
+    ])
+    closed = [f for f in ui_bridge.UIBridge._fills_today(trader)
+              if f["trade_pnl"] is not None][0]
+
+    assert closed["entry_ts_et"] == "07:30:00", "took the other strategy's entry"
+
+
+def test_a_position_with_no_opening_row_falls_back_to_the_hold(tmp_path):
+    """Adopted from a previous session, or the log was rolled aside mid-session.
+    An approximate time beats an empty column here, and it is within seconds."""
+    trader = _log_with(tmp_path, [
+        dict(ts_et="2026-09-14 07:42:00", strategy="MCL", symbol="AAA",
+             action="SELL", status="FILLED", filled_qty=100, fill_price=3.88,
+             entry_price=4.02, exit_price=3.88, trade_pnl=-16.20, hold_minutes=21.0),
+    ])
+    closed = [f for f in ui_bridge.UIBridge._fills_today(trader)
+              if f["trade_pnl"] is not None][0]
+
+    assert closed["entry_ts_et"] == "07:21:00"
+
+
+def test_a_skipped_row_never_opens_a_pairing(tmp_path):
+    """SKIPPED_PAUSED and the cap rows are BUY rows that never filled. Letting
+    one open a pairing would hand the next real exit a time no trade happened
+    at."""
+    trader = _log_with(tmp_path, [
+        dict(ts_et="2026-09-14 06:00:00", strategy="MCL", symbol="AAA",
+             action="BUY", status="SKIPPED_PAUSED", reject_reason="paused"),
+        dict(ts_et="2026-09-14 07:21:00", strategy="MCL", symbol="AAA",
+             action="BUY", status="FILLED", filled_qty=100, fill_price=4.02),
+        dict(ts_et="2026-09-14 07:42:00", strategy="MCL", symbol="AAA",
+             action="SELL", status="FILLED", filled_qty=100, fill_price=3.88,
+             entry_price=4.02, exit_price=3.88, trade_pnl=-16.20, hold_minutes=21.0),
+    ])
+    closed = [f for f in ui_bridge.UIBridge._fills_today(trader)
+              if f["trade_pnl"] is not None][0]
+
+    assert closed["entry_ts_et"] == "07:21:00"

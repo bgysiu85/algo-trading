@@ -41,7 +41,7 @@ import socket
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, time as dtime, timezone
+from datetime import datetime, time as dtime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from typing import Any
@@ -52,7 +52,7 @@ LOG = logging.getLogger("ui_bridge")
 # fact about the market, not a value anyone configures.
 ET = ZoneInfo("America/New_York")
 
-CONTRACT_VERSION = "1.4"
+CONTRACT_VERSION = "1.6"
 PUSH_EVERY_S = 5.0
 HTTP_TIMEOUT_S = 3.0
 MAX_FILLS = 500
@@ -162,6 +162,33 @@ def _ascii(text: str) -> str:
     return (text or "").replace("\u2014", "--").replace("\u2013", "-") \
                        .replace("\u2192", "->").encode("ascii", "replace") \
                        .decode("ascii")
+
+
+def _clock(stamp: str | None) -> str | None:
+    """The time of day out of a fill-log timestamp, or None."""
+    if not stamp:
+        return None
+    part = stamp.strip().split(" ")[-1]
+    return part or None
+
+
+def _minus_minutes(stamp: str | None, minutes: float | None) -> str | None:
+    """Fallback entry time: the exit, less how long the position was held.
+
+    Used only when no opening row is in today's log -- a position adopted from
+    a previous session, or a log that was rolled aside mid-session. hold_minutes
+    is stored to one decimal, so this lands within about three seconds, which
+    is honest for a column read as a time of day and useless for anything
+    finer. Pairing with the BUY row is exact and is tried first.
+    """
+    if not stamp or minutes is None:
+        return None
+    try:
+        opened = datetime.strptime(stamp.strip(), "%Y-%m-%d %H:%M:%S") - \
+            timedelta(minutes=float(minutes))
+    except (TypeError, ValueError):
+        return None
+    return opened.strftime("%H:%M:%S")
 
 
 def _round_trip_costs(entry: float | None, exit_px: float, qty: float,
@@ -320,6 +347,12 @@ class UIBridge:
                       if f.get("strategy") == name and f.get("trade_pnl") is not None]
             strategies.append({
                 "name": name,
+                # The bar size this strategy DECIDES on, read off the adapter.
+                # The portal uses it to pick a chart interval without holding a
+                # table of strategy names -- so a new strategy, or one that
+                # changes its bar size, needs no UI change and cannot silently
+                # be charted at the wrong resolution.
+                "bar_minutes": getattr(adapter, "bar_minutes", None),
                 "enabled": name not in getattr(trader, "disabled_strategies", set()),
                 "paused": bool(getattr(trader, "paused", False)),
                 "paused_since": None,
@@ -400,11 +433,23 @@ class UIBridge:
         if not path or not Path(path).exists():
             return []
         out: list[dict[str, Any]] = []
+        # The opening time of each round trip. The closing row records the exit
+        # and how long it was held, never when it opened -- so the entry is
+        # taken from the BUY row that opened it, which is exact. The trader
+        # allows one position per symbol per strategy at a time, so the most
+        # recent unmatched BUY IS the one this SELL closes.
+        opened_by: dict[tuple[str, str], str] = {}
         try:
             with Path(path).open(newline="", encoding="utf-8-sig") as fh:
                 for i, row in enumerate(csv.DictReader(fh)):
                     if (row.get("status") or "").upper() != "FILLED":
                         continue
+                    key = (row.get("strategy") or "", row.get("symbol") or "")
+                    action = (row.get("action") or "").upper()
+                    if action in ("BUY", "COVER"):
+                        opened_by[key] = row.get("ts_et") or ""
+                    entry_ts = (opened_by.pop(key, None) if action in ("SELL", "SHORT")
+                                else None)
                     qty = _num(row.get("filled_qty")) or _num(row.get("qty")) or 0
                     price = _num(row.get("fill_price")) or 0.0
                     entry = _num(row.get("entry_price"))
@@ -417,6 +462,8 @@ class UIBridge:
                         "symbol": row.get("symbol") or "",
                         "action": (row.get("action") or "").upper(),
                         "qty": qty,
+                        "entry_ts_et": _clock(entry_ts) or _minus_minutes(
+                            row.get("ts_et"), _num(row.get("hold_minutes"))),
                         "entry_price": entry,
                         "price": price,
                         "commission": commission,
