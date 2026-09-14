@@ -1,0 +1,805 @@
+#!/usr/bin/env python3
+"""Which print is the REGULAR-session close?
+
+    python -m common.regular_close                 # validate against known truth
+    python -m common.regular_close --emit          # write var/state/regular_close.json
+
+WHAT IS WRONG, AND HOW IT WAS PINNED DOWN
+------------------------------------------
+`prior_closes()` reads Databento's `ohlcv-1d` close. That schema aggregates the
+WHOLE feed, so its close is the last print of the EXTENDED day (20:00 ET).
+TradingView's `premarket_change` -- the clause the live screen actually applies
+-- divides by the official 16:00 REGULAR close. Two closes that look comparable
+and are not.
+
+ACVA, 2026-09-10, is the proof, and the LOW is what makes it proof:
+
+                     high      low    close
+    ours            11.31     7.00    10.38
+    the market       7.39     7.00     7.22
+
+The low agrees to the cent and the high is 53% higher. A wrong bar does not
+reproduce one endpoint exactly; a bar covering EXTRA HOURS does, because the
+regular session set the low and the after-hours session set the high and the
+close.
+
+The error is one-directional -- a name that runs after hours gets an inflated
+divisor, which DEFLATES its computed premarket change -- which is exactly the
+16-missed-against-2 shape `screen_validate` found.
+
+WHY THIS MODULE EXISTS RATHER THAN A ONE-LINE FIX
+--------------------------------------------------
+The repair needs a 16:00 close the archive does not carry, so it needs a pull.
+Before spending one across 552 sessions, the CONSTRUCTION has to be right, and
+there is a real ambiguity in it: the closing cross prints AT 16:00:00.000 and
+is usually the largest trade of the day. A bar convention of [start, start+1m)
+puts it in the 16:00 bar, not the 15:59 bar. Guess wrong and every close is the
+last continuous print instead of the official one -- a small, plausible,
+systematic error, which is the kind this project keeps shipping.
+
+So each candidate is scored against closes taken from TradingView by hand.
+
+THE TRAP IN THAT SCORING, AND THE GUARD FOR IT
+------------------------------------------------
+On a day with no after-hours activity the extended close and the regular close
+are THE SAME NUMBER, so every candidate matches and the row proves nothing.
+ACVA's 09-08 and 09-09 are exactly that. A scorer that counted them would
+report a near-perfect match for whichever construction it tried first.
+
+A row is therefore DISCRIMINATING only when our own `ohlcv-1d` close already
+disagrees with the truth. Non-discriminating rows are printed, counted, and
+excluded from the verdict.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+from datetime import time as dtime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+
+from common.report_fmt import acct
+from common.report_io import emit
+
+ET = ZoneInfo("America/New_York")
+CLOSE_T = dtime(16, 0)
+
+# The key the emitted file records a relaxed bar under. EXPORTED, and imported
+# by the consumer, because this was written here as a literal and read there as
+# a different literal ("relaxed") -- so the file carried "AMEX 0/3, residual
+# error is real and must be stated wherever these closes are used" and the
+# module that used them printed nothing at all. A shared name cannot drift.
+RELAXED_KEY = "RELAXED_PRE_REGISTERED_BAR"
+
+# Regular-session closes read from TradingView by hand, 2026-09-12. The
+# exchange is recorded because two of these are NOT Nasdaq-listed and the
+# archive is XNAS.BASIC -- a cross-listed name reaches this tape only through
+# Nasdaq-venue prints, which is its own question and is noted in the report.
+TRUTH = [
+    ("2026-09-08", "ACVA", "NYSE", 7.03),
+    ("2026-09-09", "ACVA", "NYSE", 7.37),
+    ("2026-09-10", "ACVA", "NYSE", 7.22),
+    ("2026-09-11", "ACVA", "NYSE", 10.41),
+    ("2026-09-08", "ISPC", "NASDAQ", 1.59),
+    ("2026-09-09", "ISPC", "NASDAQ", 1.55),
+    ("2026-09-10", "ISPC", "NASDAQ", 1.50),
+    ("2026-09-11", "ISPC", "NASDAQ", 1.47),
+    ("2026-09-09", "TPET", "AMEX", 1.81),
+    ("2026-09-10", "TPET", "AMEX", 2.02),
+    ("2026-09-11", "TPET", "AMEX", 1.88),
+    # Added after the first scored run, which put ALL THREE of its misses on
+    # TPET while every ACVA and ISPC row matched. Three misses on one of three
+    # names is not a finding, and it has two readings that the first table
+    # cannot separate:
+    #
+    #   LISTING VENUE   TPET is NYSE Arca. Its closing cross happens on a
+    #                   venue XNAS.BASIC does not carry, so the "first print
+    #                   after 16:00" on this tape is just whatever Nasdaq
+    #                   printed, not the official close.
+    #   LIQUIDITY       TPET is also the thinnest name in the table.
+    #
+    # These four are all NASDAQ-listed and span two orders of magnitude of
+    # volume -- XRTX trades ~10k shares on a quiet day, TNON and FTFT trade
+    # tens of millions. If the thin Nasdaq name matches, liquidity is not the
+    # problem and TPET's failure is about where it lists; if XRTX fails too,
+    # it is thinness and the repair degrades for exactly the small caps this
+    # screen is for.
+    ("2026-09-08", "TNON", "NASDAQ", 3.36),
+    ("2026-09-09", "TNON", "NASDAQ", 2.44),
+    ("2026-09-10", "TNON", "NASDAQ", 5.30),
+    ("2026-09-11", "TNON", "NASDAQ", 5.93),
+    ("2026-09-08", "FTFT", "NASDAQ", 1.31),
+    ("2026-09-09", "FTFT", "NASDAQ", 2.09),
+    ("2026-09-10", "FTFT", "NASDAQ", 2.05),
+    ("2026-09-11", "FTFT", "NASDAQ", 2.88),
+    ("2026-09-08", "XRTX", "NASDAQ", 2.28),
+    ("2026-09-09", "XRTX", "NASDAQ", 2.158),
+    ("2026-09-10", "XRTX", "NASDAQ", 2.11),
+    ("2026-09-11", "XRTX", "NASDAQ", 2.33),
+    ("2026-09-08", "SUNE", "NASDAQ", 2.37),
+    ("2026-09-09", "SUNE", "NASDAQ", 4.51),
+    ("2026-09-10", "SUNE", "NASDAQ", 3.37),
+    ("2026-09-11", "SUNE", "NASDAQ", 3.20),
+]
+
+TOL = 0.005          # half a cent: a match is a match to the printed cent
+
+# Rows checked against a THIRD source after the two-method flag raised them.
+# TradingView's daily close is one number; its own intraday bars are another
+# view of the same session, and where they agree the truth row is corroborated
+# rather than merely asserted.
+#
+# XRTX 2026-09-10: the 15:30-16:00 ET bar closes at 2.11 on TradingView's own
+# 30-minute series, matching its daily close. So the flag was a FALSE ALARM --
+# raised correctly, resolved against the extraction. `last_bar_before_1600`
+# gets this row exactly (2.11); `open_at_1600` and Nasdaq's published
+# CLOSE_PRICE both give 2.18, an after-hours print.
+#
+# That is also the strongest evidence about stat_type 11: it is NOT reliably
+# the official regular-session close. Together with its 0/2 on NYSE-listed
+# rows, the statistics route is weaker than the minute route, not stronger.
+THIRD_SOURCE = {
+    ("2026-09-10", "XRTX"): (2.11, "TV 30-minute bars, 15:30-16:00 ET"),
+}
+
+
+def _daily_takes_schema() -> bool:
+    """Does dbn_io.daily_frame accept a schema override yet?
+
+    Asked rather than assumed: this module must work against the loader as it
+    IS, and a TypeError here would read as "no eod bars" -- a wrong answer that
+    looks like a missing file.
+    """
+    import inspect
+
+    from common.dbn_io import daily_frame
+    return "schema" in inspect.signature(daily_frame).parameters
+
+
+def _eod_frame(archive, dataset):
+    """ohlcv-eod through the same parsing path as ohlcv-1d.
+
+    daily_frame hard-codes "ohlcv-1d", so this reproduces it for the eod
+    directory rather than re-implementing the symbol resolution and the
+    duplicate check, both of which have already cost this project a run.
+    """
+    from pathlib import Path
+
+    from common.dbn_io import daily_frame as _df
+    src = Path(archive) / dataset / "ohlcv-eod"
+    if not src.exists():
+        return None
+    import shutil
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        link = Path(tmp) / dataset / "ohlcv-1d"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, link)
+        return _df(Path(tmp), dataset)
+
+
+# Databento StatType ints. Named as constants rather than imported so this
+# module still loads without the databento package, and so a reader can see
+# which numbers are being filtered on without a second lookup.
+STAT_CLOSE_PRICE = 11
+STAT_UNCROSSING_PRICE = 16
+
+
+def stats_closes(archive, dataset: str) -> tuple[dict, dict, dict]:
+    """({(date, symbol): close}, {...: uncrossing}, {stat_type: count}).
+
+    `ohlcv-eod` is NOT offered on XNAS.BASIC, so the published-number route is
+    the statistics schema. It carries CLOSE_PRICE (11) and UNCROSSING_PRICE
+    (16) -- the auction print itself, rather than a bar boundary guessed at.
+
+    The third return value is the census of every stat_type present. A filter
+    that matches nothing returns an empty dict, which is indistinguishable from
+    a schema that has no closes in it -- so the counts are carried out and
+    printed. This module has already been caught once by a control whose empty
+    answer looked like a clean one.
+    """
+    from pathlib import Path
+
+    from common.dbn_io import read_dbn
+    d = Path(archive) / dataset / "statistics"
+    if not d.exists():
+        return {}, {}, {}
+    close, uncross, census = {}, {}, {}
+    for f in sorted(d.glob("*.dbn.zst")):
+        c, u, n = stats_from_frame(read_dbn(f))
+        close.update(c)
+        uncross.update(u)
+        for st, k in n.items():
+            census[st] = census.get(st, 0) + k
+    return close, uncross, census
+
+
+def stats_from_frame(df: pd.DataFrame) -> tuple[dict, dict, dict]:
+    """One statistics frame -> (closes, uncrossings, stat_type census).
+
+    Split out of `stats_closes` so it can be tested without a .dbn.zst on
+    disk. The first version was only reachable through a real file, so the
+    only defect in it -- a column named `_date`, which `itertuples` renames to
+    a positional field and makes unreachable -- could not be caught by any
+    test and surfaced as an AttributeError on Ben's machine instead.
+    """
+    if df is None or df.empty or "stat_type" not in df:
+        return {}, {}, {}
+    local = df.tz_convert(ET) if df.index.tz is not None else df
+    # NO leading underscore: pandas' itertuples renames any column that is not
+    # a valid identifier -- underscore-prefixed included -- to _1, _2, ...
+    local = local.assign(sess_date=[t.strftime("%Y-%m-%d")
+                                    for t in local.index])
+    census = {int(st): int(len(g)) for st, g in local.groupby("stat_type")}
+    close, uncross = {}, {}
+    for st, target in ((STAT_CLOSE_PRICE, close),
+                       (STAT_UNCROSSING_PRICE, uncross)):
+        for r in local[local["stat_type"] == st].itertuples():
+            sym = getattr(r, "symbol", None)
+            if sym is None or sym != sym:
+                continue
+            px = float(r.price)
+            if px > 0:
+                target[(r.sess_date, str(sym))] = px
+    return close, uncross, census
+
+
+def candidates(rows: pd.DataFrame) -> dict[str, float | None]:
+    """Every defensible reading of "the close", from one symbol-day's minutes.
+
+    `rows` is indexed by bar START in UTC, as the archive stores it.
+    """
+    if rows.empty:
+        return {}
+    local = rows.tz_convert(ET) if rows.index.tz is not None else rows
+    t = local.index.time
+    at_or_before = local[[x <= CLOSE_T for x in t]]
+    strictly_before = local[[x < CLOSE_T for x in t]]
+    at_close = local[[x == CLOSE_T for x in t]]
+    def first_open(frame):
+        if frame.empty or "open" not in frame:
+            return None
+        return float(frame["open"].iloc[0])
+
+    return {
+        # The bar STARTING at 15:59 -- the last one that closes at or before
+        # 16:00 under a [start, start+1m) convention. This is the last
+        # continuous print and EXCLUDES the closing cross.
+        "last_bar_before_1600": (float(strictly_before["close"].iloc[-1])
+                                 if not strictly_before.empty else None),
+        # The OPEN of the bar starting at 16:00 -- the FIRST print at or after
+        # 16:00:00.000, which is the closing cross itself.
+        #
+        # This candidate was added after the first run, because that run showed
+        # the one below is not what I claimed it was. ACVA 2026-09-10 closed at
+        # 7.22 on the market; the 16:00 bar's CLOSE on this tape is 10.45,
+        # because 16:00:00-16:00:59 also contains the first EXTENDED-hours
+        # prints and a name running post-close is already away. The auction is
+        # the first trade in that minute, not the last.
+        "open_at_1600": first_open(at_close),
+        # The bar STARTING at 16:00, read at its close. Kept so the report
+        # still shows why it fails rather than quietly dropping a candidate
+        # that a later reader would think to try.
+        "bar_at_1600": (float(at_close["close"].iloc[0])
+                        if not at_close.empty else None),
+        # Whichever of those is later -- the reading that takes the auction
+        # when it exists and falls back when it does not.
+        "last_bar_at_or_before_1600": (float(at_or_before["close"].iloc[-1])
+                                       if not at_or_before.empty else None),
+        # The last continuous print, with the auction preferred when the tape
+        # carries one. This is what an official close IS: the cross if there
+        # was one, otherwise the last trade of the session.
+        "auction_else_last": (first_open(at_close) if first_open(at_close)
+                              is not None else
+                              (float(strictly_before["close"].iloc[-1])
+                               if not strictly_before.empty else None)),
+    }
+
+
+def score(got: list[dict]) -> dict[str, dict]:
+    """Per-candidate hit rate, counting ONLY discriminating rows."""
+    names = ["last_bar_before_1600", "open_at_1600", "bar_at_1600",
+             "last_bar_at_or_before_1600", "auction_else_last"]
+    for extra in ("ohlcv_eod_close", "stats_uncrossing", "stats_close_price"):
+        if any(extra in g.get("cand", {}) for g in got):
+            names.insert(0, extra)
+    out = {}
+    for n in names:
+        disc = [g for g in got if g["discriminating"]]
+        hit = [g for g in disc
+               if g["cand"].get(n) is not None
+               and abs(g["cand"][n] - g["truth"]) <= TOL]
+        miss = [g for g in disc if g not in hit]
+        # A candidate that produced NO value on any row scored 0 because it
+        # was never there, not because it was wrong -- and 0/24 reads
+        # identically either way. UNCROSSING_PRICE is exactly this case: the
+        # statistic is absent from XNAS.BASIC, and the census proves it.
+        present = any(g["cand"].get(n) is not None for g in disc)
+        out[n] = {"hit": len(hit), "of": len(disc), "misses": miss,
+                  "present": present}
+    return out
+
+
+def _by_venue(got: list[dict]) -> dict[str, list[dict]]:
+    out: dict[str, list[dict]] = {}
+    for g in got:
+        if g["discriminating"]:
+            out.setdefault(g.get("exchange") or "?", []).append(g)
+    return out
+
+
+def render(got: list[dict], sc: dict, missing: list[str],
+           dataset: str = "XNAS.BASIC",
+           daily_dataset: str = "XNAS.BASIC",
+           st_census: dict | None = None) -> list[str]:
+    disc = [g for g in got if g["discriminating"]]
+    L = ["WHICH PRINT IS THE REGULAR-SESSION CLOSE?", "",
+         f"  minute bars from {dataset}; the close currently in use is "
+         f"{daily_dataset} ohlcv-1d",
+         f"  {len(got)} truth row(s) from TradingView, "
+         f"{len(disc)} of them DISCRIMINATING",
+         "  a row discriminates only when our ohlcv-1d close already",
+         "  disagrees with the truth -- on a quiet after-hours day every",
+         "  candidate matches and the row proves nothing", ""]
+    if missing:
+        L += ["  NOT TESTED (no minute bars in the archive for these):", ""]
+        L += [f"    {m}" for m in missing]
+        L += [""]
+
+    if not disc:
+        return L + [
+            "NO DISCRIMINATING ROW", "",
+            "  Every truth row agrees with our daily close already, so this",
+            "  run cannot distinguish the candidates. That is NOT evidence",
+            "  that the daily close is right -- it is evidence that these",
+            "  particular names were quiet after hours. Pull a session where",
+            "  a name ran post-close and re-run.", ""]
+
+    has_stats = any("stats_close_price" in g.get("cand", {}) for g in got)
+    L += ["PER ROW", "",
+          f"  {'date':<12}{'symbol':<7}{'ours(1d)':>10}{'truth':>8}"
+          f"{'bef 16:00':>11}{'open 16:00':>12}{'auc|last':>11}"
+          + (f"{'STAT close':>12}" if has_stats else "") + "   "]
+    for g in sorted(got, key=lambda g: (g["date"], g["symbol"])):
+        c = g["cand"]
+
+        def f(v, w):
+            return acct(v, w) if v is not None else f"{'-':>{w}}"
+        mark = "" if g["discriminating"] else "   (not discriminating)"
+        L.append(f"  {g['date']:<12}{g['symbol']:<7}{acct(g['daily'], 10)}"
+                 f"{acct(g['truth'], 8)}"
+                 f"{f(c.get('last_bar_before_1600'), 11)}"
+                 f"{f(c.get('open_at_1600'), 12)}"
+                 f"{f(c.get('auction_else_last'), 11)}"
+                 + (f(c.get("stats_close_price"), 12) if has_stats else "")
+                 + mark)
+
+    if st_census:
+        L += ["", "STAT TYPES PRESENT (a filter matching nothing looks exactly",
+              "like a schema with no closes in it, so the census is printed)",
+              ""]
+        for st, n in sorted(st_census.items()):
+            label = {STAT_CLOSE_PRICE: "  <- CLOSE_PRICE",
+                     STAT_UNCROSSING_PRICE: "  <- UNCROSSING_PRICE"}.get(st, "")
+            L.append(f"  stat_type {st:<4}{n:>9,} record(s){label}")
+        if STAT_CLOSE_PRICE not in st_census \
+                and STAT_UNCROSSING_PRICE not in st_census:
+            L += ["", "  NEITHER close statistic appears. The schema is here",
+                  "  and does not carry what this needs; that is a finding,",
+                  "  not an empty result."]
+
+    L += ["", "SCORE, on discriminating rows only", ""]
+    for n, s in sc.items():
+        if not s.get("present", True):
+            L.append(f"  {n:<30} {'n/a':>5}   never produced a value -- "
+                     "ABSENT, not wrong")
+            continue
+        L.append(f"  {n:<30} {s['hit']}/{s['of']}")
+
+    # Split by listing venue. An official close is set by the LISTING venue's
+    # cross, so a construction that works on Nasdaq names and fails elsewhere
+    # is not a broken construction -- it is a tape that does not carry the
+    # other venues. Pooling the two hides exactly that.
+    by_ex = {}
+    for g in got:
+        if g["discriminating"]:
+            by_ex.setdefault(g.get("exchange") or "?", []).append(g)
+    if len(by_ex) > 1:
+        L += ["", "THE SAME SCORE, SPLIT BY LISTING VENUE", "",
+              f"  (the archive is a NASDAQ tape)", "",
+              f"  {'candidate':<30}" +
+              "".join(f"{e:>12}" for e in sorted(by_ex))]
+        for n in sc:
+            cells = []
+            for e in sorted(by_ex):
+                rows_e = by_ex[e]
+                hit = sum(1 for g in rows_e
+                          if g["cand"].get(n) is not None
+                          and abs(g["cand"][n] - g["truth"]) <= TOL)
+                cells.append(f"{hit}/{len(rows_e)}".rjust(12))
+            L.append(f"  {n:<30}" + "".join(cells))
+        L += ["",
+              "  A candidate that is perfect on NASDAQ and imperfect elsewhere",
+              "  says the CONSTRUCTION is right and the TAPE is partial. That",
+              "  is a known, bounded degradation for cross-listed names, not a",
+              "  reason to reject the repair -- but it must be stated wherever",
+              "  the repaired closes are used, not discovered later."]
+
+    # Nasdaq's PUBLISHED close statistic and a close DERIVED from minute bars
+    # are two different methods over the same tape. Where they agree with each
+    # other and both differ from TradingView, the extraction is not what is in
+    # question -- the truth row is. Conflating the two would have this module
+    # chasing its own inputs.
+    agree_vs_truth = []
+    for g in got:
+        if not g["discriminating"]:
+            continue
+        a_ = g["cand"].get("auction_else_last")
+        b_ = g["cand"].get("stats_close_price")
+        if a_ is None or b_ is None:
+            continue
+        if abs(a_ - b_) <= TOL and abs(a_ - g["truth"]) > TOL:
+            agree_vs_truth.append((g, a_))
+    if agree_vs_truth:
+        L += ["", "WHERE TWO METHODS AGREE AND THE TRUTH DOES NOT", ""]
+        for g, v in sorted(agree_vs_truth,
+                           key=lambda x: (x[0]["date"], x[0]["symbol"])):
+            L.append(f"  {g['date']}  {g['symbol']:<6} both methods "
+                     f"{acct(v, 1).strip():<7} truth "
+                     f"{acct(g['truth'], 1).strip():<7} ({g['exchange']})")
+        checked = [(g, v) for g, v in agree_vs_truth
+                   if (g["date"], g["symbol"]) in THIRD_SOURCE]
+        if checked:
+            L += ["", "  CHECKED AGAINST A THIRD SOURCE:", ""]
+            for g, v in checked:
+                px, how = THIRD_SOURCE[(g["date"], g["symbol"])]
+                ok = "CONFIRMS THE TRUTH" if abs(px - g["truth"]) <= TOL \
+                    else "contradicts the truth"
+                L.append(f"    {g['date']}  {g['symbol']:<6} "
+                         f"{acct(px, 1).strip():<7} {ok}  ({how})")
+            L += ["",
+                  "    A confirmed truth row means the flag was a FALSE ALARM",
+                  "    -- raised correctly, and resolved AGAINST the",
+                  "    extraction. The row is a real miss."]
+        L += ["",
+              "  Nasdaq's published CLOSE_PRICE and a close derived from the",
+              "  minute bars are two different methods. Where they agree and",
+              "  TradingView does not, what is in question is the TRUTH ROW,",
+              "  not the extraction.",
+              "",
+              "  They are NOT fully independent -- both read the same",
+              "  XNAS.BASIC tape -- so agreement shows the extraction is",
+              "  consistent, not that the number is the official consolidated",
+              "  close. Settling it needs a third source; until then these",
+              "  rows are neither a pass nor a failure."]
+
+    winners = [n for n, s in sc.items()
+               if s["of"] and s.get("present", True) and s["hit"] == s["of"]]
+    L += ["", "VERDICT", ""]
+    if len(winners) == 1:
+        L += [f"  {winners[0]}", "",
+              "  This construction reproduces every discriminating truth row.",
+              "  It is safe to build `prior_close` from -- after the pull, and",
+              "  after `screen_validate` is re-run, not before."]
+    elif len(winners) > 1:
+        L += [f"  AMBIGUOUS -- {len(winners)} candidates are perfect: "
+              f"{', '.join(winners)}", "",
+              "  They did not differ on any row tested. Do NOT pick one."]
+        if set(winners) <= {"bar_at_1600", "last_bar_at_or_before_1600"}:
+            L += ["",
+                  "  These two are IDENTICAL BY CONSTRUCTION whenever a 16:00",
+                  "  bar exists -- the fallback only differs when the name did",
+                  "  not print in the closing minute at all. Tying here says",
+                  "  nothing about which is right; it says every name in the",
+                  "  sample traded at the close.",
+                  "",
+                  "  To separate them, add a THIN name that did not print at",
+                  "  16:00. To rule out the auction question instead, add a",
+                  "  name whose closing cross moved the price away from the",
+                  "  last continuous print."]
+        else:
+            L += ["",
+                  "  Add a row where they disagree before choosing."]
+    else:
+        L += ["  NONE of the candidates reproduces the truth.", "",
+              "  The extended-hours explanation may be right and the",
+              "  construction wrong, or the explanation may be wrong. Either",
+              "  way this does not authorise the 552-session pull.", ""]
+        for n, s in sc.items():
+            if s["misses"]:
+                g = s["misses"][0]
+                L.append(f"    {n}: first miss {g['symbol']} {g['date']} "
+                         f"got {acct(g['cand'].get(n) or float('nan'), 1).strip()}"
+                         f", truth {acct(g['truth'], 1).strip()}")
+
+    L += ["", "WHAT THIS IS NOT", "",
+          "  Not a repair. Nothing here rewrites prior_close, and --emit only",
+          "  writes the closes for the sessions actually pulled.",
+          "",
+          "  Not a claim about any OTHER dataset. ACVA is NYSE and TPET is",
+          "  AMEX, and an official close is set by the LISTING venue's closing",
+          "  auction -- which a Nasdaq-only tape does not carry at all. So a",
+          "  failure here may mean the construction is wrong OR that this",
+          "  dataset cannot answer the question. Re-run with --dataset on a",
+          "  consolidated feed before blaming the construction; if only the",
+          "  Nasdaq-listed rows match, that IS the answer and the repair needs",
+          "  a consolidated source.",
+          "",
+          "  Not out of sample. These eleven rows were read while chasing this",
+          "  defect. A construction validated on them is validated on the",
+          "  evidence that produced the hypothesis."]
+    return L
+
+
+
+def emit_day(args: tuple) -> tuple[str, dict[str, float]]:
+    """One session's closes under one construction. Module-level and picklable
+    so a process pool can run it, and the SINGLE implementation -- the
+    sequential path calls it too, so the two cannot drift.
+
+    It re-reads its own slice rather than taking a cached frame. The four TRUTH
+    days are already in memory upstairs, but passing DataFrames to workers is
+    expensive and the cache is what produced the `df or fallback` crash in the
+    first place. Four extra file reads out of 552 is not a cost worth keeping a
+    failure mode for.
+    """
+    from common.dbn_io import read_dbn
+
+    path, construction = args
+    day = Path(path).name[:10]
+    bars = read_dbn(Path(path))
+    if bars.empty:
+        return day, {}
+    got: dict[str, float] = {}
+    for sym, g in bars.groupby("symbol"):
+        v = candidates(g.sort_index(kind="mergesort")).get(construction)
+        if v is not None:
+            got[str(sym)] = float(v)
+    return day, got
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    p.add_argument("--archive", default=None)
+    p.add_argument("--dataset", default="XNAS.BASIC",
+                   help="the dataset the MINUTE bars come from. Worth varying: "
+                        "XNAS.BASIC is Nasdaq-only, and an official close for "
+                        "a NYSE- or AMEX-listed name is set by THAT venue's "
+                        "closing auction, which this tape does not carry.")
+    p.add_argument("--daily-dataset", default="XNAS.BASIC",
+                   help="the dataset whose ohlcv-1d close is the one in USE -- "
+                        "the source of the defect. Held fixed while --dataset "
+                        "varies, because whether a row discriminates is a fact "
+                        "about the close we currently divide by, not about the "
+                        "candidate being tested.")
+    p.add_argument("--window", default="15:55-16:05",
+                   help="the ET window pulled by databento_universe --window")
+    p.add_argument("--stats", action="store_true",
+                   help="also score the statistics schema's CLOSE_PRICE and "
+                        "UNCROSSING_PRICE. ohlcv-eod is not offered on "
+                        "XNAS.BASIC, and `trades` prices at 14.7 GB for five "
+                        "sessions against statistics' 2.3 MB, so this is the "
+                        "route that is both cheapest and most direct.")
+    p.add_argument("--eod", action="store_true",
+                   help="also score the close of the ohlcv-eod bars in the "
+                        "archive, if any. An end-of-day schema is a DIFFERENT "
+                        "object from ohlcv-1d and may already be the regular "
+                        "close -- if it is, the repair is a daily-sized pull "
+                        "and no reconstruction at all. Availability is not "
+                        "validation: ohlcv-1d is also called a daily bar.")
+    p.add_argument("--accept", default=None, metavar="CONSTRUCTION",
+                   help="emit using THIS construction even though it did not "
+                        "clear the pre-registered bar of every discriminating "
+                        "row. Relaxing a bar registered before the run is a "
+                        "decision, so it has to be made explicitly, by name, "
+                        "and it is stamped into the output file with the score "
+                        "it actually achieved and the venue split. It is not a "
+                        "flag to reach for twice.")
+    p.add_argument("--jobs", type=int, default=0,
+                   help="worker processes for --emit. Each session is wholly "
+                        "independent -- no warm-up, no carried state, no "
+                        "randomness -- so the answer cannot depend on how "
+                        "many are used. 0 means one per core.")
+    p.add_argument("--emit", action="store_true",
+                   help="write var/state/regular_close.json for the sessions "
+                        "present, using the winning construction")
+    p.add_argument("--out", default=None,
+                   help="default: var/reports/regular_close_<dataset>.txt, so "
+                        "two datasets do not clobber each other")
+    return p
+
+
+def main(argv=None) -> int:
+    a = build_parser().parse_args(argv)
+    from common.databento_fetch import default_archive
+    from common.dbn_io import daily_frame, read_dbn
+
+    archive = Path(a.archive) if a.archive else default_archive()
+    d = archive / a.dataset / "ohlcv-1m"
+    lo, hi = a.window.replace(":", "").split("-")
+    slices = {p.name[:10]: p for p in sorted(d.glob(f"*_{lo}_{hi}.dbn.zst"))}
+    if not slices:
+        sys.exit(
+            f"no {a.window} ET slices in {d}/.\n"
+            "Pull them first:\n"
+            f"  python -m common.databento_universe --schema ohlcv-1m "
+            f"--window {a.window} --start 2026-09-08 --end 2026-09-12\n"
+            "It prints the cost and does nothing without --confirm.")
+
+    daily = daily_frame(archive, a.daily_dataset)
+    dkey = {(r.date, r.symbol): float(r.close) for r in daily.itertuples()} \
+        if not daily.empty else {}
+
+    # ohlcv-eod, read through the same loader as ohlcv-1d so a difference
+    # between them is a difference in the DATA, not in how it was parsed.
+    st_close: dict = {}
+    st_uncross: dict = {}
+    st_census: dict = {}
+    if a.stats:
+        st_close, st_uncross, st_census = stats_closes(archive, a.dataset)
+        if not st_census:
+            print(f"  --stats: no statistics bars in {archive}/{a.dataset}/. "
+                  "Pull them first:\n"
+                  f"    python -m common.databento_universe "
+                  f"--dataset {a.dataset} --schema statistics "
+                  f"--start 2026-09-08 --end 2026-09-12")
+
+    eod: dict[tuple[str, str], float] = {}
+    if a.eod:
+        e = daily_frame(archive, a.dataset, schema="ohlcv-eod") \
+            if _daily_takes_schema() else _eod_frame(archive, a.dataset)
+        if e is None or e.empty:
+            print(f"  --eod: no ohlcv-eod bars in {archive}/{a.dataset}/. "
+                  "Pull them first:\n"
+                  f"    python -m common.databento_universe "
+                  f"--dataset {a.dataset} --schema ohlcv-eod "
+                  f"--start 2026-09-08 --end 2026-09-12")
+        else:
+            eod = {(r.date, r.symbol): float(r.close) for r in e.itertuples()}
+
+    got, missing = [], []
+    cache: dict[str, pd.DataFrame] = {}
+    for day, sym, _exch, truth in TRUTH:  # noqa: B007
+        p = slices.get(day)
+        if p is None:
+            missing.append(f"{day} {sym}: no {a.window} slice")
+            continue
+        if day not in cache:
+            cache[day] = read_dbn(p)
+        bars = cache[day]
+        rows = bars[bars["symbol"] == sym] if not bars.empty else bars
+        if rows.empty:
+            missing.append(f"{day} {sym}: not on this tape in that window")
+            continue
+        dly = dkey.get((day, sym))
+        if dly is None:
+            missing.append(f"{day} {sym}: no daily bar to compare against")
+            continue
+        cand = candidates(rows.sort_index(kind="mergesort"))
+        if a.stats:
+            # None, never the daily close, when the statistic is absent. A
+            # fallback here would make the candidate score as well as the
+            # thing it replaces -- the defect shape this project keeps finding.
+            cand["stats_close_price"] = st_close.get((day, sym))
+            cand["stats_uncrossing"] = st_uncross.get((day, sym))
+        if a.eod:
+            # None, not the daily close, when the eod bar is absent for this
+            # symbol-day. Falling back to ohlcv-1d here would make the new
+            # candidate score exactly as well as the thing it is replacing.
+            cand["ohlcv_eod_close"] = eod.get((day, sym))
+        got.append({"date": day, "symbol": sym, "truth": truth, "daily": dly,
+                    "exchange": _exch, "cand": cand,
+                    "discriminating": abs(dly - truth) > TOL})
+
+    sc = score(got)
+    out = a.out or ("var/reports/regular_close_"
+                    f"{a.dataset.replace('.', '_')}.txt")
+    emit("\n".join(render(got, sc, missing, a.dataset, a.daily_dataset,
+                          st_census)), out,
+         header=f"common.regular_close  minutes={a.dataset} "
+                f"daily={a.daily_dataset} window={a.window}")
+
+    if a.emit:
+        winners = [n for n, s in sc.items()
+                   if s["of"] and s.get("present", True)
+                   and s["hit"] == s["of"]]
+        relaxed = None
+        if a.accept:
+            if a.accept not in sc:
+                print(f"  --accept refused: {a.accept!r} is not a candidate. "
+                      f"Choose one of: {', '.join(sc)}")
+                return 1
+            if not sc[a.accept].get("present", True):
+                print(f"  --accept refused: {a.accept} never produced a value "
+                      "on any discriminating row. It is ABSENT, and accepting "
+                      "it would write a file of nothing.")
+                return 1
+            n = a.accept
+            if n not in winners:
+                relaxed = {
+                    "bar": "every discriminating row",
+                    "achieved": f"{sc[n]['hit']}/{sc[n]['of']}",
+                    "by_venue": {
+                        e: f"{sum(1 for g in rows_e if g['cand'].get(n) is not None and abs(g['cand'][n] - g['truth']) <= TOL)}/{len(rows_e)}"
+                        for e, rows_e in _by_venue(got).items()},
+                    "note": "Accepted below the pre-registered bar by explicit "
+                            "--accept. Residual error is real and must be "
+                            "stated wherever these closes are used.",
+                }
+                print(f"  --accept: {n} scored {sc[n]['hit']}/{sc[n]['of']}, "
+                      "BELOW the pre-registered bar. The relaxation is "
+                      "recorded in the output file.")
+        elif len(winners) != 1:
+            print("  --emit refused: the verdict is not a single construction."
+                  "\n  Pass --accept <construction> to relax the "
+                  "pre-registered bar deliberately.")
+            return 1
+        else:
+            n = winners[0]
+        out: dict[str, dict[str, float]] = {}
+        t_emit = time.time()
+        tasks = [(str(p), n) for _day, p in sorted(slices.items())]
+        jobs = (os.cpu_count() or 1) if a.jobs == 0 else max(1, a.jobs)
+        print(f"  emitting {n} for {len(tasks):,} session(s) on {jobs} "
+              "worker(s) -- the slow part, and it prints as it goes",
+              flush=True)
+
+        def took(k: int, day: str) -> None:
+            el = time.time() - t_emit
+            eta = (len(tasks) - k) / (k / el) / 60.0 if el and k else 0.0
+            if k % 25 == 0 or k == len(tasks):
+                print(f"    [{k:>4}/{len(tasks)}] {day}  "
+                      f"{sum(len(v) for v in out.values()):>8,} closes  "
+                      f"{el / 60:>5.1f} min  ~{eta:>5.1f} min left", flush=True)
+
+        if jobs == 1:
+            for k, t in enumerate(tasks, 1):
+                day, got = emit_day(t)
+                if got:
+                    out[day] = got
+                took(k, day)
+        else:
+            # Days are wholly independent here -- no warm-up, no carried state,
+            # and no randomness -- so the pool needs no seeding discipline and
+            # the merged result cannot depend on completion order: it is a dict
+            # keyed by day.
+            from concurrent.futures import ProcessPoolExecutor
+            with ProcessPoolExecutor(max_workers=jobs) as ex:
+                for k, (day, got) in enumerate(ex.map(emit_day, tasks,
+                                                      chunksize=4), 1):
+                    if got:
+                        out[day] = got
+                    took(k, day)
+
+        path = Path("var/state/regular_close.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        doc = {"construction": n,
+               "dataset": a.dataset,
+               "window": a.window,
+               # These are the close OF each session. prior_closes() wants the
+               # PREVIOUS session's, so the shift stays with the consumer --
+               # doing it here would bury a one-row offset inside a data file.
+               "meaning": "regular-session close of THIS date; the consumer "
+                          "shifts it to become the prior close",
+               "sessions": len(out),
+               "symbol_days": sum(len(v) for v in out.values()),
+               "closes": out}
+        if relaxed:
+            doc[RELAXED_KEY] = relaxed
+        path.write_text(json.dumps(doc, indent=1))
+        print(f"  wrote {path} using {n} "
+              f"({doc['symbol_days']:,} symbol-days over "
+              f"{doc['sessions']} session(s))")
+        if relaxed:
+            print(f"  the file records that the bar was relaxed: "
+                  f"{relaxed['achieved']} on discriminating rows")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

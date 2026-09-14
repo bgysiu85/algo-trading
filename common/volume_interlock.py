@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+"""How often do MCL's two volume conditions lock each other out?
+
+    python -m common.volume_interlock
+    python -m common.volume_interlock --pairs var/state/traded_pairs.json
+
+THE QUESTION, AND WHY IT IS NOT THE SCREEN'S QUESTION
+------------------------------------------------------
+On 2026-09-11 MCL declined TNON at 07:35 -- the bar that opened a 13-minute,
+15% run -- and the sole blocker was `c_floor`. The bar after it was blocked by
+`c_vol`, and so was every bar until the move was over. The two conditions read
+the SAME number in opposite directions:
+
+    c_vol     this bar's volume >= 3 x prev_vol       wants prev_vol SMALL
+    c_floor   prev_vol          >= 0.5 x trail_avg    wants prev_vol LARGE
+
+Both hold only inside
+
+    0.5 x trail_avg  <=  prev_vol  <=  volume / 3
+
+which is non-empty only when `volume >= 1.5 x trail_avg`, and which narrows as
+the trailing average rises through a session. A burst bar has a quiet
+predecessor, so it clears the multiple and fails the floor; every bar after it
+has a loud predecessor, so it clears the floor and fails the multiple.
+
+**That is one name on one day.** `tnon_no_entry_20260911.md` section 5 specified
+the counting that turns it into a rate, and this is it.
+
+THIS DOES NOT DEPEND ON THE SCREEN
+-----------------------------------
+Every other open question in this project is waiting on the `prior_close`
+repair, because it changes WHICH symbol-days the universe contains. This one
+does not: the interlock is a property of how two conditions interact WITHIN a
+symbol-day, so it is measured per bar on cached bars and the population only
+has to be a reasonable sample of the names MCL trades. The pairs file is
+stated in the report so the population is never implicit.
+
+THE THREE NUMBERS, AND WHAT EACH CAN AND CANNOT SHOW
+------------------------------------------------------
+    1. WINDOW EMPTY      bars where volume < 1.5 x trail_avg, among bars that
+                         pass every NON-volume condition. On these no
+                         prev_vol could have satisfied both, so the interlock
+                         is arithmetic rather than bad luck.
+
+    2. THE HAND-OFF      bar N clears c_vol and fails c_floor, and bar N+1
+                         does the reverse. This is the shape that costs a RUN
+                         rather than a bar, and it is what happened to TNON.
+
+    3. HEADROOM          the distribution of volume / trail_avg on bars where
+                         the other three conditions hold. 1.5 is where the
+                         window opens; how far above it the mass sits says
+                         whether the interlock binds often or rarely.
+
+None of the three says a trade would have been profitable. A bar where four of
+five conditions held is a bar where the rule said no, and what the entry would
+have been worth is a separate, registered question for `pit_delta`. This
+module measures FREQUENCY and nothing else -- deliberately, because the prior
+on mechanic changes in this project is poor and a frequency that turns out to
+be low ends the line of enquiry cheaply.
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+from zoneinfo import ZoneInfo
+
+from common.report_fmt import acct
+from common.report_io import emit
+
+ET = ZoneInfo("America/New_York")
+
+# Where the joint window opens: volume >= OPENS_AT x trail_avg. Derived, not
+# chosen -- it falls out of VOL_MULTIPLE and FLOOR_FRACTION, and a test pins
+# that it still does if either constant moves.
+def opens_at(mcl) -> float:
+    return mcl.VOL_MULTIPLE * mcl.FLOOR_FRACTION
+
+
+def per_session(sig: pd.DataFrame, mcl) -> dict:
+    """One symbol-day's bars -> the three counts.
+
+    `sig` is `mcl.signals()` output, which already carries c_macd / c_mfi /
+    c_rsi / c_vol / c_floor / prev_vol / trail_avg per bar. Recomputing the
+    conditions here would be a second implementation of the entry rule, and
+    the two would agree until one of them changed.
+    """
+    need = ["c_macd", "c_mfi", "c_rsi", "c_vol", "c_floor", "prev_vol",
+            "trail_avg", "volume"]
+    missing = [c for c in need if c not in sig.columns]
+    if missing:
+        raise ValueError(f"signals() did not emit {', '.join(missing)}")
+
+    others = sig["c_macd"] & sig["c_mfi"] & sig["c_rsi"]
+    # Only bars where a trailing average EXISTS can be judged: early in a
+    # session trail_avg is NaN and c_floor is False for a reason that has
+    # nothing to do with the interlock. Counting those would inflate every
+    # figure here with warm-up.
+    warm = sig["trail_avg"].notna() & (sig["trail_avg"] > 0)
+    base = others & warm
+
+    ratio = sig["volume"] / sig["trail_avg"]
+    empty = base & (ratio < opens_at(mcl))
+
+    # The hand-off, measured on ALL bars. KEPT, but it is the weakest of the
+    # numbers here and the report says so: given a 3x spike at N, bar N+1
+    # almost cannot help clearing the floor and failing the multiple, so this
+    # count is close to "spikes after a quiet bar" rather than a coincidence
+    # of two rules. It also counts bars the indicators had already rejected,
+    # which could never have entered whatever the volume did.
+    a = sig["c_vol"] & ~sig["c_floor"]
+    b = (~sig["c_vol"] & sig["c_floor"]).shift(-1, fill_value=False)
+    handoff = a & b & warm
+
+    # THE DECISION-RELEVANT PAIR. Restricted to bars the other three
+    # conditions APPROVED, so every one of these is a bar that would have
+    # entered but for a single volume rule.
+    #
+    #   floor_sole  the TNON 07:35 shape: a burst everything else approved,
+    #               refused because its PREDECESSOR was too quiet.
+    #   vol_sole    TNON 07:36 onward: the follow-through, refused because
+    #               its predecessor was now too loud.
+    floor_sole = base & sig["c_vol"] & ~sig["c_floor"]
+    vol_sole = base & ~sig["c_vol"] & sig["c_floor"]
+
+    # The costly shape is a floor_sole bar whose NEXT bar is vol_sole: an
+    # ignition refused, and the follow-through locked out behind it. That is
+    # a run lost, not a bar.
+    locked = floor_sole & vol_sole.shift(-1, fill_value=False)
+
+    return {
+        "bars": int(len(sig)),
+        "judgeable": int(base.sum()),
+        "window_empty": int(empty.sum()),
+        "handoff": int(handoff.sum()),
+        "floor_sole": int(floor_sole.sum()),
+        "vol_sole": int(vol_sole.sum()),
+        "locked": int(locked.sum()),
+        "entries": int(sig["entry"].sum()) if "entry" in sig else 0,
+        "ratios": [float(x) for x in ratio[base].dropna()],
+    }
+
+
+def render(rows: list[dict], pairs_path: str, mcl, skipped: int,
+           elapsed: float) -> list[str]:
+    n_sd = len(rows)
+    bars = sum(r["bars"] for r in rows)
+    judge = sum(r["judgeable"] for r in rows)
+    empty = sum(r["window_empty"] for r in rows)
+    hand = sum(r["handoff"] for r in rows)
+    entries = sum(r["entries"] for r in rows)
+    ratios = sorted(x for r in rows for x in r["ratios"])
+    gate = opens_at(mcl)
+
+    L = ["DO MCL'S TWO VOLUME CONDITIONS LOCK EACH OTHER OUT?", "",
+         f"  {n_sd:,} symbol-day(s) from {pairs_path}",
+         f"  {bars:,} bars, {entries:,} entry signal(s)",
+         f"  c_vol needs volume >= {mcl.VOL_MULTIPLE:g}x prev_vol; c_floor "
+         f"needs prev_vol >= {mcl.FLOOR_FRACTION:g}x trail_avg",
+         f"  so both can hold only when volume >= {gate:g}x trail_avg",
+         f"  elapsed {elapsed:.1f}s", ""]
+    if skipped:
+        L += [f"  {skipped:,} symbol-day(s) NOT tested: no cached bars, or "
+              "too short for full warm-up", ""]
+
+    if not judge:
+        return L + [
+            "NOTHING JUDGEABLE", "",
+            "  No bar passed the three non-volume conditions with a trailing",
+            "  average defined. That is not a finding about the interlock --",
+            "  it is a population with nothing in it. Check the pairs file",
+            "  and the cache window before reading anything into this.", ""]
+
+    L += ["1. IS THE WINDOW ARITHMETICALLY EMPTY?", "",
+          "  Among bars passing MACD, MFI and RSI with a trailing average:", "",
+          f"  {'judgeable bars':<34}{judge:>10,}",
+          f"  {'of those, window EMPTY':<34}{empty:>10,}   "
+          f"{empty / judge * 100:.1f}%", "",
+          "  On an empty-window bar NO prev_vol could have satisfied both",
+          "  conditions. The block is arithmetic, not timing.", ""]
+
+    fs = sum(r.get("floor_sole", 0) for r in rows)
+    vs = sum(r.get("vol_sole", 0) for r in rows)
+    lk = sum(r.get("locked", 0) for r in rows)
+    lk_days = sum(1 for r in rows if r.get("locked"))
+
+    L += ["2. ONE VOLUME RULE, ALONE, AGAINST AN OTHERWISE-VALID BAR", "",
+          "  Bars the other three conditions APPROVED, refused by exactly one",
+          "  of the volume pair. Every one of these would have entered.", "",
+          f"  {'c_floor alone blocked it':<34}{fs:>10,}   "
+          f"{fs / judge * 100:.1f}% of judgeable   <- the TNON 07:35 shape",
+          f"  {'c_vol alone blocked it':<34}{vs:>10,}   "
+          f"{vs / judge * 100:.1f}% of judgeable   <- the follow-through",
+          "",
+          f"  {'IGNITION REFUSED, RUN LOCKED OUT':<34}{lk:>10,}",
+          f"  {'per symbol-day':<34}{lk / n_sd:>10.2f}",
+          f"  {'symbol-days with at least one':<34}{lk_days:>10,}   "
+          f"{lk_days / n_sd * 100:.1f}%", "",
+          "  The last one is the TNON shape end to end: a burst refused by",
+          "  the floor, with the follow-through bar behind it refused by the",
+          "  multiple. A run lost, not a bar.", ""]
+
+    L += ["2b. THE RAW HAND-OFF, AND WHY IT IS THE WEAKEST NUMBER HERE", "",
+          f"  {'hand-off bars (all bars)':<34}{hand:>10,}",
+          f"  {'per symbol-day':<34}{hand / n_sd:>10.2f}",
+          f"  {'symbol-days with at least one':<34}"
+          f"{sum(1 for r in rows if r['handoff']):>10,}   "
+          f"{sum(1 for r in rows if r['handoff']) / n_sd * 100:.1f}%", "",
+          "  This counts the shape WITHOUT requiring the other three",
+          "  conditions, and it overstates. Given a 3x spike at bar N, bar",
+          "  N+1 can hardly avoid clearing the floor and failing the multiple",
+          "  -- a second consecutive 3x is rare -- so the pair is close to",
+          "  tautological and the count is nearer to 'spikes after a quiet",
+          "  bar' than to a coincidence of two rules. It also counts bars the",
+          "  indicators had already rejected, which could never have entered",
+          "  whatever the volume did.",
+          "",
+          "  It is kept because it was the first number reported and removing",
+          "  it would quietly change the answer. Read section 2, not this.", ""]
+
+    L += ["3. HEADROOM  (volume / trail_avg on judgeable bars)", ""]
+    q = [0.10, 0.25, 0.50, 0.75, 0.90]
+    for p in q:
+        v = ratios[min(int(p * len(ratios)), len(ratios) - 1)]
+        mark = "  <- the window opens here" if p == 0.50 else ""
+        L.append(f"  p{int(p * 100):<3}{acct(v, 10)}x{mark}")
+    above = sum(1 for x in ratios if x >= gate)
+    L += ["",
+          f"  {above:,} of {len(ratios):,} judgeable bars ({above / len(ratios) * 100:.1f}%) "
+          f"clear {gate:g}x", ""]
+
+    L += ["WHAT THIS DOES NOT SAY", "",
+          "  It does not say a trade would have been profitable. A bar where",
+          "  four of five conditions held is a bar where the rule said no,",
+          "  and what the entry would have been worth is a separate question",
+          "  for `pit_delta`, registered with its predicted failure first.",
+          "",
+          "  It does not say the interlock is a defect. Both conditions were",
+          "  chosen deliberately; a rule that declines bursts out of nowhere",
+          "  may be declining exactly what it should.",
+          "",
+          "  It is one strategy on one cache window. The population is named",
+          "  above rather than assumed, and a different pairs file is a",
+          "  different measurement."]
+    return L
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    p.add_argument("--pairs", default="var/state/traded_pairs.json")
+    p.add_argument("--cache", default="bar_cache",
+                   help="bar cache ROOT. The window under it, and the slice "
+                        "back to the backtest window, both come from "
+                        "cache_io's shared constants -- restating either here "
+                        "is how the first run of this module looked for "
+                        "var/cache/1d_to_09:30, a path Windows cannot even "
+                        "hold.")
+    p.add_argument("--limit", type=int, default=0)
+    p.add_argument("--out", default="var/reports/volume_interlock.txt")
+    return p
+
+
+def main(argv=None) -> int:
+    import time
+    a = build_parser().parse_args(argv)
+    from datetime import datetime
+
+    from common.cache_io import (BACKTEST_END_HHMM, BACKTEST_SESSIONS,
+                                 SHARED_DURATION, SHARED_END_HHMM,
+                                 check_sessions, load_cached_bars, load_pairs,
+                                 slice_sessions, window_dir)
+    from strategy.mcl import mcl as MCL
+
+    pairs = load_pairs(Path(a.pairs))
+    if not pairs:
+        sys.exit(f"{a.pairs} lists no US-equity symbol-days")
+    if a.limit:
+        pairs = pairs[:a.limit]
+
+    # The cache holds a SUPERSET -- SHARED_DURATION to SHARED_END_HHMM -- and
+    # every offline consumer slices it back to the backtest window before
+    # reading anything off it. cache_io's own comment says caching a superset
+    # and passing it through unsliced "would silently revalue every backtest";
+    # here it would mean measuring a PRE-MARKET rule across three full
+    # sessions including regular and after hours, which is a different
+    # population wearing the same name.
+    cache = window_dir(Path(a.cache), SHARED_DURATION, SHARED_END_HHMM)
+    end_h, end_m = int(BACKTEST_END_HHMM[:2]), int(BACKTEST_END_HHMM[2:])
+
+    t0 = time.time()
+    rows, no_bars, too_short = [], 0, 0
+    for p in pairs:
+        bars = load_cached_bars(cache, p["symbol"], p["date"])
+        if bars is None or bars.empty:
+            no_bars += 1
+            continue
+        bars.index = (bars.index.tz_localize("UTC") if bars.index.tz is None
+                      else bars.index.tz_convert("UTC"))
+        bars = bars.sort_index()
+        want_end = datetime.strptime(p["date"], "%Y-%m-%d").replace(
+            hour=end_h, minute=end_m, tzinfo=ET)
+        if check_sessions(bars, want_end, BACKTEST_SESSIONS) < BACKTEST_SESSIONS:
+            too_short += 1
+            continue
+        sl = slice_sessions(bars, want_end, BACKTEST_SESSIONS)
+        if len(sl) < MCL.MIN_BARS_REQUIRED:
+            too_short += 1
+            continue
+        r = per_session(MCL.signals(sl), MCL)
+        r["symbol"], r["date"] = p["symbol"], p["date"]
+        rows.append(r)
+
+    skipped = no_bars + too_short
+    if not rows:
+        sys.exit(
+            f"no usable bars for any of {len(pairs)} symbol-day(s) under "
+            f"{cache}/\n"
+            f"  {no_bars} had no cached file, {too_short} were too short for "
+            f"{BACKTEST_SESSIONS} session(s) of warm-up.\n"
+            "  Pass --cache <root> if the cache lives elsewhere.")
+
+    emit("\n".join(render(rows, a.pairs, MCL, skipped, time.time() - t0)),
+         a.out, header=f"common.volume_interlock  pairs={a.pairs}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

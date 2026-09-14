@@ -5,9 +5,54 @@ the Claude session — the IB API is a local socket only.
 
 ---
 
+## WHICH TREE DO I RUN FROM? (2026-09-11)
+
+There are now two working copies and **sessions run from the production one**.
+
+| | |
+|---|---|
+| `D:\TradingProd` | **production.** Checked out at a tag. **Every `--mode paper` and `--mode dry` runs here.** |
+| `D:\Trading` | development. `main`. Edit freely; run backtests and studies here. |
+| `D:\TradingProd\var` | a **junction** to `D:\Trading\var` — one fill log, one watchlist, **one session lock** |
+
+**The junction is the safety property, not a convenience.** The session lock
+lives at the relative path `var/state/session.lock`, so it resolves against
+whichever directory you are in. Two trees with separate `var/` directories have
+**two locks**, and the lock then stops protecting anything: both processes could
+connect to the same IB account and compete for its account-wide request budget.
+
+A junction fails silently. Check it — from `D:\TradingProd`, in **Command
+Prompt or PowerShell**:
+
+```
+python -m common.provenance --expect-shared-var D:\Trading\var
+```
+
+Three things must be true before a session: `describes as  prod-<date>`,
+`uncommitted   no`, and `OK   var/ is shared`. If it says **WRONG**, do not
+start a session.
+
+Backtests and studies do **not** take the lock, so research in `D:\Trading`
+runs freely while a session is live.
+
+Every session prints its version at startup and writes it into the lock, so a
+second session blocked by the first is told which tree the first is running
+from — and the fill log can be traced back to the code that produced it. If you
+accidentally start from `D:\Trading`, the banner says so.
+
+### Promoting a new baseline — never mid-session
+
+```
+git -C "D:\TradingProd" fetch origin --tags
+git -C "D:\TradingProd" checkout <new-tag>
+```
+
+---
+
 ## What this does and does not do
 
-**Does:** mirrors the V7 Pine strategy, watches 1-minute bars live, and places
+**Does:** runs the shipped MCL configuration — **apex exit OFF** since
+2026-09-05, not V7 — watches 1-minute bars live, and places
 **marketable limit orders** against an IBKR **paper** account during pre-market.
 Logs every signal with the live bid/ask, the limit sent, and the fill or no-fill.
 
@@ -39,7 +84,10 @@ least once and are happy with what it reports.
 
 ## One-time setup
 
-Files live in `D:\Trading`. You are using **IB Gateway**, so the paper port
+Files live in `D:\Trading` (development) and `D:\TradingProd` (production —
+see the section above; that is where sessions run). The venv in `D:\Trading`
+serves both: activate it, then `cd` to whichever tree you mean. You are using
+**IB Gateway**, so the paper port
 is **4002** — this is now the script's default, and `run_dry.ps1` passes it explicitly.
 (TWS paper would be 7497; both are in the safety allowlist.)
 
@@ -153,6 +201,7 @@ Without `--allow-empty` an empty watchlist is treated as a mistake and the scrip
 ### 2. Dry run first, every time
 
 ```powershell
+cd "D:\TradingProd"
 .\run_dry.ps1
 ```
 
@@ -171,6 +220,7 @@ on, every order is rejected. The script now names that failure explicitly rather
 logging it as a no-fill, so you'll know within a minute if you forgot.
 
 ```powershell
+cd "D:\TradingProd"
 .\run_paper.ps1
 ```
 
@@ -257,7 +307,9 @@ gap is itself something we need to know.
 
 After the first dry run:
 
-1. Open the same ticker and date on the TradingView chart with the V7 script attached.
+1. Open the same ticker and date on the TradingView chart with `pine/MCL.pine`
+   attached — the **current** script, apex off. Reconciling against V7 would
+   compare the live trader with a configuration it stopped running on 2026-09-05.
 2. Compare the buy/sell markers on the chart against the `entry_signal` rows in
    `var/fills/mcl_fills_YYYYMMDD.csv`.
 3. Send me the CSV plus the chart's trade list and I'll reconcile them.
@@ -395,8 +447,8 @@ Three other routes, for completeness:
 ## What a dry run does and does not prove
 
 A dry run **simulates the full round trip**: it opens a virtual position at the
-marketable-limit price, then runs the trailing stop and the apex exit against live
-quotes exactly as the live version would. Every SELL row carries `entry_price`,
+marketable-limit price, then runs the trailing stop against live quotes exactly
+as the live version would (the apex exit is OFF). Every SELL row carries `entry_price`,
 `exit_price`, `trade_pnl`, `trade_pct` and `hold_minutes`, and the session ends with a
 printed summary of trades and net P/L.
 
@@ -432,13 +484,21 @@ paper P/L **is** the fill risk, quantified.
 | `status` | `FILLED`, `PARTIAL_FILL`, `NO_FILL_CANCELLED`, `REJECTED`, `DRY_RUN`, `NO_QUOTE` |
 | `reject_reason` | IB's own words, when it refused the order outright |
 | `entry_price` / `exit_price` | round trip, written on the SELL row |
-| `trade_pnl` / `trade_pct` | P/L for that trade, net of $2 round-trip commission |
+| `trade_pnl` / `trade_pct` | P/L for that trade, net of commission only — **not** net of the measured stop-fill friction |
 | `hold_minutes` | time in the position |
 
 Three questions to answer from one session:
 
-1. **What is the average `slippage_vs_ref`?** Multiply by ~50 trades. Against V7's
-   +$924 over 50 trades, anything worse than about −$18/trade wipes out the edge.
+1. **What is the average `slippage_vs_ref`?** **Corrected 2026-09-11 — the old
+   text here said "against V7's +$924 over 50 trades, anything worse than about
+   −$18/trade wipes out the edge". There is no edge to wipe out.** On the
+   screened universe MCL's break-even friction is **−$0.96 per round trip**: it
+   loses money at zero cost. Measured from 21 live trailing-stop exits, the real
+   stop-fill cost is a **mean −$8.46 per 100 shares** (median −$2.25, 20 of 21
+   adverse), against the $4.26 every backtest charges — so the shipped figure is
+   too small by roughly half. See `stop_fill_20260911.md`. **This is what the
+   session is for**: each round trip improves that estimate, which is the
+   largest un-nailed number in the project.
 2. **How often is `status = NO_FILL_CANCELLED`?** Every no-fill is a backtest trade that
    would not have existed. If the winners are the ones that don't fill, the edge is
    imaginary. Count `PARTIAL_FILL` here too — a 40-share fill on a 100-share signal is
@@ -485,9 +545,12 @@ suits; edit the file directly the rest of the time.
 
 ## Suggested sequence
 
+**Updated 2026-09-11.** The original sequence is complete — five sessions of
+paper fills exist and the slippage substitution has been made
+(`stop_fill_20260911.md`). What the sessions are for now:
+
 | When | What |
 |---|---|
-| Session 1 | `--dry-run` only. Reconcile signals against TradingView. |
-| Session 2 | `--dry-run` again if session 1 showed mismatches worth chasing |
-| Session 3+ | Live paper orders. Collect 3-5 sessions of fill data. |
-| Then | Re-run the backtest with measured slippage and no-fill rate substituted for the 1-tick assumption. **That** number is the first honest estimate of the edge. |
+| Every session | **More trailing-stop fills.** n = 21. It is the largest un-nailed number in the project, the $4.26 the backtests charge is roughly half the measured mean, and nothing else in this repository can improve it. |
+| Every session | Run from `D:\TradingProd` and check the provenance line. A session run from the wrong tree is only visible in that line. |
+| Not yet | Any read of session P/L as validation. Both live strategies are negative **gross** on the screened universe — before any cost assumption — so a good night is variance and a bad one is not news. |

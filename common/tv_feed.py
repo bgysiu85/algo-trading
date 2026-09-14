@@ -223,14 +223,51 @@ def in_band(row: dict) -> bool:
 class Ranking:
     """Session-scoped memory of what has screened, newest interest first.
 
-    Holds ORDER, not membership. Nothing is ever forgotten except by the size
-    cap, and the cap always takes from the cold end.
+    Holds ORDER, not membership. Within a session nothing is forgotten except
+    by the size cap, and the cap always takes from the cold end -- Ben,
+    2026-09-05: "do not remove but deprioritise".
+
+    THE WORD `Session-scoped` WAS A DESCRIPTION, NOT A MECHANISM
+    -------------------------------------------------------------
+    Until 2026-09-12 nothing here knew what a session was. `ever` simply never
+    forgot, so a process spanning midnight carried yesterday's names into
+    today's file as COLD -- and the trader arms every name in the file, in
+    order. The archived watchlists show it plainly:
+
+        09-08  hot=2 cold=4   BNC WYHG QCML HCWB SLE ISPC
+        09-09  hot=5 cold=8   ... | BNC WYHG            <- 09-08's, still cold
+        09-10  hot=2 cold=9   ... | BIAF RML ODD SUNE IRD  <- 09-09's
+
+    Five of 09-10's seven `screen_validate` "misses" are that list. The
+    simulation was right about every one: they were not on the screen that
+    day, they were left in the file.
+
+    `begin_session(day)` is the mechanism the docstring always claimed. It is
+    explicit rather than inferred from `now` inside `update()` because `tiers()`
+    is called BEFORE `update()` on every poll, so a roll hidden in `update`
+    would report one tiering and write another.
     """
 
     def __init__(self, max_symbols: int = MAX_SYMBOLS):
         self.max_symbols = max_symbols
         self.last_seen: dict[str, float] = {}
         self.ever: dict[str, dict] = {}
+        self.session = None
+
+    def begin_session(self, day) -> bool:
+        """Start `day`. Clears the memory if this is a NEW session.
+
+        Returns True when it cleared, so the caller can log it -- a silent
+        clear and a silent non-clear look identical in a file, which is how
+        this went unnoticed for four sessions.
+        """
+        if self.session == day:
+            return False
+        rolled = bool(self.ever) and self.session is not None
+        self.session = day
+        self.last_seen.clear()
+        self.ever.clear()
+        return rolled
 
     def update(self, rows: list[dict], now: float | None = None) -> list[str]:
         now = time.time() if now is None else now
@@ -361,6 +398,12 @@ def _loop(a, rank, tg, prev_screening, last_beat, backoff) -> int:
                 return 1
             time.sleep(backoff)
             continue
+
+        # Roll the ranker's memory BEFORE tiering, so the tiers reported and
+        # the symbols written describe the same session.
+        if rank.begin_session(now.date()):
+            LOG.info("new session %s — ranker memory cleared; yesterday's "
+                     "names no longer carry over as COLD", now.date())
 
         hot, warm, cold = rank.tiers(rows)
         symbols = rank.update(rows)

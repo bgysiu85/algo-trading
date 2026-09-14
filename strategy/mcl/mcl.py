@@ -245,6 +245,12 @@ class Signals:
     exit_signal: bool
     close: float
     detail: dict
+    # The bar this signal was COMPUTED ON, which the live trader dedupes
+    # entries on. For MCL it equals the frame's last row -- which is precisely
+    # why it must be carried rather than inferred by the caller: the caller
+    # inferring it is correct for MCL and wrong for MC5, and it looked right
+    # for three sessions. See mc5.Signals.bar_ts.
+    bar_ts: object = None
 
 
 def evaluate_last_bar(df: pd.DataFrame,
@@ -284,6 +290,7 @@ def evaluate_last_bar(df: pd.DataFrame,
         long_entry=bool(row["entry"]),
         exit_signal=bool(row["exit_sig"]) and use_apex,
         close=float(row["close"]),
+        bar_ts=sig.index[-1],
         detail={
             "macd": round(float(row["macd"]), 5),
             "macd_sig": round(float(row["macd_sig"]), 5),
@@ -389,6 +396,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      max_adds: int | None = None,
                      entry_delay_bars: int = 0,
                      max_hold_bars: int | None = None,
+                     not_before: dtime | None = None,
+                     entry_bars: "pd.Series | None" = None,
                      ladder: "PL.LadderConfig | None" = None,
                      target_exit: "TE.TargetExit | None" = None) -> list[Trade]:
     """Run one pre-market session.
@@ -469,6 +478,31 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     full level has necessarily passed the partial one), and both before any
     buy-back, so a bar that could plausibly have done several things is
     resolved against the position.
+
+    NOT_BEFORE: THE POINT-IN-TIME ENTRY FLOOR
+    -----------------------------------------
+    `not_before` is an ET time-of-day before which no entry may be taken. It
+    exists for `common/pit_strategy.py`, which runs this engine over a universe
+    built by `common/screen_sim.py` where every name carries a `first_seen` --
+    the moment the live screen would actually have surfaced it. A name the feed
+    puts on the watchlist at 07:20 cannot be bought at 04:30, and running
+    without the floor would reproduce exactly the look-ahead that whole exercise
+    exists to remove, while producing a number that looks like an answer.
+
+    Two properties, both tested:
+
+      * It can only move an entry LATER or remove it. The floor is applied to
+        the bar's own timestamp and no bar is ever brought forward, so a floor
+        earlier than SESSION_START is inert rather than permissive.
+      * `not_before=None` is BIT-IDENTICAL to this function before the
+        parameter existed. This is a published engine; a default that changed
+        behaviour would silently rewrite every result already in the docs.
+
+    The floor is tested against the bar's START timestamp, which is up to one
+    bar more conservative than necessary (a 1-minute bar stamped 06:09 is not
+    knowable until 06:10, so a `first_seen` of 06:10 could legitimately fill on
+    it). Conservative is the correct direction for a control: it can cost
+    entries, never manufacture them.
     """
     if use_apex is None:
         use_apex = USE_APEX_EXIT
@@ -490,6 +524,33 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     if not idx:
         return []
 
+    # The point-in-time entry floor (see the docstring). A MASK over entries
+    # rather than a narrowing of `idx`, deliberately: `idx` also drives
+    # `prev_high` and `last_of_session`, so dropping bars from it would change
+    # the buy-back trigger and which bar counts as the forced flatten -- i.e.
+    # it would alter the EXIT model as a side effect of an ENTRY restriction.
+    # `None` yields an all-True mask, which is why the default path is
+    # bit-identical rather than merely equivalent.
+    entry_allowed = ([True] * len(sig) if not_before is None
+                     else [t >= not_before for t in local.time])
+
+    # `entry_bars` REPLACES the rule's own entry signal, bar for bar. It exists
+    # so a refused bar can be PRICED with this exact exit model instead of a
+    # second implementation of the exit written next to the question -- which
+    # is how the live path and the backtest drifted apart for three days.
+    #
+    # It is a replacement rather than an addition on purpose. "Enter where the
+    # rule said no" and "enter where the rule said yes OR where I say so" are
+    # different populations, and a union would quietly mix a control into its
+    # own treatment.
+    #
+    # None leaves the rule untouched, so the default path is bit-identical.
+    if entry_bars is None:
+        take = None
+    else:
+        aligned = entry_bars.reindex(sig.index, fill_value=False)
+        take = [bool(x) for x in aligned]
+
     trades: list[Trade] = []
     pos = None
     rows = sig.reset_index()
@@ -503,7 +564,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         last_of_session = (k == len(idx) - 1)
 
         if pos is None:
-            if row["entry"]:
+            fires = row["entry"] if take is None else take[i]
+            if fires and entry_allowed[i]:
                 # ENTRY LATENCY. entry_delay_bars=0 is the rule as backtested:
                 # the signal bar closes and we are filled at that close. LIVE,
                 # measured 2026-09-09, the order leaves SIXTY SECONDS after the

@@ -1,5 +1,13 @@
 # Runtime
-ib_async
+#
+# ib_async is PINNED, and the pin is the point. It is the maintained successor
+# to ib_insync, whose repo was archived 2024-03-14 after its author died; this
+# project migrated on 2026-09-04 and no ib_insync import remains. A broker API
+# does not fail loudly when it drifts -- it fails the morning IBKR changes
+# something, mid-session, with a position open. 2.1.0 is the version this suite
+# has been run against; moving it is a deliberate decision with a test pass
+# behind it, not something a fresh `pip install` does on its own.
+ib_async==2.1.0
 pandas
 numpy
 databento
