@@ -121,6 +121,22 @@ def locate(idx: pd.DatetimeIndex, stamp: str) -> int | None:
     return int(pos)
 
 
+def extremes(df: pd.DataFrame, i: int, end: int) -> tuple[int, int]:
+    """Bar positions of the highest high and the lowest low in (i, end).
+
+    A SECOND reading of the same window `excursions()` measures, kept separate
+    from it so that one is not rewritten to serve the other. The values these
+    positions point at must equal the values `excursions()` returns, and a test
+    asserts exactly that on random windows -- because two implementations of one
+    window is how an off-by-one becomes a finding.
+    """
+    hi = df["high"].to_numpy(dtype=float)[i + 1:end]
+    lo = df["low"].to_numpy(dtype=float)[i + 1:end]
+    if not len(hi):
+        return -1, -1
+    return int(np.argmax(hi)) + i + 1, int(np.argmin(lo)) + i + 1
+
+
 def measure(df: pd.DataFrame, trade) -> dict | None:
     """One trade's excursions, in dollars on the traded size.
 
@@ -135,13 +151,21 @@ def measure(df: pd.DataFrame, trade) -> dict | None:
     # trade -- price traded at that bar while the position was still open.
     mfe_in, mae_in = excursions(df, i, trade.entry_price, end=j + 1)
     mfe_end, mae_end = excursions(df, i, trade.entry_price, end=len(df))
+    hi_i, lo_i = extremes(df, i, j + 1)
     px = trade.entry_price
     return {"symbol": trade.symbol, "date": trade.date,
             "net": float(trade.net), "bars_held": int(trade.bars_held),
             "entry_price": px, "qty": qty,
             "mfe_in": mfe_in * px * qty, "mae_in": mae_in * px * qty,
             "mfe_end": mfe_end * px * qty,
-            "mfe_in_share": mfe_in * px, "mae_in_share": mae_in * px}
+            "mfe_in_share": mfe_in * px, "mae_in_share": mae_in * px,
+            # WHICH CAME FIRST. The marginal medians cannot answer this: the
+            # trade at the median of MFE is not the trade at the median of MAE,
+            # and reading one against the other treats two different trades as
+            # one. Only the per-trade pair says whether the drawdown arrived
+            # before the move that would have paid for it.
+            "mfe_i": hi_i, "mae_i": lo_i,
+            "adverse_first": bool(0 <= lo_i < hi_i)}
 
 
 def pct(vals: list[float], q: float) -> float:
@@ -228,6 +252,52 @@ def verdict(rows: list[dict], friction: float) -> tuple[str, list[str]]:
         "  picking the reading that suits the next piece of work."]
 
 
+def order_section(rows: list[dict], friction: float) -> list[str]:
+    """Which extreme arrived first, per trade.
+
+    THE MARGINAL MEDIANS CANNOT ANSWER THIS and reading them as if they could is
+    a live mistake -- the trade at the median of MFE is not the trade at the
+    median of MAE, so "the median trade goes $16 against and $14 for" describes
+    no trade that exists. Only the pair does.
+
+    It matters because it splits the deficit. If the favourable move arrives
+    FIRST, an exit that took it would have banked something, and the exit is
+    where the money went. If the drawdown arrives first, the trade was underwater
+    before it was ever up, and an exit is fighting the entry's timing rather
+    than improving on it.
+    """
+    have = [r for r in rows if r.get("mfe_i", -1) >= 0]
+    L = ["WHICH CAME FIRST, THE MOVE OR THE DRAWDOWN", "",
+         "  Per trade, not per percentile. The trade at the median of MFE is",
+         "  not the trade at the median of MAE, so the two rows above cannot",
+         "  be read against each other -- only this can.", ""]
+    if not have:
+        return L + ["  No trade carries both extremes.", ""]
+    adverse = [r for r in have if r["adverse_first"]]
+    favour = [r for r in have if not r["adverse_first"]]
+    for label, sel in (("drawdown first", adverse), ("move first", favour)):
+        if not sel:
+            continue
+        med_f = pct([r["mfe_in"] for r in sel], 50)
+        med_a = pct([r["mae_in"] for r in sel], 50)
+        net = sum(r["net"] - friction for r in sel) / len(sel)
+        L.append(f"  {label:<16}{len(sel):>7,} ({100 * len(sel) / len(have):>5.1f}%)"
+                 f"   median MFE ${med_f:>8,.2f}   median MAE ${med_a:>8,.2f}"
+                 f"   {acct(net, 9)}/trade")
+    L.append("")
+    if adverse:
+        share = len(adverse) / len(have)
+        L += [f"  {100 * share:.1f}% of trades were at their worst BEFORE they "
+              "were at their best.",
+              "",
+              "  On those, an exit is not recovering a move it gave back -- the",
+              "  position was underwater first, and any protective stop had to",
+              "  survive the drawdown to still be holding when the move came.",
+              "  That is a question about entry timing as much as about exits,",
+              "  and this report does not settle which.", ""]
+    return L
+
+
 def render(rows: list[dict], name: str, n_days: int, n_universe: int,
            split: str, elapsed: float, jobs: int, made: int | None = None,
            warm_short: int = 0) -> list[str]:
@@ -287,6 +357,8 @@ def render(rows: list[dict], name: str, n_days: int, n_universe: int,
           "  A trade whose best moment never reached its own round trip could",
           "  not have been profitable under ANY exit rule. This is the share",
           "  of the book that exit work cannot reach at all.", ""]
+
+    L += order_section(rows, MEASURED_FRICTION)
 
     pe = perfect_exit(rows, MEASURED_FRICTION)
     drop = (f"${acct(pe['dropped'], 11, 0)}" if pe["syms"] > DROP
@@ -405,16 +477,16 @@ def main(argv=None) -> int:
         days = days[:a.limit]
     # Each task carries its own warm-up paths, so a worker builds the same
     # frame pit_strategy's sequential deque walk would have handed it.
-    have = sorted(slices)
-    pos = {d: i for i, d in enumerate(have)}
-    tasks = []
-    for d in days:
-        if d not in slices:
-            continue
-        i = pos[d]
-        tasks.append(([str(slices[x])
-                       for x in have[max(0, i - WARMUP_SESSIONS):i + 1]],
-                      d, by_date[d], a.strategy))
+    # From the PAIRS days that have a slice, not from every archive day.
+    # pit_strategy's deque appends only the days it processes, so on a session
+    # the pairs file skips its warm-up is the previous PROCESSED day rather
+    # than the previous calendar one. Using the archive's ordering instead gave
+    # 3,956 trades against its 3,955 -- one trade, from one day, and exactly
+    # the kind of divergence that is invisible until someone diffs two totals.
+    have = [d for d in days if d in slices]
+    tasks = [([str(slices[x]) for x in have[max(0, i - WARMUP_SESSIONS):i + 1]],
+              d, by_date[d], a.strategy)
+             for i, d in enumerate(have)]
     jobs = (os.cpu_count() or 1) if a.jobs == 0 else max(1, a.jobs)
     print(f"  {a.strategy} excursions over {len(tasks):,} session(s) on "
           f"{jobs} worker(s)", flush=True)
