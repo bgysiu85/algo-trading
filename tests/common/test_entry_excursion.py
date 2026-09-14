@@ -360,9 +360,9 @@ def test_the_split_reports_the_move_that_continued_after_the_exit():
         r.update(mfe_i=5, mae_i=1 if k < 5 else 9, adverse_first=k < 5,
                  mfe_end=10.0 if k < 5 else 500.0)
     o = "\n".join(E.order_section(rows, 4.26))
-    assert "med MFE to close" in o
+    assert "to close" in o
     assert "500.00" in o
-    assert "not cut short" in o and "no exit" in o
+    assert "no exit reaches what was never there" in o
 
 
 # --- 10. the double must not be more permissive than the real thing ----------
@@ -403,3 +403,61 @@ def test_the_fields_measure_reads_all_exist_on_the_real_trade():
     for field in ("symbol", "date", "entry_time", "exit_time", "entry_price",
                   "qty", "net", "bars_held"):
         assert field in have, f"measure() reads .{field} and Trade lost it"
+
+
+# --- 11. the fixed horizon, against the window-length confound ---------------
+
+def test_mfe_to_close_depends_on_when_the_trade_ended_and_the_fixed_one_does_not():
+    """`to close` runs to the session's last bar, so a trade stopped out early
+    is credited with more tape than one stopped out late -- and the group that
+    exits soonest collects the largest figure for it. The fixed horizon gives
+    every trade the same window from its own entry."""
+    n = E.FIXED_HORIZON + 20
+    highs = [10.0] * n
+    highs[E.FIXED_HORIZON + 10] = 50.0     # a spike beyond the fixed horizon
+    df = frame([10.0] * n, highs=highs)
+    early = E.measure(df, trade(df, 0, 2, 10.0, 10.0))
+    late = E.measure(df, trade(df, 0, n - 2, 10.0, 10.0))
+    # both see the spike in `to close`, because both run to the last bar
+    assert early["mfe_end"] == pytest.approx(4000.0)
+    assert late["mfe_end"] == pytest.approx(4000.0)
+    # neither sees it in the fixed window, which stops at the same bar for both
+    assert early["mfe_fix"] == pytest.approx(0.0)
+    assert late["mfe_fix"] == pytest.approx(0.0)
+
+
+def test_the_fixed_horizon_sees_a_move_inside_its_own_window():
+    n = E.FIXED_HORIZON + 20
+    highs = [10.0] * n
+    highs[5] = 12.0
+    df = frame([10.0] * n, highs=highs)
+    m = E.measure(df, trade(df, 0, 2, 10.0, 10.0))
+    assert m["mfe_in"] == pytest.approx(0.0)      # the spike is after the exit
+    assert m["mfe_fix"] == pytest.approx(200.0)   # and inside the fixed window
+
+
+def test_bars_left_records_how_much_session_each_trade_was_handed():
+    df = frame([10.0] * 20)
+    assert E.measure(df, trade(df, 0, 2, 10.0, 10.0))["bars_left"] == 17
+    assert E.measure(df, trade(df, 0, 18, 10.0, 10.0))["bars_left"] == 1
+
+
+def test_the_table_tells_the_reader_to_use_the_fixed_column():
+    rows = rows_with([10.0] * 10)
+    for k, r in enumerate(rows):
+        r.update(mfe_i=5, mae_i=1 if k < 5 else 9, adverse_first=k < 5,
+                 mfe_end=500.0, mfe_fix=20.0, bars_left=200 if k < 5 else 3)
+    o = "\n".join(E.order_section(rows, 4.26))
+    assert f"READ THE +{E.FIXED_HORIZON}-BAR COLUMN, NOT `to close`" in o
+    assert "the group that exits soonest is" in o
+    assert "bars left" in o
+
+
+def test_the_fixed_horizon_is_registered_not_tuned():
+    """A horizon chosen after seeing the split is a parameter fitted to the
+    answer. It is a module constant with its reasoning written beside it."""
+    import inspect
+    src = inspect.getsource(E)
+    i = src.index("FIXED_HORIZON = ")
+    assert "registered here rather" in src[:i]
+    assert "p90" in src[:i]

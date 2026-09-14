@@ -99,6 +99,15 @@ ET = ZoneInfo("America/New_York")
 QTY = 100
 MEASURED_FRICTION = 4.26
 
+# A FIXED horizon from entry, so "did the move continue after we exited" is not
+# answered with a window whose length depends on when we exited. `mfe_end` runs
+# to the session's last bar, so a trade stopped out at 04:30 is credited with
+# five hours of tape and one stopped out at 09:25 with five minutes -- and the
+# group that exits soonest collects the most. 30 bars is registered here rather
+# than chosen after seeing the split: MCL's holds are a median of 2 bars with
+# p90 around 24, so 30 clears p90 for both groups without reaching the close.
+FIXED_HORIZON = 30
+
 # Pre-registered above, before the first run.
 COVER_SHARE_BAR = 0.50          # share of trades never covering friction
 MFE_MULTIPLE_BAR = 2.0          # median in-trade MFE, as a multiple of friction
@@ -151,6 +160,8 @@ def measure(df: pd.DataFrame, trade) -> dict | None:
     # trade -- price traded at that bar while the position was still open.
     mfe_in, mae_in = excursions(df, i, trade.entry_price, end=j + 1)
     mfe_end, mae_end = excursions(df, i, trade.entry_price, end=len(df))
+    mfe_fix, _mae_fix = excursions(df, i, trade.entry_price,
+                                   end=min(i + 1 + FIXED_HORIZON, len(df)))
     hi_i, lo_i = extremes(df, i, j + 1)
     px = trade.entry_price
     return {"symbol": trade.symbol, "date": trade.date,
@@ -158,6 +169,8 @@ def measure(df: pd.DataFrame, trade) -> dict | None:
             "entry_price": px, "qty": qty,
             "mfe_in": mfe_in * px * qty, "mae_in": mae_in * px * qty,
             "mfe_end": mfe_end * px * qty,
+            "mfe_fix": mfe_fix * px * qty,
+            "bars_left": int(len(df) - 1 - j),
             "mfe_in_share": mfe_in * px, "mae_in_share": mae_in * px,
             # WHICH CAME FIRST. The marginal medians cannot answer this: the
             # trade at the median of MFE is not the trade at the median of MAE,
@@ -276,7 +289,8 @@ def order_section(rows: list[dict], friction: float) -> list[str]:
     adverse = [r for r in have if r["adverse_first"]]
     favour = [r for r in have if not r["adverse_first"]]
     L.append(f"  {'':<16}{'trades':>16}{'med MFE':>12}{'med MAE':>12}"
-             f"{'med MFE to close':>19}{'per trade':>12}")
+             f"{'+' + str(FIXED_HORIZON) + ' bars':>12}{'to close':>11}"
+             f"{'bars held':>11}{'bars left':>11}{'per trade':>12}")
     for label, sel in (("drawdown first", adverse), ("move first", favour)):
         if not sel:
             continue
@@ -288,17 +302,28 @@ def order_section(rows: list[dict], friction: float) -> list[str]:
         # Those are opposite findings -- an entry problem and an exit problem --
         # and they render as the same number.
         med_e = pct([r["mfe_end"] for r in sel], 50)
+        med_x = pct([r.get("mfe_fix", float("nan")) for r in sel], 50)
+        med_h = pct([r["bars_held"] for r in sel], 50)
+        med_l = pct([r.get("bars_left", float("nan")) for r in sel], 50)
         net = sum(r["net"] - friction for r in sel) / len(sel)
         L.append(f"  {label:<16}{len(sel):>7,} "
                  f"({100 * len(sel) / len(have):>5.1f}%)"
-                 f"${med_f:>11,.2f}${med_a:>11,.2f}${med_e:>18,.2f}"
+                 f"${med_f:>11,.2f}${med_a:>11,.2f}${med_x:>11,.2f}"
+                 f"${med_e:>10,.2f}{med_h:>11,.0f}{med_l:>11,.0f}"
                  f"{acct(net, 12)}")
     L += ["",
-          "  `med MFE to close` runs past the exit to the session's last bar.",
-          "  Compare it to `med MFE`: a group whose two figures are close was",
-          "  not cut short -- the move really was that small, and no exit",
-          "  reaches what was never there. A group whose to-close figure is far",
-          "  larger was exited out of a move that kept going."]
+          f"  READ THE +{FIXED_HORIZON}-BAR COLUMN, NOT `to close`. Both run "
+          "past the exit, but",
+          "  `to close` measures whatever tape happened to remain, and `bars",
+          "  left` says how much that was -- the group that exits soonest is",
+          "  handed the most session and collects the largest figure for it.",
+          f"  The +{FIXED_HORIZON}-bar column gives every trade the same window "
+          "from its own",
+          "  entry, so the two groups are compared on equal ground.",
+          "",
+          "  Against `med MFE`: close together means the move really was that",
+          "  small and no exit reaches what was never there. Far apart means",
+          "  the trade was exited out of a move that kept going."]
     L.append("")
     if adverse:
         share = len(adverse) / len(have)
