@@ -143,30 +143,44 @@ def capture_needed(row: dict, cfg: ScreenConfig) -> float:
     return float(v) / cfg.volume_min
 
 
-def repair_reach(rows: list[dict], cfg: ScreenConfig) -> list[str]:
+def repair_reach(rows: list[dict], cfg: ScreenConfig,
+                 rep=None) -> list[str]:
     """Did the prior-close repair reach each of these names, and how short is
     the nearest one.
 
-    Two residual categories that look identical in the table above and are not:
-    a name still dividing by a 20:00 close has an OUTSTANDING defect, and a
-    name on a repaired 16:00 close that still fails has a real shortfall on
-    this tape. The first is fixable by extending the repair to another venue;
-    the second is not fixable by any close at all.
+    REPAIRED IS A PROVENANCE, NOT A WARRANT. The first version of this section
+    read `prior_source == "repaired"` as "this name's divisor is correct" and
+    told the reader that extending the repair could not recover the nearest
+    miss. It cannot support that. `auction_else_last` takes the FIRST PRINT IN
+    THE 16:00 MINUTE and treats it as the closing cross; on a name whose cross
+    happens on a venue this tape does not carry, that print is an ordinary
+    continuous trade and the reconstructed close is simply a different wrong
+    number from the 20:00 one. The construction's own record says so -- it was
+    accepted below its bar with AMEX at 0/3 -- so a repaired close on a name
+    listed off this tape's venue carries the residual in full.
+
+    So the section states the provenance, carries the relaxation record beside
+    it rather than on stdout where the report cannot see it, and stops short of
+    a verdict that needs per-name listing venue to earn.
     """
     chg = [r for r in rows if "CHANGE" in str(r.get("why", ""))
            and r.get("change") not in (None, float("-inf"))]
     unrepaired = [r for r in chg if r.get("prior_source") != "repaired"]
     L = ["DID THE REPAIR REACH THEM", "",
-         "  A name still dividing by a 20:00 close carries the defect this",
-         "  screen was supposed to have fixed. A name on a repaired 16:00",
-         "  close that still falls short does not -- its change is real, and",
-         "  no prior close recovers it. The table's `prior` column separates",
-         "  them; they are different findings with different fixes.", ""]
+         "  `repaired` says where a divisor came from, NOT that it is right.",
+         "  The construction takes the first print in the 16:00 minute as the",
+         "  closing cross; for a name whose cross happens on a venue this tape",
+         "  does not carry, that print is an ordinary trade and the",
+         "  reconstructed close is a different wrong number, not a fixed one.",
+         ""]
     if not chg:
         return L + ["  No CHANGE failure carries a computed change.", ""]
 
-    L += [f"  {len(unrepaired)} of {len(chg)} CHANGE failure(s) are still on an "
-          "UNREPAIRED close."]
+    L += [f"  {len(unrepaired)} of {len(chg)} CHANGE failure(s) still divide by "
+          "a 20:00 close.",
+          f"  The other {len(chg) - len(unrepaired)} divide by a reconstructed "
+          "16:00 one, with the",
+          "  residual below."]
     near = max(chg, key=lambda r: r["change"])
     short = cfg.change_min - near["change"]
     L += ["",
@@ -175,14 +189,25 @@ def repair_reach(rows: list[dict], cfg: ScreenConfig) -> list[str]:
           f"  of the {cfg.change_min:.0f}% clause, on a "
           f"{near.get('prior_source', 'unknown')} prior close.", ""]
     if near.get("prior_source") != "repaired":
-        L += ["  That nearest miss is one of the unrepaired ones, so its",
-              "  shortfall is not a measurement of the screen -- it is the",
-              "  outstanding defect, still costing a name, and the size above",
-              "  is how much the missing close would have to be worth.", ""]
+        L += ["  That one still carries the confirmed defect, and the",
+              "  shortfall above is how much the missing close would have to",
+              "  be worth.", ""]
     else:
-        L += ["  That nearest miss IS on a repaired close, so the shortfall is",
-              "  a property of this tape's prints rather than of the divisor.",
-              "  Extending the repair cannot recover it.", ""]
+        L += ["  A shortfall that small is inside the construction's own",
+              "  residual, so this is NOT yet evidence that the name's change",
+              "  is genuinely short on this tape. Settling it needs the one",
+              "  thing no report here carries: each name's LISTING VENUE, and",
+              "  with it whether its closing cross is on this tape at all.", ""]
+
+    band = relaxation_banner(rep)
+    if band:
+        # In the report, not on stdout. The emitted file asks for the residual
+        # to be stated wherever these closes are used, and a reader holding
+        # only the .txt was being asked to trust `repaired` with no sight of
+        # what the construction was accepted at.
+        L += ["  THE CONSTRUCTION'S OWN RECORD", ""]
+        L += [f"  {line.strip()}" for line in band]
+        L.append("")
     return L
 
 
@@ -240,7 +265,7 @@ def capture_verdict(rows: list[dict], cfg: ScreenConfig) -> list[str]:
 
 
 def render(rows: list[dict], cfg: ScreenConfig, n_sessions: int,
-           elapsed: float) -> list[str]:
+           elapsed: float, rep=None) -> list[str]:
     L = ["WHY THE SIMULATED SCREEN MISSED THEM", "",
          f"  {len(rows)} live names the simulation never surfaced, over "
          f"{n_sessions} session(s)",
@@ -316,7 +341,7 @@ def render(rows: list[dict], cfg: ScreenConfig, n_sessions: int,
               "  have called these eligible and blamed the cap.", ""]
 
     L += capture_verdict(rows, cfg)
-    L += repair_reach(rows, cfg)
+    L += repair_reach(rows, cfg, rep)
 
     L += ["WHAT THIS IS NOT", "",
           "  Not a measure of the live screen's correctness. TradingView's",
@@ -413,7 +438,8 @@ def main(argv=None) -> int:
                                    else str(src.get(s, "unknown")))
             out.append(rec)
 
-    emit("\n".join(render(out, cfg, len(rows), time.time() - t0)), a.out,
+    emit("\n".join(render(out, cfg, len(rows), time.time() - t0, rep)),
+         a.out,
          header=f"common.screen_miss  dataset={a.dataset}")
     return 0
 
