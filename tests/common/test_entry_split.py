@@ -345,3 +345,67 @@ def test_the_fixtures_actually_reach_the_bucketing_path():
     o = "\n".join(S.render(mixed(), "mcl", 10, 1.0, 1))
     assert "NOT BUCKETABLE" not in o
     assert o.count("per trade") >= len(ALL_COLS)
+
+
+# --- 7. the rate and the money can point opposite ways -----------------------
+
+def test_money_agrees_reads_the_end_the_rate_points_at():
+    rising = [{"mean": 1.0}, {"mean": 2.0}, {"mean": 3.0}]
+    assert S.money_agrees(rising, +1, 4.26) is True
+    assert S.money_agrees(rising, -1, 4.26) is False
+
+
+def test_a_separator_whose_money_runs_backwards_is_flagged():
+    """ma20_dist on the real run: the rate falls 38.1% -> 21.8% while the P/L
+    is best in the 21.8% bucket. The feature sorts trades by KIND and the
+    dollars the other way, which the label can do and the money cannot."""
+    out = []
+    # rate falls STRICTLY across the four quartiles: .44 .36 .24 .16
+    per_bucket = [11, 9, 6, 4]
+    for i in range(800):
+        v = i % 100
+        lab = 1 if (v % 25) < per_bucket[v // 25] else 0
+        # ...and the money RISES with v, the opposite end
+        net = (-14.0 + 4.26) + (v / 100.0) * 8.0
+        r = {S.LABEL: float(lab), "net": net,
+             "date": f"2026-0{1 + (i // 400)}-01", "adverse_first": bool(lab)}
+        r.update({c: float(v) for c in ALL_COLS})
+        out.append(r)
+    o = "\n".join(S.render(out, "mcl", 10, 1.0, 1))
+    assert "AND THE MONEY RUNS THE OTHER WAY" in o
+    assert "WHERE THE RATE AND THE MONEY DISAGREE" in o
+    assert "acting on that shape would not have collected anything" in o
+
+
+def test_a_separator_whose_money_agrees_is_not_flagged():
+    o = "\n".join(S.render(mixed(), "mcl", 10, 1.0, 1))
+    assert "AND THE MONEY RUNS THE OTHER WAY" not in o
+
+
+def test_the_best_bucket_in_the_whole_table_is_stated():
+    """A tier is a statement about SHAPE. This is the one about money, and a
+    table with no profitable bucket has no filter in it however many features
+    separate."""
+    o = "\n".join(S.render(mixed(), "mcl", 10, 1.0, 1))
+    assert "THE BEST BUCKET IN THE TABLE" in o
+
+
+def test_a_table_with_no_profitable_bucket_says_so_outright():
+    r = rows([(float(i), i % 2, -6.0 + 4.26) for i in range(400)])
+    o = "\n".join(S.render(r, "mcl", 10, 1.0, 1))
+    assert "NOT ONE BUCKET OF ANY FEATURE IS PROFITABLE" in o
+    assert "no subset this feature set can name" in o
+
+
+def test_a_profitable_bucket_is_not_called_unprofitable():
+    """The branch must be reachable both ways, or it is a constant."""
+    out = []
+    for i in range(800):
+        v = float(i % 100)
+        r = {S.LABEL: float(i % 2), "net": (20.0 if v > 50 else -6.0) + 4.26,
+             "date": f"2026-0{1 + (i // 400)}-01", "adverse_first": bool(i % 2)}
+        r.update({c: v for c in ALL_COLS})
+        out.append(r)
+    o = "\n".join(S.render(out, "mcl", 10, 1.0, 1))
+    assert "THE BEST BUCKET IN THE TABLE" in o
+    assert "NOT ONE BUCKET OF ANY FEATURE IS PROFITABLE" not in o
