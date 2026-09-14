@@ -70,6 +70,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from common.screen import is_test_symbol
 from common.tv_feed import MAX_SYMBOLS
 from common.tv_screener import (PREMARKET_CHANGE_MIN, PREMARKET_PRICE_RANGE,
                                 PREMARKET_VOLUME_MIN)
@@ -211,6 +212,18 @@ def screen_at(bars: pd.DataFrame, prior_close: pd.Series, t: datetime,
         # float filter, which used the same operation.
         & (f["premarket_close"] >= lo) & (f["premarket_close"] <= hi)
         & (f["premarket_volume"] >= cfg.volume_min_on_tape)
+        # EXCHANGE TEST SYMBOLS, which `screen.py` has excluded since it was
+        # written and this path never did. They are not securities: venues
+        # publish them continuously so members can verify connectivity, and
+        # they carry real-looking prices and volume on a tape that makes no
+        # distinction. ZVZZT reached first_rank 1 on 2025-01-03 in the
+        # point-in-time universe -- top of the watchlist, on prints that are
+        # arbitrary by construction.
+        #
+        # The exclusion lives in ONE place, `screen.is_test_symbol`, because
+        # two lists of test tickers under two names is the same defect as two
+        # screens under one: they agree until one of them is updated.
+        & ~f["symbol"].map(is_test_symbol)
     )
     # Ties broken by symbol, ALWAYS. Two names at the same pre-market change is
     # common on a 2-decimal figure, and an unstable sort would make the top-40

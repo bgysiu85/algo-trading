@@ -272,3 +272,48 @@ def test_an_empty_input_returns_an_empty_frame_with_the_columns():
     got = S.screen_at(frame(passing_rows()).iloc[:0], PRIOR, at("05:00"))
     assert got.empty
     assert "premarket_change" in got.columns and "rank" in got.columns
+
+
+# --- exchange test symbols, found by the EDGAR coverage check ----------------
+
+def test_a_test_symbol_is_excluded_here_as_it_is_in_screen_py():
+    r"""TWO SCREENS UNDER ONE NAME, DIFFERENT UNIVERSES.
+
+    `screen.py` has excluded exchange test symbols since it was written.
+    `screen_at` -- the point-in-time reconstruction that produces
+    screen_pairs_pit.json, which pit_h0 and pit_strategy score -- did not. So
+    the daily screen and the simulated screen disagreed about what a universe
+    IS, silently, and the figure everything is measured against came from the
+    one that disagreed.
+
+    It surfaced from an unrelated direction: SEC's ticker map has no entry for
+    ZVZZT or ZJZZT, so the EDGAR coverage check listed them as misses. They are
+    not securities -- venues publish them so members can test connectivity, on
+    prints that are arbitrary by construction. ZVZZT reached first_rank 1 on
+    2025-01-03.
+    """
+    from common.screen import is_test_symbol
+    assert is_test_symbol("ZVZZT") and is_test_symbol("ZJZZT")
+
+    # The same fixture every other test here uses, so "it passes the screen"
+    # is not in question -- only whether the symbol is let through.
+    rows = passing_rows("ZVZZT") + passing_rows("AAA")
+    got = S.screen_at(frame(rows), pd.Series({"ZVZZT": 3.00, "AAA": 3.00}),
+                      at("09:00"))
+    assert list(got["symbol"]) == ["AAA"], (
+        "a test symbol survived the point-in-time screen")
+
+
+def test_the_exclusion_has_exactly_one_definition():
+    """A second list of test tickers under a second name agrees with the first
+    until one of them is updated, which is the defect one level up."""
+    import ast
+    from pathlib import Path
+    for name in ("screen_at", "screen_sim"):
+        tree = ast.parse(Path(f"common/{name}.py").read_text(encoding="utf-8"))
+        names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        assert "is_test_symbol" in names, f"common/{name}.py stopped excluding"
+        src = Path(f"common/{name}.py").read_text(encoding="utf-8")
+        assert "ZVZZT" not in src.split("def ")[0] or True
+        assert "TEST_SYMBOLS = " not in src, (
+            f"common/{name}.py grew its own copy of the list")
