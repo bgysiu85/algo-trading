@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import dataclasses
 import json
 import logging
 import os
@@ -74,6 +75,33 @@ def _session_state(now_et: datetime) -> str:
     if t < dtime(20, 0):
         return "after"
     return "closed"
+
+
+def _rebind_adapter(trader, old, new) -> None:
+    """Swap one StrategyAdapter for another everywhere the trader holds it.
+
+    StrategyAdapter is a frozen dataclass, and should stay that way: it is a
+    VALUE describing a strategy, and the whole point of reading its fields off
+    the strategy module is that nobody gets to keep a private, drifted copy.
+    So changing the trail does not mutate the adapter -- it builds the next
+    value and rebinds every reference to it.
+
+    Both places matter. `trader.strategies` is what the next state document
+    reports and what a later command looks the adapter up in; `SymbolState
+    .strategy` is what an ENTRY reads to stamp the trail onto the Position. Miss
+    the second and the portal would report the new trail while entries kept
+    taking the old one -- a number in a browser disagreeing with the trade.
+
+    Open positions are untouched by construction: the trader copies trail_pct
+    into Position at entry, so a position carries the trail it was opened with
+    and no later change reaches it.
+    """
+    for i, a in enumerate(getattr(trader, "strategies", [])):
+        if a is old:
+            trader.strategies[i] = new
+    for st in getattr(trader, "states", {}).values():
+        if getattr(st, "strategy", None) is old:
+            st.strategy = new
 
 
 class UIBridge:
@@ -431,7 +459,9 @@ class UIBridge:
             number = _num(value)
             if number is None or not (0.5 <= number <= 20):
                 return _ack("rejected", "a percentage between 0.5 and 20", "bad_args")
-            was, adapter.trail_pct = adapter.trail_pct, float(number)
+            was = adapter.trail_pct
+            _rebind_adapter(trader, adapter,
+                            dataclasses.replace(adapter, trail_pct=float(number)))
             self.record_event("info", f"{name} trail {was}% -> {float(number)}%")
             return _ack("applied", f"{name} trail set to {number}% — new positions only")
 

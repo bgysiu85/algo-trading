@@ -357,3 +357,107 @@ def test_reading_commands_from_a_dead_relay_returns_nothing():
     b = bridge()
     b.base_url = "http://127.0.0.1:9"
     assert b._get("/api/commands") == []
+
+
+# ---------------------------------------------------------------------------
+# The fakes above are ordinary objects, and an ordinary object accepts any
+# attribute you set on it. The real StrategyAdapter is a FROZEN dataclass, so
+# `adapter.trail_pct = x` raises -- and the first version of this module did
+# exactly that, passing every test here while failing on Ben's machine. These
+# tests use the real adapter for that reason; do not replace it with a fake.
+
+def _real_trader_with_real_adapters():
+    from common import strategy_adapter as SA
+
+    class State:
+        def __init__(self, symbol, adapter):
+            self.symbol, self.strategy = symbol, adapter
+            self.position = None
+
+    class Trader:
+        def __init__(self):
+            self.strategies = SA.build_all(["mcl", "mc5"])
+            self.states = {"AAA": State("AAA", self.strategies[0]),
+                           "BBB": State("BBB", self.strategies[1])}
+            self.max_positions = 3
+            self.paused = False
+            self.disabled_strategies = set()
+
+    return Trader()
+
+
+def test_the_trail_can_be_changed_on_a_real_frozen_adapter():
+    trader = _real_trader_with_real_adapters()
+    name = trader.strategies[0].name
+    ui = bridge(paper=True)
+
+    answer = ui.apply(trader, {"id": "c1", "type": "set_setting",
+                                   "args": {"key": f"trail_pct:{name}", "value": 7.5}})
+
+    assert answer["status"] == "applied", answer
+    assert "FrozenInstanceError" not in answer["detail"]
+    changed = next(a for a in trader.strategies if a.name == name)
+    assert changed.trail_pct == 7.5
+
+
+def test_the_change_reaches_the_state_an_entry_actually_reads():
+    """step_symbol stamps the trail onto the Position from st.strategy. If the
+    rebind missed SymbolState, the portal would report 7.5% while every entry
+    kept taking 5.0% -- the browser disagreeing with the trade."""
+    trader = _real_trader_with_real_adapters()
+    name = trader.strategies[0].name
+    ui = bridge(paper=True)
+
+    ui.apply(trader, {"id": "c1", "type": "set_setting",
+                      "args": {"key": f"trail_pct:{name}", "value": 9.0}})
+
+    for state in trader.states.values():
+        if state.strategy.name == name:
+            assert state.strategy.trail_pct == 9.0
+
+    published = {s["key"]: s["value"] for s in ui.build_state(
+        trader, NOW).get("settings", [])}
+    assert published[f"trail_pct:{name}"] == 9.0
+
+
+def test_changing_one_strategys_trail_leaves_the_other_alone():
+    trader = _real_trader_with_real_adapters()
+    first, second = trader.strategies[0].name, trader.strategies[1].name
+    before = next(a for a in trader.strategies if a.name == second).trail_pct
+    ui = bridge(paper=True)
+
+    ui.apply(trader, {"id": "c1", "type": "set_setting",
+                      "args": {"key": f"trail_pct:{first}", "value": 6.5}})
+
+    assert next(a for a in trader.strategies if a.name == second).trail_pct == before
+
+
+def test_an_open_position_keeps_the_trail_it_was_opened_with():
+    """The trader copies trail_pct into Position at entry, so this holds by
+    construction -- asserted here because the portal's promise to the user
+    ("new positions only") depends on it staying true."""
+    trader = _real_trader_with_real_adapters()
+    name = trader.strategies[0].name
+    state = next(s for s in trader.states.values() if s.strategy.name == name)
+
+    class Position:
+        trail_pct = 5.0
+    state.position = Position()
+
+    bridge(paper=True).apply(trader, {"id": "c1", "type": "set_setting",
+                                       "args": {"key": f"trail_pct:{name}",
+                                                "value": 12.0}})
+
+    assert state.position.trail_pct == 5.0
+    assert state.strategy.trail_pct == 12.0
+
+
+def test_the_adapter_is_still_frozen():
+    """A future edit could 'fix' this by unfreezing StrategyAdapter. That would
+    let anything keep a private, drifted copy of a strategy's constants, which
+    is the defect the adapter exists to prevent."""
+    from common import strategy_adapter as SA
+
+    assert SA.StrategyAdapter.__dataclass_params__.frozen, (
+        "unfreezing the adapter would remove the guarantee that its fields are "
+        "read off the strategy module")
