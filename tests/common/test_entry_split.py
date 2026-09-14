@@ -202,3 +202,81 @@ def test_the_label_is_one_for_a_drawdown_that_came_first():
     got = S.label_rows([{"adverse_first": True}, {"adverse_first": False},
                         {}])
     assert [r[S.LABEL] for r in got] == [1.0, 0.0, 0.0]
+
+
+# --- 5. the pipeline, not just the renderer ----------------------------------
+
+def _frame(sym="AAA", n=330, period=40, amp=0.30, drift=0.004,
+           base_v=40_000.0, spike=130_000.0):
+    """Two 04:00-09:30 sessions shaped to MCL's real entry conditions.
+
+    Copied from `test_pit_strategy.frame` rather than imported, so this file
+    does not depend on another test module's internals. A wobbly uptrend, not a
+    ramp: a monotone ramp pins RSI at 100 and never enters.
+    """
+    import math
+    from datetime import date, datetime, time as dtime, timedelta
+    import pandas as pd
+    from zoneinfo import ZoneInfo
+    ET = ZoneInfo("America/New_York")
+    D = date(2026, 3, 2)
+    idx = []
+    for d in (D - timedelta(days=1), D):
+        b = pd.Timestamp(datetime.combine(d, dtime(4, 0), tzinfo=ET))
+        idx += [(b + timedelta(minutes=i)).tz_convert("UTC") for i in range(n)]
+    idx = pd.DatetimeIndex(idx)
+    close = [4.0 + drift * i + amp * math.sin(2 * math.pi * i / period)
+             for i in range(len(idx))]
+    vol = [spike if i % 3 == 0 else base_v for i in range(len(idx))]
+    return pd.DataFrame({"symbol": sym, "open": close,
+                         "high": [c + 0.02 for c in close],
+                         "low": [c - 0.02 for c in close],
+                         "close": close, "volume": vol}, index=idx), D
+
+
+def test_run_day_produces_labelled_feature_rows_from_a_real_frame(monkeypatch):
+    """THE TEST THAT WAS MISSING. Every other test here feeds the renderer
+    dictionaries, so the first real session raised KeyError('macd') -- the
+    features read INDICATOR columns and were being handed raw OHLCV. A suite
+    that never runs the pipeline cannot catch that."""
+    import pandas as pd
+    df, D = _frame()
+    monkeypatch.setattr("common.dbn_io.read_dbn", lambda p: df)
+    fs = pd.Timestamp(f"{D.isoformat()}T04:00:00-05:00").tz_convert(
+        "UTC").isoformat()
+    day, out, err = S.run_day(([f"{D.isoformat()}.dbn"], D.isoformat(),
+                               [{"symbol": "AAA", "date": D.isoformat(),
+                                 "first_seen": fs}], "mcl"))
+    assert err == "" and day == D.isoformat()
+    assert out, "the fixture produced no trades; the test proves nothing"
+    r = out[0]
+    # the label side
+    assert "adverse_first" in r and "mfe_in" in r
+    # and the feature side -- one from every family, so a renamed column fails
+    for fam, cols in F.FAMILIES.items():
+        assert any(c in r for c in cols), f"no feature from {fam}"
+
+
+def test_the_features_and_the_label_travel_on_the_same_row(monkeypatch):
+    """A join that silently dropped one side would leave a table of features
+    against a constant label, which buckets perfectly well and means nothing."""
+    df, D = _frame()
+    import pandas as pd
+    monkeypatch.setattr("common.dbn_io.read_dbn", lambda p: df)
+    fs = pd.Timestamp(f"{D.isoformat()}T04:00:00-05:00").tz_convert(
+        "UTC").isoformat()
+    _day, out, _err = S.run_day(([f"{D.isoformat()}.dbn"], D.isoformat(),
+                                 [{"symbol": "AAA", "date": D.isoformat(),
+                                   "first_seen": fs}], "mcl"))
+    S.label_rows(out)
+    assert all(S.LABEL in r and "rsi" in r for r in out)
+    assert all(r[S.LABEL] in (0.0, 1.0) for r in out)
+
+
+def test_mc5_is_refused_rather_than_measured_against_the_wrong_features():
+    """MC5's signals() wants 5-minute bars; this feature set is MCL's 1-minute
+    one. An mc5 run would compute a table against a frame the features were not
+    written for and print it as a measurement."""
+    import pytest as _pytest
+    with _pytest.raises(SystemExit):
+        S.build_parser().parse_args(["--strategy", "mc5"])

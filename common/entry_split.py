@@ -276,6 +276,8 @@ def run_day(args: tuple) -> tuple:
     from common.dbn_io import read_dbn
     from common.pit_strategy import build_frame, engine
 
+    from strategy.mcl import mcl as MCL
+
     paths, day, universe, strategy = args
     mod, extra = engine(strategy)
     parts = []
@@ -304,26 +306,35 @@ def run_day(args: tuple) -> tuple:
             continue
         if not trades:
             continue
-        ctx = None
+        # `features_at` reads INDICATOR columns -- macd, rsi, mfi and the rest --
+        # so it needs the signal frame, not the raw OHLCV one. Handing it `df`
+        # raised KeyError('macd') on the first real session; every unit test
+        # here passed, because they all fed the renderer dictionaries and never
+        # ran this function against a frame.
+        sig = MCL.signals(df)
+        ctx = frame_ctx(sig)
         for t in trades:
             m = measure(df, t)
             if m is None:
                 continue
-            i = df.index.searchsorted(pd.Timestamp(t.entry_time))
-            if i >= len(df) or df.index[i] != pd.Timestamp(t.entry_time):
+            i = sig.index.searchsorted(pd.Timestamp(t.entry_time))
+            if i >= len(sig) or sig.index[i] != pd.Timestamp(t.entry_time):
                 continue
-            if ctx is None:
-                ctx = frame_ctx(df)
             # features from bar i and the bars BEFORE it; the label is the only
             # thing here that knows what happened afterwards.
-            m.update(features_at(df, int(i), ctx=ctx))
+            m.update(features_at(sig, int(i), ctx=ctx))
             out.append(m)
     return day, out, ""
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--strategy", default="mcl", choices=["mcl", "mc5"])
+    # MCL ONLY, on purpose. `entry_features` computes MCL's 1-minute indicator
+    # set, and MC5's `signals()` wants 5-minute bars -- so an mc5 run would
+    # either raise or, worse, compute a feature table against a frame those
+    # features were not written for and print it as a measurement.
+    p.add_argument("--strategy", default="mcl", choices=["mcl"],
+                   help="mcl only: the feature set is MCL's 1-minute one")
     p.add_argument("--pairs", default="var/state/screen_pairs_pit.json")
     p.add_argument("--archive", default=None)
     p.add_argument("--dataset", default="XNAS.BASIC")
