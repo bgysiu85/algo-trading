@@ -199,6 +199,12 @@ def render(rows: list[dict], name: str, n_days: int, elapsed: float,
 
     a, b = split(rows)
     L += ["EVERY FEATURE, PRINTED", "",
+          "  Two lines each: the dip-then-run RATE per bucket, and the P/L per",
+          "  trade in the same bucket at $4.26. The rate is what the tier is",
+          "  judged on; the money is what a filter would actually collect, and",
+          "  they can disagree -- the label says which KIND of trade, never how",
+          "  large.",
+          "",
           "  Nothing is ranked and nothing is omitted. A list sorted by effect",
           "  invites reading the top of it as a finding.", ""]
     tiers: dict[str, str] = {}
@@ -216,7 +222,17 @@ def render(rows: list[dict], name: str, n_days: int, elapsed: float,
             t, note = tier(ba, bb, st["base"], be)
             tiers[col] = t
             cells = "  ".join(f"{100 * x['mean']:>5.1f}%" for x in bs)
+            # THE RATE IS A PROXY; THE MONEY IS THE THING. A bucket can carry
+            # more dip-then-run trades and still lose more, if its winners are
+            # smaller or its losers worse -- the label says which KIND of trade,
+            # never how large. Printing the rate alone would leave the reader to
+            # infer the P/L from it, which is the inference this whole thread
+            # exists because someone made.
+            ps = buckets(rows, col, QUANTILES, outcome="net")
+            money = "  ".join(f"{acct(x['mean'] - MEASURED_FRICTION, 6)}"
+                              for x in ps)
             L += [f"    {col:<22} {cells}   {t}",
+                  f"      {'per trade':<20}{money}",
                   f"      {note}"]
         L.append("")
 

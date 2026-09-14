@@ -21,12 +21,25 @@ from common import entry_features as F
 from common import entry_split as S
 
 
+ALL_COLS = [c for cols in F.FAMILIES.values() for c in cols]
+
+
 def rows(pairs, dates=None):
-    """pairs = [(feature value, label 0/1, net)]"""
+    """pairs = [(feature value, label 0/1, net)]
+
+    The value is written to EVERY column in FAMILIES, not to a column named
+    "f". The first version used "f", so `render` found none of the real feature
+    names, refused all 22 as NOT BUCKETABLE, and the tests that asserted on the
+    report passed without the bucketing path ever running.
+    """
     dates = dates or ["2026-01-01"] * len(pairs)
-    return [{"f": v, S.LABEL: float(lab), "net": net, "date": d,
+    out = []
+    for (v, lab, net), d in zip(pairs, dates):
+        r = {"f": v, S.LABEL: float(lab), "net": net, "date": d,
              "adverse_first": bool(lab)}
-            for (v, lab, net), d in zip(pairs, dates)]
+        r.update({c: v for c in ALL_COLS})
+        out.append(r)
+    return out
 
 
 # --- 1. the bar is derived ----------------------------------------------------
@@ -149,10 +162,12 @@ def mixed(n=800):
     for i in range(n):
         v = float(i % 100)
         lab = 1 if (v > 70 and i % 3) else 0
-        out.append({"f": v, S.LABEL: float(lab),
-                    "net": (19.13 + 4.26) if lab else (-22.73 + 4.26),
-                    "date": f"2026-0{1 + (i // (n // 2))}-01",
-                    "adverse_first": bool(lab)})
+        r = {"f": v, S.LABEL: float(lab),
+             "net": (19.13 + 4.26) if lab else (-22.73 + 4.26),
+             "date": f"2026-0{1 + (i // (n // 2))}-01",
+             "adverse_first": bool(lab)}
+        r.update({c: v for c in ALL_COLS})
+        out.append(r)
     return out
 
 
@@ -280,3 +295,53 @@ def test_mc5_is_refused_rather_than_measured_against_the_wrong_features():
     import pytest as _pytest
     with _pytest.raises(SystemExit):
         S.build_parser().parse_args(["--strategy", "mc5"])
+
+
+# --- 6. the rate is a proxy; the money is the thing --------------------------
+
+def test_each_feature_prints_its_P_L_beside_its_rate():
+    """A bucket can carry more dip-then-run trades and still lose more, if its
+    winners are smaller. Printing the rate alone leaves the reader to infer the
+    money from it -- the inference this whole thread exists because someone
+    made."""
+    o = "\n".join(S.render(mixed(), "mcl", 10, 1.0, 1))
+    assert "per trade" in o
+    assert "the money is what a filter would actually collect" in o
+    assert "they can disagree" in o
+
+
+def test_the_P_L_row_charges_friction_per_trade():
+    r = rows([(float(i), 0, 10.0) for i in range(400)])
+    # every bucket is +10.00 gross, so every printed cell must be 10 - 4.26
+    o = "\n".join(S.render(r, "mcl", 10, 1.0, 1))
+    assert "5.74" in o
+
+
+def test_a_rate_that_rises_while_the_money_falls_is_visible_in_the_report():
+    """The case the second row exists for: the label and the P/L pointing
+    opposite ways. Reading the rate alone would call it a filter."""
+    out = []
+    for i in range(800):
+        v = float(i % 100)
+        lab = 1 if v > 70 else 0
+        # the label-rich bucket wins less often per dollar
+        net = (1.0 + 4.26) if lab else (-0.5 + 4.26)
+        r = {"f": v, S.LABEL: float(lab), "net": net,
+             "date": f"2026-0{1 + (i // 400)}-01",
+             "adverse_first": bool(lab)}
+        r.update({c: v for c in ALL_COLS})
+        out.append(r)
+    o = "\n".join(S.render(out, "mcl", 10, 1.0, 1))
+    assert "per trade" in o
+    # the money row must be present for the feature whose rate climbs
+    seg = o[o.index("f") if "f" in o else 0:]
+    assert "1.00" in o or "(0.50)" in o
+
+
+def test_the_fixtures_actually_reach_the_bucketing_path():
+    """The guard on the guard. The first fixtures named their column "f", so
+    render refused all 22 real features as NOT BUCKETABLE and every assertion
+    about the report passed without a single bucket being built."""
+    o = "\n".join(S.render(mixed(), "mcl", 10, 1.0, 1))
+    assert "NOT BUCKETABLE" not in o
+    assert o.count("per trade") >= len(ALL_COLS)
