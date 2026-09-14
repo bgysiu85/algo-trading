@@ -48,11 +48,13 @@ MC5 rather than folded in.
 from __future__ import annotations
 
 import argparse
+import io
 import sys
 from pathlib import Path
 
 import pandas as pd
 
+from common import textio as T
 from common.report_fmt import acct
 from common.report_io import emit
 
@@ -119,7 +121,11 @@ def load(path: Path) -> tuple[pd.DataFrame, str | None]:
     a file that has it: `mcl_fills_20260911.csv` is named for MCL and is full
     of MC5 rows, so the name is evidence about the ERA and not about any row.
     """
-    d = pd.read_csv(path)
+    # NOT pd.read_csv(path). pandas defaults to UTF-8 REGARDLESS OF LOCALE, so
+    # every log written before FillLog named its encoding -- all of them, on a
+    # cp1252 machine -- raises UnicodeDecodeError here instead of loading.
+    # Decoding first reads both generations; see common/textio.
+    d = pd.read_csv(io.StringIO(T.read_text(path)[0]))
     missing = [c for c in REQUIRED if c not in d.columns]
     if missing:
         raise ValueError(f"no {', '.join(missing)} column(s)")

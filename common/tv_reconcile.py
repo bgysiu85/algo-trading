@@ -69,6 +69,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from common import textio as T
 from common.report_io import emit
 
 ET = ZoneInfo("America/New_York")
@@ -132,8 +133,10 @@ def load_alerts(path: Path) -> list[dict]:
 
 
 def load_fills(path: Path) -> list[dict]:
-    with open(path, newline="", encoding="utf-8") as fh:
-        rows = list(csv.DictReader(fh))
+    # STRICT utf-8 here raised on every log written before FillLog named its
+    # encoding -- which is every log on disk before 2026-09-14. Both
+    # generations are read; see common/textio.
+    rows, _enc = T.read_csv(path)
     out = []
     for r in rows:
         if r.get("status") != "FILLED":
