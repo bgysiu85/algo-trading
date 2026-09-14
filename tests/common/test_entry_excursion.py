@@ -274,3 +274,77 @@ def test_sessions_short_of_warm_up_are_counted_not_hidden():
     o = "\n".join(E.render(rows_with([50.0] * 40), "mcl", 10, 100,
                            "2026-03-02", 1.0, 1, warm_short=3))
     assert "3 session(s) ran with less warm-up than asked" in o
+
+
+# --- 9. which extreme came first ---------------------------------------------
+
+def test_extremes_agree_with_the_values_excursions_returns():
+    """Two implementations of one window is how an off-by-one becomes a
+    finding. The positions must point at the values the other function found."""
+    import random
+    from common.dip_entry import excursions
+    rng = random.Random(11)
+    for _ in range(60):
+        n = rng.randint(3, 40)
+        hi = [round(rng.uniform(5, 15), 2) for _ in range(n)]
+        lo = [round(h - rng.uniform(0.1, 3.0), 2) for h in hi]
+        df = frame([10.0] * n, highs=hi, lows=lo)
+        i = rng.randint(0, n - 2)
+        end = rng.randint(i + 2, n)
+        entry = 10.0
+        mfe, mae = excursions(df, i, entry, end=end)
+        hi_i, lo_i = E.extremes(df, i, end)
+        assert df["high"].iloc[hi_i] == pytest.approx(mfe * entry + entry)
+        assert df["low"].iloc[lo_i] == pytest.approx(entry - mae * entry)
+
+
+def test_a_window_with_no_bars_after_entry_returns_no_positions():
+    df = frame([10.0, 10.0])
+    assert E.extremes(df, 0, 1) == (-1, -1)
+
+
+def test_adverse_first_is_true_when_the_low_precedes_the_high():
+    df = frame([10.0] * 5, highs=[10.0, 10.0, 10.0, 10.0, 12.0],
+               lows=[10.0, 9.0, 10.0, 10.0, 10.0])
+    m = E.measure(df, trade(df, 0, 4, 10.0, 10.0))
+    assert m["mae_i"] == 1 and m["mfe_i"] == 4
+    assert m["adverse_first"] is True
+
+
+def test_adverse_first_is_false_when_the_high_precedes_the_low():
+    df = frame([10.0] * 5, highs=[10.0, 12.0, 10.0, 10.0, 10.0],
+               lows=[10.0, 10.0, 10.0, 10.0, 9.0])
+    m = E.measure(df, trade(df, 0, 4, 10.0, 10.0))
+    assert m["adverse_first"] is False
+
+
+def test_the_order_section_refuses_the_comparison_the_percentiles_invite():
+    """'The median trade goes $16 against and $14 for' describes no trade that
+    exists -- those are two different trades. The report has to say so where
+    the two rows sit next to each other."""
+    rows = rows_with([50.0] * 20)
+    for k, r in enumerate(rows):
+        r.update(mfe_i=5, mae_i=1 if k < 15 else 9,
+                 adverse_first=k < 15)
+    o = "\n".join(E.order_section(rows, 4.26))
+    assert "Per trade, not per percentile" in o
+    assert "cannot" in o and "be read against each other" in o
+    assert "75.0% of trades were at their worst BEFORE they were at their best"\
+        in o
+
+
+def test_both_orderings_are_reported_with_their_own_medians():
+    rows = rows_with([10.0] * 10 + [90.0] * 10)
+    for k, r in enumerate(rows):
+        r.update(mfe_i=5, mae_i=1 if k < 10 else 9, adverse_first=k < 10)
+    o = "\n".join(E.order_section(rows, 4.26))
+    assert "drawdown first" in o and "move first" in o
+    assert "10.00" in o and "90.00" in o
+
+
+def test_the_order_section_does_not_claim_to_settle_entry_versus_exit():
+    rows = rows_with([50.0] * 10)
+    for r in rows:
+        r.update(mfe_i=5, mae_i=1, adverse_first=True)
+    o = "\n".join(E.order_section(rows, 4.26))
+    assert "this report does not settle which" in o
