@@ -263,6 +263,39 @@ def test_comparing_a_cache_with_itself_is_refused():
         TC.main(["--a", "bar_cache", "--b", "bar_cache"])
 
 
+def _sessions_or_skip(root: str = "bar_cache", limit: int = 40):
+    r"""The cached sessions, or a SKIP if this checkout has no bar cache.
+
+    `load_sessions` calls `sys.exit` on an empty cache, which is right for a
+    study invoked from the command line and wrong here: pytest renders it as a
+    failure, so a clean run in a checkout without a cache is indistinguishable
+    at a glance from a broken one. `D:\TradingProd` is exactly that checkout --
+    its `var` is a junction to the main one, but `bar_cache` is not shared.
+
+    THE CHEAP CHECK COMES FIRST. The `len(sessions) < 10` guard these tests
+    already carried sits AFTER the call that cannot be taken back, so it never
+    ran -- the same shape as the artefact guard that classified a path only
+    after `emit` had written it. Look at the directory, then decide, then call.
+
+    `common/analysis.py` is deliberately untouched.
+    """
+    from pathlib import Path
+    from common.cache_io import SHARED_DURATION, SHARED_END_HHMM, window_dir
+
+    d = window_dir(Path(root), SHARED_DURATION, SHARED_END_HHMM)
+    if not d.is_dir() or not any(d.glob("*.csv.gz")):
+        pytest.skip(f"this checkout has no bar cache ({d}/ is absent or "
+                    "holds no *.csv.gz) -- nothing to compare a tape against")
+
+    from common.analysis import load_sessions
+
+    sessions = load_sessions(Path(root))[:limit]
+    if len(sessions) < 10:
+        pytest.skip(f"{d}/ holds too few usable sessions ({len(sessions)}) "
+                    "for the identity case to prove anything")
+    return sessions
+
+
 # --- the identity case: the strongest smoke test there is -------------------
 
 def test_a_cache_compared_with_itself_agrees_exactly():
@@ -278,12 +311,7 @@ def test_a_cache_compared_with_itself_agrees_exactly():
     exercise the join, the split guard and the pairing against real timestamps
     at once.
     """
-    from pathlib import Path
-    from common.analysis import load_sessions
-
-    sessions = load_sessions(Path("bar_cache"))[:40]
-    if len(sessions) < 10:
-        pytest.skip("bar_cache is not populated in this environment")
+    sessions = _sessions_or_skip()
     g = TC.collect(sessions, sessions)
     assert g["splits"] == 0, "a cache is not a split of itself"
     assert g["scored"] == g["n_matched"] == len(sessions)
@@ -299,12 +327,7 @@ def test_a_cache_compared_with_itself_agrees_exactly():
 
 def test_the_identity_case_reaches_the_agreement_verdict():
     """And the report has to say so, rather than finding an effect in noise."""
-    from pathlib import Path
-    from common.analysis import load_sessions
-
-    sessions = load_sessions(Path("bar_cache"))[:40]
-    if len(sessions) < 10:
-        pytest.skip("bar_cache is not populated in this environment")
+    sessions = _sessions_or_skip()
     out = "\n".join(TC.render(TC.collect(sessions, sessions), "x", "y"))
     assert "it is NOT the tape" in out
 
@@ -384,3 +407,55 @@ def test_a_tape_whose_median_minute_has_no_range_is_called_out():
                   "range_a": 0.0050, "range_b": 0.0}]
     out = "\n".join(TC.render(g, "xnas", "db"))
     assert "NO RANGE AT ALL" in out and "single print" in out
+
+
+# --- the skip guard itself ---------------------------------------------------
+
+def test_an_absent_bar_cache_skips_rather_than_exiting(tmp_path):
+    """A prod checkout has no `bar_cache` -- its `var` is a junction to the main
+    one, `bar_cache` is not shared. `load_sessions` sys.exits there, pytest
+    renders that as a failure, and a clean run becomes indistinguishable from a
+    broken one at a glance."""
+    # pytest.skip raises Skipped, which inherits from BaseException -- so
+    # `pytest.raises(Exception)` does NOT catch it, the skip propagates, and
+    # THIS test skips instead of passing. Three of these did exactly that
+    # before anyone read the "sss" in the progress line.
+    with pytest.raises(pytest.skip.Exception) as e:
+        _sessions_or_skip(root=str(tmp_path / "no_such_cache"))
+    assert "no bar cache" in str(e.value)
+
+
+def test_an_empty_window_directory_also_skips(tmp_path):
+    """Present but empty is the same situation, and is what a half-built cache
+    looks like."""
+    from common.cache_io import SHARED_DURATION, SHARED_END_HHMM, window_dir
+
+    d = window_dir(tmp_path, SHARED_DURATION, SHARED_END_HHMM)
+    d.mkdir(parents=True)
+    with pytest.raises(pytest.skip.Exception) as e:
+        _sessions_or_skip(root=str(tmp_path))
+    assert "holds no *.csv.gz" in str(e.value)
+
+
+def test_the_check_happens_BEFORE_load_sessions_is_called(tmp_path,
+                                                          monkeypatch):
+    """THE POINT OF THE HELPER. The `len(sessions) < 10` guard these tests
+    already carried sat after the call that cannot be taken back, so it never
+    ran -- the same shape as the artefact guard that classified a path only
+    after `emit` had written it."""
+    called = []
+    import common.analysis as A
+    monkeypatch.setattr(A, "load_sessions",
+                        lambda *a, **k: called.append(a) or [])
+    with pytest.raises(pytest.skip.Exception):
+        _sessions_or_skip(root=str(tmp_path / "absent"))
+    assert called == [], "load_sessions was reached despite an absent cache"
+
+
+def test_common_analysis_still_exits_for_a_command_line_study():
+    """Deliberately untouched: sys.exit is right for a study invoked from the
+    command line. The fix belongs in the test, not in the module."""
+    import inspect
+    from common import analysis as A
+    src = inspect.getsource(A.load_sessions)
+    assert "sys.exit(" in src
