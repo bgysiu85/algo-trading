@@ -114,7 +114,66 @@ def test_the_report_sizes_the_volume_shortfall_rather_than_asserting_it():
     o = out(rows)
     assert "failed ONLY the volume floor" in o
     assert "40% of the scaled threshold" in o
-    assert "capture_sensitivity" in o
+    # It used to point at `capture_sensitivity()` as the thing that would one
+    # day price this. The report prices it itself now, per name.
+    assert "CAN THE CAPTURE RATIO REACH THEM" in o
+    assert f"{CFG.volume_min_on_tape * 0.4 / CFG.volume_min:.3f}" in o
+
+
+def test_a_name_failing_change_too_is_excluded_from_the_capture_count():
+    """Capture scales the volume floor and nothing else, so a name that also
+    failed CHANGE is unreachable at any ratio. Counting it among the reachable
+    would turn 'the floor is mis-scaled' into a conclusion drawn from names
+    that were never going to pass."""
+    rows = [{"date": "2026-09-10", "symbol": "A", "why": "VOLUME",
+             "change": 30.0, "volume": CFG.volume_min * 0.50,
+             "close_at_best": 5.0},
+            {"date": "2026-09-10", "symbol": "B", "why": "CHANGE+VOLUME",
+             "change": 0.7, "volume": CFG.volume_min * 0.50,
+             "close_at_best": 5.0}]
+    o = out(rows)
+    i = o.index("CAN THE CAPTURE RATIO REACH THEM")
+    seg = o[i:]
+    assert "  A " in seg
+    assert "\n  B " not in seg, "a CHANGE failure is listed as capture-reachable"
+    assert "1 of 1 volume-only miss" in seg
+    assert "1 further name(s) failed volume AND change" in seg
+
+
+def test_when_nothing_failed_volume_alone_the_capture_question_is_closed():
+    """The standing next step was 'measure capture on the missed names'. If
+    every miss also failed CHANGE, that question has no population left and the
+    report must say so rather than leave it open for another session."""
+    rows = [{"date": "2026-09-10", "symbol": "B", "why": "CHANGE+VOLUME",
+             "change": 0.7, "volume": 100.0, "close_at_best": 5.0},
+            {"date": "2026-09-10", "symbol": "C", "why": "CHANGE",
+             "change": 5.0, "volume": 9e9, "close_at_best": 5.0}]
+    o = out(rows)
+    assert "NO NAME FAILED VOLUME ALONE" in o
+    assert "THE CAPTURE HYPOTHESIS IS CLOSED" in o
+    assert "1 name(s) failed volume alongside CHANGE" in o
+
+
+def test_the_capture_column_is_blank_where_volume_was_not_the_problem():
+    """On a name that cleared volume the ratio is a true number answering a
+    question nobody asked, and in that column it reads as though capture were
+    in play."""
+    rows = [{"date": "2026-09-10", "symbol": "C", "why": "CHANGE",
+             "change": 5.0, "volume": 9e9, "close_at_best": 5.0}]
+    o = out(rows)
+    line = [l for l in o.splitlines() if "  C " in l][0]
+    assert line.rstrip().endswith("CHANGE")
+    assert "-   CHANGE" in line
+
+
+def test_capture_needed_is_measured_against_the_consolidated_floor():
+    """Against volume_min, not volume_min_on_tape. Scaling twice would report a
+    ratio with nothing to do with the tape -- and it would read low, which is
+    the direction that manufactures a mis-scaling."""
+    row = {"volume": float(CFG.volume_min) * 0.5}
+    assert M.capture_needed(row, CFG) == pytest.approx(0.5)
+    assert M.capture_needed({"volume": None}, CFG) != M.capture_needed(row, CFG)
+    assert M.capture_needed({}, CFG) != M.capture_needed({}, CFG)  # nan
 
 
 def test_names_not_on_the_tape_are_called_out_as_unfixable_by_a_threshold():

@@ -54,6 +54,7 @@ import pandas as pd
 
 from common.report_fmt import acct
 from common.report_io import emit
+from common.screen_at import CAPTURE_P10, CAPTURE_P50, CAPTURE_P90
 from common.screen_sim import (SCREEN_END, SCREEN_START, ScreenConfig,
                                accumulate, date_of, load_repaired, prior_closes,
                                relaxation_banner,
@@ -119,6 +120,82 @@ def diagnose(acc: pd.DataFrame, symbol: str, prior: float | None,
     return {"symbol": symbol, "why": "+".join(fails), **best}
 
 
+def capture_needed(row: dict, cfg: ScreenConfig) -> float:
+    """The capture ratio at which this name's best volume clears the floor.
+
+    Measured against `volume_min` CONSOLIDATED, not the already-scaled tape
+    figure -- scaling twice would report a ratio with nothing to do with the
+    tape.
+
+    This is the only number in the report that prices the capture hypothesis,
+    and it prices exactly ONE clause. A name that also failed CHANGE is not
+    reachable at any ratio, because no volume threshold moves a price. The
+    report has to say that beside the figure: "needs 0.528 and p10 is 0.458" is
+    an invitation to conclude the floor is mis-scaled, from a name that was
+    never going to pass anyway.
+
+    Derived on demand from the row rather than stored on it, so the per-name
+    table and the verdict section cannot come to hold two different answers.
+    """
+    v = row.get("volume")
+    if not cfg.volume_min or v is None or v != v:
+        return float("nan")
+    return float(v) / cfg.volume_min
+
+
+def capture_verdict(rows: list[dict], cfg: ScreenConfig) -> list[str]:
+    """Does the capture ratio reach these names -- answered, not deferred.
+
+    The standing next step was "measure capture on the missed names". That
+    question has a ceiling this can state outright: capture scales the VOLUME
+    floor and nothing else, so a miss that also failed CHANGE is unreachable at
+    ANY ratio, including 1.000 -- the whole consolidated tape. Only the
+    volume-ONLY misses are even candidates, and for each of those the required
+    ratio is arithmetic.
+    """
+    reachable = [r for r in rows if r.get("why") == "VOLUME"]
+    blocked = [r for r in rows
+               if "VOLUME" in str(r.get("why", "")) and r.get("why") != "VOLUME"]
+    L = ["CAN THE CAPTURE RATIO REACH THEM", "",
+         f"  measured band: p10 {CAPTURE_P10:.3f}  p50 {CAPTURE_P50:.3f} "
+         f"(in use)  p90 {CAPTURE_P90:.3f}",
+         "",
+         "  Capture scales the VOLUME floor and nothing else. A name that also",
+         "  failed CHANGE is out of reach at every ratio, 1.000 included, so",
+         "  the volume-only misses are the entire population this question",
+         "  can address.", ""]
+
+    if not reachable:
+        L += ["  NO NAME FAILED VOLUME ALONE.", "",
+              "  The capture ratio cannot recover a single one of these, and",
+              "  re-running the screen at p10 or p90 would return the same",
+              f"  list. {len(blocked)} name(s) failed volume alongside CHANGE "
+              "and are",
+              "  counted there, not here. THE CAPTURE HYPOTHESIS IS CLOSED FOR",
+              "  THIS RESIDUAL -- not weakened, closed, because the clause it",
+              "  moves is not the clause that is failing.", ""]
+        return L
+
+    L += [f"  {'symbol':<8}{'best volume':>14}{'needs capture':>15}"
+          f"{'reached at':>13}"]
+    for r in sorted(reachable, key=lambda r: capture_needed(r, cfg)):
+        need = capture_needed(r, cfg)
+        where = ("p50, already" if need >= CAPTURE_P50
+                 else "p10" if need >= CAPTURE_P10
+                 else "NEVER, even at 1.000" if need > 1.0 else "below p10")
+        L.append(f"  {r['symbol']:<8}{r['volume']:>14,.0f}{need:>15.3f}"
+                 f"{where:>13}")
+    at_p10 = sum(1 for r in reachable
+                 if capture_needed(r, cfg) >= CAPTURE_P10)
+    L += ["",
+          f"  {at_p10} of {len(reachable)} volume-only miss(es) would clear at "
+          f"p10 capture.",
+          f"  {len(blocked)} further name(s) failed volume AND change; those "
+          "are not",
+          "  reachable by any ratio and are excluded from the count above.", ""]
+    return L
+
+
 def render(rows: list[dict], cfg: ScreenConfig, n_sessions: int,
            elapsed: float) -> list[str]:
     L = ["WHY THE SIMULATED SCREEN MISSED THEM", "",
@@ -137,7 +214,7 @@ def render(rows: list[dict], cfg: ScreenConfig, n_sessions: int,
 
     L += ["PER NAME", "",
           f"  {'date':<12}{'symbol':<8}{'best change':>13}{'best volume':>14}"
-          f"{'close':>9}   why"]
+          f"{'close':>9}{'cap needed':>12}   why"]
     for r in sorted(rows, key=lambda r: (r["date"], r["symbol"])):
         # A name with no bars at all carries no bests. Missing and
         # negative-infinity both render as a dash rather than as a figure --
@@ -150,7 +227,14 @@ def render(rows: list[dict], cfg: ScreenConfig, n_sessions: int,
         vol = f"{v:>14,.0f}" if v is not None else f"{'-':>14}"
         px = (acct(px_v, 9) if px_v is not None and px_v == px_v
               else f"{'-':>9}")
-        L.append(f"  {r['date']:<12}{r['symbol']:<8}{ch}{vol}{px}   {r['why']}")
+        # Printed ONLY where volume is the failing clause. On a name that
+        # cleared volume the ratio is a true number answering a question nobody
+        # asked, and it reads in this column as though capture were in play.
+        cn = capture_needed(r, cfg)
+        cap = (f"{cn:>12.3f}" if "VOLUME" in str(r["why"]) and cn == cn
+               else f"{'-':>12}")
+        L.append(f"  {r['date']:<12}{r['symbol']:<8}{ch}{vol}{px}{cap}   "
+                 f"{r['why']}")
 
     counts = Counter(r["why"] for r in rows)
     L += ["", "WHY, COUNTED", ""]
@@ -169,12 +253,9 @@ def render(rows: list[dict], cfg: ScreenConfig, n_sessions: int,
         L += [f"  {vol_only} name(s) failed ONLY the volume floor. Median best",
               f"  volume was {med[len(med) // 2]:.0%} of the scaled threshold.",
               "",
-              "  This is the capture hypothesis, and the ratio above is its",
-              "  size. If these names reach the floor at a capture materially",
-              "  below the population's, the threshold is mis-scaled for",
-              "  exactly the universe this screen is for -- and",
-              "  `screen_at.capture_sensitivity()` already re-runs the screen",
-              "  at p10/p50/p90 to price that.", ""]
+              "  This is the capture hypothesis, and the section below prices",
+              "  it per name rather than leaving it as a direction to look.",
+              ""]
     if counts.get("CHANGE") or counts.get("CHANGE+VOLUME"):
         L += ["  Names failing CHANGE never reached the threshold on this",
               "  tape's prints. A thin tape can miss the print that takes a",
@@ -189,6 +270,8 @@ def render(rows: list[dict], cfg: ScreenConfig, n_sessions: int,
         L += [f"  {counts['NEVER SIMULTANEOUS']} name(s) met every clause at",
               "  some point and never all at once. Per-clause maxima would",
               "  have called these eligible and blamed the cap.", ""]
+
+    L += capture_verdict(rows, cfg)
 
     L += ["WHAT THIS IS NOT", "",
           "  Not a measure of the live screen's correctness. TradingView's",
