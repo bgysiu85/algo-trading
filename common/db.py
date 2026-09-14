@@ -532,6 +532,14 @@ paper_fill = Table(
     Column("mfi", Float), Column("rsi", Float),
     Column("vol", Float), Column("prev_vol", Float), Column("trail_avg", Float),
 
+    # The trailing-stop width in force for THIS trade, in percent. Not related
+    # to trail_avg above, which is a volume average. Recorded because the
+    # portal can change the width mid-session: without it, rows taken at 5%
+    # and rows taken at 9% are one undifferentiated population here, and every
+    # comparison against a fixed-trail backtest is then comparing two things
+    # under one label.
+    Column("trail_pct", Float),
+
     Column("source_file", String(255)),
     Column("loaded_at", DateTime),
 )
