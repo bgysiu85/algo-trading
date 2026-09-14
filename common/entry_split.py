@@ -166,6 +166,22 @@ def tier(ba: list[dict], bb: list[dict], base: float,
                        f"{min(lift_a, lift_b):.2f}x")
 
 
+def money_agrees(ps: list[dict], direction: int, friction: float) -> bool:
+    """Does the P/L move the same way the label rate does?
+
+    `direction` is +1 when the rate RISES across the buckets, -1 when it falls.
+    The end the rate points at must also be the end the money points at. If it
+    is not, the feature sorts trades by KIND while the dollars run the other
+    way -- which is what the label can do and the money cannot, because the
+    label says nothing about size.
+    """
+    if len(ps) < 2:
+        return False
+    good = ps[-1]["mean"] if direction > 0 else ps[0]["mean"]
+    bad = ps[0]["mean"] if direction > 0 else ps[-1]["mean"]
+    return good > bad
+
+
 def render(rows: list[dict], name: str, n_days: int, elapsed: float,
            jobs: int) -> list[str]:
     L = [f"{name.upper()}: IS THE PROFITABLE KIND OF TRADE VISIBLE AT ENTRY?",
@@ -199,9 +215,16 @@ def render(rows: list[dict], name: str, n_days: int, elapsed: float,
 
     a, b = split(rows)
     L += ["EVERY FEATURE, PRINTED", "",
+          "  Two lines each: the dip-then-run RATE per bucket, and the P/L per",
+          "  trade in the same bucket at $4.26. The rate is what the tier is",
+          "  judged on; the money is what a filter would actually collect, and",
+          "  they can disagree -- the label says which KIND of trade, never how",
+          "  large.",
+          "",
           "  Nothing is ranked and nothing is omitted. A list sorted by effect",
           "  invites reading the top of it as a finding.", ""]
     tiers: dict[str, str] = {}
+    disagree: set[str] = set()
     for fam in sorted(FAMILIES):
         L.append(f"  {fam.upper()}")
         for col in FAMILIES[fam]:
@@ -216,8 +239,26 @@ def render(rows: list[dict], name: str, n_days: int, elapsed: float,
             t, note = tier(ba, bb, st["base"], be)
             tiers[col] = t
             cells = "  ".join(f"{100 * x['mean']:>5.1f}%" for x in bs)
+            # THE RATE IS A PROXY; THE MONEY IS THE THING. A bucket can carry
+            # more dip-then-run trades and still lose more, if its winners are
+            # smaller or its losers worse -- the label says which KIND of trade,
+            # never how large. Printing the rate alone would leave the reader to
+            # infer the P/L from it, which is the inference this whole thread
+            # exists because someone made.
+            ps = buckets(rows, col, QUANTILES, outcome="net")
+            money = "  ".join(f"{acct(x['mean'] - MEASURED_FRICTION, 6)}"
+                              for x in ps)
             L += [f"    {col:<22} {cells}   {t}",
+                  f"      {'per trade':<20}{money}",
                   f"      {note}"]
+            if t in ("CLEARS", "SEPARATES"):
+                d = monotone(buckets(rows, col, QUANTILES, outcome=LABEL))
+                if not money_agrees(ps, d, MEASURED_FRICTION):
+                    disagree.add(col)
+                    L.append("      *** AND THE MONEY RUNS THE OTHER WAY. The "
+                             "end with more of the")
+                    L.append("          good KIND of trade is not the end with "
+                             "the better P/L.")
         L.append("")
 
     clears = sorted({f for f, cols in FAMILIES.items()
@@ -225,6 +266,29 @@ def render(rows: list[dict], name: str, n_days: int, elapsed: float,
     seps = sorted({f for f, cols in FAMILIES.items()
                    if any(tiers.get(c) == "SEPARATES" for c in cols)
                    and f not in clears})
+    # The single number that decides whether any filter is worth building: the
+    # best bucket in the whole table. A tier is a statement about SHAPE; this is
+    # a statement about money, and a table with no profitable bucket in it has
+    # no filter in it however many features separate.
+    best = None
+    for cols in FAMILIES.values():
+        for col in cols:
+            for x in buckets(rows, col, QUANTILES, outcome="net"):
+                v = x["mean"] - MEASURED_FRICTION
+                if best is None or v > best[0]:
+                    best = (v, col)
+    if best is not None:
+        overall = sum(r["net"] - MEASURED_FRICTION for r in rows) / len(rows)
+        L += ["THE BEST BUCKET IN THE TABLE", "",
+              f"  {acct(best[0], 9)}/trade, in a bucket of {best[1]}",
+              f"  against {acct(overall, 9)}/trade over all "
+              f"{len(rows):,} trades.", ""]
+        if best[0] <= 0:
+            L += ["  NOT ONE BUCKET OF ANY FEATURE IS PROFITABLE. Every quarter",
+                  "  of every one of these 22 columns loses money. A filter",
+                  "  selects a subset, and no subset this feature set can name",
+                  "  is a subset that makes money.", ""]
+
     L += ["TIERS, COUNTED BY FAMILY", "",
           "  22 columns is 22 chances; 11 families is 11. Counted the way",
           "  `entry_features` counts them, so the two runs are comparable.", "",
@@ -233,6 +297,16 @@ def render(rows: list[dict], name: str, n_days: int, elapsed: float,
           f"  SEPARATES  {len(seps)}   "
           + (", ".join(seps) if seps else "-"),
           f"  of {len(FAMILIES)} families", ""]
+
+    if disagree:
+        L += ["WHERE THE RATE AND THE MONEY DISAGREE", "",
+              "  " + ", ".join(sorted(disagree)),
+              "",
+              "  These separate the two KINDS of trade and do not sort the",
+              "  dollars the same way. The label carries no size, so a bucket",
+              "  can hold more dip-then-run trades and still lose more. A tier",
+              "  above is a statement about shape; these are the columns where",
+              "  acting on that shape would not have collected anything.", ""]
 
     if not clears and not seps:
         L += ["NOTHING AT THE ENTRY BAR SEES IT", "",
