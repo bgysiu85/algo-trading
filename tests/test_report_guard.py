@@ -8,6 +8,8 @@ import order change -- and it would look exactly like a guard that works.
 from __future__ import annotations
 
 
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -59,6 +61,32 @@ def test_the_selftest_default_report_is_a_path_the_guard_refuses():
         report_io.emit("x", "var/reports/mcp_sql_selftest.txt")
 
 
+def _link_directory(link: Path, target: Path) -> None:
+    r"""Make `link` point at directory `target`, however this platform allows.
+
+    On Windows a SYMLINK needs SeCreateSymbolicLinkPrivilege -- an elevated
+    shell or Developer Mode -- and raises WinError 1314 without it. A JUNCTION
+    needs neither. It is also what D:\TradingProd\var actually is, so this is
+    the more faithful reproduction rather than a workaround.
+
+    This matters more than it looks: written with symlink_to, the test for a
+    Windows junction bug ran only on Linux, where the bug cannot occur. A test
+    that skips the platform it is about is worth very little.
+    """
+    if os.name == "nt":
+        done = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True, text=True)
+        if done.returncode != 0:                            # pragma: no cover
+            pytest.skip("could not create a junction: "
+                        f"{(done.stderr or done.stdout).strip()}")
+        return
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError as e:                                    # pragma: no cover
+        pytest.skip(f"could not create a directory symlink: {e}")
+
+
 def test_the_guard_sees_through_a_junction(tmp_path, monkeypatch):
     """D:\\TradingProd\\var is a junction to D:\\Trading\\var. A write
     through it resolves to the other repo, so a root that was never resolved
@@ -70,7 +98,7 @@ def test_the_guard_sees_through_a_junction(tmp_path, monkeypatch):
     real.mkdir(parents=True)
     prod = tmp_path / "prod"
     prod.mkdir()
-    (prod / "var").symlink_to(tmp_path / "real" / "var", target_is_directory=True)
+    _link_directory(prod / "var", tmp_path / "real" / "var")
 
     monkeypatch.setattr(C, "REPO", prod)
     monkeypatch.setattr(C, "PROTECTED", C._roots())
@@ -99,3 +127,44 @@ def test_the_guard_covers_the_bar_caches_too(tmp_path):
     """var/ is not the only directory holding hours of work."""
     with pytest.raises(AssertionError):
         report_io.emit("x", "bar_cache_db/notes.txt")
+
+
+def test_on_windows_the_link_is_a_junction_not_a_symlink(monkeypatch, tmp_path):
+    """Runs on every platform, so a typo in the Windows-only branch is caught
+    here rather than on Ben's machine. A symlink there needs privileges a
+    normal shell does not have; a junction needs none."""
+    monkeypatch.setattr(os, "name", "nt")
+    seen = {}
+
+    class Done:
+        returncode = 0
+        stdout = stderr = ""
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        return Done()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    _link_directory(tmp_path / "link", tmp_path / "target")
+
+    assert seen["command"][:4] == ["cmd", "/c", "mklink", "/J"]
+    assert seen["command"][4:] == [str(tmp_path / "link"), str(tmp_path / "target")]
+
+
+def test_a_junction_that_cannot_be_made_skips_rather_than_fails(monkeypatch, tmp_path):
+    """Not every machine allows it. A skip says "not checked here"; a failure
+    would say "the guard is broken", which is a different and wrong claim."""
+    monkeypatch.setattr(os, "name", "nt")
+
+    class Done:
+        returncode = 1
+        stdout = ""
+        stderr = "Access is denied."
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: Done())
+
+    # Skipped derives from BaseException, so `pytest.raises(Exception)` lets it
+    # through and the test skips itself instead of asserting anything.
+    with pytest.raises(pytest.skip.Exception) as caught:
+        _link_directory(tmp_path / "link", tmp_path / "target")
+    assert "Access is denied" in str(caught.value)
