@@ -76,7 +76,7 @@ try:
 except ImportError:  # pragma: no cover
     sys.exit("ib_async not installed.  pip install ib_async pandas")
 
-from common import notify
+from common import notify, ui_bridge
 from common import strategy_adapter as SA
 from common.commissions import order_cost
 from strategy.mcl import mcl as S
@@ -490,6 +490,13 @@ class MCLPaperTrader:
         self._paced_warned = False
         self._empty_warned_at = 0.0
         self._stop = False
+        # -- the portal (algo-trading-ui), off unless UI_RELAY_URL is set ----
+        # `paused` stops NEW ENTRIES only: an open position is still managed,
+        # its trail still runs, and its exit still fires. Anything else would
+        # mean a button in a browser could leave a position unprotected.
+        self.paused = False
+        self.disabled_strategies: set[str] = set()
+        self.ui = None                  # common.ui_bridge.UIBridge, or None
         # IB delivers the real rejection reason on the error event, not in
         # trade.log — without this we only ever see "Inactive".
         self._errors: dict[int, str] = {}
@@ -1317,6 +1324,23 @@ class MCLPaperTrader:
         if not sig.long_entry:
             return
 
+        # Stopped from the portal. Recorded in the fill log like every other
+        # declined entry, so a later reader can see the signal fired and why it
+        # was not taken -- an absence would look like the strategy never fired.
+        if self.paused or st.strategy.name in self.disabled_strategies:
+            why = ("paused from the portal" if self.paused
+                   else f"{st.strategy.name} disabled from the portal")
+            LOG.info("%s %s entry signal declined — %s",
+                     st.strategy.name, st.symbol, why)
+            self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                           strategy=self._name_of(st),
+                           symbol=st.symbol, action="BUY",
+                           reason="entry_signal", ref_close=round(sig.close, 4),
+                           ref_kind="signal_close",
+                           status="SKIPPED_PAUSED", reject_reason=why,
+                           **detail)
+            return
+
         # Portfolio-level gate. Everything above this point is about THIS
         # symbol; this is the only check that looks at the account as a whole.
         # The bar is already marked evaluated above, which is correct: the
@@ -1467,6 +1491,16 @@ class MCLPaperTrader:
                     await self.step_symbol(st, now_et)
                 except Exception as e:  # noqa: BLE001
                     LOG.exception("%s step failed: %s", st.symbol, e)
+
+            # The portal, if one is configured. It throttles itself, runs its
+            # network calls off this thread, and swallows its own failures --
+            # a relay that is down must be invisible from in here.
+            if self.ui is not None:
+                try:
+                    await self.ui.tick(self, now_et)
+                except Exception as e:  # noqa: BLE001
+                    LOG.warning("portal tick failed: %s", e)
+
             await asyncio.sleep(LOOP_SLEEP_S)
 
         open_pos = [s.symbol for s in self.states.values() if s.position]
@@ -1538,6 +1572,15 @@ async def main_async(args):
     trader = MCLPaperTrader(ib, wl, log, args.dry_run, tg=tg,
                             strategies=strategies,
                             max_positions=getattr(args, "max_positions", None))
+    # The portal, when one is configured. Attached AFTER the DU check above,
+    # so a bridge can never exist on a session that failed it.
+    trader.ui = ui_bridge.UIBridge.from_env()
+    if trader.ui is not None:
+        trader.ui.note_account(accounts[0] if accounts else "")
+        tg.observer = trader.ui.record_message
+        LOG.info("portal: publishing to %s as %s", trader.ui.base_url,
+                 trader.ui.agent_id)
+
     # Read the cap back OFF THE TRADER rather than off the constant or the
     # argument. Those can drift from what is running; this cannot.
     LOG.info("strategies: %s (one book, cap %d across all of them)%s",
