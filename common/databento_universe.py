@@ -185,6 +185,19 @@ def clamp_to_dataset(client, dataset: str, start: str, end: str):
 
     Clamping is reported, never silent. A window that was quietly shortened is
     how a backtest ends up with a coverage hole nobody put in the notes.
+
+    THE END IT RETURNS IS EXCLUSIVE, because that is what both chunkers take:
+    `day_chunks` and `month_chunks` both walk `while cur < e`. The first
+    version clamped to `avail_end` itself, which is the last date that HAS
+    data -- so asking for the newest available session produced start == end,
+    ZERO chunks, and a report reading "to download 0 / $0.0000" that is
+    indistinguishable from "everything is already on disk". The dataset's most
+    recent day was unreachable and the tool said nothing.
+
+    Over-running by a day is the safe direction and that is why it is chosen:
+    a day past the end costs one free metadata call and falls out as `empty
+    (holiday/no data)`, which the caller already handles. A day short is a
+    silent hole.
     """
     notes: list[str] = []
     try:
@@ -200,8 +213,12 @@ def clamp_to_dataset(client, dataset: str, start: str, end: str):
         notes.append(f"start {start} is before {dataset} begins -> {avail_start}")
         start = avail_start
     if avail_end and end > avail_end:
-        notes.append(f"end {end} is after {dataset} ends -> {avail_end}")
-        end = avail_end
+        # +1 day: `end` is exclusive to the chunkers, and avail_end is the last
+        # day WITH data. Clamping to avail_end itself drops it.
+        nxt = (date.fromisoformat(avail_end) + timedelta(days=1)).isoformat()
+        notes.append(f"end {end} is after {dataset} ends "
+                     f"({avail_end}) -> {nxt} exclusive")
+        end = nxt
     return start, end, notes
 
 
@@ -268,6 +285,17 @@ def main(argv=None) -> int:
     else:
         chunks = month_chunks(a.start, a.end)
         kind = "monthly chunk(s)"
+    if not chunks:
+        # A REQUEST THAT COVERS NOTHING IS NOT A SUCCESSFUL NO-OP. Without
+        # this, an empty chunk list prints the same "to download 0 /
+        # $0.0000" as a pull whose files are all already on disk, and the run
+        # exits 0. The two look identical and mean opposite things.
+        sys.exit(f"\nNOTHING TO DO: {a.start} -> {a.end} (end exclusive) "
+                 f"covers no weekday chunk.\n"
+                 f"  `--end` is EXCLUSIVE. To pull a single day D, pass "
+                 f"--start D --end D+1.\n"
+                 f"  A same-day start and end covers zero days, which is not "
+                 f"the same as having nothing left to fetch.")
     print(f"{a.dataset}  {a.schema}  {a.start} -> {a.end}   "
           f"{len(chunks)} {kind}\narchive {root}/\n")
 

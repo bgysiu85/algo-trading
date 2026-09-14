@@ -6,6 +6,8 @@ after a failure, and whether two chunks can cover the same bars twice.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from common import databento_universe as U
 
 # --- per-weekday windowed chunks --------------------------------------------
@@ -108,3 +110,94 @@ def test_chunk_last_bar_swallows_a_bad_file_rather_than_raising(tmp_path):
     f = tmp_path / "junk.dbn.zst"
     f.write_bytes(b"not a dbn file")
     assert U.chunk_last_bar(f) is None
+
+
+# --- the newest available day was unreachable -------------------------------
+
+class _RangeClient:
+    """A client whose dataset ends on a known day."""
+
+    def __init__(self, end="2026-09-14", start="2024-07-01"):
+        self._r = {"start": start, "end": end}
+        outer = self
+
+        class metadata:
+            @staticmethod
+            def get_dataset_range(ds):
+                return outer._r
+        self.metadata = metadata
+
+
+def test_the_datasets_last_available_day_can_actually_be_pulled():
+    """THE DEFECT: the clamp treated `avail_end` as an achievable end while
+    both chunkers take `end` EXCLUSIVE, so asking for the newest session gave
+    start == end, zero chunks, and a report reading "to download 0 / $0.0000"
+    -- indistinguishable from "everything is already on disk". The most recent
+    day was unreachable and nothing said so."""
+    from common.databento_universe import clamp_to_dataset, day_chunks
+    s, e, notes = clamp_to_dataset(_RangeClient(), "XNAS.BASIC",
+                                   "2026-09-14", "2026-09-15")
+    chunks = day_chunks(s, e, "04:00-09:30")
+    assert [c[0] for c in chunks] == ["2026-09-14_0400_0930"], (
+        "the dataset's last day still cannot be pulled")
+    assert any("exclusive" in n for n in notes), (
+        "the clamp must say which convention its end is in")
+
+
+def test_the_clamp_overruns_rather_than_falls_short():
+    """Asymmetric by design: a day past the end costs one free metadata call
+    and falls out as `empty (holiday/no data)`. A day short is a silent hole."""
+    from common.databento_universe import clamp_to_dataset
+    _s, e, _n = clamp_to_dataset(_RangeClient(end="2026-09-14"), "X",
+                                 "2026-09-01", "2026-12-31")
+    assert e == "2026-09-15", "clamped end must be exclusive of the last day"
+
+
+def test_a_start_before_the_dataset_is_still_clamped_forward():
+    from common.databento_universe import clamp_to_dataset
+    s, _e, notes = clamp_to_dataset(_RangeClient(start="2024-07-01"), "X",
+                                    "2020-01-01", "2026-09-14")
+    assert s == "2024-07-01" and any("before" in n for n in notes)
+
+
+def test_a_same_day_range_really_does_cover_nothing():
+    assert U.day_chunks("2026-09-14", "2026-09-14", "04:00-09:30") == []
+    assert U.month_chunks("2026-09-01", "2026-09-01") == []
+
+
+def test_a_window_covering_no_days_is_refused_not_reported_as_done(monkeypatch,
+                                                                   tmp_path):
+    """A REQUEST THAT COVERS NOTHING IS NOT A SUCCESSFUL NO-OP.
+
+    `--end` is EXCLUSIVE, so --start D --end D covers zero days. That printed
+    the same "to download 0 / ESTIMATED COST $0.0000" as a pull with nothing
+    left to fetch, and exited 0. The two look identical and mean opposite
+    things.
+
+    Driven through main() rather than asserted against the source: the first
+    version of this test looked for the string "NOTHING TO DO" in the file,
+    which a mutation replacing the guard with `if False:` left untouched.
+    """
+    import pytest
+
+    class Fake:
+        class metadata:
+            @staticmethod
+            def get_dataset_range(ds):
+                return {"start": "2024-07-01", "end": "2026-09-14"}
+
+    class FakeDB:
+        @staticmethod
+        def Historical(key):
+            return Fake()
+
+    monkeypatch.setattr(U, "require_databento", lambda: FakeDB)
+    monkeypatch.setattr(U, "_key", lambda: "x", raising=False)
+    with pytest.raises(SystemExit) as ex:
+        U.main(["--dataset", "XNAS.BASIC", "--schema", "ohlcv-1m",
+                "--window", "04:00-09:30", "--start", "2026-09-14",
+                "--end", "2026-09-14", "--archive", str(tmp_path),
+                "--confirm"])
+    msg = str(ex.value)
+    assert "NOTHING TO DO" in msg
+    assert "EXCLUSIVE" in msg, "the message must say which end is exclusive"
