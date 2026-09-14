@@ -89,6 +89,7 @@ import numpy as np
 import pandas as pd
 
 from common.dip_entry import excursions
+from common.scale_grid import SLIP_PER_SHARE
 from common.pit_h0 import DROP, FRICTIONS, first_seen_time, load_pit
 from common.pit_strategy import WARMUP_SESSIONS
 from common.report_fmt import acct
@@ -283,22 +284,73 @@ def stop_scan(winners: list[dict], losers: list[dict]) -> list[str]:
     """
     if not winners or not losers:
         return []
+    wn, ln = len(winners), len(losers)
+    n = wn + ln
+    base = (sum(r["net"] for r in winners + losers) / n) - MEASURED_FRICTION
     L = ["  IF A HARD STOP HAD SAT AT EACH LEVEL", "",
-         f"  {'stop':>8}{'winners cut':>14}{'losers cut':>13}"
-         f"{'ratio':>9}"]
+         f"  {'stop':>8}{'per share':>11}{'winners cut':>13}{'losers cut':>12}"
+         f"{'ratio':>8}{'book':>11}{'vs now':>10}"]
     for lvl in (5.0, 8.0, 10.0, 12.0, 15.0, 20.0, 25.0):
-        w = sum(1 for r in winners if r["mae_in"] >= lvl) / len(winners)
-        l = sum(1 for r in losers if r["mae_in"] >= lvl) / len(losers)
+        w = sum(1 for r in winners if r["mae_in"] >= lvl) / wn
+        l = sum(1 for r in losers if r["mae_in"] >= lvl) / ln
         ratio = (l / w) if w > 0 else float("inf")
-        L.append(f"  ${lvl:>7,.0f}{100 * w:>13.1f}%{100 * l:>12.1f}%"
-                 f"{ratio:>9.2f}")
+        est = stop_book(winners, losers, lvl)
+        L.append(f"  ${lvl:>7,.0f}{lvl / QTY:>11.4f}{100 * w:>12.1f}%"
+                 f"{100 * l:>11.1f}%{ratio:>8.2f}{acct(est, 11)}"
+                 f"{acct(est - base, 10)}")
     L += ["",
+          f"  `per share` is the same stop in cents on a {QTY}-share lot, which "
+          "is the",
+          "  unit slippage is measured in. Live trailing stops fill "
+          f"${SLIP_PER_SHARE:.4f} a share",
+          f"  worse than reference -- ${SLIP_PER_SHARE * QTY:.2f} a trade -- and "
+          "the `book` column",
+          "  charges it on every stopped-out trade, so a stop narrower than the",
+          "  slippage cannot look free.",
+          "",
           "  `ratio` above 1 means the level catches more losers than winners.",
           "  Near 1 at every level means a stop cannot tell them apart, and no",
-          "  width is the right width. This is a bound on the question, not a",
-          "  backtest: a real stop ends the position, so nothing after it",
-          "  happens, and none of these rows model that.", ""]
+          "  width is the right width.",
+          "",
+          "  THE `book` COLUMN IS AN ESTIMATE, NOT A BACKTEST. It assumes a "
+          "stopped",
+          "  trade exits AT its level, and that the survivors keep the group "
+          "mean they",
+          "  have here -- they will not, because survivors are selected for "
+          "small",
+          "  drawdowns. A real stop also ends the position, so nothing after "
+          "it",
+          "  happens, and no row here models that. It sizes the question; it "
+          "does",
+          "  not answer it.", ""]
     return L
+
+
+def stop_book(winners: list[dict], losers: list[dict], lvl: float) -> float:
+    """Per-trade book P/L if a hard stop at `lvl` had been in force.
+
+    An ESTIMATE with two assumptions stated at the point of use: a stopped trade
+    exits at its level plus the measured slippage, and a survivor keeps its
+    group's mean. Both flatter the stop -- survivors are selected for small
+    drawdowns, so their mean is better than the group's, and a real stop ends
+    the position so the survivor set is not even the same trades.
+
+    Written here rather than worked out from the table in a chat message,
+    because a figure computed outside the instrument is the defect this whole
+    thread keeps finding.
+    """
+    n = len(winners) + len(losers)
+    if not n:
+        return float("nan")
+    stopped = -lvl - MEASURED_FRICTION - SLIP_PER_SHARE * QTY
+    total = 0.0
+    for grp in (winners, losers):
+        if not grp:
+            continue
+        mean = sum(r["net"] for r in grp) / len(grp) - MEASURED_FRICTION
+        cut = sum(1 for r in grp if r["mae_in"] >= lvl)
+        total += cut * stopped + (len(grp) - cut) * mean
+    return total / n
 
 
 def order_section(rows: list[dict], friction: float) -> list[str]:

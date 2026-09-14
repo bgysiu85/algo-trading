@@ -485,7 +485,7 @@ def test_a_clean_separation_shows_a_ratio_far_above_one():
     """Winners all draw down $5, losers all $30. A stop at $10 catches every
     loser and no winner."""
     o = "\n".join(E.stop_scan(grp([5.0] * 100), grp([30.0] * 100)))
-    line = [l for l in o.splitlines() if l.startswith("  $     10")][0]
+    line = [l for l in o.splitlines() if l.lstrip().startswith("$     10")][0]
     assert "0.0%" in line and "100.0%" in line
 
 
@@ -493,9 +493,9 @@ def test_no_separation_shows_a_ratio_near_one():
     """Both groups drawing down the same amount. A stop cannot tell them apart
     and no width is the right width -- which the report says in those words."""
     o = "\n".join(E.stop_scan(grp([12.0] * 100), grp([12.0] * 100)))
-    line = [l for l in o.splitlines() if l.startswith("  $     10")][0]
-    assert line.strip().endswith("1.00")
-    assert "no" in o and "width is the right width" in o
+    line = [l for l in o.splitlines() if l.lstrip().startswith("$     10")][0]
+    assert "1.00" in line
+    assert "width is the right width" in " ".join(o.split())
 
 
 def test_the_scan_says_it_is_a_bound_and_not_a_backtest():
@@ -504,8 +504,8 @@ def test_the_scan_says_it_is_a_bound_and_not_a_backtest():
     o = "\n".join(E.stop_scan(grp([5.0] * 10), grp([30.0] * 10)))
     # the phrase wraps across lines in the rendered report
     flat = " ".join(o.split())
-    assert "not a backtest" in flat
-    assert "a real stop ends the position" in flat
+    assert "NOT A BACKTEST" in flat
+    assert "A real stop also ends the position" in flat
 
 
 def test_an_empty_group_produces_no_scan_rather_than_a_divide_by_zero():
@@ -527,3 +527,55 @@ def test_the_report_prints_the_drawdown_distribution_not_just_the_median():
     assert "THE DRAWDOWN EACH GROUP HAS TO SURVIVE" in o
     assert "p90" in o and "p95" in o
     assert "the overlap between the two rows is the whole" in o
+
+
+# --- 13. the book estimate, with its assumptions charged ---------------------
+
+def test_the_stop_book_charges_friction_and_measured_slippage():
+    """A stop narrower than the slippage must not look free. Live trailing
+    stops fill worse than reference by a measured amount per share, and a
+    stopped trade pays it."""
+    from common.scale_grid import SLIP_PER_SHARE
+    # everyone is stopped: mae above the level on every row
+    w = grp([99.0] * 10)
+    l = grp([99.0] * 10)
+    got = E.stop_book(w, l, 5.0)
+    assert got == pytest.approx(-5.0 - 4.26 - SLIP_PER_SHARE * 100)
+
+
+def test_a_stop_nobody_reaches_leaves_the_book_where_it_was():
+    w = grp([1.0] * 10)
+    for r in w:
+        r["net"] = 20.0
+    l = grp([1.0] * 10)
+    for r in l:
+        r["net"] = -10.0
+    got = E.stop_book(w, l, 50.0)
+    assert got == pytest.approx((20.0 - 4.26 + (-10.0 - 4.26)) / 2)
+
+
+def test_the_estimate_is_labelled_and_its_assumptions_named():
+    """It flatters the stop in two ways and has to say both: survivors are
+    selected for small drawdowns, and a real stop ends the position."""
+    o = " ".join("\n".join(E.stop_scan(grp([5.0] * 10),
+                                       grp([30.0] * 10))).split())
+    assert "IS AN ESTIMATE, NOT A BACKTEST" in o
+    assert "survivors are selected for small drawdowns" in o
+    assert "A real stop also ends the position" in o
+    assert "It sizes the question; it does not answer it." in o
+
+
+def test_the_scan_states_the_stop_in_the_unit_slippage_is_measured_in():
+    """$5 on 100 shares is 5 cents a share, which is the same order as the
+    measured fill difference. Printing only the dollar figure hides that."""
+    o = "\n".join(E.stop_scan(grp([5.0] * 10), grp([30.0] * 10)))
+    assert "per share" in o
+    assert "0.0500" in o
+
+
+def test_the_book_column_is_reported_against_the_current_book():
+    """A level that improves nothing must read as zero change rather than as a
+    number the reader has to subtract themselves."""
+    w, l = grp([1.0] * 10), grp([1.0] * 10)
+    o = "\n".join(E.stop_scan(w, l))
+    assert "vs now" in o
