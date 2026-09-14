@@ -36,20 +36,59 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
-PROTECTED = (REPO / "var", REPO / "bar_cache", REPO / "bar_cache_db")
+NAMES = ("var", "bar_cache", "bar_cache_db")
+
+
+def _roots() -> tuple[Path, ...]:
+    r"""Every spelling of a protected directory, resolved AND literal.
+
+    D:\TradingProd\var is a junction to D:\Trading\var. The path being
+    written resolves through it; a root that does not is then a different
+    string, relative_to says no, and the guard waves through a write into the
+    very directory it exists to protect. That is not hypothetical -- running
+    this suite from the production checkout on 2026-09-14 replaced
+    var/reports/mcp_sql_selftest.txt for the second time, the first being the
+    incident this guard was written for.
+
+    Both spellings are kept because either can be the one that matches: the
+    resolved root catches a write through the junction, the literal root
+    catches a path that was never resolved (a non-existent parent on some
+    platforms, or a root that is itself unreadable).
+    """
+    roots: list[Path] = []
+    for name in NAMES:
+        here = REPO / name
+        roots.append(here)
+        try:
+            roots.append(here.resolve())
+        except OSError:                                     # pragma: no cover
+            pass
+    return tuple(dict.fromkeys(roots))
+
+
+PROTECTED = _roots()
 
 
 def _protected(p: Path) -> Path | None:
+    """The protected root `p` sits inside, or None.
+
+    Checks the path both as given and resolved, so neither a junction in the
+    path nor one in the root can make a protected location look ordinary.
+    """
+    candidates = []
     try:
-        rp = Path(p).resolve()
+        candidates.append(Path(p).resolve())
     except OSError:
-        return None
-    for root in PROTECTED:
-        try:
-            rp.relative_to(root)
-        except ValueError:
-            continue
-        return root
+        pass
+    candidates.append(Path(p) if Path(p).is_absolute() else Path.cwd() / p)
+
+    for candidate in candidates:
+        for root in PROTECTED:
+            try:
+                candidate.relative_to(root)
+            except ValueError:
+                continue
+            return root
     return None
 
 
