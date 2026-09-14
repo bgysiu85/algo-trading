@@ -191,7 +191,15 @@ UI_AGENT_TOKEN_FILE D:\Trading UI\var\agent_token.txt
 ```
 
 Optional: `UI_AGENT_TOKEN` (inline instead of a file), `UI_AGENT_ID` (defaults
-to the hostname).
+to the hostname), `UI_PUBLISH_DRY=1`.
+
+**A dry run does not publish.** `main_async` passes the session's mode to
+`from_env`, which returns `None` for `--mode dry` unless `UI_PUBLISH_DRY` is
+set to an affirmative value. The relay holds one state document, so a dry
+session and the production session both publishing would flip the dashboard
+between two traders and send a command to whichever polled first. That gate is
+what lets the settings live at machine level instead of being two lines someone
+has to remember to type.
 
 Unset `UI_RELAY_URL` and the trader runs exactly as it did before
 `common/ui_bridge.py` existed. For a strategy or backtest session, leave them
