@@ -511,3 +511,227 @@ def test_the_trader_passes_its_own_mode_to_the_gate():
     src = inspect.getsource(T.main_async)
     assert "from_env(dry_run=bool(args.dry_run))" in src, (
         "main_async must pass the session's mode, or every dry run publishes")
+
+
+# ===========================================================================
+# The CONFIG row. Shape agreed with the strategy/database side, 2026-09-14:
+# claude/portal_config_row_reply_20260914.md.
+
+import csv as _csv  # noqa: E402
+
+from brokers.ibkr import trader as T  # noqa: E402
+
+
+def _trader_with_a_log(tmp_path, paused=False):
+    trader = _real_trader_with_real_adapters()
+    trader.log = T.FillLog(tmp_path / "fills.csv")
+    trader.paused = paused
+    trader.states = {k: v for k, v in trader.states.items()}
+    return trader
+
+
+def _rows(trader) -> list[dict]:
+    trader.log.fh.flush()
+    with trader.log.path.open(newline="", encoding="utf-8") as fh:
+        return list(_csv.DictReader(fh))
+
+
+def _config_rows(trader) -> list[dict]:
+    return [r for r in _rows(trader) if r["action"] == ui_bridge.CONFIG_ACTION]
+
+
+# -- the key fields ---------------------------------------------------------
+
+def test_the_setting_name_goes_in_symbol_lowercase(tmp_path):
+    """paper_fill's key is (session_date, ts_et, strategy, symbol, action,
+    status). symbol is the only field left that can separate two DIFFERENT
+    settings changed in the same second by the same strategy; without it the
+    loader's de-duplicator keeps one and drops the other silently."""
+    trader = _trader_with_a_log(tmp_path)
+    name = trader.strategies[0].name
+    ui = bridge(paper=True)
+
+    ui.apply(trader, {"id": "c1", "type": "set_setting",
+                      "args": {"key": f"trail_pct:{name}", "value": 8.0}}, NOW)
+
+    row = _config_rows(trader)[0]
+    assert row["symbol"] == "trail_pct"
+    assert row["symbol"] == row["symbol"].lower(), (
+        "every real ticker in this table is uppercase; lowercase is what makes "
+        "a CONFIG row un-mistakable in a listing")
+
+
+@pytest.mark.parametrize("setting", [
+    ui_bridge.SETTING_PAUSED, ui_bridge.SETTING_ENABLED,
+    ui_bridge.SETTING_TRAIL, ui_bridge.SETTING_CAP, ui_bridge.SETTING_UNKNOWN,
+])
+def test_every_setting_name_fits_the_symbol_column(setting):
+    """db.SYM is 24 and the contract key "max_concurrent_positions" is exactly
+    24 — a truncation waiting for a longer setting. These are the short names,
+    and this pins the margin rather than the coincidence."""
+    from common import db
+
+    assert len(setting) <= db.SYM - 8, (
+        f"{setting!r} leaves no headroom in a {db.SYM}-char column")
+
+
+def test_a_global_stop_writes_one_row_per_adapter_and_no_phantom_strategy(tmp_path):
+    """strategy is a key column AND the grouping column in every census. A
+    synthetic "ALL" would appear in "which strategies traded" for as long as
+    the table exists. A global pause genuinely IS both adapters changing."""
+    trader = _trader_with_a_log(tmp_path)
+    names = {a.name for a in trader.strategies}
+    ui = bridge(paper=True)
+
+    ui.apply(trader, {"id": "c1", "type": "stop"}, NOW)
+
+    rows = _config_rows(trader)
+    assert {r["strategy"] for r in rows} == names
+    assert len(rows) == len(names)
+    assert "ALL" not in {r["strategy"] for r in rows}
+
+
+def test_a_change_to_one_strategy_names_only_that_one(tmp_path):
+    trader = _trader_with_a_log(tmp_path)
+    first, second = (a.name for a in trader.strategies[:2])
+    ui = bridge(paper=True)
+
+    ui.apply(trader, {"id": "c1", "type": "set_setting",
+                      "args": {"key": f"trail_pct:{first}", "value": 7.0}}, NOW)
+
+    assert {r["strategy"] for r in _config_rows(trader)} == {first}
+    assert second not in {r["strategy"] for r in _config_rows(trader)}
+
+
+# -- applied and rejected ---------------------------------------------------
+
+def test_a_rejected_command_is_recorded_too(tmp_path):
+    """A refusal that left no trace reads as a command nobody sent — the same
+    ambiguity a declined entry writing no row would create."""
+    trader = _trader_with_a_log(tmp_path)
+    ui = bridge(paper=True)
+
+    answer = ui.apply(trader, {"id": "c1", "type": "set_setting",
+                               "args": {"key": "trail_pct:nope", "value": 7.0}}, NOW)
+
+    assert answer["status"] == "rejected"
+    row = _config_rows(trader)[0]
+    assert row["status"] == ui_bridge.CONFIG_REJECTED
+    assert "nope" in row["reject_reason"]
+
+
+def test_a_command_on_a_live_account_is_refused_and_recorded(tmp_path):
+    """The one case where a CONFIG row is evidence of an attempt rather than a
+    change. It must not be the quiet one."""
+    trader = _trader_with_a_log(tmp_path)
+    ui = bridge(paper=False)
+
+    ui.apply(trader, {"id": "c1", "type": "stop"}, NOW)
+
+    rows = _config_rows(trader)
+    assert rows and all(r["status"] == ui_bridge.CONFIG_REJECTED for r in rows)
+    assert all("paper" in r["reject_reason"] for r in rows)
+
+
+def test_the_trail_column_carries_the_value_the_trader_now_has(tmp_path):
+    """Read back off the adapter, not off the request: the row records what
+    took effect, not what was asked for."""
+    trader = _trader_with_a_log(tmp_path)
+    name = trader.strategies[0].name
+    ui = bridge(paper=True)
+
+    ui.apply(trader, {"id": "c1", "type": "set_setting",
+                      "args": {"key": f"trail_pct:{name}", "value": 6.5}}, NOW)
+
+    row = next(r for r in _config_rows(trader) if r["reason"] == "set_setting")
+    assert float(row["trail_pct"]) == 6.5
+    assert next(a for a in trader.strategies if a.name == name).trail_pct == 6.5
+
+
+def test_a_rejected_trail_change_records_no_value(tmp_path):
+    """Nothing took effect, so the column must not claim something did."""
+    trader = _trader_with_a_log(tmp_path)
+    name = trader.strategies[0].name
+    ui = bridge(paper=True)
+
+    ui.apply(trader, {"id": "c1", "type": "set_setting",
+                      "args": {"key": f"trail_pct:{name}", "value": 400}}, NOW)
+
+    row = _config_rows(trader)[0]
+    assert row["status"] == ui_bridge.CONFIG_REJECTED
+    assert row["trail_pct"] == ""
+
+
+# -- the session-open row ---------------------------------------------------
+
+def test_the_session_opens_with_the_values_in_force(tmp_path):
+    """A journal that writes only on CHANGE cannot tell "nobody touched it"
+    from "the recorder was broken" — both are an empty file."""
+    trader = _trader_with_a_log(tmp_path)
+    ui = bridge(paper=True)
+
+    ui.record_session_open(trader, NOW)
+
+    rows = _config_rows(trader)
+    assert {r["strategy"] for r in rows} == {a.name for a in trader.strategies}
+    assert all(r["reason"] == "session_open" for r in rows)
+    for adapter in trader.strategies:
+        row = next(r for r in rows if r["strategy"] == adapter.name)
+        assert float(row["trail_pct"]) == adapter.trail_pct
+        assert "max_positions=" in row["reject_reason"]
+        assert "paused=" in row["reject_reason"]
+
+
+def test_the_session_opens_once_not_every_tick(tmp_path):
+    trader = _trader_with_a_log(tmp_path)
+    ui = bridge(paper=True)
+
+    ui.record_session_open(trader, NOW)
+    before = len(_config_rows(trader))
+    ui.record_session_open(trader, NOW)
+
+    assert len(_config_rows(trader)) == before
+
+
+def test_the_first_command_has_something_to_be_a_diff_from(tmp_path):
+    """The point of the session-open row: the trail before the change is a
+    recorded fact rather than "presumably the default"."""
+    trader = _trader_with_a_log(tmp_path)
+    name = trader.strategies[0].name
+    was = trader.strategies[0].trail_pct
+    ui = bridge(paper=True)
+
+    ui.record_session_open(trader, NOW)
+    ui.apply(trader, {"id": "c1", "type": "set_setting",
+                      "args": {"key": f"trail_pct:{name}", "value": 9.0}}, NOW)
+
+    mine = [r for r in _config_rows(trader) if r["strategy"] == name]
+    assert float(mine[0]["trail_pct"]) == was
+    assert float(mine[-1]["trail_pct"]) == 9.0
+
+
+# -- it must never break the trading loop -----------------------------------
+
+def test_a_log_that_cannot_be_written_does_not_break_the_command(tmp_path):
+    """Called from inside the trading loop. A log that will not take a row is
+    not a reason to stop trading."""
+    trader = _trader_with_a_log(tmp_path)
+
+    class Broken:
+        path = tmp_path / "x.csv"
+
+        def write(self, **row):
+            raise OSError("disk full")
+
+    trader.log = Broken()
+
+    answer = bridge(paper=True).apply(trader, {"id": "c1", "type": "stop"}, NOW)
+
+    assert answer["status"] == "applied"
+    assert trader.paused is True
+
+
+def test_a_trader_without_a_log_is_fine(tmp_path):
+    trader = _real_trader_with_real_adapters()
+    assert bridge(paper=True).apply(
+        trader, {"id": "c1", "type": "stop"}, NOW)["status"] == "applied"

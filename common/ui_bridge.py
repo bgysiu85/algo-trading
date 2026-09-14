@@ -43,9 +43,14 @@ import urllib.error
 import urllib.request
 from datetime import datetime, time as dtime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from typing import Any
 
 LOG = logging.getLogger("ui_bridge")
+
+# Every module in this repo names the exchange clock for itself; this is a
+# fact about the market, not a value anyone configures.
+ET = ZoneInfo("America/New_York")
 
 CONTRACT_VERSION = "1.3"
 PUSH_EVERY_S = 5.0
@@ -57,6 +62,46 @@ MAX_EVENTS = 20
 # After this many consecutive failures, complain once and then stay quiet:
 # a relay that is down for an hour must not write 700 lines into the session log.
 QUIET_AFTER = 3
+
+# -- the CONFIG row --------------------------------------------------------
+# A command applied from a browser changes how the session trades. The fill log
+# is where that belongs: durable, time-ordered WITH the trades, and the one
+# ledger every reader already opens. SKIPPED_PAUSED is the precedent -- a row
+# that records a decision rather than a trade.
+#
+# paper_fill's primary key is (session_date, ts_et, strategy, symbol, action,
+# status) at second resolution, and that decides three fields:
+#
+#   symbol    the SETTING NAME, lowercase. It is the only key field left that
+#             can separate two different settings changed in the same second by
+#             the same strategy; without it the second one silently replaces the
+#             first in the loader's de-duplicator, and the row that vanishes is
+#             the one from the busy moment. Lowercase because every real ticker
+#             in this table is uppercase, so a listing shows at a glance that
+#             the row is not a symbol.
+#   strategy  the adapter the change applied to, ONE ROW PER ADAPTER, never a
+#             synthetic "ALL". strategy is both a key column and the grouping
+#             column in every census; a phantom name would appear in "which
+#             strategies traded" for as long as the table exists. A global pause
+#             genuinely IS both adapters changing.
+#   status    APPLIED or REJECTED, so both in the same second are two rows.
+#
+# Everything else fits columns that already exist, so no schema change and no
+# loader change -- which matters, because a column added to FIELDS and
+# db.paper_fill but not to load_paper_fills loads as null on every row while
+# every test passes. That happened today, to trail_pct.
+CONFIG_ACTION = "CONFIG"
+CONFIG_APPLIED = "APPLIED"
+CONFIG_REJECTED = "REJECTED"
+
+# Short, stable names -- NOT the contract keys. db.SYM is 24 and
+# "max_concurrent_positions" is exactly 24, which is a truncation waiting for a
+# longer setting. A test pins every name against db.SYM with room to spare.
+SETTING_PAUSED = "paused"
+SETTING_ENABLED = "enabled"
+SETTING_TRAIL = "trail_pct"
+SETTING_CAP = "max_positions"
+SETTING_UNKNOWN = "command"
 
 
 def _utc_now() -> str:
@@ -123,6 +168,7 @@ class UIBridge:
         self._seq = 0
         self.account_id = ""
         self.is_paper = False
+        self._session_open_written = False
 
     # -- construction ------------------------------------------------------
     @classmethod
@@ -412,11 +458,134 @@ class UIBridge:
                              "properties": {"key": {"type": "string"}, "value": {}}}},
         ]
 
+    # -- the CONFIG row ----------------------------------------------------
+    @staticmethod
+    def _adapter_names(trader) -> list[str]:
+        return [getattr(a, "name", "") for a in getattr(trader, "strategies", [])
+                if getattr(a, "name", "")]
+
+    def _scope(self, trader, kind: str, args: dict[str, Any]) -> tuple[str, list[str]]:
+        """(setting name, the adapters it applied to).
+
+        A change that is genuinely global lists every adapter, because one row
+        per adapter is the truthful record of it and a synthetic "ALL" would
+        become a phantom strategy in every census that groups by the column.
+        """
+        every = self._adapter_names(trader)
+        if kind in ("stop", "pause", "start", "resume"):
+            return SETTING_PAUSED, every
+        if kind == "set_strategy_enabled":
+            named = args.get("strategy")
+            return SETTING_ENABLED, [named] if named in every else every
+        if kind == "set_setting":
+            key = args.get("key") or ""
+            if isinstance(key, str) and key.startswith("trail_pct:"):
+                named = key.split(":", 1)[1]
+                return SETTING_TRAIL, [named] if named in every else every
+            if key == "max_concurrent_positions":
+                return SETTING_CAP, every
+        return SETTING_UNKNOWN, every
+
+    def record_config(self, trader, *, now_et: datetime, setting: str,
+                      status: str, reason: str, detail: str,
+                      strategies: list[str], trail_pct: float | None = None) -> None:
+        """Write one CONFIG row per adapter into the trader's OWN fill log.
+
+        Never raises. This is called from inside the trading loop, and a log
+        that cannot be written is not a reason to stop trading -- but it IS
+        logged at exception level, because a silent recorder is the failure
+        this row exists to make impossible.
+        """
+        log = getattr(trader, "log", None)
+        if log is None:
+            return
+        for name in (strategies or [""]):
+            try:
+                log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                          strategy=name,
+                          symbol=setting,
+                          action=CONFIG_ACTION,
+                          status=status,
+                          reason=reason[:32],
+                          reject_reason=(detail or "")[:255],
+                          trail_pct=trail_pct)
+            except Exception:                               # noqa: BLE001
+                LOG.exception("could not write the CONFIG row for %s/%s",
+                              name, setting)
+
+    def record_session_open(self, trader, now_et: datetime) -> None:
+        """One row per adapter at startup, with the values in force.
+
+        A journal that writes only on CHANGE cannot tell "nobody touched it"
+        from "the recorder was broken" -- both are an empty file. This turns the
+        absence of a change into a positive record, gives the first command of
+        the day something to be a diff from, and means no reader has to fall
+        back on "presumably the default" for the rows before it.
+        """
+        if self._session_open_written:
+            return
+        self._session_open_written = True
+        cap = getattr(trader, "max_positions", None)
+        paused = bool(getattr(trader, "paused", False))
+        disabled = set(getattr(trader, "disabled_strategies", ()) or ())
+        for adapter in getattr(trader, "strategies", []):
+            name = getattr(adapter, "name", "")
+            trail = getattr(adapter, "trail_pct", None)
+            self.record_config(
+                trader, now_et=now_et, setting=SETTING_TRAIL,
+                status=CONFIG_APPLIED, reason="session_open",
+                detail=(f"trail_pct={trail} paused={paused} "
+                        f"max_positions={cap} enabled={name not in disabled} "
+                        f"portal={self.base_url}"),
+                strategies=[name], trail_pct=trail)
+
     # -- applying a command ------------------------------------------------
-    def apply(self, trader, command: dict[str, Any]) -> dict[str, Any]:
-        """Answer every command, including the ones refused. Never raises."""
+    def apply(self, trader, command: dict[str, Any],
+              now_et: datetime | None = None) -> dict[str, Any]:
+        """Answer every command, including the ones refused. Never raises.
+
+        Every answer is also written to the fill log as a CONFIG row, applied
+        and rejected alike. A rejected command that left no trace would read as
+        a command nobody sent, which is the same ambiguity a declined entry
+        writing no row would create.
+        """
         kind = command.get("type")
         args = command.get("args") or {}
+        answer = self._decide(trader, kind, args)
+
+        try:
+            setting, scope = self._scope(trader, kind or "", args)
+            self.record_config(
+                trader, now_et=now_et or datetime.now(ET), setting=setting,
+                status=(CONFIG_APPLIED if answer["status"] == "applied"
+                        else CONFIG_REJECTED),
+                reason=str(kind or "unknown"),
+                detail=answer.get("detail", ""),
+                strategies=scope,
+                trail_pct=self._new_trail(trader, kind, args, answer))
+        except Exception:                                   # noqa: BLE001
+            LOG.exception("could not record the CONFIG row for %s", kind)
+        return answer
+
+    @staticmethod
+    def _new_trail(trader, kind, args, answer) -> float | None:
+        """The trail column on a CONFIG row, populated only when the row IS a
+        trail change that took effect. Reading it back off the adapter rather
+        than off the request means the row records what the trader now has, not
+        what was asked for."""
+        if kind != "set_setting" or answer.get("status") != "applied":
+            return None
+        key = args.get("key") or ""
+        if not (isinstance(key, str) and key.startswith("trail_pct:")):
+            return None
+        name = key.split(":", 1)[1]
+        adapter = next((a for a in getattr(trader, "strategies", [])
+                        if getattr(a, "name", "") == name), None)
+        return getattr(adapter, "trail_pct", None)
+
+    def _decide(self, trader, kind, args: dict[str, Any]) -> dict[str, Any]:
+        """The answer itself. Split out so apply() can record every outcome in
+        one place rather than at each return."""
 
         if not self.is_paper:
             return _ack("rejected", "this trader is not on a paper account",
@@ -493,12 +662,21 @@ class UIBridge:
     async def tick(self, trader, now_et: datetime | None = None) -> None:
         """Push, collect, answer. Called from the trading loop; never raises,
         and returns immediately when it is not yet time to push."""
+        clock = now_et or datetime.now(ET)
+        # BEFORE the throttle, and before anything touches the network: the
+        # session-open record is about the TRADER's session, not the portal's
+        # health, so a relay that never answers must not cost us the row.
+        try:
+            self.record_session_open(trader, clock)
+        except Exception:                                   # noqa: BLE001
+            LOG.exception("could not record the session-open rows")
+
         if time.monotonic() - self._last_push < self.push_every_s:
             return
         self._last_push = time.monotonic()
 
         try:
-            state = self.build_state(trader, now_et or datetime.now())
+            state = self.build_state(trader, clock)
         except Exception:                                   # noqa: BLE001
             LOG.exception("could not build the portal state; skipping this push")
             return
@@ -507,7 +685,7 @@ class UIBridge:
         if not ok:
             return
         for command in await asyncio.to_thread(self._get, "/api/commands"):
-            answer = self.apply(trader, command)
+            answer = self.apply(trader, command, clock)
             LOG.info("portal command %s (%s) -> %s: %s", command.get("type"),
                      command.get("id"), answer["status"], answer["detail"])
             await asyncio.to_thread(
