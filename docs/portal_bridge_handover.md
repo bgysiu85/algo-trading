@@ -12,8 +12,14 @@ Written 14 Sep 2026. Companion doc: `claude/ui_bridge_delivery_20260914.md`.
 ## 1. What landed, exactly
 
 Delivered as a git bundle, not as copied files:
-`D:\Trading\Claude outputs\claude-ui-bridge-20260914.bundle`
-→ branch `claude-work`, single commit **`a085154`**, merged into `main`.
+`D:\Trading\Claude outputs\claude-ui-bridge-20260914.bundle` → commit `a085154`
+`D:\Trading\Claude outputs\claude-ui-bridge-20260914b.bundle` → adds `e307662`
+(the fix in section 9) and this note. `git log --oneline a085154..claude-work`
+lists exactly what it carries — a doc that names its own commit hash is wrong
+the moment it is committed.
+
+Both on branch `claude-work`. **`b` supersedes the first** — it is the same
+branch, so merging it fast-forwards whether or not you merged the first.
 
 | Path | State | Size of change |
 |---|---|---|
@@ -25,7 +31,8 @@ Delivered as a git bundle, not as copied files:
 Nothing else in the repo was touched. No strategy module, no backtest, no
 commission code, no data path.
 
-Verified on Ben's machine after the merge: **2156 passed, 3 skipped, 0 failed.**
+Verified on Ben's machine after merging `a085154`: **2156 passed, 3 skipped,
+0 failed.** `e307662` adds 5 tests on top of that.
 (My sandbox lacks `databento`, so it reports 1337 passed / 5 failed there — the
 5 are pre-existing and fail identically on `main`.)
 
@@ -138,11 +145,18 @@ rate limiting, keep the mirror above them.
    their exit. A button in a browser must never be able to leave a position
    unprotected. If you add a new "stop everything" path, it must not reach the
    exit logic.
-6. **`trail_pct` changes apply to new positions only.** `apply()` mutates
-   `StrategyAdapter.trail_pct`; positions already open keep the trail they were
-   opened with. Note `StrategyAdapter` is a frozen dataclass for its *fields* —
-   `trail_pct` is set via normal attribute assignment on the instance the trader
-   holds, so a change to how adapters are built could silently break this.
+6. **`StrategyAdapter` stays frozen, and the trail change respects that.**
+   Changing a trail does not mutate an adapter — `_rebind_adapter` builds the
+   next value with `dataclasses.replace` and rebinds **both** references:
+   `trader.strategies[i]` and every `SymbolState.strategy`. Miss the second and
+   the portal would report the new trail while entries kept stamping the old
+   one onto `Position`. If you change how adapters are held — a dict instead of
+   a list, a per-symbol copy, a rebuild each loop — update `_rebind_adapter`
+   with it.
+7. **`trail_pct` changes apply to new positions only**, by construction: the
+   trader copies `trail_pct` into `Position` at entry (`step_symbol`), so an
+   open position carries the trail it was opened with. The portal states this
+   to the user, so it has to keep being true.
 
 ---
 
@@ -216,4 +230,21 @@ To see exactly what the commit did:
 cd "D:\Trading"
 git show a085154 --stat
 git show a085154 -- brokers/ibkr/trader.py common/notify.py
+git show e307662 -- common/ui_bridge.py
 ```
+
+---
+
+## 9. One defect already found and fixed, worth knowing about
+
+`e307662` fixes a bug that every test in `a085154` passed over. `apply()` did
+`adapter.trail_pct = value` on a **frozen** dataclass, which raises
+`FrozenInstanceError`. The test double for the adapter was an ordinary object,
+and an ordinary object accepts any attribute you set on it — the fake was more
+permissive than the real class, so the tests agreed with each other and
+disagreed with production.
+
+Worth carrying into this repo's own testing: a double that is more permissive
+than the thing it stands in for can hide a defect completely. The new tests use
+real `StrategyAdapter` instances via `SA.build_all`, and one of them fails if
+anyone unfreezes the class to make a future change easier.
