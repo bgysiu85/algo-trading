@@ -83,6 +83,47 @@ def test_every_trader_field_has_a_column():
     assert not missing, f"paper_fill has no column for {missing}"
 
 
+def _specimen(field):
+    """A value for one trader field, typed by the column it lands in, and
+    DISTINCT from the empty string and from zero -- the two things a dropped
+    value looks like once it is in the database."""
+    kind = D.paper_fill.c[field].type.__class__.__name__
+    if kind == "Float":
+        return 7.25
+    if kind == "Integer":
+        return 100
+    return "x"
+
+
+def test_every_trader_field_survives_the_loader(tmp_path, conn):
+    r"""THE TEST ABOVE IS ONE STEP SHORT, AND THE STEP IT IS SHORT OF IS THE
+    ONE THAT BROKE.
+
+    `trail_pct` was added to trader.FIELDS and to db.paper_fill on 2026-09-14
+    and the test above went green, because a column existing is not the same as
+    a column being filled. `load_paper_fills` builds its row as an EXPLICIT
+    DICT, and the new key was simply not in it: the CSV carried the value, the
+    table had somewhere to put it, and the loader dropped it in between. Every
+    row would have arrived NULL -- indistinguishable from a session recorded
+    before the column existed, on the one ledger every downstream reader uses.
+
+    So this asserts the ROUND TRIP, field by field, from the trader's own list.
+    A column added to FIELDS and to the table but not to the loader fails here
+    and names itself.
+    """
+    from brokers.ibkr.trader import FIELDS
+    carried = [f for f in FIELDS
+               if f not in ("ts_et", "strategy", "symbol", "action", "status")]
+    p = fills_csv(tmp_path, [row("2026-09-10 06:21:00",
+                                 **{f: _specimen(f) for f in carried})])
+    L.load_paper_fills(conn, [p])
+    got = conn.execute(select(D.paper_fill)).mappings().one()
+    dropped = [f for f in carried if got[f] in (None, "")]
+    assert not dropped, (
+        f"the loader never puts a value in {dropped} -- the CSV carried one "
+        f"and the column exists, so these load as NULL on every row")
+
+
 # --- THE ONE THAT MATTERS ---------------------------------------------------
 
 def test_loading_twice_is_a_no_op(tmp_path, conn):

@@ -153,7 +153,11 @@ rate limiting, keep the mirror above them.
    one onto `Position`. If you change how adapters are held — a dict instead of
    a list, a per-symbol copy, a rebuild each loop — update `_rebind_adapter`
    with it.
-7. **`trail_pct` changes apply to new positions only**, by construction: the
+7. **A CONFIG row is not a trade.** `action="CONFIG"` rows carry no price and
+   no `trade_pnl`. Every current reader excludes them on `status` or `action`,
+   and a test proves it by running those readers rather than describing them. A
+   new reader of this file must gate on one of those two columns.
+8. **`trail_pct` changes apply to new positions only**, by construction: the
    trader copies `trail_pct` into `Position` at entry (`step_symbol`), so an
    open position carries the trail it was opened with. The portal states this
    to the user, so it has to keep being true.
@@ -173,6 +177,43 @@ Only these. Everything else is read-only and says so in the state document.
 
 The entry price band is published as **read-only** — changing it is a repo
 change, by design.
+
+**Every command writes a CONFIG row to the fill log**, applied and rejected
+alike, plus one row per adapter at session open. Shape agreed with the
+strategy/database side (`claude/portal_config_row_reply_20260914.md`):
+
+| column | value |
+|---|---|
+| `action` | `CONFIG` |
+| `status` | `APPLIED` or `REJECTED` |
+| `symbol` | the setting name, **lowercase** — `trail_pct`, `paused`, `enabled`, `max_positions` |
+| `strategy` | the adapter it applied to, **one row per adapter**, never a synthetic `ALL` |
+| `reason` | the command type, or `session_open` |
+| `reject_reason` | the detail, or the full starting config |
+| `trail_pct` | the new value, on a trail change that took effect |
+
+`symbol` carries the setting because `paper_fill`'s key is
+`(session_date, ts_et, strategy, symbol, action, status)` at second resolution:
+it is the only key field left that separates two *different* settings changed in
+the same second by the same strategy. Without it the loader keeps one and drops
+the other, and the row that vanishes is the one from the busy moment.
+
+The session-open row exists because a journal that writes only on change cannot
+tell "nobody touched it" from "the recorder was broken" — both are an empty
+file.
+
+Every field is one that already exists, so there is **no schema change and no
+loader change**. If a future row shape needs a NEW column it takes three edits,
+not two: `trader.FIELDS`, `db.paper_fill`, **and** `load_paper_fills`. The third
+is the one that gets missed — a column in the first two and absent from the
+third loads as null on every row while every test passes. That happened to
+`trail_pct` on 14 Sep.
+
+`tests/common/test_config_row_is_invisible_to_readers.py` drives the real
+`load()` functions of churn_count, friction, tv_reconcile and ui_bridge over the
+same book with and without CONFIG rows, and asserts the trades and the P/L come
+back identical. It drives the readers rather than restating their gates,
+because a restatement passes while the reader it describes changes.
 
 If you add a parameter you want controllable from the portal, add it to
 `UIBridge._settings` with a `set_command`, and handle its key in

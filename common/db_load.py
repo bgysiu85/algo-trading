@@ -646,6 +646,16 @@ def load_paper_fills(conn, paths) -> tuple[int, list[str]]:
                     "mfi": _f(r.get("mfi")), "rsi": _f(r.get("rsi")),
                     "vol": _f(r.get("vol")), "prev_vol": _f(r.get("prev_vol")),
                     "trail_avg": _f(r.get("trail_avg")),
+                    # THE COLUMN EXISTED FOR A DAY WITH NOTHING PUTTING A VALUE
+                    # IN IT. trader.FIELDS gained trail_pct, db.paper_fill
+                    # gained the column, and test_every_trader_field_has_a_column
+                    # passed -- because it checks THE TABLE, which is one step
+                    # short of the loader that fills it. Every row would have
+                    # arrived NULL, which reads exactly like a session that
+                    # never recorded a trail at all; and the entire reason the
+                    # column exists is to tell a 5% row from a 9% one in a
+                    # session where someone moved it from the portal.
+                    "trail_pct": _f(r.get("trail_pct")),
                     "source_file": path.name[:255], "loaded_at": now})
 
     # DE-DUPLICATE WITHIN THE BATCH, on the primary key. Two files can overlap:
