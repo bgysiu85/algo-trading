@@ -532,6 +532,14 @@ paper_fill = Table(
     Column("mfi", Float), Column("rsi", Float),
     Column("vol", Float), Column("prev_vol", Float), Column("trail_avg", Float),
 
+    # The trailing-stop width in force for THIS trade, in percent. Not related
+    # to trail_avg above, which is a volume average. Recorded because the
+    # portal can change the width mid-session: without it, rows taken at 5%
+    # and rows taken at 9% are one undifferentiated population here, and every
+    # comparison against a fixed-trail backtest is then comparing two things
+    # under one label.
+    Column("trail_pct", Float),
+
     Column("source_file", String(255)),
     Column("loaded_at", DateTime),
 )
@@ -573,6 +581,26 @@ DERIVED_TABLES = {
     "bar_daily": "python -m common.db_load --daily-bars <ARCHIVE> <DATASET>",
     "orb_preflight": "python -m common.db_load --orb-preflight <CSV> <DATASET>",
     "day_dollar_volume": "python -m common.db_load --dollar-volume <CSV>",
+    # paper_fill is derived from var/fills/*.csv, which the portal handover
+    # establishes as the only source of trade truth -- ui_bridge reads them and
+    # keeps no parallel ledger. So the table is a VIEW of those files and a
+    # rebuild is the same delete-then-insert the loader already does every
+    # session, at a wider scope.
+    #
+    # BUT ONLY WHILE THE FILES ARE ALL STILL THERE. `rebuild_table` refuses
+    # anything outside this dict because "the rows may be the only copy", and
+    # for this one that is a question about the disk rather than a property of
+    # the table. So the guard is not removed, it is REPLACED with a checked
+    # precondition -- see `paper_fill_is_rebuildable`, which the CLI must call
+    # before rebuilding this table and which refuses when the CSVs do not
+    # cover every session the table holds.
+    "paper_fill": "python -m common.db_load --paper-fills var/fills/*.csv",
+}
+
+# Tables whose rebuild needs more than membership above: a callable that raises
+# when the precondition does not hold. Keyed by table name.
+REBUILD_PRECONDITION: dict[str, str] = {
+    "paper_fill": "paper_fill_is_rebuildable(eng, fills_dir)",
 }
 
 
@@ -621,6 +649,12 @@ def rebuild_table(eng, name: str) -> int:
 
     So: drop, recreate, reload from the caches. Refused for anything outside
     DERIVED_TABLES, where the rows may be the only copy.
+
+    `paper_fill` is in that dict but carries a precondition the caller must
+    check FIRST -- see REBUILD_PRECONDITION and `paper_fill_is_rebuildable`.
+    This function will not check it for you, because it does not know where the
+    fill logs live; what it does is refuse to be the place that quietly dropped
+    a session nobody could reconstruct.
     """
     if name not in DERIVED_TABLES:
         raise ValueError(
@@ -635,6 +669,73 @@ def rebuild_table(eng, name: str) -> int:
         table.drop(c, checkfirst=True)
         table.create(c)
     return n
+
+
+def sessions_on_disk(fills_dir) -> set:
+    """Every session_date reconstructible from the fill logs in `fills_dir`.
+
+    Read from the ROWS, not from the filenames, exactly as `load_paper_fills`
+    does -- the filename is the trader's convention and nothing enforces it, and
+    a log appended across a restart holds two dates. A coverage check that
+    trusted filenames would pass on a file whose rows say otherwise, which is
+    the failure it exists to prevent.
+
+    Rolled-aside logs count. `FillLog.__init__` renames a file whose header no
+    longer matches FIELDS to `<stem>_pre<HHMMSS>.csv`, and the portal's
+    `trail_pct` column makes that happen on the next live session. Those rows
+    are still the record; globbing only `*_fills_*.csv` would miss them and
+    report a session as unreconstructible when it is sitting right there.
+    """
+    import csv as _csv
+    from datetime import datetime as _dt
+    from pathlib import Path as _P
+
+    out = set()
+    d = _P(fills_dir)
+    if not d.is_dir():
+        return out
+    for path in sorted(d.glob("*.csv")):
+        try:
+            with path.open(newline="") as fh:
+                for r in _csv.DictReader(fh):
+                    raw = (r.get("ts_et") or "").strip()
+                    if not raw:
+                        continue
+                    try:
+                        out.add(_dt.fromisoformat(raw).date())
+                    except ValueError:
+                        try:
+                            out.add(_dt.strptime(
+                                raw, "%Y-%m-%d %H:%M:%S").date())
+                        except ValueError:
+                            continue
+        except OSError:
+            continue
+    return out
+
+
+def paper_fill_is_rebuildable(eng, fills_dir) -> tuple[bool, list]:
+    """(ok, sessions the table holds that the CSVs cannot reproduce).
+
+    `rebuild_table` drops the table. For `paper_fill` that is safe only while
+    every session in it can be read back off disk, and that is a fact about the
+    filesystem rather than a property of the table -- so it is measured, not
+    assumed.
+
+    A session present in the table and absent from the logs is real trading
+    history that a rebuild would destroy. There is no recovering it: the fill
+    log is the only source of trade truth and the database is a view of it, so
+    if the view outlives the source the view IS the source.
+    """
+    have = sessions_on_disk(fills_dir)
+    try:
+        with eng.connect() as c:
+            rows = c.execute(select(paper_fill.c.session_date).distinct()).all()
+    except Exception:  # noqa: BLE001 -- an absent table holds nothing to lose
+        return True, []
+    in_db = {r[0] for r in rows if r[0] is not None}
+    missing = sorted(d for d in in_db if d not in have)
+    return (not missing), missing
 
 
 def counts(eng) -> dict:
@@ -694,6 +795,11 @@ def main(argv=None) -> int:
                          "rows, then reload it with its own loader. This is how "
                          "a column added to a model reaches a table that "
                          "already exists: create_all never alters one.")
+    ap.add_argument("--fills-dir", default="var/fills",
+                    help="where the trader's fill logs live. Only read when "
+                         "rebuilding paper_fill, whose rows come from them -- "
+                         "the rebuild refuses unless every session in the "
+                         "table can be read back off disk.")
     ap.add_argument("--ddl", action="store_true",
                     help="print the T-SQL without connecting to anything")
     ap.add_argument("--report", nargs="?", const="var/reports/db_status.txt",
@@ -745,6 +851,28 @@ def main(argv=None) -> int:
         return 1
 
     if a.rebuild_table:
+        # The precondition is checked HERE, before the drop, and not inside
+        # rebuild_table -- which does not know where the fill logs live. A
+        # check that ran after the table was dropped would be the third
+        # instance this week of a guard placed behind the thing it guards.
+        if a.rebuild_table in REBUILD_PRECONDITION:
+            ok, missing = paper_fill_is_rebuildable(eng, a.fills_dir)
+            if not ok:
+                print(f"\nREFUSED: {a.rebuild_table} holds {len(missing)} "
+                      f"session(s) that {a.fills_dir}/ cannot reproduce.")
+                print("  A rebuild would destroy real trading history: the "
+                      "fill log is the")
+                print("  only source of trade truth, so where the log is gone "
+                      "the table IS")
+                print("  the record rather than a view of one.")
+                for d in missing[:10]:
+                    print(f"    {d}")
+                if len(missing) > 10:
+                    print(f"    ... and {len(missing) - 10} more")
+                print(f"\n  Restore those logs to {a.fills_dir}/ and re-run, "
+                      "or export the")
+                print("  table before rebuilding it.")
+                return 1
         try:
             n = rebuild_table(eng, a.rebuild_table)
         except ValueError as e:

@@ -404,6 +404,18 @@ FIELDS = [
     "entry_price", "exit_price", "trade_pnl", "trade_pct", "hold_minutes",
     "reject_reason",        # populated only when IB refused the order outright
     "macd", "macd_sig", "mfi", "rsi", "vol", "prev_vol", "trail_avg",
+    # -- the trail this trade is running, in percent -------------------------
+    # NOT the same thing as trail_avg above, which is a volume average. This is
+    # the trailing-stop width, and it is here because the portal can change it
+    # mid-session: without the column, a session where someone moved the trail
+    # from a browser produces rows indistinguishable from rows taken at the
+    # default, in the one ledger every downstream reader uses. Anything later
+    # comparing the live record against a 5% backtest would then be comparing
+    # two populations under one label.
+    #
+    # It cannot be reconstructed afterwards -- the rows that need it are the
+    # ones written during the experiment.
+    "trail_pct",
 ]
 
 
@@ -918,6 +930,25 @@ class MCLPaperTrader:
 
     # -- order placement --------------------------------------------------
 
+    @staticmethod
+    def _trail_for(st) -> float | None:
+        """The trailing-stop width this row's trade is running, or None.
+
+        On an EXIT the position's own trail is the truth: it is the one that
+        produced the stop, and it can differ from the strategy's current value
+        because the portal may have changed the latter mid-session. On an ENTRY
+        the strategy's value is the truth, because it is what stamps the
+        Position moments later -- see the Position construction in step_symbol,
+        which reads the same attribute.
+
+        None rather than a default when it cannot be known: a wrong number in
+        this column is worse than an empty one, because a reader would believe
+        it.
+        """
+        if getattr(st, "position", None) is not None:
+            return getattr(st.position, "trail_pct", None)
+        return getattr(getattr(st, "strategy", None), "trail_pct", None)
+
     async def marketable_limit(self, st: SymbolState, action: str, qty: int,
                                ref_close: float, reason: str, detail: dict,
                                closing: "Position | None" = None,
@@ -945,6 +976,7 @@ class MCLPaperTrader:
                         trade_pct=round(pct, 3),
                         hold_minutes=round(held, 1))
 
+        trail_pct = self._trail_for(st)
         bid, ask = self.quote(st)
         spread = (ask - bid) if (bid == bid and ask == ask) else float("nan")
         spread_pct = (spread / ask * 100.0) if (ask == ask and ask > 0) else float("nan")
@@ -960,6 +992,7 @@ class MCLPaperTrader:
                            reason=reason, ref_close=ref_close,
                            ref_kind=ref_kind, bid=bid, ask=ask,
                            spread=spread, spread_pct=spread_pct, qty=qty,
+                           trail_pct=trail_pct,
                            status="NO_QUOTE", **detail)
             return None
 
@@ -971,7 +1004,7 @@ class MCLPaperTrader:
                    symbol=st.symbol, action=action, reason=reason,
                    ref_close=ref_close, ref_kind=ref_kind, bid=bid, ask=ask,
                    spread=spread, spread_pct=spread_pct, limit_sent=limit,
-                   qty=qty, **detail)
+                   qty=qty, trail_pct=trail_pct, **detail)
 
         if self.dry_run:
             # Assume the marketable limit fills at its own price. That is the
