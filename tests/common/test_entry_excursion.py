@@ -363,3 +363,43 @@ def test_the_split_reports_the_move_that_continued_after_the_exit():
     assert "med MFE to close" in o
     assert "500.00" in o
     assert "not cut short" in o and "no exit" in o
+
+
+# --- 10. the double must not be more permissive than the real thing ----------
+
+@pytest.mark.parametrize("mod", ["mcl", "mc5"])
+def test_measure_reads_a_REAL_trade_from_each_engine(mod):
+    """`portal_bridge_handover_20260914.md` §9: a test double more permissive
+    than the class it stands in for hides defects completely -- an ordinary
+    object accepts any attribute you set on it, so the fakes agreed with each
+    other and disagreed with production.
+
+    Every other test here builds a SimpleNamespace. This one builds the engine's
+    own Trade, so a renamed or removed field fails here instead of at runtime.
+    """
+    import importlib
+    M = importlib.import_module(f"strategy.{mod}.{mod}")
+    df = frame([10.0] * 4, highs=[10.0, 10.0, 11.0, 10.0],
+               lows=[10.0, 9.5, 10.0, 10.0])
+    t = M.Trade(symbol="AAA", date=D.isoformat(),
+                entry_time=df.index[0].isoformat(),
+                exit_time=df.index[3].isoformat(),
+                entry_price=10.0, exit_price=10.0, qty=100,
+                reason="trailing_stop", bars_held=3,
+                gross=0.0, commission=0.0, net=0.0)
+    m = E.measure(df, t)
+    assert m is not None, f"{mod}.Trade no longer carries what measure() reads"
+    assert m["mfe_in"] == pytest.approx(100.0)
+    assert m["mae_in"] == pytest.approx(50.0)
+    assert m["adverse_first"] is True
+
+
+def test_the_fields_measure_reads_all_exist_on_the_real_trade():
+    """Named explicitly, so a rename shows up as this test rather than as a
+    silently smaller book."""
+    import dataclasses
+    from strategy.mcl import mcl as M
+    have = {f.name for f in dataclasses.fields(M.Trade)}
+    for field in ("symbol", "date", "entry_time", "exit_time", "entry_price",
+                  "qty", "net", "bars_held"):
+        assert field in have, f"measure() reads .{field} and Trade lost it"
