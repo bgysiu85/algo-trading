@@ -461,3 +461,69 @@ def test_the_fixed_horizon_is_registered_not_tuned():
     i = src.index("FIXED_HORIZON = ")
     assert "registered here rather" in src[:i]
     assert "p90" in src[:i]
+
+
+# --- 12. can a stop separate the two groups at all ---------------------------
+
+def grp(maes):
+    return [{"symbol": f"S{i}", "date": "2026-03-02", "net": 0.0,
+             "bars_held": 3, "mfe_in": 50.0, "mae_in": m, "mfe_end": 50.0,
+             "mfe_fix": 50.0, "bars_left": 10, "mfe_in_share": 0.5,
+             "mae_in_share": m / 100, "entry_price": 10.0, "qty": 100,
+             "mfe_i": 5, "mae_i": 1, "adverse_first": True}
+            for i, m in enumerate(maes)]
+
+
+def test_the_scan_reports_both_groups_at_every_level():
+    o = "\n".join(E.stop_scan(grp([5.0] * 10), grp([30.0] * 10)))
+    assert "IF A HARD STOP HAD SAT AT EACH LEVEL" in o
+    for lvl in ("$      5", "$     10", "$     20", "$     25"):
+        assert lvl in o
+
+
+def test_a_clean_separation_shows_a_ratio_far_above_one():
+    """Winners all draw down $5, losers all $30. A stop at $10 catches every
+    loser and no winner."""
+    o = "\n".join(E.stop_scan(grp([5.0] * 100), grp([30.0] * 100)))
+    line = [l for l in o.splitlines() if l.startswith("  $     10")][0]
+    assert "0.0%" in line and "100.0%" in line
+
+
+def test_no_separation_shows_a_ratio_near_one():
+    """Both groups drawing down the same amount. A stop cannot tell them apart
+    and no width is the right width -- which the report says in those words."""
+    o = "\n".join(E.stop_scan(grp([12.0] * 100), grp([12.0] * 100)))
+    line = [l for l in o.splitlines() if l.startswith("  $     10")][0]
+    assert line.strip().endswith("1.00")
+    assert "no" in o and "width is the right width" in o
+
+
+def test_the_scan_says_it_is_a_bound_and_not_a_backtest():
+    """A real stop ends the position, so nothing after it happens. Reading
+    these rows as a P/L would be reading a counterfactual that was never run."""
+    o = "\n".join(E.stop_scan(grp([5.0] * 10), grp([30.0] * 10)))
+    # the phrase wraps across lines in the rendered report
+    flat = " ".join(o.split())
+    assert "not a backtest" in flat
+    assert "a real stop ends the position" in flat
+
+
+def test_an_empty_group_produces_no_scan_rather_than_a_divide_by_zero():
+    assert E.stop_scan([], grp([30.0] * 10)) == []
+    assert E.stop_scan(grp([5.0] * 10), []) == []
+
+
+def test_the_report_prints_the_drawdown_distribution_not_just_the_median():
+    """The two medians invite a stop between them. A median cannot support
+    that: if the winners' tail reaches into the losers' body, a stop there kills
+    winners faster than it saves losers, and the medians look identical either
+    way."""
+    rows = grp([5.0] * 50)
+    for r in rows[25:]:
+        r["adverse_first"] = False
+        r["mae_i"], r["mfe_i"] = 9, 5
+        r["mae_in"] = 30.0
+    o = "\n".join(E.order_section(rows, 4.26))
+    assert "THE DRAWDOWN EACH GROUP HAS TO SURVIVE" in o
+    assert "p90" in o and "p95" in o
+    assert "the overlap between the two rows is the whole" in o

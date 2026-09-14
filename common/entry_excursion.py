@@ -265,6 +265,42 @@ def verdict(rows: list[dict], friction: float) -> tuple[str, list[str]]:
         "  picking the reading that suits the next piece of work."]
 
 
+def stop_scan(winners: list[dict], losers: list[dict]) -> list[str]:
+    """What a hard stop at each level would have cost each group.
+
+    NOT A BACKTEST AND NOT A PROPOSAL. It reads the excursions already measured
+    and asks, at each level, how many of each group would have been stopped out
+    before their own best moment. A real stop changes the path -- the position
+    is gone, so nothing after it happens -- which this cannot model. It bounds
+    the question of whether a stop can separate the two groups AT ALL, which is
+    what has to be true before a stop is worth testing properly.
+
+    `mcl_rejected_mechanics.md` has cent stops at 10-20c rejected and monotone,
+    on a $4 name roughly this range per 100 shares. That was measured on the
+    485-trade cache and the leaky universe. If this table shows no separation,
+    the rejection stands and the medians were misleading; if it shows a wide
+    one, the two disagree and a registered re-run settles it.
+    """
+    if not winners or not losers:
+        return []
+    L = ["  IF A HARD STOP HAD SAT AT EACH LEVEL", "",
+         f"  {'stop':>8}{'winners cut':>14}{'losers cut':>13}"
+         f"{'ratio':>9}"]
+    for lvl in (5.0, 8.0, 10.0, 12.0, 15.0, 20.0, 25.0):
+        w = sum(1 for r in winners if r["mae_in"] >= lvl) / len(winners)
+        l = sum(1 for r in losers if r["mae_in"] >= lvl) / len(losers)
+        ratio = (l / w) if w > 0 else float("inf")
+        L.append(f"  ${lvl:>7,.0f}{100 * w:>13.1f}%{100 * l:>12.1f}%"
+                 f"{ratio:>9.2f}")
+    L += ["",
+          "  `ratio` above 1 means the level catches more losers than winners.",
+          "  Near 1 at every level means a stop cannot tell them apart, and no",
+          "  width is the right width. This is a bound on the question, not a",
+          "  backtest: a real stop ends the position, so nothing after it",
+          "  happens, and none of these rows model that.", ""]
+    return L
+
+
 def order_section(rows: list[dict], friction: float) -> list[str]:
     """Which extreme arrived first, per trade.
 
@@ -325,6 +361,28 @@ def order_section(rows: list[dict], friction: float) -> list[str]:
           "  small and no exit reaches what was never there. Far apart means",
           "  the trade was exited out of a move that kept going."]
     L.append("")
+
+    # THE DISTRIBUTION, NOT THE MEDIAN. The two medians -- $8 for the winners
+    # against $21 for the losers -- invite a stop between them. A median cannot
+    # support that: if the winners' adverse tail reaches into the losers' body,
+    # a stop there kills winners faster than it saves losers, and the medians
+    # look identical either way.
+    L += ["  THE DRAWDOWN EACH GROUP HAS TO SURVIVE", "",
+          f"  {'':<16}{'p25':>10}{'p50':>10}{'p75':>10}{'p90':>10}"
+          f"{'p95':>10}"]
+    for label, sel in (("drawdown first", adverse), ("move first", favour)):
+        if not sel:
+            continue
+        v = [r["mae_in"] for r in sel]
+        L.append(f"  {label:<16}" + "".join(f"${pct(v, q):>9,.2f}"
+                                            for q in (25, 50, 75, 90, 95)))
+    L += ["",
+          "  A stop is a horizontal line through this table. It helps only if",
+          "  it sits above enough of the WINNERS' column and below enough of",
+          "  the losers' -- so the overlap between the two rows is the whole",
+          "  question, and the medians alone cannot show it.", ""]
+    L += stop_scan(adverse, favour)
+
     if adverse:
         share = len(adverse) / len(have)
         L += [f"  {100 * share:.1f}% of trades were at their worst BEFORE they "
