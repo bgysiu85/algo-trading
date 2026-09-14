@@ -109,6 +109,11 @@ BATCH_SEP = "\n\n– – –\n\n"
 class Notifier:
     """Fire-and-forget Telegram sender. Safe to construct unconfigured."""
 
+    # Set by the live path when the portal bridge is on: a callable taking the
+    # message text, so the same words the phone gets also reach the portal. It
+    # is never allowed to raise into send() -- see the guard there.
+    observer = None
+
     def __init__(self, token: str = "", chat_id: str = "", enabled: bool = True,
                  batch_interval_s: float = 0.0):
         """batch_interval_s > 0 holds NON-FORCED messages and sends them
@@ -269,6 +274,15 @@ class Notifier:
         force bypasses the rate limit and the de-duplicator. Use it only for
         things that must not be swallowed: fills, and the heartbeat.
         """
+        # The mirror runs before every filter below: the portal shows what the
+        # trader SAID, and a message the rate limiter drops is still something
+        # that happened. It is also the only copy when Telegram is unconfigured.
+        if self.observer is not None:
+            try:
+                self.observer(text)
+            except Exception:                               # noqa: BLE001
+                LOG.debug("portal mirror failed", exc_info=True)
+
         if not self.enabled:
             return False
         if not force and not self._allow(text):
