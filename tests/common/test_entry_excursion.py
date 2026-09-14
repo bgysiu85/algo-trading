@@ -237,3 +237,40 @@ def test_no_trades_renders_without_a_verdict():
     assert "NO TRADES" in o
     assert "THE EXIT IS WORTH ATTACKING" not in o
     assert "THE ENTRY IS THE PROBLEM" not in o
+
+
+# --- 8. the frame must match pit_strategy's ----------------------------------
+
+def test_the_report_says_how_many_trades_could_not_be_located():
+    """The first version measured 3,521 trades against pit_strategy's 3,955 and
+    said nothing. A silent drop is how a biased subsample gets reported as the
+    whole book."""
+    o = "\n".join(E.render(rows_with([50.0] * 90), "mcl", 10, 100,
+                           "2026-03-02", 1.0, 1, made=100))
+    assert "10 of 100 trades (10.0%) COULD NOT BE LOCATED" in o
+    assert "Read nothing below until that is zero" in o
+
+
+def test_a_clean_run_carries_no_drop_banner():
+    o = "\n".join(E.render(rows_with([50.0] * 100), "mcl", 10, 100,
+                           "2026-03-02", 1.0, 1, made=100))
+    assert "COULD NOT BE LOCATED" not in o
+
+
+def test_the_warm_up_is_stated_and_matches_pit_strategy():
+    """MACD is an EMA with unbounded memory, so a frame without the prior slice
+    is a different population, not the same one measured differently. The first
+    version read one day's slice under a report saying 'same warm-up as
+    pit_strategy'."""
+    from common.pit_strategy import WARMUP_SESSIONS
+    o = "\n".join(E.render(rows_with([50.0] * 40), "mcl", 10, 100,
+                           "2026-03-02", 1.0, 1))
+    assert f"{WARMUP_SESSIONS} session(s) of warm-up" in o
+    assert "unbounded memory" in o
+    assert E.WARMUP_SESSIONS == WARMUP_SESSIONS
+
+
+def test_sessions_short_of_warm_up_are_counted_not_hidden():
+    o = "\n".join(E.render(rows_with([50.0] * 40), "mcl", 10, 100,
+                           "2026-03-02", 1.0, 1, warm_short=3))
+    assert "3 session(s) ran with less warm-up than asked" in o

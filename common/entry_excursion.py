@@ -90,6 +90,7 @@ import pandas as pd
 
 from common.dip_entry import excursions
 from common.pit_h0 import DROP, FRICTIONS, first_seen_time, load_pit
+from common.pit_strategy import WARMUP_SESSIONS
 from common.report_fmt import acct
 from common.report_io import emit
 
@@ -228,13 +229,30 @@ def verdict(rows: list[dict], friction: float) -> tuple[str, list[str]]:
 
 
 def render(rows: list[dict], name: str, n_days: int, n_universe: int,
-           split: str, elapsed: float, jobs: int) -> list[str]:
+           split: str, elapsed: float, jobs: int, made: int | None = None,
+           warm_short: int = 0) -> list[str]:
     L = [f"{name.upper()}: HOW FAR PRICE MOVES IN OUR FAVOUR AFTER ENTRY", "",
          f"  {n_days} sessions, {n_universe:,} point-in-time symbol-days, "
          f"{len(rows):,} trades",
          f"  every entry floored at its own first_seen; {QTY} shares",
+         f"  {WARMUP_SESSIONS} session(s) of warm-up, as pit_strategy builds "
+         f"it -- MACD is an EMA with",
+         "  unbounded memory, so a frame without the prior slice is a "
+         "different population",
          f"  halves split at {split} (derived)",
-         f"  elapsed {elapsed:.1f}s on {jobs} worker(s)", "",
+         f"  elapsed {elapsed:.1f}s on {jobs} worker(s)", ""]
+    if warm_short:
+        L.append(f"  {warm_short} session(s) ran with less warm-up than asked "
+                 "(no prior slice)")
+    if made is not None and made != len(rows):
+        # A trade whose bar cannot be located is dropped. Silently dropping a
+        # share of the book is how a biased subsample gets reported as the book.
+        lost = made - len(rows)
+        L += [f"  *** {lost:,} of {made:,} trades "
+              f"({100 * lost / max(made, 1):.1f}%) COULD NOT BE LOCATED",
+              "      in their own frame and are excluded. Read nothing below "
+              "until that is zero."]
+    L += ["",
          "  EXCURSIONS START AT THE BAR AFTER ENTRY. Within a bar, OHLCV",
          "  cannot say whether the high came before or after the fill, so the",
          "  entry bar is excluded and every figure below is a LOWER BOUND.", ""]
@@ -309,20 +327,38 @@ def render(rows: list[dict], name: str, n_days: int, n_universe: int,
 
 
 def run_day(args: tuple) -> tuple:
-    """One session's trades and their excursions. Module-level and picklable."""
-    from common.dbn_io import read_dbn
-    from common.pit_strategy import engine
+    """One session's trades and their excursions. Module-level and picklable.
 
-    path, day, universe, strategy = args
+    THE FRAME MUST MATCH `pit_strategy`'s. The first version of this module read
+    a single day's slice; pit_strategy prepends `WARMUP_SESSIONS` prior slices,
+    and MACD is an EMA with unbounded memory. That produced 3,521 trades against
+    pit_strategy's 3,955 -- an 11% different population -- under a report that
+    said "same tape and warm-up as pit_strategy". A caveat asserting a
+    comparability that does not hold is worse than no caveat.
+
+    Each worker is handed its own day's paths INCLUDING the warm-up ones and
+    builds the frame itself, so the sessions stay independent and the deque walk
+    that pit_strategy does sequentially is not needed here.
+    """
+    from common.dbn_io import read_dbn
+    from common.pit_strategy import build_frame, engine
+
+    paths, day, universe, strategy = args
     mod, extra = engine(strategy)
-    try:
-        frame = read_dbn(Path(path))
-    except Exception as e:                                  # noqa: BLE001
-        return day, [], 0, f"unreadable ({type(e).__name__}: {e})"
-    if frame.empty:
-        return day, [], 0, ""
+    parts = []
+    for pth in paths:
+        try:
+            f = read_dbn(Path(pth))
+        except Exception as e:                              # noqa: BLE001
+            return day, [], 0, 0, 0, f"unreadable ({type(e).__name__}: {e})"
+        if not f.empty:
+            parts.append((Path(pth).name[:10], f))
+    if not parts or parts[-1][0] != day:
+        return day, [], 0, 0, 0, ""
+    frame = build_frame(parts, day)
     d = _date.fromisoformat(day)
     out: list[dict] = []
+    made = 0
     for rec in universe:
         df = frame[frame["symbol"] == rec["symbol"]]
         if df.empty or not rec.get("first_seen"):
@@ -334,11 +370,14 @@ def run_day(args: tuple) -> tuple:
                                           **extra)
         except Exception:                                   # noqa: BLE001
             continue
+        made += len(trades)
         for t in trades:
             m = measure(df, t)
             if m is not None:
                 out.append(m)
-    return day, out, len(universe), ""
+    # made vs len(out): a trade whose bar cannot be located is dropped, and a
+    # silent 11% drop is how a biased subsample gets reported as the book.
+    return day, out, len(universe), made, len(parts) - 1, ""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -364,21 +403,31 @@ def main(argv=None) -> int:
     days = sorted(by_date)
     if a.limit:
         days = days[:a.limit]
-    tasks = [(str(slices[d]), d, by_date[d], a.strategy)
-             for d in days if d in slices]
+    # Each task carries its own warm-up paths, so a worker builds the same
+    # frame pit_strategy's sequential deque walk would have handed it.
+    have = sorted(slices)
+    pos = {d: i for i, d in enumerate(have)}
+    tasks = []
+    for d in days:
+        if d not in slices:
+            continue
+        i = pos[d]
+        tasks.append(([str(slices[x])
+                       for x in have[max(0, i - WARMUP_SESSIONS):i + 1]],
+                      d, by_date[d], a.strategy))
     jobs = (os.cpu_count() or 1) if a.jobs == 0 else max(1, a.jobs)
     print(f"  {a.strategy} excursions over {len(tasks):,} session(s) on "
           f"{jobs} worker(s)", flush=True)
 
     t0 = time.time()
-    got: dict[str, tuple[list, int]] = {}
+    got: dict[str, tuple[list, int, int, int]] = {}
 
     def take(res, k):
-        day, rows, nu, err = res
+        day, rows, nu, made, warm, err = res
         if err:
             print(f"  {day}: {err}", flush=True)
         else:
-            got[day] = (rows, nu)
+            got[day] = (rows, nu, made, warm)
         if k % 25 == 0 or k == len(tasks):
             el = time.time() - t0
             eta = (len(tasks) - k) / (k / el) / 60.0 if el and k else 0.0
@@ -398,17 +447,20 @@ def main(argv=None) -> int:
     # Day order, not completion order: this module sums floats, and a total
     # that moved when --jobs changed would not be a measurement.
     rows: list[dict] = []
-    n_universe = 0
+    n_universe = made = warm_short = 0
     for day in sorted(got):
-        r, nu = got[day]
+        r, nu, mk, warm = got[day]
         rows += r
         n_universe += nu
+        made += mk
+        warm_short += 1 if warm < WARMUP_SESSIONS else 0
 
     ds = sorted({r["date"] for r in rows})
     split = ds[len(ds) // 2] if ds else ""
     out = a.out or f"var/reports/entry_excursion_{a.strategy}.txt"
     emit("\n".join(render(rows, a.strategy, len(days), n_universe, split,
-                          time.time() - t0, jobs)),
+                          time.time() - t0, jobs, made=made,
+                          warm_short=warm_short)),
          out, header=f"common.entry_excursion  strategy={a.strategy}  "
                      f"pairs={a.pairs}"
                      + (f"  LIMIT {a.limit}" if a.limit else ""))
