@@ -143,6 +143,49 @@ def capture_needed(row: dict, cfg: ScreenConfig) -> float:
     return float(v) / cfg.volume_min
 
 
+def repair_reach(rows: list[dict], cfg: ScreenConfig) -> list[str]:
+    """Did the prior-close repair reach each of these names, and how short is
+    the nearest one.
+
+    Two residual categories that look identical in the table above and are not:
+    a name still dividing by a 20:00 close has an OUTSTANDING defect, and a
+    name on a repaired 16:00 close that still fails has a real shortfall on
+    this tape. The first is fixable by extending the repair to another venue;
+    the second is not fixable by any close at all.
+    """
+    chg = [r for r in rows if "CHANGE" in str(r.get("why", ""))
+           and r.get("change") not in (None, float("-inf"))]
+    unrepaired = [r for r in chg if r.get("prior_source") != "repaired"]
+    L = ["DID THE REPAIR REACH THEM", "",
+         "  A name still dividing by a 20:00 close carries the defect this",
+         "  screen was supposed to have fixed. A name on a repaired 16:00",
+         "  close that still falls short does not -- its change is real, and",
+         "  no prior close recovers it. The table's `prior` column separates",
+         "  them; they are different findings with different fixes.", ""]
+    if not chg:
+        return L + ["  No CHANGE failure carries a computed change.", ""]
+
+    L += [f"  {len(unrepaired)} of {len(chg)} CHANGE failure(s) are still on an "
+          "UNREPAIRED close."]
+    near = max(chg, key=lambda r: r["change"])
+    short = cfg.change_min - near["change"]
+    L += ["",
+          f"  Nearest miss: {near['symbol']} on {near['date']} at "
+          f"{near['change']:.2f}%, {short:.2f}pp short",
+          f"  of the {cfg.change_min:.0f}% clause, on a "
+          f"{near.get('prior_source', 'unknown')} prior close.", ""]
+    if near.get("prior_source") != "repaired":
+        L += ["  That nearest miss is one of the unrepaired ones, so its",
+              "  shortfall is not a measurement of the screen -- it is the",
+              "  outstanding defect, still costing a name, and the size above",
+              "  is how much the missing close would have to be worth.", ""]
+    else:
+        L += ["  That nearest miss IS on a repaired close, so the shortfall is",
+              "  a property of this tape's prints rather than of the divisor.",
+              "  Extending the repair cannot recover it.", ""]
+    return L
+
+
 def capture_verdict(rows: list[dict], cfg: ScreenConfig) -> list[str]:
     """Does the capture ratio reach these names -- answered, not deferred.
 
@@ -214,7 +257,7 @@ def render(rows: list[dict], cfg: ScreenConfig, n_sessions: int,
 
     L += ["PER NAME", "",
           f"  {'date':<12}{'symbol':<8}{'best change':>13}{'best volume':>14}"
-          f"{'close':>9}{'cap needed':>12}   why"]
+          f"{'close':>9}{'cap needed':>12}{'prior':>10}   why"]
     for r in sorted(rows, key=lambda r: (r["date"], r["symbol"])):
         # A name with no bars at all carries no bests. Missing and
         # negative-infinity both render as a dash rather than as a figure --
@@ -233,8 +276,9 @@ def render(rows: list[dict], cfg: ScreenConfig, n_sessions: int,
         cn = capture_needed(r, cfg)
         cap = (f"{cn:>12.3f}" if "VOLUME" in str(r["why"]) and cn == cn
                else f"{'-':>12}")
-        L.append(f"  {r['date']:<12}{r['symbol']:<8}{ch}{vol}{px}{cap}   "
-                 f"{r['why']}")
+        src = str(r.get("prior_source", "unknown"))
+        L.append(f"  {r['date']:<12}{r['symbol']:<8}{ch}{vol}{px}{cap}"
+                 f"{src:>10}   {r['why']}")
 
     counts = Counter(r["why"] for r in rows)
     L += ["", "WHY, COUNTED", ""]
@@ -272,6 +316,7 @@ def render(rows: list[dict], cfg: ScreenConfig, n_sessions: int,
               "  have called these eligible and blamed the cap.", ""]
 
     L += capture_verdict(rows, cfg)
+    L += repair_reach(rows, cfg)
 
     L += ["WHAT THIS IS NOT", "",
           "  Not a measure of the live screen's correctness. TradingView's",
@@ -337,6 +382,14 @@ def main(argv=None) -> int:
         print(line, flush=True)
     by_date = {d: g.set_index("symbol")["prior_close"]
                for d, g in pc.groupby("date")}
+    # Per NAME, not just the run-level mix. "Did the repair reach this one?" is
+    # the first question about any residual miss, and without this column a
+    # name still dividing by a 20:00 close is indistinguishable in the table
+    # from one whose repaired close genuinely does not clear the clause. Those
+    # are different findings with different fixes.
+    src_by_date = ({d: g.set_index("symbol")["prior_source"]
+                    for d, g in pc.groupby("date")}
+                   if "prior_source" in pc.columns else {})
     slices = {date_of(p): p for p in window_slices(archive, a.dataset)}
 
     t0 = time.time()
@@ -355,6 +408,9 @@ def main(argv=None) -> int:
             p = None if prior is None else prior.get(s)
             rec = diagnose(acc, s, p, d_et, cfg, a.cadence)
             rec["date"] = day
+            src = src_by_date.get(day)
+            rec["prior_source"] = ("unknown" if src is None
+                                   else str(src.get(s, "unknown")))
             out.append(rec)
 
     emit("\n".join(render(out, cfg, len(rows), time.time() - t0)), a.out,

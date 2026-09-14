@@ -163,7 +163,8 @@ def test_the_capture_column_is_blank_where_volume_was_not_the_problem():
     o = out(rows)
     line = [l for l in o.splitlines() if "  C " in l][0]
     assert line.rstrip().endswith("CHANGE")
-    assert "-   CHANGE" in line
+    # the capture cell itself, between the close and the prior-source column
+    assert "5.00           -   unknown" in line
 
 
 def test_capture_needed_is_measured_against_the_consolidated_floor():
@@ -216,3 +217,54 @@ def test_a_name_with_no_measurement_prints_a_dash_not_a_zero():
              {"date": "2026-09-10", "symbol": "Y", "why": M.NO_PRIOR}])
     line = [ln for ln in o.splitlines() if " X " in ln][0]
     assert "-" in line and "0.00" not in line and "inf" not in line
+
+
+# --- did the repair reach them ----------------------------------------------
+
+def test_an_unrepaired_close_is_a_different_finding_from_a_real_shortfall():
+    """A name still dividing by a 20:00 close carries the defect the screen was
+    supposed to have fixed; one on a repaired close that still falls short does
+    not. In the per-name table they look identical."""
+    rows = [{"date": "2026-09-10", "symbol": "TP", "why": "CHANGE",
+             "change": 19.45, "volume": 4e6, "close_at_best": 2.18,
+             "prior_source": "daily"},
+            {"date": "2026-09-10", "symbol": "OK", "why": "CHANGE",
+             "change": 4.5, "volume": 4e6, "close_at_best": 5.0,
+             "prior_source": "repaired"}]
+    o = out(rows)
+    assert "DID THE REPAIR REACH THEM" in o
+    assert "1 of 2 CHANGE failure(s) are still on an UNREPAIRED close" in o
+    assert "Nearest miss: TP" in o and "0.55pp short" in o
+    assert "it is the" in o and "outstanding defect" in o
+
+
+def test_a_nearest_miss_on_a_repaired_close_is_not_blamed_on_the_divisor():
+    rows = [{"date": "2026-09-10", "symbol": "OK", "why": "CHANGE",
+             "change": 18.0, "volume": 4e6, "close_at_best": 5.0,
+             "prior_source": "repaired"}]
+    o = out(rows)
+    assert "IS on a repaired close" in o
+    assert "Extending the repair cannot recover it" in o
+    assert "outstanding defect" not in o
+
+
+def test_the_prior_source_column_is_printed_per_name():
+    """The run-level mix cannot answer 'did the repair reach THIS one', which
+    is the first question about any residual miss."""
+    rows = [{"date": "2026-09-10", "symbol": "TP", "why": "CHANGE",
+             "change": 19.45, "volume": 4e6, "close_at_best": 2.18,
+             "prior_source": "daily"}]
+    o = out(rows)
+    line = [l for l in o.splitlines() if "  TP " in l][0]
+    assert "daily" in line
+    assert "prior" in o.splitlines()[o.splitlines().index(line) - 1]
+
+
+def test_a_row_with_no_recorded_source_reads_unknown_not_repaired():
+    """Defaulting a missing provenance to `repaired` would report the defect as
+    fixed on exactly the rows where nobody checked."""
+    rows = [{"date": "2026-09-10", "symbol": "Q", "why": "CHANGE",
+             "change": 5.0, "volume": 4e6, "close_at_best": 5.0}]
+    o = out(rows)
+    assert "unknown" in [l for l in o.splitlines() if "  Q " in l][0]
+    assert "1 of 1 CHANGE failure(s) are still on an UNREPAIRED close" in o
