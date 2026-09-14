@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -66,16 +67,55 @@ def day_bounds(day: str, window: str | None = None) -> tuple[str, str]:
 
 
 def size_one_day(client, dataset: str, schema: str, day: str,
-                 window: str | None = None) -> tuple[float, float]:
+                 window: str | None = None,
+                 symbols: "list[str] | None" = None) -> tuple[float, float]:
     """Billable MB and USD for one day, or one intraday window, of a
     dataset/schema. Metadata only -- get_billable_size and get_cost are both
-    free, which is the whole point of asking before pulling."""
+    free, which is the whole point of asking before pulling.
+
+    `symbols` PRICES WHAT WOULD ACTUALLY BE BOUGHT. The whole-universe number
+    is the right one for a tape this project pulls whole, and the wrong one for
+    a depth schema it would only ever want on a watchlist: ALL_SYMBOLS on
+    mbp-10 prices ~11,000 names to answer a question about forty, and a figure
+    that large kills an idea that was never that expensive. Both are printed,
+    because the scoped number has the opposite failure -- it looks affordable
+    while hiding what a wider universe would cost later.
+    """
     start, end = day_bounds(day, window)
-    kw = dict(dataset=dataset, schema=schema, symbols="ALL_SYMBOLS",
+    kw = dict(dataset=dataset, schema=schema,
+              symbols=list(symbols) if symbols else "ALL_SYMBOLS",
               stype_in="raw_symbol", start=start, end=end)
     mb = int(client.metadata.get_billable_size(**kw)) / 1e6
     usd = float(client.metadata.get_cost(**kw))
     return mb, usd
+
+
+def build_parser_default_scope_limit() -> int:
+    """The default `--scope-limit`, read from the live watchlist cap rather
+    than typed twice. A depth pull sized for forty names while the trader
+    watches sixty is a price for a different job."""
+    from common.tv_feed import MAX_SYMBOLS
+    return MAX_SYMBOLS
+
+
+def universe_symbols(pairs_path: "str | Path", day: str | None = None,
+                     limit: int = 40) -> list[str]:
+    """The symbols the point-in-time watchlist actually held.
+
+    Read from the SAME pairs file `pit_h0` and every entry study score, so a
+    price quoted here is a price for the names those results are about. `day`
+    picks one session; without it the busiest session is used, which is the
+    conservative choice -- a quiet day would understate every other one.
+    """
+    import json
+    rows = json.loads(Path(pairs_path).read_text())
+    by_day: dict[str, list[str]] = {}
+    for r in rows:
+        by_day.setdefault(str(r["date"]), []).append(str(r["symbol"]))
+    if not by_day:
+        return []
+    pick = day if day in by_day else max(by_day, key=lambda d: len(by_day[d]))
+    return sorted(set(by_day[pick]))[:limit]
 
 
 def parse_size_args(items) -> list[tuple[str, str]]:
@@ -90,7 +130,7 @@ def parse_size_args(items) -> list[tuple[str, str]]:
 
 
 def probe_sizes(client, day: str, pairs, out=None,
-                window: str | None = None) -> int:
+                window: str | None = None, symbols=None) -> int:
     """Price one day of each dataset/schema, so a plan total can be checked.
 
     A whole-plan estimate is one number per job with nothing to compare it
@@ -105,7 +145,9 @@ def probe_sizes(client, day: str, pairs, out=None,
     """
     span = f"{day} {window} ET" if window else f"{day}, whole day"
     unit = "MB/win" if window else "MB/day"
-    lines = [f"ONE-DAY SIZE PROBE  ({span}, whole universe, billable)", "",
+    scope = (f"whole universe AND {len(symbols)} watchlist name(s)"
+             if symbols else "whole universe")
+    lines = [f"ONE-DAY SIZE PROBE  ({span}, {scope}, billable)", "",
              f"{'dataset / schema':<30} {unit:>12} {'USD':>10}"
              f"  {'x21 -> MB/month':>16}",
              "-" * 74]
@@ -117,6 +159,17 @@ def probe_sizes(client, day: str, pairs, out=None,
             lines.append(f"{label:<30} FAILED: {_scrub(e)}")
             continue
         lines.append(f"{label:<30} {mb:>12,.1f} {usd:>10.4f} {mb*21:>16,.0f}")
+        if symbols:
+            try:
+                smb, susd = size_one_day(client, dataset, schema, day, window,
+                                         symbols)
+            except Exception as e:  # noqa: BLE001
+                lines.append(f"{'  scoped to watchlist':<30} FAILED: {_scrub(e)}")
+                continue
+            share = (100.0 * susd / usd) if usd else float("nan")
+            lines.append(f"{'  scoped to watchlist':<30} {smb:>12,.1f} "
+                         f"{susd:>10.4f} {smb*21:>16,.0f}   "
+                         f"({share:.1f}% of the universe cost)")
     lines += ["",
               "Compare the month column against the same job in the overnight",
               "plan. A large disagreement means one of the two estimates is",
@@ -142,6 +195,15 @@ def main(argv=None) -> int:
                     help="the day --size prices (default: %(default)s)")
     ap.add_argument("--out", default="var/reports/databento_size_probe.txt",
                     help="where --size writes its report (default: %(default)s)")
+    ap.add_argument("--scope-pairs", default=None, metavar="PAIRS_JSON",
+                    help="also price the day SCOPED to that session's "
+                         "watchlist, read from a screen_pairs json. A depth "
+                         "schema would only ever be bought for the names on "
+                         "the list, and ALL_SYMBOLS prices ~11,000 of them.")
+    ap.add_argument("--scope-limit", type=int,
+                    default=build_parser_default_scope_limit(),
+                    help="how many watchlist names to price (default: "
+                         "%(default)s, the live watchlist cap)")
     a = ap.parse_args(argv)
 
     db = require_databento()
@@ -149,7 +211,10 @@ def main(argv=None) -> int:
     c = db.Historical(_key())
 
     if a.size:
-        return probe_sizes(c, a.day, parse_size_args(a.size), a.out, a.window)
+        syms = (universe_symbols(a.scope_pairs, a.day, a.scope_limit)
+                if a.scope_pairs else None)
+        return probe_sizes(c, a.day, parse_size_args(a.size), a.out, a.window,
+                           syms)
 
     try:
         names = c.metadata.list_datasets()
