@@ -398,6 +398,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      max_hold_bars: int | None = None,
                      not_before: dtime | None = None,
                      entry_bars: "pd.Series | None" = None,
+                     entry_px_by_bar: "pd.Series | None" = None,
                      ladder: "PL.LadderConfig | None" = None,
                      target_exit: "TE.TargetExit | None" = None) -> list[Trade]:
     """Run one pre-market session.
@@ -551,6 +552,28 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         aligned = entry_bars.reindex(sig.index, fill_value=False)
         take = [bool(x) for x in aligned]
 
+    # `entry_px_by_bar` REPLACES THE FILL PRICE on the bar entry happens, and
+    # nothing else. It exists for one legitimate case: a LIMIT order whose
+    # price was decided at signal time and which filled later, at the limit
+    # rather than at a bar's close.
+    #
+    # IT CANNOT BE USED TO FILL INSIDE THE SIGNAL BAR. The signal is not known
+    # until that bar closes, so no price inside it was ever available -- a
+    # study that "fills at the signal bar's midpoint" is reading the future.
+    # The caller chooses WHICH bar via entry_bars; this says what was paid
+    # there, and the caller is responsible for that price having been reachable.
+    #
+    # No slippage tick is added to an overridden price: a limit fills at the
+    # limit or better, and adding a tick would charge market-order slippage to
+    # an order that did not pay it. The ROUND-TRIP friction charged downstream
+    # was measured on market orders and is therefore the wrong number for a
+    # limit -- conservative, in an unmeasured direction, and said out loud
+    # rather than corrected by guesswork.
+    #
+    # None leaves the fill untouched, so the default path is bit-identical.
+    px_at = (None if entry_px_by_bar is None
+             else entry_px_by_bar.reindex(sig.index).tolist())
+
     trades: list[Trade] = []
     pos = None
     rows = sig.reset_index()
@@ -587,7 +610,9 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                     if j >= idx[-1]:
                         continue
                     i, row = j, rows.iloc[j]
-                px = float(row["close"]) + SLIPPAGE_TICKS * TICK
+                over = None if px_at is None else px_at[i]
+                px = (float(row["close"]) + SLIPPAGE_TICKS * TICK
+                      if over is None or over != over else float(over))
                 if ENFORCE_PRICE_BAND and not (PRICE_MIN <= px <= PRICE_MAX):
                     continue
                 # entry_shares bypasses size_for() so a study can hold size
