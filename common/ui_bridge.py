@@ -52,7 +52,7 @@ LOG = logging.getLogger("ui_bridge")
 # fact about the market, not a value anyone configures.
 ET = ZoneInfo("America/New_York")
 
-CONTRACT_VERSION = "1.3"
+CONTRACT_VERSION = "1.4"
 PUSH_EVERY_S = 5.0
 HTTP_TIMEOUT_S = 3.0
 MAX_FILLS = 500
@@ -162,6 +162,30 @@ def _ascii(text: str) -> str:
     return (text or "").replace("\u2014", "--").replace("\u2013", "-") \
                        .replace("\u2192", "->").encode("ascii", "replace") \
                        .decode("ascii")
+
+
+def _round_trip_costs(entry: float | None, exit_px: float, qty: float,
+                      net: float | None) -> tuple[float | None, float | None]:
+    """(gross, commission) for a closed round trip, or (None, None).
+
+    The trader computes net as (exit - entry) * qty - commission, charging both
+    legs from common/commissions.py. So gross is recoverable from the prices on
+    the row, and the fee is the difference.
+
+    DERIVED, not recomputed. Calling order_cost again here would be a second
+    calculation of the same number, agreeing with the first until someone
+    changes a schedule and only one of them follows. Subtracting guarantees the
+    three figures reconcile on screen, which is the property a reader checks by
+    eye.
+
+    Commission is returned POSITIVE, as a cost. The page renders it negative;
+    publishing it signed would make "is this already negative?" a question
+    every consumer has to ask.
+    """
+    if entry is None or net is None or not qty:
+        return None, None
+    gross = round((exit_px - entry) * qty, 2)
+    return gross, round(gross - net, 2)
 
 
 class UIBridge:
@@ -381,17 +405,24 @@ class UIBridge:
                 for i, row in enumerate(csv.DictReader(fh)):
                     if (row.get("status") or "").upper() != "FILLED":
                         continue
+                    qty = _num(row.get("filled_qty")) or _num(row.get("qty")) or 0
+                    price = _num(row.get("fill_price")) or 0.0
+                    entry = _num(row.get("entry_price"))
+                    net = _num(row.get("trade_pnl"))
+                    gross, commission = _round_trip_costs(entry, price, qty, net)
                     out.append({
                         "id": f"f-{i:05d}",
                         "ts_et": (row.get("ts_et") or "").split(" ")[-1],
                         "strategy": row.get("strategy") or "",
                         "symbol": row.get("symbol") or "",
                         "action": (row.get("action") or "").upper(),
-                        "qty": _num(row.get("filled_qty")) or _num(row.get("qty")) or 0,
-                        "price": _num(row.get("fill_price")) or 0.0,
-                        "commission": None,
+                        "qty": qty,
+                        "entry_price": entry,
+                        "price": price,
+                        "commission": commission,
                         "reason": row.get("reason") or None,
-                        "trade_pnl": _num(row.get("trade_pnl")),
+                        "gross_pnl": gross,
+                        "trade_pnl": net,
                         "friction_charged": False,
                     })
         except Exception as e:                              # noqa: BLE001

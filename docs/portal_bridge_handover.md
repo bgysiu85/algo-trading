@@ -125,27 +125,35 @@ rate limiting, keep the mirror above them.
 
 ## 4. Invariants — things that will break quietly if changed
 
-1. **The fill log is the only source of trade truth.** `ui_bridge` reads today's
+1. **A closed fill publishes its own arithmetic.** Contract 1.4 adds
+   `entry_price` and `gross_pnl` to a fill, and fills in `commission`. Gross
+   comes from the prices on the row; commission is `gross - trade_pnl`, DERIVED
+   rather than recomputed from `common/commissions.py`. A second calculation of
+   the same fee agrees with the first until someone changes a schedule and only
+   one of them follows — this way the three figures reconcile by construction,
+   which is the property a reader checks by eye. Commission is published
+   positive, as a cost; the page renders the sign.
+2. **The fill log is the only source of trade truth.** `ui_bridge` reads today's
    fills out of the trader's own fill-log CSV. It keeps no parallel ledger. If
    you change the fill log's columns or its `status` vocabulary, `ui_bridge`
    follows — do not add a second store for the portal's benefit.
-2. **`SKIPPED_PAUSED` is a `status` value now.** Anything that aggregates the
+3. **`SKIPPED_PAUSED` is a `status` value now.** Anything that aggregates the
    fill log (session reviews, backtest parity checks, P&L) must treat it as a
    non-fill, exactly like the existing cap-skip rows.
-3. **Paper-only, checked three times.** `from_env()` returns `None` without a
+4. **Paper-only, checked three times.** `from_env()` returns `None` without a
    relay URL and token; `note_account()` sets `is_paper` from the `DU` prefix
    and publishes no commands otherwise; `apply()` refuses again at the point of
    use. Three, because one will eventually be edited by someone who does not
    know why it is there. Do not consolidate them.
-4. **`tick()` must never raise into the run loop and must never block it.** Every
+5. **`tick()` must never raise into the run loop and must never block it.** Every
    network call is `asyncio.to_thread` with a 3 s timeout; failures go quiet
    after 3 consecutive complaints. A relay that is down must be invisible from
    inside the trader.
-5. **`paused` stops new *entries* only.** Open positions keep their trail and
+6. **`paused` stops new *entries* only.** Open positions keep their trail and
    their exit. A button in a browser must never be able to leave a position
    unprotected. If you add a new "stop everything" path, it must not reach the
    exit logic.
-6. **`StrategyAdapter` stays frozen, and the trail change respects that.**
+7. **`StrategyAdapter` stays frozen, and the trail change respects that.**
    Changing a trail does not mutate an adapter — `_rebind_adapter` builds the
    next value with `dataclasses.replace` and rebinds **both** references:
    `trader.strategies[i]` and every `SymbolState.strategy`. Miss the second and
@@ -153,11 +161,11 @@ rate limiting, keep the mirror above them.
    one onto `Position`. If you change how adapters are held — a dict instead of
    a list, a per-symbol copy, a rebuild each loop — update `_rebind_adapter`
    with it.
-7. **A CONFIG row is not a trade.** `action="CONFIG"` rows carry no price and
+8. **A CONFIG row is not a trade.** `action="CONFIG"` rows carry no price and
    no `trade_pnl`. Every current reader excludes them on `status` or `action`,
    and a test proves it by running those readers rather than describing them. A
    new reader of this file must gate on one of those two columns.
-8. **`trail_pct` changes apply to new positions only**, by construction: the
+9. **`trail_pct` changes apply to new positions only**, by construction: the
    trader copies `trail_pct` into `Position` at entry (`step_symbol`), so an
    open position carries the trail it was opened with. The portal states this
    to the user, so it has to keep being true.
@@ -255,7 +263,7 @@ is deliberately independent — MVC, at Ben's request. It knows nothing about
 trading: it renders whatever state document arrives and offers whatever commands
 that document advertises.
 
-The only coupling is a versioned JSON contract, currently **1.3**, declared in
+The only coupling is a versioned JSON contract, currently **1.4**, declared in
 `ui_bridge.CONTRACT_VERSION`. If you change the *shape* of what `build_state`
 emits, that is a contract change and belongs in the UI repo's
 `contract/schema/`, not here.
