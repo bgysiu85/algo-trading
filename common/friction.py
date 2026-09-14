@@ -54,6 +54,8 @@ import statistics
 import sys
 from pathlib import Path
 
+from common import textio as T
+
 FILLS_DIR = Path("var/fills")
 
 # NOTE there is deliberately no commission constant here. This module measures
@@ -174,7 +176,14 @@ def load(session: str | None, fills_dir: Path):
         if session and day != session:
             continue
         try:
-            rows = list(csv.DictReader(f.open(newline="")))
+            # `f.open(newline="")` used the LOCALE default, which is cp1252
+            # here and utf-8 elsewhere -- so this module read the same file
+            # differently on two machines, and the newer logs (utf-8 since
+            # FillLog was fixed) came back as mojibake in reject_reason with
+            # nothing raised. `UnicodeDecodeError` is a ValueError, not an
+            # OSError, so on a utf-8 machine a legacy log did not even reach
+            # the message below: it killed the whole run.
+            rows, _enc = T.read_csv(f)
         except OSError as e:  # noqa: BLE001
             print(f"  ! could not read {f.name}: {e}")
             continue

@@ -43,6 +43,7 @@ from pathlib import Path
 from sqlalchemy import delete, insert
 
 from common import db as D
+from common import textio as T
 
 BATCH = 5_000
 
@@ -111,12 +112,12 @@ def note_load(conn, rid, kind, path: Path, rows, notes=""):
 def load_screen(conn, survivors: Path, rejects: Path | None, params: dict):
     rid = run_id("screen", params.get("dataset", "?"), survivors)
     rows = []
-    for p in json.load(open(survivors)):
+    for p in json.loads(T.read_text(survivors)[0]):
         rows.append({"run_id": rid, "symbol": p["symbol"],
                      "session_date": _date(p["date"]), "is_reject": False})
     n_rej = 0
     if rejects and rejects.exists():
-        for p in json.load(open(rejects)):
+        for p in json.loads(T.read_text(rejects)[0]):
             rows.append({"run_id": rid, "symbol": p["symbol"],
                          "session_date": _date(p["date"]), "is_reject": True})
             n_rej += 1
@@ -138,7 +139,7 @@ def load_flex(conn, summary: Path | None, round_trips: Path | None,
     if round_trips and round_trips.exists():
         rid = run_id("flex", "round_trips", round_trips)
         seq, rows = {}, []
-        for r in csv.DictReader(open(round_trips, newline="")):
+        for r in T.read_csv(round_trips)[0]:
             k = (r["symbol"], r["date"])
             seq[k] = seq.get(k, 0) + 1
             rows.append({
@@ -211,10 +212,12 @@ SWEEP_COLS = {"source", "per_trade_pct", "total_pct", "final", "multiple",
 
 
 def load_compound(conn, path: Path) -> tuple[str, str, int]:
-    with open(path, newline="") as fh:
-        rdr = csv.DictReader(fh)
-        head = set(rdr.fieldnames or [])
-        rows = list(rdr)
+    rows, _enc = T.read_csv(path)
+    # THE HEADER, NOT THE FIRST ROW. This dispatches on which columns the file
+    # has, and a file with a header and no data rows still HAS those columns --
+    # taking them off rows[0] would make an empty run indistinguishable from an
+    # unrecognised one, which is a different error with a different fix.
+    head = set(T.read_header(path)[0])
     rid = run_id("compound", path.stem, path)
 
     if "capital" in head and RUN_COLS <= head:
@@ -264,7 +267,7 @@ def load_backtest(conn, reports: Path, states: Path, strategy: str,
     rid = run_id("backtest", f"{universe}:{strategy}", trades_p)
 
     rows = []
-    for i, r in enumerate(csv.DictReader(open(trades_p, newline="")), start=1):
+    for i, r in enumerate(T.read_csv(trades_p)[0], start=1):
         rows.append({
             "run_id": rid, "seq": i, "symbol": r["symbol"],
             "session_date": _date(r["date"]),
@@ -319,7 +322,7 @@ def load_dollar_volume(conn, path: Path) -> int:
     rows = [{"symbol": r["symbol"], "session_date": _date(r["date"]),
              "close": _f(r.get("close")), "volume": _i(r.get("volume")),
              "dollar_volume": _f(r.get("dollar_volume"))}
-            for r in csv.DictReader(open(path, newline=""))]
+            for r in T.read_csv(path)[0]]
     conn.execute(delete(D.day_dollar_volume))
     for i in range(0, len(rows), BATCH):
         conn.execute(insert(D.day_dollar_volume), rows[i:i + BATCH])
@@ -350,7 +353,7 @@ def minute_rows(paths) -> list[dict]:
     seen: dict = {}
     sym = paths[0].name.rsplit("_", 1)[0] if paths else ""
     for p in paths:
-        with gzip.open(p, "rt") as fh:
+        with gzip.open(p, "rt", encoding="utf-8") as fh:
             df = pd.read_csv(fh, index_col=0, parse_dates=[0])
         if df.empty:
             continue
@@ -440,7 +443,7 @@ def load_leak_control(conn, path: Path) -> tuple[str, int]:
         "share_of_days_traded": _f(r.get("share_of_days_traded")),
         "net_per_day": _f(r.get("net_per_day")),
         "net_per_trade": _f(r.get("net_per_trade")),
-    } for r in csv.DictReader(open(path, newline=""))]
+    } for r in T.read_csv(path)[0]]
     n = replace(conn, D.leak_control, "run_id", rid, rows)
     note_load(conn, rid, "leak_control", path, n)
     return rid, n
@@ -492,7 +495,7 @@ def load_orb_preflight(conn, path: Path, dataset: str) -> int:
         return None if s in ("", "none") else s in ("true", "1")
 
     rows = []
-    for r in csv.DictReader(open(path, newline="")):
+    for r in T.read_csv(path)[0]:
         rows.append({
             "dataset": dataset, "symbol": r["symbol"],
             "session_date": _date(r["date"]),
@@ -608,55 +611,60 @@ def load_paper_fills(conn, paths) -> tuple[int, list[str]]:
     for path in paths:
         path = Path(path)
         files.append(path.name)
-        with path.open(newline="") as fh:
-            for r in csv.DictReader(fh):
-                ts = _et_naive(r.get("ts_et"))
-                if ts is None:
-                    # A row with no usable timestamp cannot be keyed and cannot
-                    # be de-duplicated. Dropping it is right; dropping it
-                    # SILENTLY is not, so it is counted and reported.
-                    continue
-                d = ts.date()
-                seen.add(d)
-                rows.append({
-                    "session_date": d, "ts_et": ts,
-                    "strategy": (r.get("strategy") or "MCL")[:24],
-                    "symbol": (r.get("symbol") or "")[:24],
-                    "action": (r.get("action") or "")[:8],
-                    "status": (r.get("status") or "")[:32],
-                    "reason": (r.get("reason") or "")[:32],
-                    "ref_close": _f(r.get("ref_close")),
-                    "ref_kind": (r.get("ref_kind") or "")[:24],
-                    "bid": _f(r.get("bid")), "ask": _f(r.get("ask")),
-                    "spread": _f(r.get("spread")),
-                    "spread_pct": _f(r.get("spread_pct")),
-                    "limit_sent": _f(r.get("limit_sent")),
-                    "qty": _i(r.get("qty")),
-                    "fill_price": _f(r.get("fill_price")),
-                    "filled_qty": _i(r.get("filled_qty")),
-                    "slippage_vs_ref": _f(r.get("slippage_vs_ref")),
-                    "seconds_to_fill": _f(r.get("seconds_to_fill")),
-                    "entry_price": _f(r.get("entry_price")),
-                    "exit_price": _f(r.get("exit_price")),
-                    "trade_pnl": _f(r.get("trade_pnl")),
-                    "trade_pct": _f(r.get("trade_pct")),
-                    "hold_minutes": _f(r.get("hold_minutes")),
-                    "reject_reason": (r.get("reject_reason") or "")[:255],
-                    "macd": _f(r.get("macd")), "macd_sig": _f(r.get("macd_sig")),
-                    "mfi": _f(r.get("mfi")), "rsi": _f(r.get("rsi")),
-                    "vol": _f(r.get("vol")), "prev_vol": _f(r.get("prev_vol")),
-                    "trail_avg": _f(r.get("trail_avg")),
-                    # THE COLUMN EXISTED FOR A DAY WITH NOTHING PUTTING A VALUE
-                    # IN IT. trader.FIELDS gained trail_pct, db.paper_fill
-                    # gained the column, and test_every_trader_field_has_a_column
-                    # passed -- because it checks THE TABLE, which is one step
-                    # short of the loader that fills it. Every row would have
-                    # arrived NULL, which reads exactly like a session that
-                    # never recorded a trail at all; and the entire reason the
-                    # column exists is to tell a 5% row from a 9% one in a
-                    # session where someone moved it from the portal.
-                    "trail_pct": _f(r.get("trail_pct")),
-                    "source_file": path.name[:255], "loaded_at": now})
+        # NOT path.open(newline=""). The LOCALE default read the two
+        # generations of fill log differently on two machines -- cp1252 logs on
+        # a utf-8 box raised, utf-8 logs on Ben's box came back as mojibake --
+        # and mojibake loaded HERE is permanent: the CSV can be re-read, the
+        # database row cannot be un-corrupted. See common/textio.
+        file_rows, _enc = T.read_csv(path)
+        for r in file_rows:
+            ts = _et_naive(r.get("ts_et"))
+            if ts is None:
+                # A row with no usable timestamp cannot be keyed and cannot
+                # be de-duplicated. Dropping it is right; dropping it
+                # SILENTLY is not, so it is counted and reported.
+                continue
+            d = ts.date()
+            seen.add(d)
+            rows.append({
+                "session_date": d, "ts_et": ts,
+                "strategy": (r.get("strategy") or "MCL")[:24],
+                "symbol": (r.get("symbol") or "")[:24],
+                "action": (r.get("action") or "")[:8],
+                "status": (r.get("status") or "")[:32],
+                "reason": (r.get("reason") or "")[:32],
+                "ref_close": _f(r.get("ref_close")),
+                "ref_kind": (r.get("ref_kind") or "")[:24],
+                "bid": _f(r.get("bid")), "ask": _f(r.get("ask")),
+                "spread": _f(r.get("spread")),
+                "spread_pct": _f(r.get("spread_pct")),
+                "limit_sent": _f(r.get("limit_sent")),
+                "qty": _i(r.get("qty")),
+                "fill_price": _f(r.get("fill_price")),
+                "filled_qty": _i(r.get("filled_qty")),
+                "slippage_vs_ref": _f(r.get("slippage_vs_ref")),
+                "seconds_to_fill": _f(r.get("seconds_to_fill")),
+                "entry_price": _f(r.get("entry_price")),
+                "exit_price": _f(r.get("exit_price")),
+                "trade_pnl": _f(r.get("trade_pnl")),
+                "trade_pct": _f(r.get("trade_pct")),
+                "hold_minutes": _f(r.get("hold_minutes")),
+                "reject_reason": (r.get("reject_reason") or "")[:255],
+                "macd": _f(r.get("macd")), "macd_sig": _f(r.get("macd_sig")),
+                "mfi": _f(r.get("mfi")), "rsi": _f(r.get("rsi")),
+                "vol": _f(r.get("vol")), "prev_vol": _f(r.get("prev_vol")),
+                "trail_avg": _f(r.get("trail_avg")),
+                # THE COLUMN EXISTED FOR A DAY WITH NOTHING PUTTING A VALUE
+                # IN IT. trader.FIELDS gained trail_pct, db.paper_fill
+                # gained the column, and test_every_trader_field_has_a_column
+                # passed -- because it checks THE TABLE, which is one step
+                # short of the loader that fills it. Every row would have
+                # arrived NULL, which reads exactly like a session that
+                # never recorded a trail at all; and the entire reason the
+                # column exists is to tell a 5% row from a 9% one in a
+                # session where someone moved it from the portal.
+                "trail_pct": _f(r.get("trail_pct")),
+                "source_file": path.name[:255], "loaded_at": now})
 
     # DE-DUPLICATE WITHIN THE BATCH, on the primary key. Two files can overlap:
     # FillLog rolls a log aside as <name>_preHHMMSS.csv when its header changes,
