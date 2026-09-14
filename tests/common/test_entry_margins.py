@@ -33,7 +33,7 @@ from common import entry_margins as M
 
 def row(gross=0.0, date="2026-01-02", price=5.0, **kw):
     r = {"symbol": "AAA", "date": date, "gross": gross, "located": True,
-         "entry_price": price,
+         "entry_price": price, "bar_volume": 50_000.0,
          "vol_multiple": 5.0, "floor_margin": 1.0, "macd_margin": 0.05,
          "macd_level": 0.10, "rsi_slope": 4.0, "mfi_slope": 3.0,
          "dollar_vol_bar": 200_000.0, "dollar_vol_session": 5_000_000.0}
@@ -57,18 +57,18 @@ def test_every_threshold_matches_the_strategy_constant():
     threshold is a measurement of a rule nobody is running, and it renders
     exactly like a correct one."""
     from strategy.mcl import mcl as MCL
-    assert M.CLAUSES["vol_multiple"][2] == MCL.VOL_MULTIPLE
-    assert M.CLAUSES["floor_margin"][2] == MCL.FLOOR_FRACTION
+    assert M.CLAUSES_MCL["vol_multiple"][2] == MCL.VOL_MULTIPLE
+    assert M.CLAUSES_MCL["floor_margin"][2] == MCL.FLOOR_FRACTION
     for col in ("macd_margin", "macd_level", "rsi_slope", "mfi_slope"):
-        assert M.CLAUSES[col][2] == 0.0, f"{col} is a sign test, not a level"
+        assert M.CLAUSES_MCL[col][2] == 0.0, f"{col} is a sign test, not a level"
 
 
 def test_the_three_bar_reference_is_the_strategys_lookback():
     """`rsi - rsi[3]` is only the right expression while TREND_LOOKBACK is 3."""
     from strategy.mcl import mcl as MCL
     assert MCL.TREND_LOOKBACK == 3
-    assert "[3]" in M.CLAUSES["rsi_slope"][0]
-    assert "[3]" in M.CLAUSES["mfi_slope"][0]
+    assert "[3]" in M.CLAUSES_MCL["rsi_slope"][0]
+    assert "[3]" in M.CLAUSES_MCL["mfi_slope"][0]
 
 
 def test_the_clause_list_covers_every_condition_the_rule_ands_together():
@@ -81,7 +81,7 @@ def test_the_clause_list_covers_every_condition_the_rule_ands_together():
     joined = " ".join(src.split('out["entry"] = ')[1].split(")")[0].split())
     for cond in ("c_macd", "c_mfi", "c_rsi", "c_vol", "c_floor"):
         assert cond in joined
-    assert len(M.CLAUSES) == 6
+    assert len(M.CLAUSES_MCL) == 6
 
 
 def test_features_at_is_imported_rather_than_reimplemented():
@@ -134,7 +134,7 @@ def test_every_dollar_level_is_printed():
 
 def test_a_hair_is_defined_per_column_and_printed():
     out = "\n".join(M.absolute_section([row()]))
-    for col in M.CLAUSES:
+    for col in M.CLAUSES_MCL:
         assert f"a hair, {col}" in out
 
 
@@ -297,9 +297,45 @@ def test_multiplicity_admits_the_overlap_with_entry_features():
     assert "not independent evidence" in out
 
 
-def test_mc5_is_refused_rather_than_measured_on_mcls_features():
-    with pytest.raises(SystemExit):
-        M.build_parser().parse_args(["--strategy", "mc5"])
+def test_mc5_is_measured_on_its_own_clauses_not_on_mcls():
+    """MC5 is now measurable, and the refusal it replaces is still in force:
+    `features_at` is MCL's 1-minute feature set and must never be run against
+    a 5-minute frame."""
+    assert set(M.CLAUSES_MC5) == {"rsi_roc", "ema_gap", "macd_margin"}
+    assert M.BAR_MINUTES == {"mcl": 1, "mc5": 5}
+    # Checked on the PARSED CALLS, not the source text: mc5_row's docstring
+    # names features_at in order to say why it is not used, and a substring
+    # guard fails on its own explanation. That is the third time this shape has
+    # turned up here.
+    tree = ast.parse(Path("common/entry_margins.py").read_text(encoding="utf-8"))
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "mc5_row")
+    called = {n.func.id for n in ast.walk(fn)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    assert "features_at" not in called, (
+        "mc5_row must not use MCL's 1-minute feature set")
+
+
+def test_mc5_has_no_volume_clause_at_all_and_the_table_says_so():
+    """THE FINDING, not an omission in the table. mc5.signals() reads only
+    `close`; `volume` appears once in the whole module, writing a log field."""
+    from common.entry_features import FAMILIES
+    vol = set(FAMILIES["volume headroom"])
+    assert not (set(M.CLAUSES_MC5) & vol)
+    assert set(M.CLAUSES_MCL) & vol
+    src = Path("strategy/mc5/mc5.py").read_text(encoding="utf-8")
+    sig = src.split("def signals(")[1].split("\ndef ")[0]
+    assert "volume" not in sig, "mc5.signals now reads volume; update this"
+
+
+def test_the_bar_size_is_printed_in_every_report():
+    """A dollar_vol_bar over five minutes and one over one minute are two
+    quantities under one column name, and putting both strategies in one
+    module is exactly how that arrives."""
+    for strat, mins in M.BAR_MINUTES.items():
+        rows = [row(shares := 0) if False else row()]
+        out = "\n".join(M.render(M.derive(rows), strat, 1, 0.1, 1))
+        assert f"{mins}-MINUTE BARS" in out
 
 
 # --- the pipeline -----------------------------------------------------------
@@ -341,9 +377,10 @@ def test_run_day_produces_a_margin_for_every_clause(monkeypatch):
     assert out, "the fixture produced no trades; the test proves nothing"
     for r in out:
         assert r["located"] is True
-        for col in M.CLAUSES:
+        for col in M.CLAUSES_MCL:
             assert r.get(col) is not None, f"{col} missing from a real entry"
         assert r["dollar_vol_bar"] and r["dollar_vol_session"]
+        assert r["bar_volume"] > 0
 
 
 def test_every_real_entry_actually_passed_the_clauses_it_is_measured_on(
@@ -362,8 +399,8 @@ def test_every_real_entry_actually_passed_the_clauses_it_is_measured_on(
                                "first_seen": fs}], "mcl"))
     assert out
     for r in out:
-        assert r["vol_multiple"] >= M.CLAUSES["vol_multiple"][2]
-        assert r["floor_margin"] >= M.CLAUSES["floor_margin"][2]
+        assert r["vol_multiple"] >= M.CLAUSES_MCL["vol_multiple"][2]
+        assert r["floor_margin"] >= M.CLAUSES_MCL["floor_margin"][2]
         assert r["macd_margin"] > 0 and r["macd_level"] > 0
         assert r["rsi_slope"] > 0 and r["mfi_slope"] > 0
 
@@ -414,7 +451,7 @@ def test_a_located_trade_carries_every_clause():
     r = M.margin_row(sig, frame_ctx(sig), _Trade(sig.index[200]), "AAA",
                      D.isoformat())
     assert r["located"] is True
-    for col in M.CLAUSES:
+    for col in M.CLAUSES_MCL:
         assert col in r
 
 
@@ -442,4 +479,131 @@ def test_the_raw_section_is_emitted_before_the_binding_census():
     will answer it from them anyway."""
     src = Path("common/entry_margins.py").read_text(encoding="utf-8")
     body = src.split("def render(")[1]
-    assert body.index("absolute_section(located)") < body.index("binding_section(")
+    assert body.index("absolute_section(located,") < body.index("binding_section(")
+
+
+# --- the bar that did not trade ---------------------------------------------
+
+def test_the_zero_volume_census_is_printed():
+    rows = M.derive([row(bar_volume=0.0), row(bar_volume=50.0),
+                     row(bar_volume=500.0), row(bar_volume=50_000.0)])
+    out = "\n".join(M.absolute_section(rows, M.CLAUSES_MCL, "mcl"))
+    assert "DID THE ENTRY BAR TRADE AT ALL?" in out
+    assert "zero volume" in out and "under 1,000 shares" in out
+
+
+def test_zero_is_structural_for_mcl_and_measured_for_mc5():
+    """A count of zero is two different facts depending on the strategy, and
+    printing `0` twice would hide which one it is."""
+    rows = M.derive([row(bar_volume=0.0)])
+    mcl = "\n".join(M.absolute_section(rows, M.CLAUSES_MCL, "mcl"))
+    mc5 = "\n".join(M.absolute_section(rows, M.CLAUSES_MC5, "mc5"))
+    assert "STRUCTURAL for MCL" in mcl and "NO CLAUSE THAT COULD REFUSE" not in mcl
+    assert "NO CLAUSE THAT COULD REFUSE" in mc5 and "STRUCTURAL" not in mc5
+
+
+def test_mcls_own_clause_makes_a_zero_volume_entry_impossible():
+    """The claim the MCL wording makes, asserted against the strategy rather
+    than trusted: c_vol needs volume >= 3 x prev_vol AND prev_vol > 0."""
+    import pandas as pd
+    from strategy.mcl import mcl as MCL
+    df = pd.DataFrame({
+        "open": [1.0] * 80, "high": [1.0] * 80, "low": [1.0] * 80,
+        "close": [1.0 + 0.001 * i for i in range(80)],
+        "volume": [0.0] * 80},
+        index=pd.date_range("2026-03-02 09:00", periods=80, freq="1min",
+                            tz="UTC"))
+    assert not MCL.signals(df)["entry"].any()
+
+
+def test_mc5s_clauses_can_all_pass_on_a_bar_that_did_not_trade():
+    """The other half, and the reason this census exists: MC5's three
+    conditions are functions of `close` alone, so volume cannot stop them."""
+    import inspect
+    from strategy.mc5 import mc5 as MC5
+    src = inspect.getsource(MC5.signals)
+    body = src.split('out["entry"]')[1].split("\n")[0]
+    for cond in ("c_rsi", "c_ema", "c_macd"):
+        assert cond in body
+    assert "volume" not in src.split("def signals(")[-1].split("return out")[0]
+
+
+def test_mc5_thresholds_match_the_strategy_constants():
+    """THE SAME GUARD MCL ALREADY HAD, WHICH MC5 DID NOT. A margin measured
+    against a stale threshold is a measurement of a rule nobody is running."""
+    from strategy.mc5 import mc5 as MC5
+    assert M.CLAUSES_MC5["rsi_roc"][2] == MC5.ENTRY_RSI_ROC_PCT
+    assert (MC5.EMA_FAST, MC5.EMA_SLOW) == (9, 21)
+    for col in ("ema_gap", "macd_margin"):
+        assert M.CLAUSES_MC5[col][2] == 0.0, f"{col} is a sign test"
+    assert M.BAR_MINUTES["mc5"] == MC5.BAR_MINUTES
+
+
+def _mc5_frame():
+    """A frame long enough for MC5's 5-minute warm-up: MACD needs ~35 buckets
+    and the gradients need three more, so 40 five-minute bars is 200 minutes."""
+    import math
+    from datetime import date, datetime, time as dtime, timedelta
+    from zoneinfo import ZoneInfo
+
+    import pandas as pd
+    ET = ZoneInfo("America/New_York")
+    D = date(2026, 3, 2)
+    idx, n = [], 660
+    for d in (D - timedelta(days=1), D):
+        b = pd.Timestamp(datetime.combine(d, dtime(4, 0), tzinfo=ET))
+        idx += [(b + timedelta(minutes=i)).tz_convert("UTC") for i in range(n)]
+    close = [4.0 + 0.003 * i + 0.35 * math.sin(2 * math.pi * i / 55)
+             for i in range(len(idx))]
+    vol = [90_000.0 if i % 3 == 0 else 30_000.0 for i in range(len(idx))]
+    return pd.DataFrame({"symbol": "AAA", "open": close,
+                         "high": [c + 0.02 for c in close],
+                         "low": [c - 0.02 for c in close],
+                         "close": close, "volume": vol},
+                        index=pd.DatetimeIndex(idx)), D
+
+
+def test_mc5_rows_come_off_a_real_five_minute_frame(monkeypatch):
+    """THE GAP THE MUTATION PASS FOUND: nothing drove mc5_row against a frame,
+    so `bar_volume` could have been a constant and every test still passed."""
+    import pandas as pd
+    df, D = _mc5_frame()
+    monkeypatch.setattr("common.dbn_io.read_dbn", lambda p: df)
+    fs = pd.Timestamp(f"{D.isoformat()}T04:00:00-05:00").tz_convert(
+        "UTC").isoformat()
+    day, out, err = M.run_day(([f"{D.isoformat()}.dbn"], D.isoformat(),
+                               [{"symbol": "AAA", "date": D.isoformat(),
+                                 "first_seen": fs}], "mc5"))
+    assert err == "" and day == D.isoformat()
+    assert out, "the fixture produced no MC5 trades; the test proves nothing"
+    vols = {r["bar_volume"] for r in out if r.get("located")}
+    assert len(vols) > 1, "bar_volume is constant across entries; it is not read"
+    for r in out:
+        if not r.get("located"):
+            continue
+        for col in M.CLAUSES_MC5:
+            assert r.get(col) is not None, f"{col} missing from a real MC5 entry"
+        # A 5-minute bucket sums five 1-minute bars, so its volume must exceed
+        # any single minute in the fixture.
+        assert r["bar_volume"] >= 30_000.0
+        assert r["dollar_vol_bar"] > 0 and r["dollar_vol_session"] > 0
+
+
+def test_every_real_mc5_entry_passed_the_clauses_it_is_measured_on(monkeypatch):
+    """If a measured margin is negative, the bar the columns were read from is
+    not the bar the trade entered on."""
+    import pandas as pd
+    df, D = _mc5_frame()
+    monkeypatch.setattr("common.dbn_io.read_dbn", lambda p: df)
+    fs = pd.Timestamp(f"{D.isoformat()}T04:00:00-05:00").tz_convert(
+        "UTC").isoformat()
+    _d, out, _e = M.run_day(([f"{D.isoformat()}.dbn"], D.isoformat(),
+                             [{"symbol": "AAA", "date": D.isoformat(),
+                               "first_seen": fs}], "mc5"))
+    assert out
+    for r in out:
+        if not r.get("located"):
+            continue
+        assert r["rsi_roc"] >= M.CLAUSES_MC5["rsi_roc"][2]
+        assert r["ema_gap"] > 0
+        assert r["macd_margin"] > 0
