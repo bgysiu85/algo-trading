@@ -223,7 +223,14 @@ def test_end_is_clamped_to_what_the_dataset_actually_holds():
                 return {"start": "2023-03-28", "end": "2026-09-05"}
 
     s, e, notes = clamp_to_dataset(C(), "EQUS.MINI", "2020-01-01", "2026-09-06")
-    assert (s, e) == ("2023-03-28", "2026-09-05")
+    # EXPECTATION CHANGED 2026-09-14, AND NOT TO MAKE A CHANGE PASS.
+    # This used to assert ("2023-03-28", "2026-09-05") -- the clamp returning
+    # avail_end itself. Both chunkers take `end` EXCLUSIVE, so that
+    # expectation pinned a bug: the dataset's LAST available day could never
+    # be fetched, and the run reported "to download 0 / $0.0000", which reads
+    # exactly like "everything is already on disk". The clamped end is now
+    # exclusive, so 2026-09-05 is reachable.
+    assert (s, e) == ("2023-03-28", "2026-09-06")
     assert len(notes) == 2 and all(isinstance(n, str) for n in notes)
 
 
