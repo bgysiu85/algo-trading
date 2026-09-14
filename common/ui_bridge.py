@@ -126,10 +126,31 @@ class UIBridge:
 
     # -- construction ------------------------------------------------------
     @classmethod
-    def from_env(cls, env: dict[str, str] | None = None) -> "UIBridge | None":
+    def from_env(cls, env: dict[str, str] | None = None, *,
+                 dry_run: bool = False) -> "UIBridge | None":
+        """The bridge, or None when it should stay off.
+
+        `dry_run` is the mode the trader was started in, and it is a gate
+        because the relay holds ONE state document. A dry session and the
+        production session both publishing means the dashboard flips between
+        two traders and a command reaches whichever polled first -- with
+        `stop` and the position cap among the commands, that is not cosmetic.
+
+        Gating here rather than asking the operator to remember is the point:
+        the settings can then live at machine level, where they survive a
+        reboot, instead of being two lines that have to be typed into the right
+        window every session. UI_PUBLISH_DRY=1 puts a dry run on the dashboard
+        deliberately, which is occasionally what you want while developing.
+        """
         env = os.environ if env is None else env
         url = (env.get("UI_RELAY_URL") or "").strip()
         if not url:
+            return None
+
+        if dry_run and (env.get("UI_PUBLISH_DRY") or "").strip().lower() \
+                not in ("1", "true", "yes", "on"):
+            LOG.info("portal: a dry run does not publish (UI_PUBLISH_DRY=1 "
+                     "if you want it to)")
             return None
 
         token = (env.get("UI_AGENT_TOKEN") or "").strip()

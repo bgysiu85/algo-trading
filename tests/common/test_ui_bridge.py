@@ -461,3 +461,53 @@ def test_the_adapter_is_still_frozen():
     assert SA.StrategyAdapter.__dataclass_params__.frozen, (
         "unfreezing the adapter would remove the guarantee that its fields are "
         "read off the strategy module")
+
+
+# ---------------------------------------------------------------------------
+# The relay holds ONE state document. Two publishers means the dashboard flips
+# between them and a command reaches whichever polled first.
+
+def _configured(**extra):
+    env = {"UI_RELAY_URL": "http://127.0.0.1:8000", "UI_AGENT_TOKEN": "t"}
+    env.update(extra)
+    return env
+
+
+def test_a_dry_run_does_not_publish():
+    assert ui_bridge.UIBridge.from_env(_configured(), dry_run=True) is None
+
+
+def test_a_real_session_publishes():
+    assert ui_bridge.UIBridge.from_env(_configured(), dry_run=False) is not None
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
+def test_a_dry_run_can_be_put_on_the_dashboard_deliberately(value):
+    """Occasionally what you want while developing — but never by default."""
+    assert ui_bridge.UIBridge.from_env(
+        _configured(UI_PUBLISH_DRY=value), dry_run=True) is not None
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "", "  ", "maybe"])
+def test_only_an_affirmative_override_counts(value):
+    """An empty or unrecognised value is not consent. Anything else would mean
+    UI_PUBLISH_DRY= in a script silently turns publishing on."""
+    assert ui_bridge.UIBridge.from_env(
+        _configured(UI_PUBLISH_DRY=value), dry_run=True) is None
+
+
+def test_the_override_cannot_conjure_a_bridge_without_a_relay():
+    """The gate narrows; it must never widen. No relay URL still means off."""
+    assert ui_bridge.UIBridge.from_env(
+        {"UI_PUBLISH_DRY": "1", "UI_AGENT_TOKEN": "t"}, dry_run=True) is None
+
+
+def test_the_trader_passes_its_own_mode_to_the_gate():
+    """The gate is only worth having if the trader actually tells it. Read from
+    the source because exercising main_async needs an IB connection."""
+    import inspect
+
+    from brokers.ibkr import trader as T
+    src = inspect.getsource(T.main_async)
+    assert "from_env(dry_run=bool(args.dry_run))" in src, (
+        "main_async must pass the session's mode, or every dry run publishes")

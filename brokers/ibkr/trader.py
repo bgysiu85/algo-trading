@@ -1571,7 +1571,7 @@ async def main_async(args):
                             max_positions=getattr(args, "max_positions", None))
     # The portal, when one is configured. Attached AFTER the DU check above,
     # so a bridge can never exist on a session that failed it.
-    trader.ui = ui_bridge.UIBridge.from_env()
+    trader.ui = ui_bridge.UIBridge.from_env(dry_run=bool(args.dry_run))
     if trader.ui is not None:
         trader.ui.note_account(accounts[0] if accounts else "")
         tg.observer = trader.ui.record_message
