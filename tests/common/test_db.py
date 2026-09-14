@@ -894,3 +894,112 @@ def test_no_report_is_written_without_the_flag(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     D.main(["--check", "--url", f"sqlite:///{tmp_path/'t.db'}"])
     assert not (tmp_path / "var").exists()
+
+
+# --- paper_fill: rebuildable, behind a measured precondition ----------------
+
+def _fills_dir(tmp_path, rows):
+    """rows = [(filename, [ts_et strings])]"""
+    d = tmp_path / "fills"
+    d.mkdir()
+    for name, stamps in rows:
+        with (d / name).open("w", newline="") as fh:
+            fh.write("ts_et,symbol\n")
+            for s in stamps:
+                fh.write(f"{s},AAA\n")
+    return d
+
+
+def test_paper_fill_is_rebuildable_now():
+    """It is a VIEW of var/fills/*.csv -- the portal handover establishes those
+    as the only source of trade truth, and ui_bridge keeps no parallel
+    ledger."""
+    assert "paper_fill" in D.DERIVED_TABLES
+    assert "--paper-fills" in D.DERIVED_TABLES["paper_fill"]
+
+
+def test_sessions_on_disk_reads_the_rows_not_the_filename():
+    """`load_paper_fills` takes session_date from the rows because the filename
+    is the trader's convention and nothing enforces it. A coverage check that
+    trusted filenames would pass on a file whose rows say otherwise."""
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as t:
+        d = _fills_dir(Path(t), [("mcl_fills_20260101.csv",
+                                  ["2026-01-01 09:30:00",
+                                   "2026-01-02 09:31:00"])])
+        got = D.sessions_on_disk(d)
+    assert len(got) == 2, "a log appended across a restart holds two dates"
+    assert str(min(got)) == "2026-01-01" and str(max(got)) == "2026-01-02"
+
+
+def test_a_rolled_aside_log_still_counts_as_coverage():
+    """FillLog renames a file whose header no longer matches FIELDS to
+    <stem>_pre<HHMMSS>.csv -- which the portal's trail_pct column makes happen
+    on the next live session. Those rows are still the record."""
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as t:
+        d = _fills_dir(Path(t), [("mcl_fills_20260101_pre143022.csv",
+                                  ["2026-01-01 09:30:00"])])
+        got = D.sessions_on_disk(d)
+    assert len(got) == 1, "a rolled-aside log was not counted"
+
+
+def test_an_absent_fills_directory_is_empty_not_an_error():
+    assert D.sessions_on_disk("/no/such/place") == set()
+
+
+def test_the_precondition_refuses_when_a_session_cannot_be_reproduced(tmp_path):
+    """A session in the table and absent from the logs is real trading history
+    a rebuild would destroy. Where the log is gone the table IS the record
+    rather than a view of one."""
+    import datetime as dt
+    from sqlalchemy import create_engine, insert
+    eng = create_engine(f"sqlite:///{tmp_path/'t.db'}")
+    D.paper_fill.create(eng)
+    with eng.begin() as c:
+        for day in ("2026-01-01", "2026-01-02"):
+            c.execute(insert(D.paper_fill).values(
+                session_date=dt.date.fromisoformat(day),
+                ts_et=dt.datetime.fromisoformat(f"{day}T09:30:00"),
+                strategy="mcl", symbol="AAA", action="BUY",
+                status="FILLED"))
+    d = _fills_dir(tmp_path, [("f.csv", ["2026-01-01 09:30:00"])])
+    ok, missing = D.paper_fill_is_rebuildable(eng, d)
+    assert ok is False
+    assert [str(m) for m in missing] == ["2026-01-02"]
+
+
+def test_the_precondition_passes_when_the_logs_cover_everything(tmp_path):
+    import datetime as dt
+    from sqlalchemy import create_engine, insert
+    eng = create_engine(f"sqlite:///{tmp_path/'t.db'}")
+    D.paper_fill.create(eng)
+    with eng.begin() as c:
+        c.execute(insert(D.paper_fill).values(
+            session_date=dt.date(2026, 1, 1),
+            ts_et=dt.datetime(2026, 1, 1, 9, 30), strategy="mcl",
+            symbol="AAA", action="BUY", status="FILLED"))
+    d = _fills_dir(tmp_path, [("f.csv", ["2026-01-01 09:30:00"])])
+    ok, missing = D.paper_fill_is_rebuildable(eng, d)
+    assert ok is True and missing == []
+
+
+def test_an_absent_table_has_nothing_to_lose(tmp_path):
+    from sqlalchemy import create_engine
+    eng = create_engine(f"sqlite:///{tmp_path/'empty.db'}")
+    ok, missing = D.paper_fill_is_rebuildable(eng, tmp_path)
+    assert ok is True and missing == []
+
+
+def test_the_precondition_is_registered_so_the_cli_cannot_skip_it():
+    """The check runs before the drop, in the CLI, because rebuild_table does
+    not know where the fill logs live. A check after the drop would be the
+    third guard this week placed behind the thing it guards."""
+    assert "paper_fill" in D.REBUILD_PRECONDITION
+    import inspect
+    src = inspect.getsource(D.main)
+    i = src.index("REBUILD_PRECONDITION")
+    j = src.index("rebuild_table(eng, a.rebuild_table)")
+    assert i < j, "the precondition is checked AFTER the drop"
