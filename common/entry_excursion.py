@@ -275,15 +275,30 @@ def order_section(rows: list[dict], friction: float) -> list[str]:
         return L + ["  No trade carries both extremes.", ""]
     adverse = [r for r in have if r["adverse_first"]]
     favour = [r for r in have if not r["adverse_first"]]
+    L.append(f"  {'':<16}{'trades':>16}{'med MFE':>12}{'med MAE':>12}"
+             f"{'med MFE to close':>19}{'per trade':>12}")
     for label, sel in (("drawdown first", adverse), ("move first", favour)):
         if not sel:
             continue
         med_f = pct([r["mfe_in"] for r in sel], 50)
         med_a = pct([r["mae_in"] for r in sel], 50)
+        # TO SESSION END, per group. Without it the in-trade MFE cannot be read:
+        # the trail ENDS the trade, so a small in-trade MFE is ambiguous between
+        # "the move was small" and "we were cut out of a move that continued".
+        # Those are opposite findings -- an entry problem and an exit problem --
+        # and they render as the same number.
+        med_e = pct([r["mfe_end"] for r in sel], 50)
         net = sum(r["net"] - friction for r in sel) / len(sel)
-        L.append(f"  {label:<16}{len(sel):>7,} ({100 * len(sel) / len(have):>5.1f}%)"
-                 f"   median MFE ${med_f:>8,.2f}   median MAE ${med_a:>8,.2f}"
-                 f"   {acct(net, 9)}/trade")
+        L.append(f"  {label:<16}{len(sel):>7,} "
+                 f"({100 * len(sel) / len(have):>5.1f}%)"
+                 f"${med_f:>11,.2f}${med_a:>11,.2f}${med_e:>18,.2f}"
+                 f"{acct(net, 12)}")
+    L += ["",
+          "  `med MFE to close` runs past the exit to the session's last bar.",
+          "  Compare it to `med MFE`: a group whose two figures are close was",
+          "  not cut short -- the move really was that small, and no exit",
+          "  reaches what was never there. A group whose to-close figure is far",
+          "  larger was exited out of a move that kept going."]
     L.append("")
     if adverse:
         share = len(adverse) / len(have)

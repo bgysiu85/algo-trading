@@ -348,3 +348,18 @@ def test_the_order_section_does_not_claim_to_settle_entry_versus_exit():
         r.update(mfe_i=5, mae_i=1, adverse_first=True)
     o = "\n".join(E.order_section(rows, 4.26))
     assert "this report does not settle which" in o
+
+
+def test_the_split_reports_the_move_that_continued_after_the_exit():
+    """Without it a small in-trade MFE is ambiguous between 'the move was
+    small' and 'the trail cut us out of a move that continued'. Those are
+    opposite findings -- an entry problem and an exit problem -- and they render
+    as the same number."""
+    rows = rows_with([10.0] * 10)
+    for k, r in enumerate(rows):
+        r.update(mfe_i=5, mae_i=1 if k < 5 else 9, adverse_first=k < 5,
+                 mfe_end=10.0 if k < 5 else 500.0)
+    o = "\n".join(E.order_section(rows, 4.26))
+    assert "med MFE to close" in o
+    assert "500.00" in o
+    assert "not cut short" in o and "no exit" in o
