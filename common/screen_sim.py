@@ -75,6 +75,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from common.screen import is_test_symbol
 from common.screen_at import (CHANGE_EPS, ScreenConfig, session_open_utc)
 from common.report_io import emit
 
@@ -259,7 +260,11 @@ def screen_accumulated(acc: pd.DataFrame, prior_close: pd.Series,
     lo, hi = cfg.price_range
     keep = ((f["premarket_change"] >= cfg.change_min - CHANGE_EPS)
             & (f["premarket_close"] >= lo) & (f["premarket_close"] <= hi)
-            & (f["premarket_volume"] >= cfg.volume_min_on_tape))
+            & (f["premarket_volume"] >= cfg.volume_min_on_tape)
+            # See screen_at.screen_at: the same clause, from the same single
+            # definition, because this function's whole contract is that it
+            # reproduces that one exactly.
+            & ~f["symbol"].map(is_test_symbol))
     out = (f[keep]
            .sort_values(["premarket_change", "symbol"], ascending=[False, True])
            .head(cfg.max_symbols).reset_index(drop=True))
