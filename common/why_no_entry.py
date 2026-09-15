@@ -99,6 +99,12 @@ def explain(name: str) -> dict[str, str]:
     }
 
 
+def _next_day(day: str) -> str:
+    """The day after `day`, for building an EXCLUSIVE --end."""
+    from datetime import timedelta
+    return (_date.fromisoformat(day) + timedelta(days=1)).isoformat()
+
+
 def from_archive(symbol: str, day: str, archive: Path, dataset: str):
     """The symbol's bars from the Databento window slices, with the prior
     session in front of them for warm-up.
@@ -125,7 +131,12 @@ def from_archive(symbol: str, day: str, archive: Path, dataset: str):
             f"Pull it first:\n"
             f"  python -m common.databento_universe --dataset {dataset} "
             f"--schema ohlcv-1m \\\n"
-            f"      --window 04:00-09:30 --start {day} --end {day} --confirm")
+            # --end is EXCLUSIVE to the chunkers. --end {day} asks for a
+            # zero-day range and prints "0 weekday chunk(s)" -- success-shaped
+            # output that fetched nothing, which is exactly the trap this
+            # message exists to steer someone out of.
+            f"      --window 04:00-09:30 --start {day} --end {_next_day(day)} "
+            f"--confirm")
     i = days.index(day)
     parts = []
     for d in days[max(0, i - 1):i + 1]:

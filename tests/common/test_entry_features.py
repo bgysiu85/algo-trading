@@ -560,3 +560,113 @@ def test_the_quantile_edges_do_not_depend_on_the_outcome_column():
     b = F.buckets(rows, "f", outcome="other")
     assert [(x["lo"], x["hi"], x["n"]) for x in a] == \
            [(x["lo"], x["hi"], x["n"]) for x in b]
+
+
+# --- the third tranche: Ben's chart, 2026-09-15 -------------------------------
+#
+# These five columns were read off the indicator headers of his 21 labelled
+# screenshots. Their whole value is that they were chosen outside the outcome
+# data, so the tests here are about the ARITHMETIC matching what his chart
+# draws -- an EMA seeded a different way, or a band one sigma-convention off,
+# would be a feature named after something he watches and measuring something
+# else. That is the defect shape this project keeps finding.
+
+def test_ema_is_seeded_with_the_simple_mean_not_the_first_value():
+    """pandas' ewm(adjust=False) recurses from x[0]. A chart recurses from the
+    mean of the first `span` values. On a series that starts far from where it
+    settles, the two are visibly different long after warm-up -- and the wrong
+    one still prints a number."""
+    x = np.array([100.0] + [1.0] * 40)
+    got = F._ema(x, 5)
+    seed = np.mean(x[:5])                      # (100 + 1*4) / 5 = 20.8
+    assert got[4] == pytest.approx(seed)
+    k = 2.0 / 6.0
+    assert got[5] == pytest.approx(1.0 * k + seed * (1 - k))
+    # and the pandas default it must NOT be
+    pandas_way = pd.Series(x).ewm(span=5, adjust=False).mean().to_numpy()
+    assert got[4] != pytest.approx(pandas_way[4])
+
+
+def test_ema_is_nan_before_it_has_span_bars():
+    """A warmed-up-enough guess is indistinguishable from a real value, which
+    is exactly what must not happen here."""
+    got = F._ema(np.arange(10, dtype=float), 5)
+    assert all(g != g for g in got[:4])
+    assert got[4] == got[4]
+    assert all(g != g for g in F._ema(np.arange(3, dtype=float), 5))
+
+
+def test_ema200_dist_is_absent_rather_than_approximate_on_a_short_frame():
+    sig = real_sig(n=120)                       # fewer than 200 bars, ever
+    ctx = F.frame_ctx(sig)
+    for i in (50, 100, 119):
+        for path in (F.features_at(sig, i), F.features_at(sig, i, ctx)):
+            v = path["ema200_dist"]
+            assert v != v, f"bar {i}: ema200_dist is {v}, should be NaN"
+            assert path["ema9_dist"] == path["ema9_dist"]   # this one is fine
+
+
+def test_bollinger_uses_the_population_sigma_the_chart_uses():
+    """ddof=0, not pandas' default ddof=1. Over 20 bars the two differ by
+    sqrt(20/19) = 2.6% on the half-width: small, always in the same direction,
+    and invisible unless something asserts it."""
+    sig = real_sig(n=200)
+    ctx = F.frame_ctx(sig)
+    i = 150
+    w = sig["close"].to_numpy(dtype=float)[i - 19:i + 1]
+    mid, sd0 = w.mean(), w.std(ddof=0)
+    cl = float(sig["close"].iloc[i])
+    want = (cl - (mid - 2 * sd0)) / (4 * sd0)
+    got = F.features_at(sig, i, ctx)["bb_pos"]
+    assert got == pytest.approx(want, rel=1e-12)
+    sd1 = w.std(ddof=1)
+    assert got != pytest.approx((cl - (mid - 2 * sd1)) / (4 * sd1), rel=1e-9)
+
+
+def test_bb_pos_is_nan_on_a_flat_band_not_a_tidy_one_half():
+    """20 identical closes give a band of zero width. 0.5 would file those
+    bars in the middle bucket looking unremarkable; they are unmeasurable."""
+    got = F._assemble(cl=5.0, o=5.0, hi_=5.0, lo_=5.0, span=0.0, ta=1.0,
+                      pv=1.0, vol=1.0, macd=0.0, macd_sig=0.0, rsi=50.0,
+                      mfi=50.0, rsi_slope=0.0, mfi_slope=0.0, mins=60,
+                      first_close=5.0, rng=0.0, cum_vol=10.0, printed=100.0,
+                      mean_range=0.1, vwap=5.0, ma20=5.0, ma20_prev=5.0,
+                      ema9=5.0, ema200=5.0, bb_mid=5.0, bb_sd=0.0, vma20=1.0)
+    assert got["bb_pos"] != got["bb_pos"]
+    assert got["bb_width"] == pytest.approx(0.0)
+
+
+def test_vol_over_ma20_counts_the_current_bar_and_vol_over_trail_does_not():
+    """His Volume 20 SMA includes the bar being drawn; `trail_avg` is a
+    SHIFTED 60-bar mean. Naming both "volume against its average" would make
+    two different measurements look comparable."""
+    sig = real_sig(n=200)
+    ctx = F.frame_ctx(sig)
+    i = 150
+    v = sig["volume"].to_numpy(dtype=float)
+    incl = v[i - 19:i + 1].mean()
+    excl = v[i - 20:i].mean()
+    got = F.features_at(sig, i, ctx)["vol_over_ma20"]
+    assert got == pytest.approx(v[i] / incl, rel=1e-12)
+    if abs(incl - excl) > 1e-9:
+        assert got != pytest.approx(v[i] / excl, rel=1e-9)
+
+
+def test_every_third_tranche_column_is_in_a_family():
+    """The multiplicity denominator has to move with the feature list. A new
+    column outside FAMILIES would be searched and never counted."""
+    tranche = {"ema9_dist", "ema200_dist", "bb_pos", "bb_width",
+               "vol_over_ma20"}
+    assert tranche <= set(F.FEATURES)
+    claimed = {c for cols in F.FAMILIES.values() for c in cols}
+    assert tranche <= claimed
+
+
+def test_the_tranche_says_when_it_was_added_and_where_it_came_from():
+    """Provenance is the only thing that makes this list pre-registered. If
+    the comment goes, the list is indistinguishable from one chosen after
+    seeing the samples."""
+    import inspect
+    src = inspect.getsource(F)
+    assert "added 2026-09-15" in src
+    assert "EMA 200 close" in src

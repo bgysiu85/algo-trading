@@ -26,8 +26,10 @@ So this module is built to describe, NEVER to choose:
     written before any outcome was seen. Nine more were added on 2026-09-12,
     AFTER the first report -- a second experiment, marked as one in FEATURES,
     each chosen for a mechanical reason rather than because the first pass
-    made it look promising. Widening a search is allowed; pretending the
-    widened list was pre-registered is not.
+    made it look promising. Five more were added on 2026-09-15, read off the
+    indicator headers of Ben's 21 labelled screenshots: the quantities he
+    actually watches and this module never measured. Widening a search is
+    allowed; pretending the widened list was pre-registered is not.
   * MULTIPLICITY IS COUNTED BY FAMILY, not by column. `rsi_slope` and
     `mfi_slope` are one idea measured twice; counting them as two findings
     doubles the apparent evidence for a single pattern.
@@ -122,6 +124,35 @@ FEATURES = {
                  "rule entirely.",
     "ma20_dist": "close / the 20-bar mean - 1, in percent.",
     "ma20_slope": "the 20-bar mean now / 3 bars ago - 1, in percent.",
+
+    # --- added 2026-09-15. A THIRD experiment, and the only one of the three
+    # not chosen by me. These five columns are the quantities on BEN'S CHART
+    # that nothing above measures -- read off the indicator headers in his 21
+    # labelled screenshots, before any of them was placed against anything:
+    #
+    #     EMA 9 close | EMA 200 close | BB 20 2 0 SMA | Volume 20 SMA
+    #
+    # That provenance is the point. The first thirteen were fixed before any
+    # outcome was seen; the next nine were mine, chosen after the first report;
+    # these five come from outside the outcome data entirely, which is the
+    # strongest pre-registration available here. It does NOT make them more
+    # likely to work -- it makes a null result on them worth more, because it
+    # cannot be explained away as "we never tested what he actually watches".
+    #
+    # The multiplicity denominator moves with them: see FAMILIES.
+    "ema9_dist": "close / EMA(9) - 1, in percent. The fast line on his chart. "
+                 "Nothing above measures a 9-bar anything.",
+    "ema200_dist": "close / EMA(200) - 1, in percent. The regime line. "
+                   "NaN until 200 bars of history exist -- see `_ema`.",
+    "bb_pos": "(close - lower) / (upper - lower) on BB(20, 2, SMA). 0 is the "
+              "lower band, 1 the upper, >1 outside it. Where in the band the "
+              "entry was.",
+    "bb_width": "(upper - lower) / mid, in percent. How wide the band is -- "
+                "a different quantity from `range_pct`, which is bar range.",
+    "vol_over_ma20": "volume / the 20-bar mean volume, INCLUDING this bar, "
+                     "which is what his Volume 20 SMA plots. `vol_over_trail` "
+                     "is the 60-bar mean EXCLUDING it: different window, "
+                     "different convention, not comparable.",
 }
 
 # Correlated columns counted ONCE. `rsi_slope` and `mfi_slope` are both "how
@@ -140,7 +171,44 @@ FAMILIES = {
     "trail fit": ["trail_over_range"],
     "bar shape": ["close_in_bar", "body_ratio"],
     "trend": ["vwap_dist", "ma20_dist", "ma20_slope"],
+    # Third tranche. `ema9_dist` joins `trend` rather than standing alone --
+    # it is "distance from a moving average of the recent close", which is
+    # what `ma20_dist` already measures, at a different lookback. Counting it
+    # as its own family would inflate the evidence for one idea. `ema200_dist`
+    # is a different idea (where price sits against the session's whole
+    # history, not its last few minutes) and the bands are a third.
+    "regime": ["ema200_dist"],
+    "band": ["bb_pos", "bb_width"],
 }
+FAMILIES["trend"].append("ema9_dist")
+FAMILIES["volume headroom"].append("vol_over_ma20")
+
+
+def _ema(x: np.ndarray, span: int) -> np.ndarray:
+    """EMA seeded the way a chart seeds it, NaN until it has `span` bars.
+
+    NOT `pandas.ewm(adjust=False)`. That recursion starts from the FIRST VALUE
+    IN THE FRAME, so on bar 200 of a 660-bar frame an EMA(200) still carries
+    about 14% of the weight of whatever the first bar happened to be -- and it
+    prints a number the whole time, which is the shape of defect this project
+    keeps finding: an output indistinguishable from the one you wanted.
+
+    TradingView seeds with the simple mean of the first `span` values and
+    recurses from there, and that is what Ben is looking at, so that is what
+    this computes. Before `span` bars there is no value and the answer is NaN,
+    not a warmed-up-enough guess.
+    """
+    n = len(x)
+    out = np.full(n, np.nan)
+    if n < span:
+        return out
+    k = 2.0 / (span + 1.0)
+    cur = float(np.mean(x[:span]))
+    out[span - 1] = cur
+    for i in range(span, n):
+        cur = x[i] * k + cur * (1.0 - k)
+        out[i] = cur
+    return out
 
 
 def frame_ctx(sig: pd.DataFrame) -> dict:
@@ -199,6 +267,19 @@ def frame_ctx(sig: pd.DataFrame) -> dict:
     }
     s = pd.Series(close)
     ctx["ma20"] = s.rolling(20).mean().to_numpy()
+    ctx["ema9"] = _ema(close, 9)
+    ctx["ema200"] = _ema(close, 200)
+    # ddof=0. TradingView's Bollinger bands use the POPULATION standard
+    # deviation; pandas defaults to the sample one (ddof=1). Over 20 bars that
+    # is a factor of sqrt(20/19) = 1.026 on the band half-width -- small,
+    # consistently wrong, and invisible unless it is written down. Two values
+    # that look comparable and are not.
+    ctx["bb_mid"] = ctx["ma20"]
+    ctx["bb_sd"] = s.rolling(20).std(ddof=0).to_numpy()
+    # INCLUDING the current bar, because that is what a "Volume 20 SMA" plots.
+    # `trail_avg` is the 60-bar mean SHIFTED off the current bar. The two are
+    # not the same measurement and nothing should compare them.
+    ctx["vma20"] = pd.Series(vol).rolling(20).mean().to_numpy()
     if have_hl:
         rng = pd.Series((high - low) / close)
         ctx["rng14"] = rng.rolling(14, min_periods=1).mean().to_numpy() * 100.0
@@ -226,6 +307,8 @@ def _features_fast(sig: pd.DataFrame, i: int, c: dict) -> dict:
     mean_range = c["mrange14"][i]
     ma20 = c["ma20"][i] if i >= 19 else float("nan")
     ma20_prev = c["ma20"][i - 3] if i >= 22 else float("nan")
+    extra = (c["ema9"][i], c["ema200"][i], c["bb_mid"][i], c["bb_sd"][i],
+             c["vma20"][i])
     cl, o = c["close"][i], c["open"][i]
     hi_, lo_ = c["high"][i], c["low"][i]
     span = hi_ - lo_
@@ -236,7 +319,8 @@ def _features_fast(sig: pd.DataFrame, i: int, c: dict) -> dict:
                      (c["rsi"][i] - c["rsi"][i - 3]) if i >= 3 else float("nan"),
                      (c["mfi"][i] - c["mfi"][i - 3]) if i >= 3 else float("nan"),
                      lt.hour * 60 + lt.minute - 240, first_close, rng,
-                     cum_vol, printed, mean_range, vwap, ma20, ma20_prev)
+                     cum_vol, printed, mean_range, vwap, ma20, ma20_prev,
+                     *extra)
 
 
 def features_at(sig: pd.DataFrame, i: int, ctx: dict | None = None) -> dict:
@@ -296,6 +380,22 @@ def features_at(sig: pd.DataFrame, i: int, ctx: dict | None = None) -> dict:
     mean_range = float((tail["high"] - tail["low"]).mean()) \
         if {"high", "low"} <= set(past.columns) else float("nan")
 
+    # The third tranche, computed from `past` alone. Every one of these is
+    # causal, so running it over the prefix gives the same number the fast
+    # path reads out of the whole-frame array -- which is what
+    # test_ctx_matches_the_slow_path_exactly asserts, rather than assumes.
+    pc = past["close"].to_numpy(dtype=float)
+    ema9 = _ema(pc, 9)[-1] if len(pc) else float("nan")
+    ema200 = _ema(pc, 200)[-1] if len(pc) else float("nan")
+    if len(pc) >= 20:
+        w = pc[-20:]
+        bb_mid = float(w.mean())
+        bb_sd = float(w.std(ddof=0))
+    else:
+        bb_mid = bb_sd = float("nan")
+    pv20 = past["volume"].to_numpy(dtype=float)
+    vma20 = float(pv20[-20:].mean()) if len(pv20) >= 20 else float("nan")
+
     return _assemble(
         float(r["close"]), o, hi_, lo_, span, ta, pv, float(r["volume"]),
         float(r["macd"]), float(r["macd_sig"]), float(r["rsi"]), float(r["mfi"]),
@@ -305,12 +405,13 @@ def features_at(sig: pd.DataFrame, i: int, ctx: dict | None = None) -> dict:
         else float("nan"),
         local[-1].hour * 60 + local[-1].minute - 240,
         first_close, float(rng), cum_vol, printed, mean_range, vwap,
-        ma20, ma20_prev)
+        ma20, ma20_prev, ema9, ema200, bb_mid, bb_sd, vma20)
 
 
 def _assemble(cl, o, hi_, lo_, span, ta, pv, vol, macd, macd_sig, rsi, mfi,
               rsi_slope, mfi_slope, mins, first_close, rng, cum_vol, printed,
-              mean_range, vwap, ma20, ma20_prev) -> dict:
+              mean_range, vwap, ma20, ma20_prev,
+              ema9, ema200, bb_mid, bb_sd, vma20) -> dict:
     """The feature dictionary itself, shared by both paths.
 
     Factored out so the fast path cannot drift from the slow one in the
@@ -352,6 +453,23 @@ def _assemble(cl, o, hi_, lo_, span, ta, pv, vol, macd, macd_sig, rsi, mfi,
         "ma20_slope": ((ma20 / ma20_prev - 1.0) * 100.0
                        if ma20 == ma20 and ma20_prev == ma20_prev and ma20_prev
                        else float("nan")),
+
+        # --- third tranche -------------------------------------------------
+        "ema9_dist": ((cl / ema9 - 1.0) * 100.0
+                      if ema9 == ema9 and ema9 else float("nan")),
+        "ema200_dist": ((cl / ema200 - 1.0) * 100.0
+                        if ema200 == ema200 and ema200 else float("nan")),
+        # NaN, not 0.5, on a flat band. A zero-width band means the last 20
+        # closes were identical; "halfway up a band of zero width" is not a
+        # position, and 0.5 would put those bars in the middle bucket looking
+        # ordinary.
+        "bb_pos": ((cl - (bb_mid - 2.0 * bb_sd)) / (4.0 * bb_sd)
+                   if bb_sd == bb_sd and bb_sd > 0 else float("nan")),
+        "bb_width": ((4.0 * bb_sd) / bb_mid * 100.0
+                     if bb_sd == bb_sd and bb_mid == bb_mid and bb_mid
+                     else float("nan")),
+        "vol_over_ma20": (vol / vma20
+                          if vma20 == vma20 and vma20 else float("nan")),
     }
 
 
