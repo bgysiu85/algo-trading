@@ -14,7 +14,7 @@ so those are what these tests are about.
 """
 from __future__ import annotations
 
-from datetime import datetime, time as dtime, timedelta
+from datetime import date, datetime, time as dtime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -435,3 +435,245 @@ def test_a_set_clustered_low_is_not_ruled_out_on_the_middle_count_alone():
         ruled = [ln for ln in block.splitlines() if "RULED OUT" in ln][0]
         assert "low" not in ruled, ruled
         assert "4/8 in the middle half" in block
+
+
+# --- reading the spreadsheet without openpyxl ---------------------------------
+#
+# The first live run of this module died on `pip install openpyxl`. openpyxl is
+# still preferred when it imports; the stdlib reader exists so that a missing
+# package cannot be the reason a report does not get produced. Two readers for
+# one value is the shape this project keeps finding defects in, so the
+# agreement is asserted rather than assumed.
+
+def _no_openpyxl(monkeypatch):
+    """Make `import openpyxl` fail, so the fallback path runs."""
+    import builtins
+    real = builtins.__import__
+
+    def blocked(name, *a, **k):
+        if name == "openpyxl":
+            raise ImportError("blocked for this test")
+        return real(name, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", blocked)
+
+
+def _write_sheet(path, rows, sheet_title="Sheet1"):
+    openpyxl = pytest.importorskip("openpyxl")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = sheet_title
+    for r in rows:
+        ws.append(list(r))
+    wb.save(path)
+    return path
+
+
+SHEET = [
+    ("symbol", "date", "time_et", "label (took/passed/took-and-lost)", "note"),
+    ("slbt", date(2026, 6, 16), dtime(4, 1), "took", "1.png"),
+    ("CRBP", date(2026, 9, 14), dtime(7, 19), "Pass", "8.png"),
+    ("RGNT", date(2026, 6, 17), dtime(4, 18), None, "17.png"),
+    ("ICCM", date(2026, 6, 17), dtime(8, 27), "took and lost",
+     "18.png, bought near peak and held too long"),
+]
+
+
+def test_the_two_xlsx_readers_agree(tmp_path, monkeypatch):
+    """The oracle test. A hand-rolled parser of somebody else's format is
+    worth exactly as much as the library it is checked against."""
+    p = _write_sheet(tmp_path / "s.xlsx", SHEET)
+    want = P.load_samples(p)
+    _no_openpyxl(monkeypatch)
+    got = P.load_samples(p)
+    assert got == want
+    assert [r["symbol"] for r in got] == ["SLBT", "CRBP", "RGNT", "ICCM"]
+    assert [r["hhmm"] for r in got] == ["04:01", "07:19", "04:18", "08:27"]
+    assert [r["date"] for r in got] == ["2026-06-16", "2026-09-14",
+                                        "2026-06-17", "2026-06-17"]
+    assert [r["label"] for r in got] == ["took", "pass", P.UNLABELLED,
+                                         "took-and-lost"]
+
+
+def test_the_stdlib_reader_uses_the_cell_reference_not_the_cell_order(
+        tmp_path, monkeypatch):
+    """A run of empty cells is simply ABSENT from the sheet XML. Counting <c>
+    elements instead of reading their `r` attribute shifts every column after
+    the first blank -- so a row with no note would read its label as its note
+    and its time as its label, and the sample would not be dropped, it would
+    be WRONG."""
+    rows = [SHEET[0],
+            ("AAAA", date(2026, 9, 14), dtime(7, 22), None, None),
+            ("BBBB", date(2026, 9, 14), dtime(8, 15), "took", "x.png")]
+    p = _write_sheet(tmp_path / "gaps.xlsx", rows)
+    want = P.load_samples(p)
+    _no_openpyxl(monkeypatch)
+    got = P.load_samples(p)
+    assert got == want
+    assert got[0]["label"] == P.UNLABELLED and got[0]["note"] == ""
+    assert got[0]["hhmm"] == "07:22"
+    assert got[1]["label"] == "took"
+
+
+def test_the_stdlib_reader_follows_workbook_order_not_the_filename(
+        tmp_path, monkeypatch):
+    """sheet1.xml is not always the first TAB. Picking the worksheet by
+    filename works until someone reorders the tabs, and then the report is
+    built from a different sheet without saying so."""
+    openpyxl = pytest.importorskip("openpyxl")
+    p = _write_sheet(tmp_path / "two.xlsx", SHEET, sheet_title="samples")
+    wb = openpyxl.load_workbook(p)
+    other = wb.create_sheet("scratch")
+    other.append(["symbol", "date", "time_et", "label (x)", "note"])
+    other.append(["ZZZZ", date(2026, 1, 2), dtime(5, 0), "took", "no"])
+    wb.move_sheet("scratch", offset=-len(wb.sheetnames) + 1)   # make it first
+    wb.save(p)
+
+    want = P.load_samples(p)
+    _no_openpyxl(monkeypatch)
+    got = P.load_samples(p)
+    assert got == want
+    assert got[0]["symbol"] == "ZZZZ", "both readers must take the FIRST tab"
+
+
+def test_a_date_serial_that_cannot_be_a_date_is_an_error_not_1902():
+    """Excel serials are day counts. A small number in the date column is a
+    number in the wrong column; converting it would place a sample three days
+    into 1900 and lose it as 'not in the archive'."""
+    assert P._as_date(46279.0) == "2026-09-14"
+    assert P._as_date(datetime(2026, 9, 14, 7, 3)) == "2026-09-14"
+    with pytest.raises(SystemExit):
+        P._as_date(3.0)
+
+
+def test_a_whole_number_in_the_time_column_is_an_error_not_midnight():
+    """00:00 is a real pre-market minute, so a date serial landing in the time
+    column must not quietly render as one."""
+    assert P._as_hhmm(0.28958333333333336) == "06:57"
+    with pytest.raises(SystemExit):
+        P._as_hhmm(46279.0)
+    with pytest.raises(SystemExit):
+        P._as_hhmm(0.0)
+
+
+def test_a_file_that_is_not_a_zip_says_so(tmp_path, monkeypatch):
+    p = tmp_path / "old.xlsx"
+    p.write_bytes(b"\xd0\xcf\x11\xe0not a zip")      # an actual .xls header
+    _no_openpyxl(monkeypatch)
+    with pytest.raises(SystemExit) as e:
+        P.load_samples(p)
+    assert ".xlsx" in str(e.value) or "zip" in str(e.value)
+
+
+# --- the format assumptions, against a hand-built workbook --------------------
+#
+# openpyxl always writes sheetN.xml in tab order and never writes rich text
+# unless asked, so a workbook it generates cannot exercise either of those
+# branches -- a mutation pass showed both surviving. These build the zip
+# directly, which is also the clearest statement of what the reader assumes.
+
+def _minimal_xlsx(path, sheets, shared_xml):
+    """`sheets` is [(tab name, worksheet filename, rows_xml)], in TAB order."""
+    import zipfile
+    NSMAIN = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+    NSREL = ('xmlns:r="http://schemas.openxmlformats.org/officeDocument/'
+             '2006/relationships"')
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml",
+                   '<?xml version="1.0"?><Types xmlns="http://schemas.'
+                   'openxmlformats.org/package/2006/content-types"/>')
+        sx = "".join(f'<sheet name="{n}" sheetId="{i+1}" r:id="rId{i+1}"/>'
+                     for i, (n, _, _) in enumerate(sheets))
+        z.writestr("xl/workbook.xml",
+                   f'<?xml version="1.0"?><workbook {NSMAIN} {NSREL}>'
+                   f'<sheets>{sx}</sheets></workbook>')
+        rx = "".join(
+            f'<Relationship Id="rId{i+1}" Target="worksheets/{fn}" '
+            f'Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+            f'relationships/worksheet"/>'
+            for i, (_, fn, _) in enumerate(sheets))
+        z.writestr("xl/_rels/workbook.xml.rels",
+                   '<?xml version="1.0"?><Relationships xmlns="http://schemas.'
+                   'openxmlformats.org/package/2006/relationships">'
+                   + rx + "</Relationships>")
+        z.writestr("xl/sharedStrings.xml",
+                   f'<?xml version="1.0"?><sst {NSMAIN}>{shared_xml}</sst>')
+        for _, fn, rows_xml in sheets:
+            z.writestr(f"xl/worksheets/{fn}",
+                       f'<?xml version="1.0"?><worksheet {NSMAIN}>'
+                       f'<sheetData>{rows_xml}</sheetData></worksheet>')
+    return path
+
+
+def _srow(n, cells):
+    """cells: [(ref, xml)] -- xml already formed, e.g. 't="s"><v>0</v>'."""
+    return f'<row r="{n}">' + "".join(
+        f'<c r="{ref}" {body}</c>' for ref, body in cells) + "</row>"
+
+
+def test_the_first_TAB_is_read_even_when_it_is_not_sheet1_xml(tmp_path):
+    """sheet1.xml is not always the first tab. Resolving through
+    workbook.xml -> the rels file is the only thing that keeps the report
+    built from the sheet the user is looking at."""
+    strings = ("<si><t>symbol</t></si><si><t>date</t></si>"
+               "<si><t>time_et</t></si><si><t>label (x)</t></si>"
+               "<si><t>note</t></si><si><t>WANTED</t></si>"
+               "<si><t>took</t></si><si><t>DECOY</t></si>")
+    head = _srow(1, [("A1", 't="s"><v>0</v>'), ("B1", 't="s"><v>1</v>'),
+                     ("C1", 't="s"><v>2</v>'), ("D1", 't="s"><v>3</v>'),
+                     ("E1", 't="s"><v>4</v>')])
+    def body(sym_idx):
+        return _srow(2, [("A2", f't="s"><v>{sym_idx}</v>'),
+                         ("B2", '><v>46279</v>'),
+                         ("C2", '><v>0.28958333333333336</v>'),
+                         ("D2", 't="s"><v>6</v>')])
+    # TAB order puts the WANTED sheet first, but its file is sheet2.xml
+    p = _minimal_xlsx(tmp_path / "order.xlsx",
+                      [("first", "sheet2.xml", head + body(5)),
+                       ("second", "sheet1.xml", head + body(7))],
+                      strings)
+    got = P._rows_from_xlsx_stdlib(p)
+    assert got[1][0] == "WANTED", f"read the wrong worksheet: {got[1][0]!r}"
+
+
+def test_a_rich_text_shared_string_is_read_whole(tmp_path):
+    """A cell with bold part-way through splits into several <t> runs. Taking
+    only the first silently truncates it -- and the label column is exactly
+    where someone would bold a word."""
+    strings = ("<si><t>symbol</t></si><si><t>date</t></si>"
+               "<si><t>time_et</t></si><si><t>label (x)</t></si>"
+               "<si><t>note</t></si><si><t>CRBP</t></si>"
+               "<si><r><t>took </t></r><r><t>and </t></r><r><t>lost</t></r></si>")
+    rows = (_srow(1, [("A1", 't="s"><v>0</v>'), ("B1", 't="s"><v>1</v>'),
+                      ("C1", 't="s"><v>2</v>'), ("D1", 't="s"><v>3</v>'),
+                      ("E1", 't="s"><v>4</v>')])
+            + _srow(2, [("A2", 't="s"><v>5</v>'), ("B2", '><v>46279</v>'),
+                        ("C2", '><v>0.28958333333333336</v>'),
+                        ("D2", 't="s"><v>6</v>')]))
+    p = _minimal_xlsx(tmp_path / "rich.xlsx",
+                      [("s", "sheet1.xml", rows)], strings)
+    # the stdlib reader directly: this hand-built zip has no Content_Types
+    # part, so openpyxl -- correctly -- refuses it.
+    got = P._rows_from_xlsx_stdlib(p)
+    assert got[1][3] == "took and lost", f"truncated to {got[1][3]!r}"
+    assert P.normalise_label(got[1][3]) == "took-and-lost"
+
+
+def test_trailing_blank_rows_do_not_change_the_sample_count(tmp_path,
+                                                            monkeypatch):
+    """Both readers must return the SAME rows, blanks included. The stdlib
+    reader used to trim trailing empties and openpyxl does not, so the two
+    disagreed on row count for the same file -- caught by a mutation pass, and
+    the trim was the wrong half."""
+    openpyxl = pytest.importorskip("openpyxl")
+    p = _write_sheet(tmp_path / "blanks.xlsx", SHEET)
+    wb = openpyxl.load_workbook(p)
+    ws = wb.active
+    ws.append([None, None, None, None, None])
+    ws.append([None, None, None, None, None])
+    wb.save(p)
+
+    want = P.load_samples(p)
+    _no_openpyxl(monkeypatch)
+    got = P.load_samples(p)
+    assert got == want
+    assert len(got) == len(SHEET) - 1

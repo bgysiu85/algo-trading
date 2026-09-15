@@ -79,7 +79,7 @@ import argparse
 import os
 import sys
 import time
-from datetime import date as _date, datetime
+from datetime import date as _date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -153,20 +153,152 @@ def load_samples(path: Path) -> list[dict]:
 
 
 def _rows_from_xlsx(path: Path) -> list[list]:
+    """One sheet of an .xlsx, through openpyxl when it is installed.
+
+    TWO READERS, AND A TEST THAT THEY AGREE
+    ---------------------------------------
+    openpyxl is the right tool and is preferred whenever it imports. But the
+    first live run of this module died on `pip install openpyxl`, and a report
+    that cannot be produced because the venv is missing a package is a report
+    that does not exist. So `_rows_from_xlsx_stdlib` reads the same sheet from
+    zipfile and ElementTree -- an .xlsx is a zip of XML -- and takes over when
+    the import fails.
+
+    Two code paths for one value is the shape this project keeps finding
+    defects in, so it is not left to hope:
+    `test_the_two_xlsx_readers_agree` builds a workbook with openpyxl and
+    asserts `load_samples` returns identical rows through both. A hand-rolled
+    parser of somebody else's format is worth exactly as much as its oracle.
+    """
     try:
         import openpyxl
-    except ImportError:                                     # pragma: no cover
-        sys.exit("reading .xlsx needs openpyxl: pip install openpyxl\n"
-                 "(or save the sheet as .csv and pass that)")
+    except ImportError:
+        return _rows_from_xlsx_stdlib(path)
     wb = openpyxl.load_workbook(path, data_only=True)
     return [list(r) for r in wb[wb.sheetnames[0]].iter_rows(values_only=True)]
 
 
+def _rows_from_xlsx_stdlib(path: Path) -> list[list]:
+    """The same sheet without openpyxl. See `_rows_from_xlsx`.
+
+    Values come back RAW -- a string, or a float. Dates and times in a
+    spreadsheet are serial numbers whose date-ness lives in a style record, and
+    this reader deliberately does not consult the styles: `_as_date` and
+    `_as_hhmm` interpret the number instead, so there is one place that decides
+    what a cell means rather than two that can disagree.
+    """
+    import re as _re
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    REL = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    PKG = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+
+    def col_index(ref: str) -> int:
+        """'AB12' -> 27. The `r` attribute is the ONLY reliable column: a run
+        of empty cells is simply absent from the XML, so counting <c> elements
+        shifts every column after the first blank."""
+        n = 0
+        for ch in ref:
+            if not ch.isalpha():
+                break
+            n = n * 26 + (ord(ch.upper()) - 64)
+        return n - 1
+
+    try:
+        z = zipfile.ZipFile(path)
+    except zipfile.BadZipFile:
+        sys.exit(f"{path} is not a readable .xlsx (not a zip). If it is an old "
+                 f".xls, save it as .xlsx or .csv.")
+    with z:
+        names = set(z.namelist())
+        # The first sheet in WORKBOOK order, resolved through the rels file.
+        # Zip order is not sheet order and sheet1.xml is not always the first
+        # tab -- picking by filename works until someone reorders the tabs.
+        target = "xl/worksheets/sheet1.xml"
+        try:
+            wb = ET.fromstring(z.read("xl/workbook.xml"))
+            first = wb.find(f"{NS}sheets/{NS}sheet")
+            rid = first.get(f"{REL}id")
+            rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+            for rel in rels:
+                if rel.get("Id") == rid:
+                    t = rel.get("Target").lstrip("/")
+                    target = t if t.startswith("xl/") else "xl/" + t
+                    break
+        except (KeyError, AttributeError, ET.ParseError):
+            pass
+        if target not in names:
+            sys.exit(f"{path}: cannot find the first worksheet ({target}).")
+
+        shared: list[str] = []
+        if "xl/sharedStrings.xml" in names:
+            for si in ET.fromstring(z.read("xl/sharedStrings.xml")):
+                # Concatenate every <t>: rich text splits one string across
+                # several runs, and taking only the first loses the rest.
+                shared.append("".join(t.text or "" for t in si.iter(f"{NS}t")))
+
+        rows: list[list] = []
+        for row in ET.fromstring(z.read(target)).iter(f"{NS}row"):
+            cells: dict[int, object] = {}
+            for c in row.findall(f"{NS}c"):
+                k = col_index(c.get("r") or "A")
+                typ = c.get("t")
+                if typ == "inlineStr":
+                    v = "".join(t.text or "" for t in c.iter(f"{NS}t"))
+                else:
+                    vt = c.find(f"{NS}v")
+                    if vt is None or vt.text is None:
+                        continue
+                    raw = vt.text
+                    if typ == "s":
+                        v = shared[int(raw)] if int(raw) < len(shared) else ""
+                    elif typ == "b":
+                        v = raw == "1"
+                    elif typ in (None, "n"):
+                        try:
+                            v = float(raw)
+                        except ValueError:
+                            v = raw
+                    else:                       # "str" (formula), "e" (error)
+                        v = raw
+                if v != "":
+                    cells[k] = v
+            width = (max(cells) + 1) if cells else 0
+            rows.append([cells.get(i) for i in range(width)])
+
+    # NO trailing-blank-row trim, deliberately. openpyxl returns those rows,
+    # `load_samples` already skips any row without a symbol, and trimming here
+    # made the two readers return different row counts for the same file --
+    # which is the one thing the agreement test exists to prevent. A mutation
+    # pass found it: nothing could tell the trim from its absence except the
+    # oracle, and against the oracle the trim was the wrong answer.
+    if not rows:
+        return []
+    width = max(len(r) for r in rows)
+    return [r + [None] * (width - len(r)) for r in rows]
+
+
+# Excel's day zero. 1899-12-30, not 1899-12-31, because Excel believes 1900
+# was a leap year; the off-by-one and the phantom 29 February cancel for every
+# date after 1900-03-01, which is every date this project will ever see.
+EXCEL_EPOCH = _date(1899, 12, 30)
+
+
 def _as_date(v) -> str:
+    """YYYY-MM-DD from a datetime, a date, an Excel serial, or a string."""
     if isinstance(v, datetime):
         return v.date().isoformat()
     if isinstance(v, _date):
         return v.isoformat()
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        # A serial date is a day count. Anything under 1000 is not a date --
+        # it is a number in the wrong column, and guessing 1902 from it would
+        # put a sample three days into the archive and lose it quietly.
+        if float(v) < 1000:
+            sys.exit(f"cannot read {v!r} as a date")
+        return (EXCEL_EPOCH + timedelta(days=int(float(v)))).isoformat()
     return str(v)[:10]
 
 
@@ -180,8 +312,14 @@ def _as_hhmm(v) -> str:
     """
     if hasattr(v, "hour") and hasattr(v, "minute"):
         return f"{v.hour:02d}:{v.minute:02d}"
-    if isinstance(v, (int, float)):
-        mins = int(round(float(v) * 24 * 60))
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        frac = float(v) % 1.0
+        # A whole number here is a date serial in the time column, or a bare
+        # integer. Both would render as 00:00, which is a real pre-market
+        # minute -- so it has to be an error, not a default.
+        if frac == 0.0:
+            sys.exit(f"cannot read {v!r} as a time of day")
+        mins = int(round(frac * 24 * 60))
         return f"{mins // 60:02d}:{mins % 60:02d}"
     s = str(v).strip()
     if ":" not in s:
