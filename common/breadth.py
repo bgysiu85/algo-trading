@@ -7,10 +7,17 @@
 
 REGISTERED FIRST
 ----------------
-`docs/research/REGISTERED_breadth.md`, commit `4bfaa88`, written before this
-file existed and before ORB produced any number. Read it before reading any
-output here. Nothing in this module chooses a threshold; it applies the ones
+`docs/research/REGISTERED_breadth.md`, written and committed before this file
+existed and before ORB produced any number. Read it before reading any output
+here. Nothing in this module chooses a threshold; it applies the ones
 registered there.
+
+THE CLAIM IS THE ORDERING, NOT A HASH. An earlier version of this paragraph
+named the registration's commit. A rebase onto another chat's work rewrote it
+that same afternoon, and a hash cited in prose is a second source of truth that
+goes stale in silence -- the reader looks it up, finds nothing, and cannot tell
+whether the registration moved or the reference did.
+`test_breadth.py` asserts the ordering against git itself instead.
 
 WHY THE OLD CRITERION COULD NOT BE RE-ESTIMATED
 ------------------------------------------------
@@ -242,8 +249,9 @@ def render(label, rows, by_sym, boot, shuf, elapsed) -> list[str]:
     good, n_sy, old = share_profitable(by_sym)
 
     L = [f"BREADTH — GO/NO-GO CRITERION 2, AS REPLACED   [{label}]", "",
-         "  Registered in docs/research/REGISTERED_breadth.md, commit 4bfaa88,",
-         "  BEFORE this module was written and before ORB had a number.", "",
+         "  Registered in docs/research/REGISTERED_breadth.md, committed",
+         "  BEFORE this module existed and before ORB had a number. The",
+         "  ordering is asserted against git, not quoted as a hash.", "",
          f"  {n_tr:,} trades across {n_sy:,} symbols",
          f"  net {net:,.0f}   per trade {net / n_tr if n_tr else 0:.2f}",
          f"  {n_tr / n_sy if n_sy else 0:.1f} trades per symbol",

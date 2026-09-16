@@ -340,6 +340,34 @@ def _tape_caveat(tape: str) -> list[str]:
             "  about the market or the universe did.", ""]
 
 
+def provenance(a, cache, tape, seen: int, rows: list) -> list[str]:
+    """What this run measured, printed at the top of the report itself.
+
+    A figure in a report that does not say which universe produced it cannot
+    be compared with the same figure from another run -- and on 2026-09-16 two
+    of this report's own numbers (31.8% and 57.2% usable at 15 minutes) could
+    not be reconciled for exactly that reason. The header is not enough on its
+    own: a header is stripped the moment anyone quotes a table out of it.
+    """
+    mins = sorted({r.orb_minutes for r in rows})
+    return [
+        "WHAT THIS RUN MEASURED", "",
+        f"  cache        {cache}",
+        f"  tape         {tape or 'UNKNOWN (no readable SOURCE.txt)'}",
+        f"  window       {a.window}",
+        f"  pairs        {', '.join(str(x) for x in a.pairs)}",
+        f"  symbol-days  {seen:,} with bars"
+        + (f"   (--limit {a.limit:,})" if a.limit else ""),
+        f"  ORB_MINUTES  {', '.join(str(m) for m in mins)}",
+        "",
+        "  Quote no figure below without this block. Two passes over different",
+        "  caches or different pairs files produce different numbers from the",
+        "  same code, and a table lifted out of one of them carries no sign of",
+        "  which it was.",
+        "", "-" * 78, "",
+    ]
+
+
 def render(rows: list[DayRow], tape: str = "") -> list[str]:
     L = ["ORB PRE-FLIGHT -- measurements before any entry logic exists", "",
          "  No strategy, no P/L. Each section can invalidate ORB on its own.",
@@ -616,9 +644,21 @@ def main(argv=None) -> int:
     tape = cache_tape(cache)
     print(f"tape: {tape or 'UNKNOWN (no readable SOURCE.txt)'}")
 
+    # THE PROVENANCE BLOCK, and it exists because two of this report's own
+    # figures could not be reconciled on 2026-09-16. One pass said a usable
+    # 15-minute range on 31.8% of symbol-days and another said 57.2%, and
+    # neither report recorded which cache, which pairs files or how many
+    # symbol-days it had measured -- so there was no way to tell a tape change
+    # from a universe change from a threshold change. The header carried the
+    # cache from 2026-09-08 onward; the pairs did not travel with it, and the
+    # pairs are what pick the universe.
+    prov = provenance(a, cache, tape, seen, rows)
     from common.report_io import emit
-    emit("\n".join(render(rows, tape)), a.out,
-         header=f"strategy.orb.preflight  cache={cache}  tape={tape or 'UNKNOWN'}")
+    emit("\n".join(prov + render(rows, tape)), a.out,
+         header=("strategy.orb.preflight  "
+                 f"cache={cache.name}  tape={tape or 'UNKNOWN'}  "
+                 f"pairs={','.join(Path(x).name for x in a.pairs)}  "
+                 f"window={a.window}  symbol_days={seen:,}"))
     return 0
 
 

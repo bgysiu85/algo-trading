@@ -338,11 +338,46 @@ def test_the_report_says_criterion_1_is_not_implied_by_this():
     assert "drop-top-3" in txt and "Both are required" in txt
 
 
-def test_the_report_names_the_registration_and_its_commit():
+def test_the_report_names_the_registration():
     """So a reader can check the thresholds against the document that fixed
     them rather than against the code that applies them."""
     txt = report(skewed(), resamples=100)
-    assert "REGISTERED_breadth.md" in txt and "4bfaa88" in txt
+    assert "REGISTERED_breadth.md" in txt
+
+
+def test_the_registration_was_committed_BEFORE_the_module():
+    """THE CLAIM, CHECKED AGAINST GIT RATHER THAN QUOTED AS A HASH.
+
+    "Registered first" is the whole basis for trusting the thresholds, and for
+    one afternoon this was asserted by naming a commit in prose. A rebase onto
+    another chat's work rewrote that hash the same day. A hash in prose is a
+    second source of truth that goes stale in silence: the reader looks it up,
+    finds nothing, and cannot tell whether the registration moved or the
+    reference did.
+
+    So the property is asserted directly. The commit that ADDED the
+    registration must be an ancestor of the commit that added the module.
+    """
+    import subprocess
+
+    def added(path):
+        out = subprocess.run(
+            ["git", "log", "--diff-filter=A", "--format=%H", "--", path],
+            cwd=REPO, capture_output=True, text=True)
+        if out.returncode != 0 or not out.stdout.strip():
+            pytest.skip(f"no git history for {path} in this checkout")
+        return out.stdout.split()[0]
+
+    reg = added("docs/research/REGISTERED_breadth.md")
+    mod = added("common/breadth.py")
+    if reg == mod:
+        pytest.fail("the registration and the module landed in one commit, so "
+                    "nothing says which was decided first")
+    anc = subprocess.run(["git", "merge-base", "--is-ancestor", reg, mod],
+                         cwd=REPO, capture_output=True)
+    assert anc.returncode == 0, (
+        "the registration must be an ancestor of the module -- a bar written "
+        "after the instrument is not a bar")
 
 
 def test_the_report_says_the_holdout_is_untouched():

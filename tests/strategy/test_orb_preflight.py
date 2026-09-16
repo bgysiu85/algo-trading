@@ -389,3 +389,88 @@ def test_the_10_1b_heading_follows_the_data():
     out = "\n".join(P.render(mostly_ok, "XNAS.BASIC"))
     assert "WHERE THE RANGE IS UNUSABLE, AND WHY" in out
     assert "WHY THE RANGE IS UNUSABLE (15-minute range)" not in out
+
+
+# ==========================================================================
+# PROVENANCE — added 2026-09-16, because two of this report's own figures
+# could not be reconciled: one pass said a usable 15-minute range on 31.8% of
+# symbol-days and another said 57.2%, and neither report recorded which cache,
+# which pairs files or how many symbol-days it had measured.
+# ==========================================================================
+class _Args:
+    def __init__(self, **kw):
+        self.pairs = kw.get("pairs", ["var/state/screen_pairs_consolidated.json",
+                                      "var/state/screen_rejects.json"])
+        self.window = kw.get("window", "3d_to_2000")
+        self.limit = kw.get("limit")
+
+
+def _rows(minutes=(5, 15, 30)):
+    from strategy.orb.preflight import DayRow
+    return [DayRow("AAA", "2026-01-02", "survivor", m) for m in minutes]
+
+
+def test_the_report_states_which_cache_and_tape_produced_it():
+    from pathlib import Path
+
+    from strategy.orb import preflight as P
+
+    txt = "\n".join(P.provenance(_Args(), Path("bar_cache_xnas/3d_to_2000"),
+                                 "databento XNAS.BASIC ohlcv-1m", 27_777,
+                                 _rows()))
+    assert "bar_cache_xnas" in txt
+    assert "XNAS.BASIC" in txt
+
+
+def test_the_report_states_which_PAIRS_FILES_chose_the_universe():
+    """The header has carried the cache since 2026-09-08. The pairs did not
+    travel with it, and the pairs are what pick the universe -- so two runs on
+    one cache over different pairs were indistinguishable."""
+    from pathlib import Path
+
+    from strategy.orb import preflight as P
+
+    txt = "\n".join(P.provenance(_Args(pairs=["a.json", "b.json"]),
+                                 Path("c"), "t", 10, _rows()))
+    assert "a.json" in txt and "b.json" in txt
+
+
+def test_an_unknown_tape_says_so_rather_than_going_blank():
+    from pathlib import Path
+
+    from strategy.orb import preflight as P
+
+    txt = "\n".join(P.provenance(_Args(), Path("c"), "", 10, _rows()))
+    assert "UNKNOWN" in txt
+
+
+def test_a_limited_run_declares_its_limit():
+    """A --limit pass and a full pass produce the same table shape and
+    different numbers. Without the flag on the page they are the same report."""
+    from pathlib import Path
+
+    from strategy.orb import preflight as P
+
+    txt = "\n".join(P.provenance(_Args(limit=500), Path("c"), "t", 500,
+                                 _rows()))
+    assert "--limit" in txt and "500" in txt
+
+
+def test_the_provenance_block_comes_BEFORE_the_tables():
+    """A block printed underneath is one a reader has already passed."""
+    from pathlib import Path
+
+    from strategy.orb import preflight as P
+
+    full = "\n".join(P.provenance(_Args(), Path("c"), "t", 10, _rows())
+                     + P.render(_rows(), "t"))
+    assert full.index("WHAT THIS RUN MEASURED") < full.index("10.1")
+
+
+def test_the_block_tells_the_reader_not_to_quote_a_table_without_it():
+    from pathlib import Path
+
+    from strategy.orb import preflight as P
+
+    txt = "\n".join(P.provenance(_Args(), Path("c"), "t", 10, _rows()))
+    assert "Quote no figure below without this block" in txt
