@@ -227,3 +227,16 @@ def test_band_refusal_is_recorded(patched):
          (1.52, 1.53, 1.49, 1.50), (1.51, 1.70, 1.50, 1.69), (1.69, 1.70, 1.68, 1.69), G, G]
     r = patched(frame(b, vol={4: BIG}))
     assert r.trades == [] and PB.BAND in [s.outcome for s in r.setups]
+
+
+def test_duplicate_timestamps_do_not_raise(patched):
+    """2025-06-09's slice repeats timestamps. The exit bar is then found by
+    value, not by get_loc, which returns a slice there."""
+    b = shape()
+    b[6] = (5.14, 5.20, 5.13, 5.19)                 # green one bar after the 5.15 entry
+    b += [(5.19, 5.20, 5.18, 5.19)] * 3
+    sig = frame(b, vol={5: BIG})
+    dup = sig.iloc[[26]].copy()                     # repeat the bar the trade exits on
+    sig = pd.concat([sig.iloc[:27], dup, sig.iloc[27:]])
+    r = patched(sig, green_hold_bars=1)             # exit at frame row 26, the duplicated stamp
+    assert len(r.trades) == 1 and r.trades[0].reason == "green_hold"
