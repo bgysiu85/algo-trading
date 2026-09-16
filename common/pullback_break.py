@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-r"""MCL-PB v2 against MCL -- a swing high, two red bars, buy the break.
+r"""MCL-PB v3 against MCL -- a swing high, two red bars, a break that closes on volume.
 
     python -m common.pullback_break --jobs 8
 
-Registered in docs/research/REGISTERED_pullback_break_v2.md before this
-version ran (v1, REGISTERED_pullback_break.md, returned NOTHING). The verdict
-rule below is §3 of that document, verbatim in code, read on the primary cell.
-Three cells -- no target, 10c, 25c -- are the values Ben named, all printed,
-none chosen from the table.
+Registered in docs/research/REGISTERED_pullback_break_v3.md before this
+version ran (v1 and v2 both returned NOTHING). The verdict rule below is v1 §3,
+verbatim in code, read on the primary cell. Three cells -- green hold 3 bars,
+5 bars, none -- all printed, none chosen from the table.
 
 SAME TAPE, SAME PROCESS, SAME SETTINGS. Both books come out of one `run_day`
 per session, over the same point-in-time universe, the same warm-up frames
@@ -46,10 +45,11 @@ DROP = 5
 PRE_CUT = dtime(7, 0)          # Ben's "before 7am ET"
 
 MCL_NAME, PB_NAME = "MCL", "MCL-PB"
-# (name, target_cents). The first is the primary cell the verdict is read on.
-CELLS = (("PB2", None), ("PB2-10c", 0.10), ("PB2-25c", 0.25))
-OUTCOMES = ("triggered", "band_refused", "refused_macd", "refused_busy",
-            "expired", "window")
+# (name, engine kwargs). The first is the primary cell the verdict is read on.
+CELLS = (("PB3-g3", {"green_hold_bars": 3}), ("PB3-g5", {"green_hold_bars": 5}),
+         ("PB3-g0", {}))
+OUTCOMES = ("triggered", "band_refused", "refused_busy", "expired", "window")
+REFUSALS = ("close", "vol", "macd")
 
 
 # --- the tape ---------------------------------------------------------------
@@ -71,7 +71,8 @@ def trade_row(t, symbol: str, day: str, setup=None, index=None) -> dict:
          "bars_held": int(t.bars_held),
          "exit_et": _et(t.exit_time), "exit_px": float(t.exit_price)}
     if setup is not None:
-        r["level"] = float(setup.peak)
+        r["top"] = float(setup.peak)
+        r["level"] = float(setup.level)
         r["reds"] = int(setup.reds)
         if index is not None:
             r["top_et"] = _et(index[setup.peak_i])
@@ -102,7 +103,8 @@ def run_day(args: tuple) -> tuple:
     d = _date.fromisoformat(day)
 
     res = {"mcl": [], "pb": {name: [] for name, _ in CELLS},
-           "setups": Counter(), "levels_per_symday": [], "symdays": 0, "errors": 0}
+           "setups": Counter(), "refused": Counter(), "breaks": 0,
+           "levels_per_symday": [], "symdays": 0, "errors": 0, "error_days": []}
     for rec in universe:
         df = frame[frame["symbol"] == rec["symbol"]]
         if df.empty or not rec.get("first_seen"):
@@ -116,15 +118,18 @@ def run_day(args: tuple) -> tuple:
                                         not_before=floor, **extra)
             dets = {name: PB.backtest_session_detail(df, d, ET, entry_shares=QTY,
                                                      not_before=floor,
-                                                     target_cents=tc, **extra)
-                    for name, tc in CELLS}
-        except Exception:                                   # noqa: BLE001
+                                                     **kw, **extra)
+                    for name, kw in CELLS}
+        except Exception as e:                              # noqa: BLE001
             res["errors"] += 1
+            res["error_days"].append(f"{rec['symbol']} {day}: {type(e).__name__}: {e}")
             continue
         res["symdays"] += 1
         res["mcl"] += [trade_row(t, rec["symbol"], day) for t in base]
         primary = dets[CELLS[0][0]]
         res["setups"].update(st.outcome for st in primary.setups)
+        res["refused"].update(primary.refused)
+        res["breaks"] += primary.breaks
         res["levels_per_symday"].append(len(primary.setups))
         for name, det in dets.items():
             for st in det.setups:
@@ -230,17 +235,21 @@ def cohort_table(mcl, pb, cut: str) -> list[str]:
 
 
 def render(mcl, pbs: dict, setups: Counter, levels_per_symday: list, symdays: int,
-           errors: int, days: list[str], elapsed: float, jobs: int) -> list[str]:
+           errors: int, days: list[str], elapsed: float, jobs: int,
+           refused: Counter | None = None, breaks: int = 0,
+           error_days: list | None = None) -> list[str]:
     cut = days[len(days) // 2] if len(days) >= 2 else (days[0] if days else "")
     primary = CELLS[0][0]
     pb = pbs[primary]
-    L = ["MCL-PB v2: A SWING HIGH, TWO RED BARS, BUY THE BREAK", "",
-         "  registered  docs/research/REGISTERED_pullback_break_v2.md",
+    L = ["MCL-PB v3: A SWING HIGH, TWO RED BARS, A BREAK THAT CLOSES ON VOLUME", "",
+         "  registered  docs/research/REGISTERED_pullback_break_v3.md",
          f"  {len(days):,} sessions   {symdays:,} symbol-days   halves cut at {cut}",
          f"  {QTY} shares   commission in, friction per round trip   "
          f"elapsed {elapsed:.1f}s on {jobs} worker(s)", ""]
     if errors:
-        L += [f"  {errors:,} symbol-day(s) raised and were dropped from EVERY book", ""]
+        L += [f"  {errors:,} symbol-day(s) raised and were dropped from EVERY book:"]
+        L += [f"    {e}" for e in (error_days or [])[:20]]
+        L += [""]
 
     pub = PUBLISHED_TRADES.get("mcl")
     L += ["POPULATION CHECK", "", f"  MCL trades here     {len(mcl):,}"]
@@ -259,19 +268,25 @@ def render(mcl, pbs: dict, setups: Counter, levels_per_symday: list, symdays: in
         v = setups.get(k, 0)
         L.append(f"  {k:<14}{v:>8,}   {100 * v / total if total else 0:5.1f}%")
     L += [f"  {'levels':<14}{total:>8,}"]
+    if refused is not None:
+        L += ["", f"  bars that reached a live level: {breaks:,}; refused at the close because"]
+        for k, lab in (("close", "closed at/below the level"), ("vol", "volume not above the prior-20 average"),
+                       ("macd", "MACD not above its signal")):
+            L.append(f"    {lab:<40}{refused.get(k, 0):>8,}")
+        L.append("  (a refused break is not consumed; the level rises to that bar's high)")
     if levels_per_symday:
         L.append(f"  per symbol-day: median {statistics.median(levels_per_symday):.0f}, "
                  f"max {max(levels_per_symday)}")
     L += ["",
           "  refused_busy = the level was crossed while a position was already",
           "  open, before first_seen, or on the final bar. MCL's signal plays no",
-          "  part in this rule, so it fires without MCL's filter.", ""]
+          "  part in this rule.", ""]
 
     L += ["THE BOOKS", ""]
     L += book_block(MCL_NAME, mcl, cut, symdays)
-    for name, _tc in CELLS:
+    for name, _kw in CELLS:
         L += book_block(name, pbs[name], cut, symdays)
-    for name, _tc in CELLS:
+    for name, _kw in CELLS:
         rows = pbs[name]
         mix = Counter(r["reason"] for r in rows)
         L.append(f"  {name} exits: " + ", ".join(f"{k} {v:,}" for k, v in mix.most_common()))
@@ -283,7 +298,7 @@ def render(mcl, pbs: dict, setups: Counter, levels_per_symday: list, symdays: in
     L += [f"THE VERDICT (registered §3, $4.26, read on {primary})", "",
           f"  {tag}: {why}",
           f"  PRE-07 {'HOLDS' if held else 'DOES NOT HOLD'}: {pwhy}", ""]
-    for name, _tc in CELLS[1:]:
+    for name, _kw in CELLS[1:]:
         t2, w2 = verdict(pbs[name], mcl, cut)
         L.append(f"  {name} would read {t2}: {w2}  -- reported, not registered")
     L += [""]
@@ -292,12 +307,11 @@ def render(mcl, pbs: dict, setups: Counter, levels_per_symday: list, symdays: in
 
     L += ["WHAT THIS IS NOT", "",
           "  NOT OUT OF SAMPLE. holdout.json has not been touched.",
-          "  NOT A QUEUE MODEL. A buy-stop is assumed filled at max(level, open)",
-          "  plus a tick the moment the bar trades through; a target is assumed",
-          "  filled at its price the moment the bar's high reaches it. On a thin",
-          "  pre-market book neither is guaranteed.",
-          "  NOT A SEARCH. The verdict is read on one cell. The target cells are",
-          "  the two values Ben named; a better-looking cell is a direction.", ""]
+          "  NOT A QUEUE MODEL. The entry is the break bar's close plus a tick,",
+          "  as MCL fills; the green-hold exit is that bar's close less a tick.",
+          "  NOT A SEARCH. The verdict is read on one cell. 3 and 5 bars are the",
+          "  values Ben named and g0 is the ablation; a better-looking cell is a",
+          "  direction.", ""]
     return L
 
 
@@ -317,7 +331,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def write_csv(path: str, mcl, pbs: dict) -> None:
     import csv
-    cols = ["book", "symbol", "date", "top_et", "level", "reds", "armed_et",
+    cols = ["book", "symbol", "date", "top_et", "top", "reds", "armed_et", "level",
             "entry_et", "entry_px", "exit_et", "exit_px", "reason", "bars_held",
             "net", "pre07"]
     Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -371,6 +385,7 @@ def main(argv=None) -> int:
 
     # DAY ORDER, not completion order -- float sums must not move with --jobs.
     mcl, pbs, setups, lps, symdays, errors = [], {n: [] for n, _ in CELLS}, Counter(), [], 0, 0
+    refused, breaks, error_days = Counter(), 0, []
     run_days = sorted(got)
     for day in run_days:
         r = got[day]
@@ -378,12 +393,15 @@ def main(argv=None) -> int:
         for name in pbs:
             pbs[name] += r["pb"][name]
         setups.update(r["setups"])
+        refused.update(r["refused"])
+        breaks += r["breaks"]
         lps += r["levels_per_symday"]
         symdays += r["symdays"]
         errors += r["errors"]
+        error_days += r["error_days"]
 
     emit("\n".join(render(mcl, pbs, setups, lps, symdays, errors, run_days,
-                          time.time() - t0, jobs)), a.out)
+                          time.time() - t0, jobs, refused, breaks, error_days)), a.out)
     write_csv(a.csv, mcl, pbs)
     return 0
 
