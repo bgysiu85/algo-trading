@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""MCL-PB against the registration, clause by clause.
+"""MCL-PB v2 against its registration, clause by clause.
 
-`MCL.signals` is replaced with a hand-built frame so every clause can be forced
-on the exact bar a test needs. The replacement is seen by MCL's own engine too,
-which is the point: the exit under test is the published one, not a copy.
+`MCL.signals` is replaced with a hand-built frame so MACD can be forced on the
+exact bar a test needs. The replacement is seen by MCL's own engine too, which
+is the point: the exit under test is the published one, not a copy.
 """
 from __future__ import annotations
 
 from datetime import date, datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -21,20 +20,16 @@ ET = ZoneInfo("America/New_York")
 DAY = date(2026, 9, 11)
 
 
-def frame(bars, entry=(), macd=None, start=dtime(4, 0)):
-    """bars = [(o, h, l, c)]; entry = row numbers with MCL's signal true;
-    macd = {row: (macd, macd_sig)} overrides, default (1.0, 0.0) = open."""
+def frame(bars, macd_closed=(), start=dtime(4, 0)):
+    """bars = [(o, h, l, c)]; macd_closed = rows where macd <= signal."""
     t0 = datetime.combine(DAY, start, tzinfo=ET)
     idx = pd.DatetimeIndex([t0 + timedelta(minutes=i) for i in range(len(bars))])
     d = pd.DataFrame(bars, columns=["open", "high", "low", "close"], index=idx)
     d["volume"] = 10_000
     d["macd"], d["macd_sig"] = 1.0, 0.0
-    for r, (m, s) in (macd or {}).items():
-        d.iloc[r, d.columns.get_loc("macd")] = m
-        d.iloc[r, d.columns.get_loc("macd_sig")] = s
+    for r in macd_closed:
+        d.iloc[r, d.columns.get_loc("macd")] = -1.0
     d["entry"] = False
-    for r in entry:
-        d.iloc[r, d.columns.get_loc("entry")] = True
     d["exit_sig"] = False
     return d
 
@@ -47,220 +42,205 @@ def patched(monkeypatch):
 
     def run(sig, **kw):
         holder["sig"] = sig
-        return PB.backtest_session_detail(sig[["open", "high", "low", "close", "volume"]],
-                                          DAY, ET, entry_shares=100, **kw)
+        return PB.backtest_session_detail(
+            sig[["open", "high", "low", "close", "volume"]], DAY, ET,
+            entry_shares=100, **kw)
     return run
 
 
-FLAT = (5.05, 5.06, 5.04, 5.05)
+G = (5.00, 5.02, 4.99, 5.01)            # a quiet green bar
+R = (5.01, 5.02, 4.98, 4.99)            # a quiet red bar
 
 
-def test_the_basic_shape_signal_lower_high_break(patched):
-    sig = frame([FLAT,
-                 (5.00, 5.10, 5.00, 5.08),   # 1 signal: peak 5.10, base 5.00
-                 (5.07, 5.08, 5.06, 5.07),   # 2 lower high -> armed
-                 (5.08, 5.15, 5.07, 5.14),   # 3 passes 5.11 -> buy
-                 (5.14, 5.16, 5.13, 5.15),
-                 FLAT], entry=[1])
+def test_peak_two_reds_break(patched):
+    sig = frame([G,
+                 (5.00, 5.10, 5.00, 5.08),   # 1 peak 5.10 (green)
+                 (5.07, 5.08, 5.04, 5.05),   # 2 red
+                 (5.05, 5.07, 5.03, 5.04),   # 3 red -> armed
+                 (5.05, 5.15, 5.04, 5.14),   # 4 breaks 5.11
+                 (5.14, 5.15, 5.13, 5.14), G])
     r = patched(sig)
-    assert [s.outcome for s in r.setups] == [PB.TRIGGERED]
     (t,) = r.trades
-    assert pd.Timestamp(t.entry_time) == sig.index[3]
-    assert t.entry_price == pytest.approx(5.12)            # 5.10 + 1c stop + 1 tick
-    assert r.setups[0].signal_close == pytest.approx(5.08)
+    assert pd.Timestamp(t.entry_time) == sig.index[4]
+    assert t.entry_price == pytest.approx(5.12)
+    s = [x for x in r.setups if x.outcome == PB.TRIGGERED][0]
+    assert s.peak == pytest.approx(5.10) and s.reds == 2 and s.armed_at == 3
 
 
-def test_a_gap_through_the_stop_pays_the_open(patched):
-    sig = frame([FLAT, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.06, 5.07),
-                 (5.30, 5.35, 5.28, 5.33), (5.33, 5.34, 5.32, 5.33), FLAT],
-                entry=[1])
-    (t,) = patched(sig).trades
-    assert t.entry_price == pytest.approx(5.31)
+def test_one_red_bar_is_not_a_pullback(patched):
+    sig = frame([G, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.04, 5.05),
+                 (5.05, 5.15, 5.04, 5.14), (5.14, 5.15, 5.13, 5.14), G])
+    assert patched(sig).trades == []
 
 
-def test_nothing_fires_without_a_pullback_first(patched):
-    """Straight up: every bar a higher high. The rule never arms."""
-    bars = [FLAT] + [(5.0 + k / 10, 5.1 + k / 10, 5.0 + k / 10, 5.1 + k / 10)
-                     for k in range(6)]
-    r = patched(frame(bars, entry=[1]))
-    assert r.trades == []
-    assert r.setups[0].outcome == PB.WINDOW
-
-
-def test_a_new_high_before_arming_moves_the_peak(patched):
-    sig = frame([FLAT,
-                 (5.00, 5.10, 5.00, 5.08),   # peak 5.10
-                 (5.09, 5.20, 5.08, 5.19),   # higher high, not armed -> peak 5.20
-                 (5.18, 5.19, 5.16, 5.17),   # lower high -> armed
-                 (5.18, 5.22, 5.17, 5.21),   # passes 5.21
-                 (5.21, 5.22, 5.20, 5.21), FLAT], entry=[1])
+def test_a_red_peak_bar_counts_as_the_first_red(patched):
+    """AEHL 09:13: the bar that made the high closed red; 09:14 red; 09:16 broke."""
+    sig = frame([G,
+                 (5.09, 5.10, 5.00, 5.02),   # 1 peak 5.10, red
+                 (5.03, 5.06, 5.01, 5.02),   # 2 red -> armed
+                 (5.03, 5.08, 5.02, 5.06),   # 3 green, no break
+                 (5.06, 5.15, 5.05, 5.14),   # 4 breaks
+                 (5.14, 5.15, 5.13, 5.14), G])
     (t,) = patched(sig).trades
     assert pd.Timestamp(t.entry_time) == sig.index[4]
-    assert t.entry_price == pytest.approx(5.22)
 
 
-def test_macd_closed_on_the_previous_bar_blocks_the_break_and_disarms(patched):
-    """macd > signal but <= 0 on bar 3: no MACD cancel, but no entry on bar 4.
-    Bar 4's high becomes the new peak and needs its own pullback."""
-    sig = frame([FLAT,
-                 (5.00, 5.10, 5.00, 5.08),
-                 (5.07, 5.08, 5.06, 5.07),   # armed
-                 (5.07, 5.08, 5.06, 5.07),   # macd -0.1 > sig -0.2, but not > 0
-                 (5.08, 5.14, 5.07, 5.13),   # break, refused -> peak 5.14
-                 (5.12, 5.13, 5.11, 5.12),   # lower high -> armed
-                 (5.13, 5.16, 5.12, 5.15),   # passes 5.15
-                 (5.15, 5.16, 5.14, 5.15), FLAT],
-                entry=[1], macd={3: (-0.1, -0.2)})
+def test_a_doji_is_not_red(patched):
+    sig = frame([G, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.04, 5.05),
+                 (5.05, 5.08, 5.04, 5.05),   # doji: would be the 2nd red
+                 (5.05, 5.15, 5.04, 5.14), (5.14, 5.15, 5.13, 5.14), G])
+    assert patched(sig).trades == []
+
+
+def test_macd_closed_on_the_completed_bar_refuses_and_the_break_is_the_new_peak(patched):
+    sig = frame([G,
+                 (5.00, 5.10, 5.00, 5.08),   # 1 peak
+                 (5.07, 5.08, 5.04, 5.05),   # 2 red
+                 (5.05, 5.07, 5.03, 5.04),   # 3 red, MACD closed
+                 (5.05, 5.15, 5.04, 5.14),   # 4 break refused -> peak 5.15
+                 (5.13, 5.14, 5.10, 5.11),   # 5 red
+                 (5.11, 5.12, 5.08, 5.09),   # 6 red -> armed
+                 (5.10, 5.20, 5.09, 5.19),   # 7 breaks 5.16
+                 (5.19, 5.20, 5.18, 5.19), G], macd_closed=[3])
+    r = patched(sig)
+    (t,) = r.trades
+    assert pd.Timestamp(t.entry_time) == sig.index[7]
+    assert t.entry_price == pytest.approx(5.17)
+    assert [s.outcome for s in r.setups][0] == PB.REFUSED_MACD
+
+
+def test_macd_is_read_on_the_completed_bar_not_the_break_bar(patched):
+    sig = frame([G, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.04, 5.05),
+                 (5.05, 5.07, 5.03, 5.04), (5.05, 5.15, 5.04, 5.14),
+                 (5.14, 5.15, 5.13, 5.14), G], macd_closed=[4])
+    assert len(patched(sig).trades) == 1
+
+
+def test_no_depth_cancel_a_deep_pullback_still_breaks(patched):
+    """AEHL 07:59: 20% below the peak, then through it."""
+    sig = frame([G, (5.00, 6.00, 5.00, 5.90), (5.80, 5.85, 5.00, 5.10),
+                 (5.10, 5.12, 4.70, 4.80), (4.80, 4.90, 4.75, 4.85),
+                 (4.90, 6.10, 4.88, 6.05), (6.05, 6.06, 6.0, 6.02), G])
     (t,) = patched(sig).trades
-    assert pd.Timestamp(t.entry_time) == sig.index[6]
-    assert t.entry_price == pytest.approx(5.16)
+    assert t.entry_price == pytest.approx(6.02)
 
 
-def test_the_macd_test_reads_the_COMPLETED_bar_not_the_trigger_bar(patched):
-    """MACD rolls over ON the break bar. The stop was live when the bar opened
-    and that bar's MACD was not knowable, so it fills."""
-    sig = frame([FLAT, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.06, 5.07),
-                 (5.08, 5.15, 5.07, 5.14), (5.14, 5.15, 5.13, 5.14), FLAT],
-                entry=[1], macd={3: (0.1, 0.5)})
-    assert len(patched(sig).trades) == 1
-
-
-def test_depth_cancel_at_half_the_run_from_the_signal_low(patched):
-    sig = frame([FLAT,
-                 (5.00, 5.10, 5.00, 5.08),   # cancel level 5.10 - 0.05 = 5.05
-                 (5.07, 5.08, 5.04, 5.05),   # low 5.04 -> cancelled
-                 (5.06, 5.20, 5.05, 5.19),   # would have broken
-                 FLAT, FLAT], entry=[1])
-    r = patched(sig)
+def test_time_limit_expires_the_peak(patched):
+    bars = [G, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.04, 5.05), (5.05, 5.07, 5.03, 5.04)]
+    bars += [(5.04, 5.05, 5.03, 5.04)] * 58          # rows 4..61, quiet, no break
+    bars += [(5.05, 5.15, 5.04, 5.14), (5.14, 5.15, 5.13, 5.14), G]   # break at row 62: 61 bars after
+    r = patched(frame(bars))
     assert r.trades == []
-    assert r.setups[0].outcome == PB.CANCEL_DEPTH
+    assert [s.outcome for s in r.setups][0] == PB.EXPIRED
 
 
-def test_depth_exactly_at_the_level_does_not_cancel(patched):
-    sig = frame([FLAT, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.05, 5.06),
-                 (5.07, 5.12, 5.06, 5.11), (5.11, 5.12, 5.10, 5.11), FLAT],
-                entry=[1])
-    assert len(patched(sig).trades) == 1
+def test_break_within_the_limit_fires(patched):
+    bars = [G, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.04, 5.05), (5.05, 5.07, 5.03, 5.04)]
+    bars += [(5.04, 5.05, 5.03, 5.04)] * 57          # rows 4..60
+    bars += [(5.05, 5.15, 5.04, 5.14), (5.14, 5.15, 5.13, 5.14), G]   # break at row 61
+    assert len(patched(frame(bars)).trades) == 1
 
 
-def test_macd_cancel_at_the_close(patched):
-    sig = frame([FLAT, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.06, 5.07),
-                 (5.08, 5.15, 5.07, 5.14), FLAT, FLAT],
-                entry=[1], macd={2: (0.1, 0.2)})
+def test_never_on_the_final_session_bar(patched):
+    sig = frame([G, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.04, 5.05),
+                 (5.05, 5.07, 5.03, 5.04), (5.05, 5.15, 5.04, 5.14)])
     r = patched(sig)
-    assert r.trades == []
-    assert r.setups[0].outcome == PB.CANCEL_MACD
+    assert r.trades == [] and PB.WINDOW in [x.outcome for x in r.setups]
 
 
-def test_the_resting_stop_is_tested_before_the_cancels(patched):
-    """Armed bar that breaks AND trades through the depth level: the stop was
-    resting, so it filled; the cancel would only have applied at the close."""
-    sig = frame([FLAT, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.06, 5.07),
-                 (5.07, 5.12, 4.90, 4.95), (4.95, 4.96, 4.94, 4.95), FLAT],
-                entry=[1])
-    r = patched(sig)
-    assert r.setups[0].outcome == PB.TRIGGERED
-    assert len(r.trades) == 1
+def test_the_floor_blocks_the_trigger_but_the_peak_is_still_built(patched):
+    sig = frame([G, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.04, 5.05),
+                 (5.05, 5.07, 5.03, 5.04), (5.05, 5.15, 5.04, 5.14),
+                 (5.13, 5.14, 5.10, 5.11), (5.11, 5.12, 5.08, 5.09),
+                 (5.10, 5.20, 5.09, 5.19), (5.19, 5.20, 5.18, 5.19), G])
+    r = patched(sig, not_before=dtime(4, 5))
+    (t,) = r.trades
+    assert pd.Timestamp(t.entry_time) == sig.index[7]      # the second break
+    assert t.entry_price == pytest.approx(5.17)             # measured off peak 5.15
 
 
-def test_never_triggers_on_the_final_session_bar(patched):
-    sig = frame([FLAT, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.06, 5.07),
-                 (5.08, 5.15, 5.07, 5.14)], entry=[1])
-    r = patched(sig)
-    assert r.trades == []
-    assert r.setups[0].outcome == PB.WINDOW
-
-
-def test_a_signal_before_the_floor_opens_nothing(patched):
-    sig = frame([FLAT, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.06, 5.07),
-                 (5.08, 5.15, 5.07, 5.14), (5.14, 5.15, 5.13, 5.14), FLAT],
-                entry=[1])
-    r = patched(sig, not_before=dtime(4, 2))
-    assert r.setups == [] and r.trades == []
-
-
-def test_signals_while_in_a_trade_are_ignored_and_the_next_needs_a_fresh_one(patched):
-    bars = [FLAT,
-            (5.00, 5.10, 5.00, 5.08),   # 1 signal
-            (5.07, 5.08, 5.06, 5.07),   # 2 armed
-            (5.08, 5.15, 5.07, 5.14),   # 3 buy @ 5.12, peak seeded 5.12
-            (5.14, 5.20, 5.13, 5.19),   # 4 signal while long -> ignored
-            (5.19, 5.20, 4.80, 4.85),   # 5 trail (5.20*0.95=4.94) -> out
-            (4.85, 4.90, 4.84, 4.88),   # 6 signal: fresh setup, peak 4.90
-            (4.88, 4.89, 4.87, 4.88),   # 7 armed
-            (4.89, 4.95, 4.88, 4.94),   # 8 buy @ 4.92
-            (4.94, 4.95, 4.93, 4.94), FLAT]
-    r = patched(frame(bars, entry=[1, 4, 6]))
-    assert [s.signal_i for s in r.setups] == [1, 6]
-    assert [pd.Timestamp(t.entry_time) for t in r.trades] == \
-        [frame(bars).index[3], frame(bars).index[8]]
+def test_the_peak_made_inside_a_trade_is_the_next_setups_peak(patched):
+    bars = [G,
+            (5.00, 5.10, 5.00, 5.08),   # 1 peak
+            (5.07, 5.08, 5.04, 5.05),   # 2 red
+            (5.05, 5.07, 5.03, 5.04),   # 3 red -> armed
+            (5.05, 5.15, 5.04, 5.14),   # 4 buy 5.12; in trade
+            (5.14, 5.40, 5.13, 5.38),   # 5 new peak 5.40 inside the trade
+            (5.38, 5.39, 5.30, 5.31),   # 6 red
+            (5.31, 5.32, 5.05, 5.06),   # 7 red; trail 5.13 -> out
+            (5.06, 5.45, 5.05, 5.44),   # 8 breaks 5.41 -> buy 5.42
+            (5.44, 5.45, 5.43, 5.44), G]
+    r = patched(frame(bars))
+    assert [t.entry_price for t in r.trades] == pytest.approx([5.12, 5.42])
     assert r.trades[0].reason == "trailing_stop"
 
 
-def test_a_setup_pending_ignores_new_signals(patched):
-    sig = frame([FLAT, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.06, 5.07),
-                 (5.07, 5.08, 5.06, 5.07),   # signal again, setup keeps its peak
-                 (5.08, 5.12, 5.07, 5.11), (5.11, 5.12, 5.10, 5.11), FLAT],
-                entry=[1, 3])
-    r = patched(sig)
-    assert len(r.setups) == 1 and r.setups[0].peak == pytest.approx(5.10)
+def test_no_trigger_on_the_exit_bar_itself(patched):
+    bars = [G, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.04, 5.05),
+            (5.05, 5.07, 5.03, 5.04), (5.05, 5.15, 5.04, 5.14),   # 4 buy
+            (5.14, 5.40, 5.13, 5.38),   # 5 peak 5.40 in trade
+            (5.38, 5.39, 5.30, 5.31),   # 6 red
+            (5.31, 5.32, 5.15, 5.20),   # 7 red -> armed
+            (5.20, 5.45, 5.05, 5.06),   # 8 trail hit AND through 5.41 -- no entry
+            (5.06, 5.10, 5.05, 5.08), G]
+    r = patched(frame(bars))
+    assert len(r.trades) == 1 and r.trades[0].reason == "trailing_stop"
+
+
+def test_target_cents_reaches_the_engine(patched):
+    sig = frame([G, (5.00, 5.10, 5.00, 5.08), (5.07, 5.08, 5.04, 5.05),
+                 (5.05, 5.07, 5.03, 5.04), (5.05, 5.15, 5.04, 5.14),
+                 (5.14, 5.30, 5.13, 5.28), (5.28, 5.29, 5.27, 5.28), G])
+    (t,) = patched(sig, target_cents=0.10).trades
+    assert t.reason == "target" and t.exit_price == pytest.approx(5.22)
 
 
 def test_engine_owned_kwargs_are_refused():
     with pytest.raises(TypeError):
-        PB.backtest_session_detail(frame([FLAT]), DAY, ET, entry_bars=None)
+        PB.backtest_session_detail(frame([G]), DAY, ET, entry_bars=None)
 
 
-def test_band_refusal_is_recorded_not_dropped(patched):
-    bars = [(1.50, 1.51, 1.49, 1.50), (1.40, 1.60, 1.40, 1.55),
-            (1.55, 1.56, 1.54, 1.55), (1.56, 1.70, 1.55, 1.69),
-            (1.69, 1.70, 1.68, 1.69), (1.69, 1.70, 1.68, 1.69)]
-    r = patched(frame(bars, entry=[1]))
-    assert r.trades == [] and r.setups[0].outcome == PB.BAND
+def test_band_refusal_is_recorded(patched):
+    bars = [(1.50, 1.51, 1.49, 1.50), (1.40, 1.60, 1.40, 1.55), (1.55, 1.56, 1.50, 1.52),
+            (1.52, 1.53, 1.49, 1.50), (1.51, 1.70, 1.50, 1.69), (1.69, 1.70, 1.68, 1.69), G]
+    r = patched(frame(bars))
+    assert r.trades == [] and PB.BAND in [s.outcome for s in r.setups]
 
 
-def test_a_refused_break_needs_a_NEW_pullback_before_the_next_break(patched):
-    """Bar 4's break is refused on MACD. Bar 5 goes straight on to another high
-    with MACD open again -- that is not a pullback-then-break, so no entry until
-    bar 6 pulls back and bar 7 breaks."""
-    sig = frame([FLAT,
-                 (5.00, 5.10, 5.00, 5.08),
-                 (5.07, 5.08, 5.06, 5.07),   # 2 armed
-                 (5.07, 5.08, 5.06, 5.07),   # 3 macd not > 0
-                 (5.08, 5.14, 5.07, 5.13),   # 4 refused -> peak 5.14, disarmed
-                 (5.13, 5.18, 5.12, 5.17),   # 5 higher again: NOT an entry
-                 (5.16, 5.17, 5.15, 5.16),   # 6 lower high -> armed
-                 (5.17, 5.20, 5.16, 5.19),   # 7 passes 5.19
-                 (5.19, 5.20, 5.18, 5.19), FLAT],
-                entry=[1], macd={3: (-0.1, -0.2)})
-    (t,) = patched(sig).trades
-    assert pd.Timestamp(t.entry_time) == sig.index[7]
-    assert t.entry_price == pytest.approx(5.20)
+def test_two_levels_live_at_once_the_AEHL_shape(patched):
+    """A 6.79 top, a pullback whose bounce tops at 6.20, then 6.21 is bought
+    (07:33) and, after that trade, 6.80 is bought (07:58)."""
+    bars = [G,
+            (6.00, 6.79, 6.00, 6.70),   # 1 outer top
+            (6.70, 6.72, 6.10, 6.15),   # 2 red
+            (6.15, 6.16, 5.80, 5.90),   # 3 red -> level 6.79
+            (5.90, 6.05, 5.85, 6.00),   # 4 up: candidate 6.05
+            (6.02, 6.20, 6.00, 6.10),   # 5 inner top 6.20
+            (6.10, 6.12, 5.95, 5.98),   # 6 red
+            (5.98, 6.00, 5.90, 5.93),   # 7 red -> level 6.20
+            (5.95, 6.50, 5.94, 6.45),   # 8 breaks 6.21 -> buy 6.22; peak 6.50 in trade
+            (6.45, 6.46, 6.30, 6.32),   # 9 red
+            (6.32, 6.33, 6.10, 6.12),   # 10 red; trail 6.175 hit -> out; level 6.50
+            (6.12, 6.20, 6.10, 6.18),
+            (6.18, 7.20, 6.15, 7.10),   # 12 through 6.51 AND 6.80: one buy at 6.52
+            (7.10, 7.15, 7.05, 7.12), G]
+    r = patched(frame(bars))
+    assert [t.entry_price for t in r.trades] == pytest.approx([6.22, 6.52])
+    ends = {(s.peak, s.outcome) for s in r.setups}
+    assert (6.79, PB.REFUSED_BUSY) in ends       # crossed on the bar that bought 6.51
 
 
-def test_the_pole_starts_at_the_lowest_low_of_the_five_bars_to_the_signal(patched):
-    """Pole low 4.80 (4 bars before the signal), peak 5.10 -> cancel below 4.95.
-    A pullback to 5.00 is inside it; against the signal bar alone (5.05) it
-    would have cancelled."""
-    sig = frame([FLAT, FLAT,
-                 (4.85, 4.90, 4.80, 4.88),   # 2  pole low
-                 (4.88, 4.95, 4.87, 4.94),
-                 (4.94, 4.99, 4.93, 4.98),
-                 (4.98, 5.02, 4.97, 5.01),
-                 (5.01, 5.10, 5.00, 5.08),   # 6  signal
-                 (5.07, 5.08, 5.00, 5.02),   # 7  lower high, low 5.00 -> armed, alive
-                 (5.03, 5.12, 5.02, 5.11),   # 8  passes 5.11
-                 (5.11, 5.12, 5.10, 5.11), FLAT], entry=[6])
-    r = patched(sig)
-    assert r.setups[0].outcome == PB.TRIGGERED
-
-
-def test_a_low_six_bars_back_is_not_in_the_pole(patched):
-    sig = frame([FLAT,
-                 (4.85, 4.90, 4.50, 4.88),   # 1  six bars before the signal
-                 FLAT, FLAT, FLAT, FLAT,
-                 (5.00, 5.10, 5.00, 5.08),   # 6  signal; pole low 5.00 -> cancel < 5.05
-                 (5.07, 5.08, 5.02, 5.03),   # 7  cancelled
-                 (5.03, 5.12, 5.02, 5.11), (5.11, 5.12, 5.10, 5.11), FLAT],
-                entry=[6])
-    assert patched(sig).setups[0].outcome == PB.CANCEL_DEPTH
+def test_a_lower_high_in_a_decline_is_not_a_swing_high(patched):
+    """After the 6.79 top: 6.10, 6.02, 5.95 -- lower highs, each followed by red
+    bars. None is a level; the first break of any of them is not a trade."""
+    bars = [G,
+            (6.00, 6.79, 6.00, 6.70),
+            (6.70, 6.72, 6.10, 6.15), (6.15, 6.16, 5.80, 5.90),   # level 6.79
+            (5.95, 6.10, 5.70, 5.75),   # 4 lower high, red
+            (5.75, 6.02, 5.60, 5.65),   # 5 lower high, red
+            (5.65, 5.95, 5.50, 5.55),   # 6 lower high, red
+            (5.55, 6.15, 5.54, 6.12),   # 7 through 6.11 and 6.03 -- nothing live there
+            (6.12, 6.14, 6.10, 6.13), G]
+    r = patched(frame(bars))
+    assert r.trades == []
+    assert all(s.peak == pytest.approx(6.79) for s in r.setups)

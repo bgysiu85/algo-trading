@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-r"""MCL-PB against MCL -- does waiting for the pullback and buying the break help?
+r"""MCL-PB v2 against MCL -- a swing high, two red bars, buy the break.
 
     python -m common.pullback_break --jobs 8
 
-Registered in docs/research/REGISTERED_pullback_break.md before this file
-existed. The verdict rule below is that document's §3, verbatim in code. One
-cell, no grid: the parameters are the ones Ben chose in chat on 2026-09-16.
+Registered in docs/research/REGISTERED_pullback_break_v2.md before this
+version ran (v1, REGISTERED_pullback_break.md, returned NOTHING). The verdict
+rule below is §3 of that document, verbatim in code, read on the primary cell.
+Three cells -- no target, 10c, 25c -- are the values Ben named, all printed,
+none chosen from the table.
 
 SAME TAPE, SAME PROCESS, SAME SETTINGS. Both books come out of one `run_day`
 per session, over the same point-in-time universe, the same warm-up frames
@@ -44,7 +46,10 @@ DROP = 5
 PRE_CUT = dtime(7, 0)          # Ben's "before 7am ET"
 
 MCL_NAME, PB_NAME = "MCL", "MCL-PB"
-OUTCOMES = ("triggered", "band_refused", "cancel_depth", "cancel_macd", "window")
+# (name, target_cents). The first is the primary cell the verdict is read on.
+CELLS = (("PB2", None), ("PB2-10c", 0.10), ("PB2-25c", 0.25))
+OUTCOMES = ("triggered", "band_refused", "refused_macd", "refused_busy",
+            "expired", "window")
 
 
 # --- the tape ---------------------------------------------------------------
@@ -56,8 +61,8 @@ def _et(ts) -> str:
 
 def trade_row(t, symbol: str, day: str, setup=None, index=None) -> dict:
     """One trade. With `setup` (and the signals frame's `index`), the MCL-PB
-    rows also carry where the setup began, armed and peaked -- the bars someone
-    needs to find the trade on a chart."""
+    rows also carry the level, its top and its arming bar -- the coordinates
+    someone needs to find the trade on a chart."""
     import pandas as pd
     et = pd.Timestamp(t.entry_time).tz_convert(ET)
     r = {"symbol": symbol, "date": day, "net": float(t.net),
@@ -66,14 +71,11 @@ def trade_row(t, symbol: str, day: str, setup=None, index=None) -> dict:
          "bars_held": int(t.bars_held),
          "exit_et": _et(t.exit_time), "exit_px": float(t.exit_price)}
     if setup is not None:
-        r["premium_pct"] = 100.0 * (float(t.entry_price) / setup.signal_close - 1.0)
-        r["signal_close"] = float(setup.signal_close)
-        r["peak"] = float(setup.peak)
-        r["pole_low"] = float(setup.pole_low)
+        r["level"] = float(setup.peak)
+        r["reds"] = int(setup.reds)
         if index is not None:
-            r["signal_et"] = _et(index[setup.signal_i])
-            if setup.armed_at is not None:
-                r["armed_et"] = _et(index[setup.armed_at])
+            r["top_et"] = _et(index[setup.peak_i])
+            r["armed_et"] = _et(index[setup.armed_at])
     return r
 
 
@@ -99,30 +101,36 @@ def run_day(args: tuple) -> tuple:
     frame = build_frame(parts, day)
     d = _date.fromisoformat(day)
 
-    res = {"mcl": [], "pb": [], "setups": Counter(), "symdays": 0, "errors": 0}
+    res = {"mcl": [], "pb": {name: [] for name, _ in CELLS},
+           "setups": Counter(), "levels_per_symday": [], "symdays": 0, "errors": 0}
     for rec in universe:
         df = frame[frame["symbol"] == rec["symbol"]]
         if df.empty or not rec.get("first_seen"):
             continue
         df = df.sort_index(kind="mergesort")
         floor = first_seen_time(rec)
-        # BOTH OR NEITHER. A symbol-day that raises in one engine is dropped
-        # from both, or the two books stop covering the same opportunities.
+        # ALL OR NONE. A symbol-day that raises in any cell is dropped from
+        # every book, or the books stop covering the same opportunities.
         try:
             base = mod.backtest_session(df, d, ET, entry_shares=QTY,
                                         not_before=floor, **extra)
-            det = PB.backtest_session_detail(df, d, ET, entry_shares=QTY,
-                                             not_before=floor, **extra)
+            dets = {name: PB.backtest_session_detail(df, d, ET, entry_shares=QTY,
+                                                     not_before=floor,
+                                                     target_cents=tc, **extra)
+                    for name, tc in CELLS}
         except Exception:                                   # noqa: BLE001
             res["errors"] += 1
             continue
         res["symdays"] += 1
         res["mcl"] += [trade_row(t, rec["symbol"], day) for t in base]
-        for st in det.setups:
-            res["setups"][st.outcome] += 1
-            if st.trade is not None:
-                res["pb"].append(trade_row(st.trade, rec["symbol"], day,
-                                           st, det.index))
+        primary = dets[CELLS[0][0]]
+        res["setups"].update(st.outcome for st in primary.setups)
+        res["levels_per_symday"].append(len(primary.setups))
+        for name, det in dets.items():
+            for st in det.setups:
+                if st.trade is not None:
+                    res["pb"][name].append(trade_row(st.trade, rec["symbol"], day,
+                                                     st, det.index))
     return day, res, ""
 
 
@@ -221,16 +229,18 @@ def cohort_table(mcl, pb, cut: str) -> list[str]:
     return L
 
 
-def render(mcl, pb, setups: Counter, symdays: int, errors: int, days: list[str],
-           elapsed: float, jobs: int) -> list[str]:
+def render(mcl, pbs: dict, setups: Counter, levels_per_symday: list, symdays: int,
+           errors: int, days: list[str], elapsed: float, jobs: int) -> list[str]:
     cut = days[len(days) // 2] if len(days) >= 2 else (days[0] if days else "")
-    L = ["MCL-PB: WAIT FOR THE PULLBACK, BUY THE BREAK OF THE PEAK", "",
-         "  registered  docs/research/REGISTERED_pullback_break.md",
+    primary = CELLS[0][0]
+    pb = pbs[primary]
+    L = ["MCL-PB v2: A SWING HIGH, TWO RED BARS, BUY THE BREAK", "",
+         "  registered  docs/research/REGISTERED_pullback_break_v2.md",
          f"  {len(days):,} sessions   {symdays:,} symbol-days   halves cut at {cut}",
          f"  {QTY} shares   commission in, friction per round trip   "
          f"elapsed {elapsed:.1f}s on {jobs} worker(s)", ""]
     if errors:
-        L += [f"  {errors:,} symbol-day(s) raised and were dropped from BOTH books", ""]
+        L += [f"  {errors:,} symbol-day(s) raised and were dropped from EVERY book", ""]
 
     pub = PUBLISHED_TRADES.get("mcl")
     L += ["POPULATION CHECK", "", f"  MCL trades here     {len(mcl):,}"]
@@ -244,39 +254,50 @@ def render(mcl, pb, setups: Counter, symdays: int, errors: int, days: list[str],
     L += [""]
 
     total = sum(setups.values())
-    L += ["WHAT HAPPENED TO EVERY MCL-PB SETUP", ""]
+    L += [f"WHAT HAPPENED TO EVERY LEVEL ({primary}, the exits do not change this)", ""]
     for k in OUTCOMES:
         v = setups.get(k, 0)
-        L.append(f"  {k:<14}{v:>7,}   {100 * v / total if total else 0:5.1f}%")
-    L += [f"  {'setups':<14}{total:>7,}", ""]
-    prem = [r["premium_pct"] for r in pb if "premium_pct" in r]
-    if prem:
-        L += [f"  entry premium over the signal bar's close: median {statistics.median(prem):+.2f}%"
-              f"   p90 {sorted(prem)[int(0.9 * (len(prem) - 1))]:+.2f}%", ""]
-    L += ["  A setup is opened only by an MCL signal taken while flat, so MCL-PB",
-          "  sees fewer signals than MCL fires -- it is out of the market later,",
-          "  and still in a trade when some of MCL's signals arrive.", ""]
+        L.append(f"  {k:<14}{v:>8,}   {100 * v / total if total else 0:5.1f}%")
+    L += [f"  {'levels':<14}{total:>8,}"]
+    if levels_per_symday:
+        L.append(f"  per symbol-day: median {statistics.median(levels_per_symday):.0f}, "
+                 f"max {max(levels_per_symday)}")
+    L += ["",
+          "  refused_busy = the level was crossed while a position was already",
+          "  open, before first_seen, or on the final bar. MCL's signal plays no",
+          "  part in this rule, so it fires without MCL's filter.", ""]
 
-    L += ["THE TWO BOOKS", ""]
+    L += ["THE BOOKS", ""]
     L += book_block(MCL_NAME, mcl, cut, symdays)
-    L += book_block(PB_NAME, pb, cut, symdays)
+    for name, _tc in CELLS:
+        L += book_block(name, pbs[name], cut, symdays)
+    for name, _tc in CELLS:
+        rows = pbs[name]
+        mix = Counter(r["reason"] for r in rows)
+        L.append(f"  {name} exits: " + ", ".join(f"{k} {v:,}" for k, v in mix.most_common()))
+    L += [""]
     L += cohort_table(mcl, pb, cut)
 
     tag, why = verdict(pb, mcl, cut)
     held, pwhy = pre07_holds(pb, mcl, cut)
-    L += ["THE VERDICT (registered §3, $4.26)", "",
+    L += [f"THE VERDICT (registered §3, $4.26, read on {primary})", "",
           f"  {tag}: {why}",
           f"  PRE-07 {'HOLDS' if held else 'DOES NOT HOLD'}: {pwhy}", ""]
+    for name, _tc in CELLS[1:]:
+        t2, w2 = verdict(pbs[name], mcl, cut)
+        L.append(f"  {name} would read {t2}: {w2}  -- reported, not registered")
+    L += [""]
     if tag == "CLEARS":
         L += ["  A candidate for the holdout, under its own registration. Not a rule to ship.", ""]
 
     L += ["WHAT THIS IS NOT", "",
           "  NOT OUT OF SAMPLE. holdout.json has not been touched.",
           "  NOT A QUEUE MODEL. A buy-stop is assumed filled at max(level, open)",
-          "  plus a tick the moment the bar trades through. On a thin pre-market",
-          "  book the first print through a level can be a few hundred shares.",
-          "  NOT A SEARCH. One cell. A better-looking depth, arming rule or MACD",
-          "  clause found by editing and re-running is a new registration.", ""]
+          "  plus a tick the moment the bar trades through; a target is assumed",
+          "  filled at its price the moment the bar's high reaches it. On a thin",
+          "  pre-market book neither is guaranteed.",
+          "  NOT A SEARCH. The verdict is read on one cell. The target cells are",
+          "  the two values Ben named; a better-looking cell is a direction.", ""]
     return L
 
 
@@ -294,16 +315,16 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def write_csv(path: str, mcl, pb) -> None:
+def write_csv(path: str, mcl, pbs: dict) -> None:
     import csv
-    cols = ["book", "symbol", "date", "signal_et", "signal_close", "armed_et",
-            "pole_low", "peak", "entry_et", "entry_px", "premium_pct", "exit_et", "exit_px",
-            "reason", "bars_held", "net", "pre07"]
+    cols = ["book", "symbol", "date", "top_et", "level", "reds", "armed_et",
+            "entry_et", "entry_px", "exit_et", "exit_px", "reason", "bars_held",
+            "net", "pre07"]
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
-        for name, rows in ((MCL_NAME, mcl), (PB_NAME, pb)):
+        for name, rows in [(MCL_NAME, mcl)] + list(pbs.items()):
             for r in rows:
                 w.writerow(dict(r, book=name))
 
@@ -349,19 +370,21 @@ def main(argv=None) -> int:
         ex.shutdown()
 
     # DAY ORDER, not completion order -- float sums must not move with --jobs.
-    mcl, pb, setups, symdays, errors = [], [], Counter(), 0, 0
+    mcl, pbs, setups, lps, symdays, errors = [], {n: [] for n, _ in CELLS}, Counter(), [], 0, 0
     run_days = sorted(got)
     for day in run_days:
         r = got[day]
         mcl += r["mcl"]
-        pb += r["pb"]
+        for name in pbs:
+            pbs[name] += r["pb"][name]
         setups.update(r["setups"])
+        lps += r["levels_per_symday"]
         symdays += r["symdays"]
         errors += r["errors"]
 
-    emit("\n".join(render(mcl, pb, setups, symdays, errors, run_days,
+    emit("\n".join(render(mcl, pbs, setups, lps, symdays, errors, run_days,
                           time.time() - t0, jobs)), a.out)
-    write_csv(a.csv, mcl, pb)
+    write_csv(a.csv, mcl, pbs)
     return 0
 
 
