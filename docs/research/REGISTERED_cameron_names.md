@@ -237,3 +237,55 @@ still discriminate.
 
 Everything else in this document stands unchanged — in particular §1, which is
 the part that governs how any of it may be read.
+
+---
+
+# AMENDMENT 2 — 2026-09-16, **AFTER** THE FIRST RUN
+
+Marked as post-run, because it is. It affects **§4 only**. §2 and §3 — the
+registered primary and its reading — do not use the arms and are untouched by
+it.
+
+## What the first run's arithmetic showed
+
+§4 defines the OURS arm as "our `best_rank <= 5` names". The run produced
+**2,372 trades over 241 sessions** for that arm — roughly ten a session, where
+a five-name watchlist can produce at most five.
+
+`best_rank <= 5` is not five names. It is the best rank a name ever reached,
+and 550 of 551 sessions have ties, so the filter takes:
+
+| filter | symbol-days selected | share of the universe | median per session | max |
+|---|---:|---:|---:|---:|
+| `best_rank <= 5` | 5,585 of 6,170 | **90.5%** | 10 | 28 |
+| `first_rank <= 5` | 5,227 of 6,170 | 84.7% | 9 | 25 |
+| a strict cut of 5 | 2,703 of 6,170 | 43.8% | 5 | 5 |
+
+**The arm labelled "our top 5" was our whole list.** A reader comparing his
+451 names against it would believe they were reading a comparison against a
+five-name watchlist.
+
+This is the same defect Amendment 1 found in §2.1, one section further down. I
+fixed the criterion and left the identical flaw in the arm definition, which
+is worth recording as plainly as the fix: finding a defect shape once does not
+sweep the file for it.
+
+## The correction
+
+§4's OURS arm is replaced by two, both printed:
+
+- **OURS-5** — the five lowest `first_rank` that session, ties by symbol. An
+  approximation of a five-name watchlist (a real list re-orders through the
+  morning) and labelled as one. Ranked on `first_rank` because a watchlist is
+  built from what you can see when you see it; `best_rank` needs the rest of
+  the day.
+- **OURS-ALL** — every name with `best_rank <= 5`, i.e. 90.5% of the universe.
+  Kept because it is what the first run actually produced under the wrong
+  label, and a number that was once wrong is worth showing beside the one that
+  replaced it.
+
+The per-symbol denominator is now printed as its own column rather than
+described in prose, so the two-denominator requirement can be checked rather
+than taken on trust.
+
+Nothing else changes. §1 still governs how any of it may be read.

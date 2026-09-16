@@ -284,32 +284,63 @@ def test_beat_rate_is_the_share_of_draws_reaching_the_observed_figure():
 
 
 # ==========================================================================
-# THE ARMS
+# THE ARMS — and the label that was wrong
 # ==========================================================================
-def test_both_arms_come_from_the_same_pair_records():
+def test_the_five_arm_really_is_FIVE_names():
+    """THE DEFECT THIS EXISTS FOR. `best_rank <= 5` is not five names: 550 of
+    551 real sessions have tied best_ranks, so that filter takes 90.5% of every
+    symbol-day in the universe -- a median of 10 a session and up to 28. An arm
+    built that way is our WHOLE LIST wearing the label "top 5"."""
+    u = pit({"2026-01-02": [(f"S{k}", 1, 1) for k in range(1, 21)]})
+    arms = CN.arm_universes([{"date": "2026-01-02", "symbol": "S1"}], u)
+    assert len(arms["OURS-5"]["2026-01-02"]) == CN.TOP_N
+    assert len(arms["OURS-ALL"]["2026-01-02"]) == 20, \
+        "the loose arm is the whole list, which is the point of printing it"
+
+
+def test_a_session_smaller_than_the_cut_is_not_padded():
+    u = pit({"2026-01-02": [("A", 1, 1), ("B", 2, 2)]})
+    arms = CN.arm_universes([{"date": "2026-01-02", "symbol": "A"}], u)
+    assert len(arms["OURS-5"]["2026-01-02"]) == 2
+
+
+def test_the_strict_cut_ranks_on_first_rank_not_best_rank():
+    """A watchlist is built from what you can see when you see it. best_rank
+    is the best a name ever reached, which needs the rest of the day."""
+    u = pit({"2026-01-02": [("EARLY", 1, 9), ("LATE", 9, 1)]})
+    picked = [r["symbol"] for r in CN.strict_top(u["2026-01-02"])]
+    assert picked[0] == "EARLY"
+
+
+def test_the_strict_cut_breaks_ties_deterministically():
+    """Otherwise the arm changes between runs and a difference in the P/L
+    table cannot be attributed to anything."""
+    u = pit({"2026-01-02": [(f"S{k}", 1, 1) for k in range(1, 21)]})
+    a = [r["symbol"] for r in CN.strict_top(u["2026-01-02"])]
+    b = [r["symbol"] for r in CN.strict_top(dict(reversed(
+        list(u["2026-01-02"].items()))))]
+    assert a == b == sorted(a)
+
+
+def test_every_arm_comes_from_the_same_pair_records():
     """A name cannot be ranked from one tape and scored on another. There is
-    one universe object here and both arms are subsets of it."""
+    one universe object here and every arm is a subset of it."""
     u = pit({"2026-01-02": [("AAA", 1, 1), ("BBB", 9, 9), ("CCC", 3, 3)]})
-    his, ours = CN.arm_universes([{"date": "2026-01-02", "symbol": "BBB"}], u)
-    assert [r["symbol"] for r in his["2026-01-02"]] == ["BBB"]
-    assert sorted(r["symbol"] for r in ours["2026-01-02"]) == ["AAA", "CCC"]
-    assert all(r is u["2026-01-02"][r["symbol"]] for r in his["2026-01-02"])
+    arms = CN.arm_universes([{"date": "2026-01-02", "symbol": "BBB"}], u)
+    assert [r["symbol"] for r in arms["HIS"]["2026-01-02"]] == ["BBB"]
+    for name, per_day in arms.items():
+        for r in per_day["2026-01-02"]:
+            assert r is u["2026-01-02"][r["symbol"]], f"{name} copied a record"
 
 
-def test_the_OURS_arm_is_the_top_cut_and_not_the_whole_universe():
-    u = pit({"2026-01-02": [(f"S{k}", k, k) for k in range(1, 15)]})
-    _, ours = CN.arm_universes([{"date": "2026-01-02", "symbol": "S1"}], u)
-    assert len(ours["2026-01-02"]) == CN.TOP_N
-
-
-def test_only_sessions_he_named_something_on_enter_either_arm():
-    """Scoring OURS over sessions with no mention would compare his 242 days
+def test_only_sessions_he_named_something_on_enter_any_arm():
+    """Scoring ours over sessions with no mention would compare his 241 days
     against our 551 and call the difference selection."""
     u = days(4, per=8)
     one = sorted(u)[0]
-    his, ours = CN.arm_universes(
-        [{"date": one, "symbol": next(iter(u[one]))}], u)
-    assert set(his) == set(ours) == {one}
+    arms = CN.arm_universes([{"date": one, "symbol": next(iter(u[one]))}], u)
+    for per_day in arms.values():
+        assert set(per_day) == {one}
 
 
 # ==========================================================================
@@ -510,7 +541,8 @@ def test_the_excluded_census_entries_are_declared_in_the_report():
 def test_the_pnl_table_carries_its_contamination_warning_inline():
     """A reader who skips to the money table must still meet the caveat."""
     pnl = {"HIS": [{"date": "2026-01-02", "symbol": "A", "net": 12.0}],
-           "OURS": [{"date": "2026-01-02", "symbol": "B", "net": -3.0}]}
+           "OURS-5": [{"date": "2026-01-02", "symbol": "B", "net": -3.0}],
+           "OURS-ALL": [{"date": "2026-01-02", "symbol": "C", "net": -9.0}]}
     txt = report(cov_at(20, 10), ctrl_at(), aucs_at(0.7), pnl=pnl)
     assert "read section 1 before this table" in txt
     assert "picked after the" in txt
@@ -519,7 +551,8 @@ def test_the_pnl_table_carries_its_contamination_warning_inline():
 
 def test_the_pnl_table_prints_all_three_frictions():
     pnl = {"HIS": [{"date": "2026-01-02", "symbol": "A", "net": 12.0}],
-           "OURS": [{"date": "2026-01-02", "symbol": "B", "net": -3.0}]}
+           "OURS-5": [{"date": "2026-01-02", "symbol": "B", "net": -3.0}],
+           "OURS-ALL": [{"date": "2026-01-02", "symbol": "C", "net": -9.0}]}
     txt = report(cov_at(20, 10), ctrl_at(), aucs_at(0.7), pnl=pnl)
     for label in ("$1.00", "$4.26", "$8.92"):
         assert f"friction {label}" in txt
@@ -530,7 +563,8 @@ def test_a_thin_arm_prints_n_a_and_never_a_zero_drop():
     exactly 0.00, which is indistinguishable from a result whose top names
     cancelled out."""
     pnl = {"HIS": [{"date": "2026-01-02", "symbol": "A", "net": 12.0}],
-           "OURS": [{"date": "2026-01-02", "symbol": "B", "net": -3.0}]}
+           "OURS-5": [{"date": "2026-01-02", "symbol": "B", "net": -3.0}],
+           "OURS-ALL": [{"date": "2026-01-02", "symbol": "C", "net": -9.0}]}
     txt = report(cov_at(20, 10), ctrl_at(), aucs_at(0.7), pnl=pnl)
     assert "n/a" in txt
 
