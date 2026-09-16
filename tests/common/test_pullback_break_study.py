@@ -88,7 +88,7 @@ def test_csv_carries_every_book(tmp_path):
     p = tmp_path / "t.csv"
     pbs = {"PB3-5m-g3": rows("2026-01-10", [2, 3]), "PB3-g3": rows("2026-01-10", [1])}
     S.write_csv(str(p), rows("2026-01-10", [1]), pbs)
-    lines = p.read_text().splitlines()
+    lines = p.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 5
     assert sum(l.startswith("PB3-5m-g3,") for l in lines) == 2
     assert sum(l.startswith("PB3-g3,") for l in lines) == 1
