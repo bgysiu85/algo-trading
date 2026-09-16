@@ -42,6 +42,13 @@ def test_analysis_reports_the_lag_cut_and_execution_times():
     assert "same day before 04:00: 12" in txt
 
 
+def test_duplicate_receipt_timestamps_do_not_break_the_analysis():
+    d = fake_trades()
+    d = pd.concat([d, d.iloc[[100, 100, 200]]]).sort_index()      # repeated ts_recv
+    txt = "\n".join(P.analyse(d, None, "TEST", "2025-08-11"))
+    assert "flags against wild" in txt
+
+
 def test_rebuild_beside_archive_bars():
     d = fake_trades()
     idx = pd.date_range("2025-08-11 08:00", "2025-08-11 08:40", freq="1min", tz="America/New_York").tz_convert("UTC")

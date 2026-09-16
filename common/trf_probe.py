@@ -61,9 +61,14 @@ def analyse(df: pd.DataFrame, bars: pd.DataFrame | None, symbol: str, day: str) 
     d = df.copy()
     if "ts_event" not in d.columns:
         d["ts_event"] = d.index
-    d["recv_et"] = d.index.tz_convert(ET)
-    d["event_et"] = pd.to_datetime(d["ts_event"], utc=True).dt.tz_convert(ET)
-    d["lag_s"] = (pd.Series(d.index, index=d.index) - pd.to_datetime(d["ts_event"], utc=True)).dt.total_seconds()
+    # Several prints share a ts_recv, so the index is not unique; every
+    # operation below works on positions, with the receipt time as a column.
+    recv = pd.to_datetime(pd.Series(d.index), utc=True)
+    d = d.reset_index(drop=True)
+    d["recv_et"] = recv.dt.tz_convert(ET)
+    ev = pd.to_datetime(d["ts_event"], utc=True)
+    d["event_et"] = ev.dt.tz_convert(ET)
+    d["lag_s"] = (recv - ev).dt.total_seconds()
     d["wild"] = wild_mask(d["price"].astype(float))
     d["minute"] = d["recv_et"].dt.strftime("%H:%M")
     d["hour"] = d["recv_et"].dt.hour
