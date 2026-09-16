@@ -10,13 +10,31 @@ passed on. The tempting move is to fit a rule to them. That move is wrong here
 and it is worth being precise about why:
 
   * The base rate for the kind of move these samples are drawn from is 0.108%
-    -- about 1 bar in 926 (`run_signal`). Twenty-one positives against that
-    base rate cannot distinguish a real edge from the shape of twenty-one
-    arbitrary bars.
-  * Eleven of the twenty-one are `took`, three are `pass`. There is no
-    comparison group. A rule fitted here would be fitted to one side.
-  * Twenty-seven features against twenty-one points, with no halves to
+    -- about 1 bar in 926 (`run_signal`). A couple of dozen positives against
+    that base rate cannot distinguish a real edge from the shape of a couple
+    of dozen arbitrary bars.
+  * Twenty-seven features against that many points, with no halves to
     disagree, is a search with nothing to catch it.
+  * The labels are written AFTER the outcomes are known.
+
+TWO COMPARISONS, AND THEY ANSWER DIFFERENT QUESTIONS
+-----------------------------------------------------
+The set grew: three `pass` rows became six, and on 2026-09-16 Ben added a
+won/loss column, so `took` now asserts a win instead of meaning "I would take
+this". That makes two cuts possible, and conflating them is the mistake this
+module is one step away from at all times:
+
+  TAKE against PASS   describes what he SELECTS. A feature that separates
+                      these says nothing about whether the selection makes
+                      money -- `range_pct` separates them cleanly and does
+                      NOT separate his winners from his losers.
+
+  WON against LOST    is the only cut that does not restate his own criterion
+                      back at him, and the only one about outcome.
+
+The report counts both from the set rather than describing them in prose. A
+hard-coded sentence about the data is a second source of truth about the data,
+and the first version of this file carried one that went stale twice.
 
 So this module does the one thing the sample size does support: it PLACES each
 sample in the distribution of ordinary bars from the same tape, feature by
@@ -828,17 +846,50 @@ def render(placed, failed, ref, names, have, syms, stride, elapsed,
             L.append(f"  {s['symbol']:<6} {s['date']} {s['hhmm']}  {why}")
         L.append("")
 
+    # WHAT THIS SET CAN AND CANNOT CARRY, COUNTED FROM THE SET.
+    #
+    # This paragraph used to assert "there is no comparison group worth the
+    # name". That was true of the first 21 samples -- three passes and no
+    # outcome column -- and became false twice: once when the passes doubled,
+    # and again when Ben added won/lost. A hard-coded description of the data
+    # is a SECOND SOURCE OF TRUTH about the data, and it drifts. This project
+    # has now found that shape in a loader, a guard, a metric and a report.
+    #
+    # So the counts come from `placed`, and the caveat is phrased from them.
+    n_took = sum(1 for s, _ in placed if s["label"] == "took")
+    n_lost = sum(1 for s, _ in placed if s["label"] == "took-and-lost")
+    n_pass = sum(1 for s, _ in placed if s["label"] == "pass")
+    cmp_lines = []
+    if n_took >= 5 and n_pass >= 5:
+        cmp_lines.append(f"  TAKE against PASS is available: {n_took} vs "
+                         f"{n_pass}. It describes what he SELECTS, and a "
+                         "feature that")
+        cmp_lines.append("  separates them says nothing about whether the "
+                         "selection makes money.")
+    if n_took >= 5 and n_lost >= 5:
+        cmp_lines.append(f"  WON against LOST is available: {n_took} vs "
+                         f"{n_lost}. It is the only cut here that does not")
+        cmp_lines.append("  restate his own criterion back at him, and the "
+                         "only one about OUTCOME.")
+    if not cmp_lines:
+        cmp_lines = ["  Neither comparison has enough rows on both sides to "
+                     "be worth cutting."]
+
     L += ["READ THE NEGATIVE DIRECTION FIRST", "",
           "  A sample landing somewhere unusual is NOT evidence. These bars",
           "  were chosen because their outcome was known, "
           f"{len(names)} features were",
           "  tried on each, and roughly half of any bar's features land in an",
           "  outer quartile by construction. There are no halves here to",
-          "  disagree and no comparison group worth the name.",
+          "  disagree, and the labels were written after the outcomes were",
+          "  known.",
           "",
           "  A feature on which the samples are spread like ordinary bars is",
           "  worth something real: it is RULED OUT as the thing that",
-          "  describes what Ben sees. That list is the output of this run.", ""]
+          "  describes what Ben sees. That list is the output of this run.",
+          "",
+          "  THE TWO COMPARISONS, AND THEY ANSWER DIFFERENT QUESTIONS", ""
+          ] + cmp_lines + [""]
 
     for tf in sorted(ref):
         L += [f"=== {tf}-MINUTE ===", ""]
