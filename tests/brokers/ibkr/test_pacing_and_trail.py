@@ -27,7 +27,7 @@ async def main():
     calls = {"n": 0}
     full, _, _ = find_firing_series(140)
 
-    async def counting_fetch(_st):
+    async def counting_fetch(_st, _now):
         calls["n"] += 1
         return full
 

@@ -217,6 +217,13 @@ HISTORY_DURATION = "2 D"
 PROBE_TIMEOUT_S = 6         # tradability whatIf probe; normally answers in <1s
 LOOP_SLEEP_S = 1.0          # fast loop: trailing stop, off streaming quotes
 BAR_MIN_INTERVAL_S = 20.0   # hard floor between history requests per symbol
+# How far past a bar's close we insist on being before calling it closed.
+# Guards the ONE direction that costs money: a local clock running fast would
+# judge a still-forming bar finished and hand a partial bar to a strategy.
+# A floor, not a proof -- it buys exactly this many seconds against skew, and
+# common/bar_freshness.py reports IB's clock against ours so the figure can be
+# set from a measurement rather than from this comment.
+BAR_CLOSE_SKEW_S = 2.0
 MAX_SYMBOLS_SAFE = 6        # beyond this, 1 req/min/symbol approaches IB's cap
 EMPTY_WARN_S = 120          # how often to repeat the 'watching nothing' warning
 
@@ -386,22 +393,53 @@ for _f in _FEED_FIELDS:
 del _f
 
 
-def drop_forming_bar(df: "pd.DataFrame") -> "pd.DataFrame":
-    """Hand back only bars that have closed.
+def drop_forming_bar(df: "pd.DataFrame", now: datetime,
+                     minutes: int = 1) -> "pd.DataFrame":
+    """Hand back only bars that have closed, judged by the clock.
 
     Every strategy here acts on a CLOSED bar, so the minute in progress must
     not reach evaluate_last_bar: acting on a partial bar is H1 in
-    claude/multi_strategy_trader_spec.md and shows up in a backtest as an
-    edge that does not exist live.
+    claude/multi_strategy_trader_spec.md and shows up in a backtest as an edge
+    that does not exist live.
 
-    THIS IS A FUNCTION AND NOT ONE INLINE LINE because it embeds an assumption
-    about IB that nothing had ever checked -- that the response INCLUDES the
-    forming minute. If IB instead returns only completed bars, this discards a
-    good one and every entry is a minute late. common/bar_freshness.py measures
-    which it is, and measures it by calling THIS, so the probe cannot drift
-    from what the trader really does.
+    This used to be an unconditional `df.iloc[:-1]`, and it embedded an
+    ASSUMPTION about IB that nothing could check from in here -- that the
+    response always includes the forming minute. `common/bar_freshness.py`
+    measured it on BNC on 2026-09-16 and the assumption holds 10 times in 11.
+    The eleventh:
+
+        06:04:05  raw last 06:03  -> acts on 06:02  (closed, raw 65s)
+
+    The 06:03 bar had already closed, the trim threw it away, and the strategy
+    acted a full extra minute late. A minute with no print produces no bar --
+    the mechanism `mc5.last_closed_bucket` already documents -- so on a thin
+    name the response often ends with a bar that is already finished. Whether
+    IB includes the forming minute is not a property of IB. It is a property of
+    the moment you ask.
+
+    So the assumption is replaced by a measurement: whether the bar labelled T
+    has closed IS decidable in here, given the time. `now` is REQUIRED and has
+    no default, because a default preserving the old behaviour would let a
+    caller that forgot it get the defect back in silence.
+
+    `BAR_CLOSE_SKEW_S` is the guard on the one direction that hurts: a local
+    clock running fast would call a bar closed with a second still to run. It
+    buys that many seconds and no more, which is why the probe now reports IB's
+    own clock against ours instead of this constant being an opinion.
+
+    See docs/research/REGISTERED_bar_trim.md.
     """
-    return df.iloc[:-1] if len(df) > 1 else df
+    if df is None or len(df) <= 1:
+        return df
+    if now.tzinfo is None:
+        raise ValueError(
+            "drop_forming_bar needs an aware `now`; a naive one cannot be "
+            "compared with a bar label without guessing a zone, and the guess "
+            "decides whether a forming bar reaches a strategy.")
+    closed_at = df.index[-1] + pd.Timedelta(minutes=minutes)
+    if pd.Timestamp(now) >= closed_at + pd.Timedelta(seconds=BAR_CLOSE_SKEW_S):
+        return df                      # the last bar has ended; it is real data
+    return df.iloc[:-1]
 
 
 def bar_session_ok(signal_ts, now_et: datetime,
@@ -1169,14 +1207,24 @@ class MCLPaperTrader:
         if fresh_enough or elapsed < BAR_MIN_INTERVAL_S:
             return st.bars_df
 
-        df = await self._fetch_bars(st)
+        df = await self._fetch_bars(st, now)
         st.bars_fetched_at = time.monotonic()
         if df is not None:
             st.bars_df = df
             st.bars_minute = (now.hour, now.minute)
         return st.bars_df
 
-    async def _fetch_bars(self, st: SymbolState) -> pd.DataFrame | None:
+    async def _fetch_bars(self, st: SymbolState,
+                          now: datetime) -> pd.DataFrame | None:
+        """`now` is the CALLER's clock reading, taken BEFORE the request went
+        out, never a fresh one taken after it came back.
+
+        A slow response makes that reading stale, and stale errs toward
+        dropping the last bar -- the safe direction, and the one the old
+        unconditional trim always took. Re-reading the clock afterwards would
+        push the other way, using time the response spent in flight as
+        evidence that a bar had closed.
+        """
         try:
             data = await self.ib.reqHistoricalDataAsync(
                 st.contract,
@@ -1198,7 +1246,7 @@ class MCLPaperTrader:
         df = df.rename(columns=str.lower)
         df["date"] = pd.to_datetime(df["date"], utc=True)
         df = df.set_index("date").sort_index()
-        return drop_forming_bar(df)
+        return drop_forming_bar(df, now)
 
     # -- order placement --------------------------------------------------
 

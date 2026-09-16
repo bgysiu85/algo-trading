@@ -196,6 +196,6 @@ def test_the_duration_is_used_and_not_merely_defined():
     tr.ib = Stub()
     st = T.SymbolState(symbol="X")
     st.contract = object()
-    asyncio.run(T.MCLPaperTrader._fetch_bars(tr, st))
+    asyncio.run(T.MCLPaperTrader._fetch_bars(tr, st, datetime.now(ET)))
     assert asked.get("durationStr") == T.HISTORY_DURATION
     assert asked.get("useRTH") is False, "pre-market or the warm-up is moot"
