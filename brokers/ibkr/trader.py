@@ -1912,6 +1912,22 @@ async def main_async(args):
         LOG.info("portal: publishing to %s as %s", trader.ui.base_url,
                  trader.ui.agent_id)
 
+    # SAID OUT LOUD. The row records the state, which is the durable half; this
+    # is the half that reaches Ben tonight. Last time the bridge refused, the
+    # only trace was one WARNING inside a wall of IB logging and it went
+    # unnoticed for two hours while the dashboard sat empty.
+    if trader.bridge_state() == "configured-but-unattached":
+        LOG.warning("PORTAL NOT PUBLISHING: UI_RELAY_URL is set but the bridge "
+                    "would not start. The session trades normally; the "
+                    "dashboard stays empty.")
+        if tg is not None:
+            try:
+                tg.send("\u26a0\ufe0f <b>portal not publishing</b>\n"
+                        "the relay is configured but the bridge would not "
+                        "start; the session is trading normally", force=True)
+            except Exception:                               # noqa: BLE001
+                LOG.debug("could not send the portal warning", exc_info=True)
+
     # Read the cap back OFF THE TRADER rather than off the constant or the
     # argument. Those can drift from what is running; this cannot.
     LOG.info("strategies: %s (one book, cap %d across all of them)%s",

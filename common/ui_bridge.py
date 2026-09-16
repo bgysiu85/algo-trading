@@ -191,6 +191,14 @@ def _minus_minutes(stamp: str | None, minutes: float | None) -> str | None:
     return opened.strftime("%H:%M:%S")
 
 
+# The session-open CONFIG row and the bridge state live on the TRADER
+# (MCLPaperTrader.bridge_state / record_config), not here. I built a second
+# copy of both in this file on 2026-09-16 without knowing the strategy side had
+# already built them; theirs is better placed, because the row records what the
+# TRADER was running with. Two writers would have put two rows per adapter in
+# the ledger at every session start.
+
+
 def _round_trip_costs(entry: float | None, exit_px: float, qty: float,
                       net: float | None) -> tuple[float | None, float | None]:
     """(gross, commission) for a closed round trip, or (None, None).
@@ -234,7 +242,6 @@ class UIBridge:
         self._seq = 0
         self.account_id = ""
         self.is_paper = False
-        self._session_open_written = False
 
     # -- construction ------------------------------------------------------
     @classmethod
@@ -442,14 +449,28 @@ class UIBridge:
         try:
             with Path(path).open(newline="", encoding="utf-8-sig") as fh:
                 for i, row in enumerate(csv.DictReader(fh)):
-                    if (row.get("status") or "").upper() != "FILLED":
-                        continue
+                    status = (row.get("status") or "").upper()
                     key = (row.get("strategy") or "", row.get("symbol") or "")
                     action = (row.get("action") or "").upper()
-                    if action in ("BUY", "COVER"):
-                        opened_by[key] = row.get("ts_et") or ""
-                    entry_ts = (opened_by.pop(key, None) if action in ("SELL", "SHORT")
-                                else None)
+                    entry_ts = None
+
+                    # PAIRING FIRST, and over a wider set of rows than the fills
+                    # list below. A partial fill opens a real position and is
+                    # written as PARTIAL_FILL, so pairing on FILLED alone would
+                    # leave its exit with no opening row.
+                    if status in ("FILLED", "PARTIAL_FILL"):
+                        if action in ("BUY", "COVER"):
+                            # setdefault, not assignment: a second partial ADDS
+                            # to the position the first one opened. The position
+                            # opened at the FIRST fill, and that is the time the
+                            # exit should carry -- overwriting would quietly
+                            # shorten every partially-filled trade.
+                            opened_by.setdefault(key, row.get("ts_et") or "")
+                        elif action in ("SELL", "SHORT"):
+                            entry_ts = opened_by.pop(key, None)
+
+                    if status != "FILLED":
+                        continue
                     qty = _num(row.get("filled_qty")) or _num(row.get("qty")) or 0
                     price = _num(row.get("fill_price")) or 0.0
                     entry = _num(row.get("entry_price"))
@@ -472,8 +493,15 @@ class UIBridge:
                         "trade_pnl": net,
                         "friction_charged": False,
                     })
-        except Exception as e:                              # noqa: BLE001
-            LOG.debug("could not read the fill log for the portal: %s", e)
+        except Exception:                                   # noqa: BLE001
+            # LOUD. This catch exists because _fills_today runs in the trading
+            # path and must not raise -- but at DEBUG it once hid a NameError
+            # whose only symptom was an empty Closed today. A defect that
+            # presents as "no trades" in a trading portal is the worst possible
+            # disguise, so the trader's log says what happened even though the
+            # dashboard carries on.
+            LOG.exception("could not read the fill log for the portal (%s); "
+                          "the dashboard will show no fills", path)
         return out
 
     @staticmethod
@@ -606,31 +634,10 @@ class UIBridge:
                 LOG.exception("could not write the CONFIG row for %s/%s",
                               name, setting)
 
-    def record_session_open(self, trader, now_et: datetime) -> None:
-        """One row per adapter at startup, with the values in force.
-
-        A journal that writes only on CHANGE cannot tell "nobody touched it"
-        from "the recorder was broken" -- both are an empty file. This turns the
-        absence of a change into a positive record, gives the first command of
-        the day something to be a diff from, and means no reader has to fall
-        back on "presumably the default" for the rows before it.
-        """
-        if self._session_open_written:
-            return
-        self._session_open_written = True
-        cap = getattr(trader, "max_positions", None)
-        paused = bool(getattr(trader, "paused", False))
-        disabled = set(getattr(trader, "disabled_strategies", ()) or ())
-        for adapter in getattr(trader, "strategies", []):
-            name = getattr(adapter, "name", "")
-            trail = getattr(adapter, "trail_pct", None)
-            self.record_config(
-                trader, now_et=now_et, setting=SETTING_TRAIL,
-                status=CONFIG_APPLIED, reason="session_open",
-                detail=(f"trail_pct={trail} paused={paused} "
-                        f"max_positions={cap} enabled={name not in disabled} "
-                        f"portal={self.base_url}"),
-                strategies=[name], trail_pct=trail)
+    # record_session_open used to live here. It now belongs to the trader --
+    # MCLPaperTrader.record_config(reason="session_open"), called from the
+    # trader's own startup -- because a session with no bridge needs the row
+    # just as much, and arguably more.
 
     # -- applying a command ------------------------------------------------
     def apply(self, trader, command: dict[str, Any],
@@ -756,14 +763,6 @@ class UIBridge:
         """Push, collect, answer. Called from the trading loop; never raises,
         and returns immediately when it is not yet time to push."""
         clock = now_et or datetime.now(ET)
-        # BEFORE the throttle, and before anything touches the network: the
-        # session-open record is about the TRADER's session, not the portal's
-        # health, so a relay that never answers must not cost us the row.
-        try:
-            self.record_session_open(trader, clock)
-        except Exception:                                   # noqa: BLE001
-            LOG.exception("could not record the session-open rows")
-
         if time.monotonic() - self._last_push < self.push_every_s:
             return
         self._last_push = time.monotonic()

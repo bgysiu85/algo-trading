@@ -664,50 +664,26 @@ def test_a_rejected_trail_change_records_no_value(tmp_path):
 
 # -- the session-open row ---------------------------------------------------
 
-def test_the_session_opens_with_the_values_in_force(tmp_path):
-    """A journal that writes only on CHANGE cannot tell "nobody touched it"
-    from "the recorder was broken" — both are an empty file."""
-    trader = _trader_with_a_log(tmp_path)
-    ui = bridge(paper=True)
-
-    ui.record_session_open(trader, NOW)
-
-    rows = _config_rows(trader)
-    assert {r["strategy"] for r in rows} == {a.name for a in trader.strategies}
-    assert all(r["reason"] == "session_open" for r in rows)
-    for adapter in trader.strategies:
-        row = next(r for r in rows if r["strategy"] == adapter.name)
-        assert float(row["trail_pct"]) == adapter.trail_pct
-        assert "max_positions=" in row["reject_reason"]
-        assert "paused=" in row["reject_reason"]
+# The session-open rows and the bridge state are the trader's, and are tested
+# in tests/brokers/ibkr/test_config_row_and_band.py. I had a second copy of
+# both here; two writers would have put two rows per adapter in the ledger at
+# every session start.
 
 
-def test_the_session_opens_once_not_every_tick(tmp_path):
-    trader = _trader_with_a_log(tmp_path)
-    ui = bridge(paper=True)
-
-    ui.record_session_open(trader, NOW)
-    before = len(_config_rows(trader))
-    ui.record_session_open(trader, NOW)
-
-    assert len(_config_rows(trader)) == before
-
-
-def test_the_first_command_has_something_to_be_a_diff_from(tmp_path):
-    """The point of the session-open row: the trail before the change is a
-    recorded fact rather than "presumably the default"."""
+def test_a_command_records_the_value_it_moved_to(tmp_path):
+    """The session-open row gives it something to be a diff FROM, and that row
+    is the trader's. This side records where the trail ended up."""
     trader = _trader_with_a_log(tmp_path)
     name = trader.strategies[0].name
     was = trader.strategies[0].trail_pct
     ui = bridge(paper=True)
 
-    ui.record_session_open(trader, NOW)
     ui.apply(trader, {"id": "c1", "type": "set_setting",
                       "args": {"key": f"trail_pct:{name}", "value": 9.0}}, NOW)
 
     mine = [r for r in _config_rows(trader) if r["strategy"] == name]
-    assert float(mine[0]["trail_pct"]) == was
     assert float(mine[-1]["trail_pct"]) == 9.0
+    assert was != 9.0, "the fixture must actually move the value"
 
 
 # -- it must never break the trading loop -----------------------------------
@@ -962,3 +938,93 @@ def test_a_skipped_row_never_opens_a_pairing(tmp_path):
               if f["trade_pnl"] is not None][0]
 
     assert closed["entry_ts_et"] == "07:21:00"
+
+
+# ---------------------------------------------------------------------------
+# Partial fills. Raised by the strategy side before it happened: a partial fill
+# opens a real position that a later exit closes, and a second partial adds to
+# the same position.
+
+def test_a_partially_filled_entry_still_gives_its_exit_a_time(tmp_path):
+    """The trader writes PARTIAL_FILL, not FILLED, when filled < qty. Pairing
+    on FILLED alone left that exit with no opening row at all."""
+    trader = _log_with(tmp_path, [
+        dict(ts_et="2026-09-14 07:21:00", strategy="MCL", symbol="AAA",
+             action="BUY", status="PARTIAL_FILL", filled_qty=40, qty=100,
+             fill_price=4.02),
+        dict(ts_et="2026-09-14 07:42:00", strategy="MCL", symbol="AAA",
+             action="SELL", status="FILLED", filled_qty=40, fill_price=3.88,
+             entry_price=4.02, exit_price=3.88, trade_pnl=-6.20,
+             hold_minutes=21.0),
+    ])
+    closed = [f for f in ui_bridge.UIBridge._fills_today(trader)
+              if f["trade_pnl"] is not None][0]
+
+    assert closed["entry_ts_et"] == "07:21:00"
+
+
+def test_a_second_partial_does_not_move_the_opening_time(tmp_path):
+    """A second partial ADDS to the position the first one opened. Taking the
+    later time would quietly shorten every partially-filled trade -- and
+    hold_minutes, computed from the real entry, would then disagree with the
+    two timestamps beside it."""
+    trader = _log_with(tmp_path, [
+        dict(ts_et="2026-09-14 07:21:00", strategy="MCL", symbol="AAA",
+             action="BUY", status="PARTIAL_FILL", filled_qty=40, qty=100,
+             fill_price=4.02),
+        dict(ts_et="2026-09-14 07:23:30", strategy="MCL", symbol="AAA",
+             action="BUY", status="PARTIAL_FILL", filled_qty=60, qty=100,
+             fill_price=4.05),
+        dict(ts_et="2026-09-14 07:42:00", strategy="MCL", symbol="AAA",
+             action="SELL", status="FILLED", filled_qty=100, fill_price=3.88,
+             entry_price=4.03, exit_price=3.88, trade_pnl=-16.20,
+             hold_minutes=21.0),
+    ])
+    closed = [f for f in ui_bridge.UIBridge._fills_today(trader)
+              if f["trade_pnl"] is not None][0]
+
+    assert closed["entry_ts_et"] == "07:21:00", "took the second partial's time"
+
+
+def test_a_partial_fill_is_still_not_listed_as_a_completed_fill(tmp_path):
+    """Pairing reads a wider set of rows than the fills list does. That is
+    deliberate and worth pinning: the list is FILLED-only, unchanged."""
+    trader = _log_with(tmp_path, [
+        dict(ts_et="2026-09-14 07:21:00", strategy="MCL", symbol="AAA",
+             action="BUY", status="PARTIAL_FILL", filled_qty=40, qty=100,
+             fill_price=4.02),
+    ])
+    assert ui_bridge.UIBridge._fills_today(trader) == []
+
+
+def test_a_read_failure_cannot_swallow_a_defect_silently(tmp_path, caplog, monkeypatch):
+    """_fills_today catches its own exceptions, which is right -- it runs in the
+    trading path. But while writing the pairing above I introduced a NameError
+    and the only symptom was an empty dashboard: the catch logged at DEBUG.
+    It logs loudly now, because a bug that presents as "no trades today" in a
+    trading portal is the worst possible disguise."""
+    import logging
+
+    path = tmp_path / "f.csv"
+    # a row that gets PAST the status filter, so the parsing is actually reached
+    path.write_text("ts_et,strategy,symbol,action,status,filled_qty,fill_price\n"
+                    "2026-09-14 07:00:00,MCL,AAA,SELL,FILLED,100,4.02\n",
+                    encoding="utf-8")
+
+    class Trader:
+        class log:
+            pass
+    Trader.log.path = path
+
+    def explode(*a, **kw):
+        raise RuntimeError("something in here is broken")
+
+    monkeypatch.setattr(ui_bridge, "_num", explode)
+
+    with caplog.at_level(logging.WARNING, logger="ui_bridge"):
+        assert ui_bridge.UIBridge._fills_today(Trader()) == []
+
+    assert any("could not read the fill log" in r.message for r in caplog.records), (
+        "the failure was swallowed without a word; an empty dashboard would be "
+        "the only symptom")
+    assert any(r.levelno >= logging.WARNING for r in caplog.records)
