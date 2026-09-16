@@ -146,3 +146,55 @@ any of this and remains unspent.
 
 It says only that the measured result is not an artefact of which symbols
 happened to be in the sample.
+
+---
+
+# AMENDMENT — 2026-09-16, BEFORE ORB HAS A NUMBER
+
+**Condition (b) is withdrawn.** Mutation testing of `common/breadth.py` could
+not find a case where dropping it changed a verdict, which is how the defect
+surfaced: a second condition that cannot fail independently of the first is
+not a second condition.
+
+## Why it cannot fail independently
+
+In every resample `per_trade = total / count`, and `count > 0` always, so
+`per_trade` carries the **same sign as `total`**. The 2.5th percentile of
+per-trade net is below zero exactly when more than 2.5% of resamples are
+negative — that is, exactly when P(total > 0) < 0.975.
+
+So (b) was **(a) at a stricter significance level**, wearing the clothes of a
+magnitude check.
+
+## And the stated justification was wrong
+
+§3 said: *"A large sample can put the total comfortably above zero while
+per-trade net sits at a hundredth of a cent. The per-trade floor is what keeps
+criterion 2 a statement about edge rather than about trade count."*
+
+A floor of **$0** does not catch a hundredth of a cent. Measured: 4,000
+symbols at $0.0001 a trade give P(total > 0) = 1.000 and a 2.5th percentile of
++$0.0001 — both conditions satisfied by a book with no edge at all. The
+sentence described a magnitude check and §3.1 then set the floor at zero
+precisely *because criterion 3 already carries the dollar bar*. Those two
+paragraphs contradicted each other and I did not notice until the mutation ran.
+
+## The corrected criterion
+
+> **2. The result survives resampling the symbols it was measured on.**
+>
+> A symbol-cluster bootstrap — symbols drawn with replacement, as many as the
+> sample has, 2,000 resamples, every trade of a drawn symbol coming with it —
+> must put **total net above zero in at least 95% of resamples**.
+
+One condition. **The magnitude question belongs to criterion 3**, which sets
+net ≥ $1.00 per trade at flat 100 shares, and it was always going to: §3.1
+said so while §3 was quietly adding a second dollar bar of its own.
+
+The per-trade interval is still **reported**, as context for reading the total,
+and is explicitly not a pass condition. A figure printed beside a verdict it
+cannot change has to say so, or the next reader will take it for one.
+
+Everything else in this document stands. §2's retirement measurement, §3.2's
+statement that criterion 1 is untouched, and §4's commitment to re-score MC5
+and publish either way are unchanged.
