@@ -135,6 +135,35 @@ LABELS = {
 }
 UNLABELLED = "unlabelled"
 
+# An OPTIONAL outcome column, added by Ben on 2026-09-16 after the first runs
+# showed that `took` did not assert a win -- it meant "I would take this", with
+# the result unstated, which left the only non-tautological comparison in the
+# report (his winners against his losers) resting on an assumption.
+#
+# Matched on a PREFIX because the header in the sheet is actually "wonl/loss",
+# and pinning that string would break the loader the moment he fixes the typo.
+# Absent entirely on older sheets and on the csv fixtures, so it must stay
+# optional: a required column would turn every earlier sample file into an
+# error.
+OUTCOME_HEADERS = ("won", "win", "outcome", "result")
+
+
+def normalise_outcome(raw) -> str | None:
+    """"won", "lost", or None. The raw text is kept separately -- one of his
+    wins is annotated "won (but it was honestly a fluke)", and a loader that
+    reduced that to "won" and threw the sentence away would delete the one
+    piece of information that says not to trust that row."""
+    if raw is None:
+        return None
+    t = str(raw).strip().lower()
+    if not t:
+        return None
+    if t.startswith(("won", "win")):
+        return "won"
+    if "lost" in t or "loss" in t:
+        return "lost"
+    return None
+
 
 def normalise_label(raw) -> str:
     if raw is None:
@@ -169,15 +198,28 @@ def load_samples(path: Path) -> list[dict]:
 
     i_sym, i_date, i_time = col("symbol"), col("date"), col("time")
     i_lab, i_note = col("label"), col("note")
+    # No exclusion of the label/note columns here. A mutation pass showed that
+    # guard was unreachable -- a header cannot begin with both "note" and one
+    # of OUTCOME_HEADERS, and a label column named for an outcome word would
+    # already have failed `col("label")`. An unreachable guard is noise that
+    # reads like protection.
+    i_out = None
+    for k, h in enumerate(head):
+        if h.startswith(OUTCOME_HEADERS):
+            i_out = k
+            break
     out = []
     for r in rows[1:]:
         if not r or r[i_sym] in (None, ""):
             continue
+        raw = r[i_out] if (i_out is not None and i_out < len(r)) else None
         out.append({
             "symbol": str(r[i_sym]).upper().strip(),
             "date": _as_date(r[i_date]),
             "hhmm": _as_hhmm(r[i_time]),
             "label": normalise_label(r[i_lab]),
+            "outcome": normalise_outcome(raw),
+            "outcome_note": "" if raw is None else str(raw).strip(),
             "note": "" if r[i_note] is None else str(r[i_note]),
         })
     return out
@@ -739,6 +781,46 @@ def render(placed, failed, ref, names, have, syms, stride, elapsed,
         counts[s["label"]] = counts.get(s["label"], 0) + 1
     L += ["THE SET", ""] + \
          [f"  {k:<16}{v:>4}" for k, v in sorted(counts.items())] + [""]
+
+    # LABEL against OUTCOME, printed whenever the outcome column exists.
+    #
+    # Today every `took` is marked `won`, so the two fields agree and the
+    # cross-tab is redundant. It is here for the day they stop agreeing: the
+    # report groups by LABEL, so a `took` later marked lost would sit in the
+    # winners' group and quietly move the one comparison in this report that
+    # is not a tautology. A divergence has to be visible, not inferred.
+    pairs = [(s["label"], s.get("outcome")) for s, _ in placed] + \
+            [(s["label"], s.get("outcome")) for s, _ in failed]
+    if any(o for _, o in pairs):
+        seen: dict[tuple, int] = {}
+        for k in pairs:
+            seen[k] = seen.get(k, 0) + 1
+        L += ["LABEL AGAINST OUTCOME", ""]
+        for (lab, out), n in sorted(seen.items(), key=lambda x: str(x[0])):
+            L.append(f"  {lab:<16}{str(out or '-'):<8}{n:>4}")
+        bad = [(lab, out, n) for (lab, out), n in seen.items()
+               if (lab == "took" and out == "lost")
+               or (lab == "took-and-lost" and out == "won")
+               or (lab == "pass" and out)]
+        L.append("")
+        if bad:
+            L += ["  *** LABEL AND OUTCOME DISAGREE ***", "",
+                  "  The groups below are cut on LABEL. These rows say "
+                  "something else:", ""]
+            L += [f"    {lab} marked {out}: {n}" for lab, out, n in bad]
+            L += ["", "  Fix the sheet, or the winners' group contains a "
+                  "loser.", ""]
+        # An annotated outcome is the row saying "do not trust me".
+        notes = [(s["symbol"], s["hhmm"], s["outcome_note"])
+                 for s, _ in placed
+                 if s.get("outcome_note")
+                 and s["outcome_note"].strip().lower() not in ("won", "lost",
+                                                               "win", "loss")]
+        if notes:
+            L += ["  outcomes the sheet qualifies in words:", ""]
+            L += [f"    {sym} {hh}  {txt}" for sym, hh, txt in notes]
+            L += ["", "  A win the trader does not endorse is not a win to "
+                  "fit against.", ""]
 
     if failed:
         L += ["NOT MEASURED  (reported, not dropped)", ""]

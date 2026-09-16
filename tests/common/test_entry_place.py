@@ -75,7 +75,8 @@ def test_csv_and_xlsx_load_the_same_rows(tmp_path):
                    "crbp,2026-09-14,07:19,Pass,8.png\n", encoding="utf-8")
     got = P.load_samples(csv)
     assert got == [{"symbol": "CRBP", "date": "2026-09-14", "hhmm": "07:19",
-                    "label": "pass", "note": "8.png"}]
+                    "label": "pass", "outcome": None, "outcome_note": "",
+                    "note": "8.png"}]
 
 
 def test_a_missing_column_says_which_one(tmp_path):
@@ -766,3 +767,133 @@ def test_full_coverage_is_still_classified():
                               ["2026-09-14"], 10, 1, 1.0, "p.json"))
     assert "TOO THIN TO PLACE" not in text
     assert "too thin" not in text
+
+
+# --- the outcome column, added 2026-09-16 --------------------------------------
+#
+# The first runs reported a `took` vs `took-and-lost` comparison as the only
+# non-tautological cut available, with the caveat that `took` did not assert a
+# win -- it meant "I would take this", outcome unstated. Ben then added the
+# column. The caveat is now answerable from the sheet instead of assumed, which
+# is the whole point.
+
+def test_the_outcome_column_is_optional(tmp_path):
+    """Every earlier sample file, and every csv fixture in this suite, has no
+    such column. Requiring it would turn all of them into errors."""
+    csv = tmp_path / "old.csv"
+    csv.write_text("symbol,date,time_et,label (x),note\n"
+                   "AAAA,2026-09-14,07:19,took,a\n", encoding="utf-8")
+    got = P.load_samples(csv)
+    assert got[0]["outcome"] is None and got[0]["outcome_note"] == ""
+
+
+def test_the_outcome_column_is_read_when_present(tmp_path):
+    csv = tmp_path / "new.csv"
+    csv.write_text("symbol,date,time_et,label (x),wonl/loss,note\n"
+                   "AAAA,2026-09-14,07:19,took,won,a\n"
+                   "BBBB,2026-09-14,07:20,took and lost,lost,b\n"
+                   "CCCC,2026-09-14,07:21,Pass,,c\n", encoding="utf-8")
+    got = P.load_samples(csv)
+    assert [r["outcome"] for r in got] == ["won", "lost", None]
+    assert [r["note"] for r in got] == ["a", "b", "c"], \
+        "the note column must still be found past the new one"
+
+
+def test_a_qualified_win_keeps_its_sentence():
+    """One win is annotated "won (but it was honestly a fluke)". Reducing that
+    to "won" and discarding the text deletes the only thing in the row that
+    says not to trust it."""
+    assert P.normalise_outcome("won (but it was honestly a fluke)") == "won"
+    assert P.normalise_outcome("Lost") == "lost"
+    assert P.normalise_outcome("") is None
+    assert P.normalise_outcome(None) is None
+    assert P.normalise_outcome("scratched") is None
+
+
+def test_the_outcome_column_is_not_confused_with_label_or_note(tmp_path):
+    """"won" is a prefix match, and so is "note". A header order that put the
+    outcome after the note, or a label column starting with one of the outcome
+    words, must not capture the wrong index."""
+    csv = tmp_path / "order.csv"
+    csv.write_text("symbol,date,time_et,label (x),note,outcome\n"
+                   "AAAA,2026-09-14,07:19,took,the note,won\n",
+                   encoding="utf-8")
+    got = P.load_samples(csv)
+    assert got[0]["note"] == "the note"
+    assert got[0]["outcome"] == "won"
+
+
+def _with_outcomes(names, spec):
+    """spec: [(label, outcome)] -- one placed sample each."""
+    out = []
+    for k, (lab, oc) in enumerate(spec):
+        f = {tf: {nm: 0.0 for nm in names} for tf in P.TIMEFRAMES}
+        for tf in P.TIMEFRAMES:
+            f[tf]["_bar"] = "07:20"
+        out.append(({"symbol": f"S{k}", "date": "2026-09-14", "hhmm": "07:22",
+                     "label": lab, "outcome": oc, "outcome_note": oc or "",
+                     "note": ""}, f))
+    return out
+
+
+def test_the_cross_tab_appears_once_an_outcome_exists():
+    names = ["a"]
+    placed = _with_outcomes(names, [("took", "won"), ("took-and-lost", None)])
+    text = "\n".join(P.render(placed, [], _fake_ref(names), names,
+                              ["2026-09-14"], 10, 1, 1.0, "p.json"))
+    assert "LABEL AGAINST OUTCOME" in text
+    assert "took            won        1" in text
+
+
+def test_a_took_marked_lost_is_flagged_LOUDLY():
+    """The report cuts its groups on LABEL. A `took` marked lost would sit in
+    the winners' group and quietly move the one comparison in this report that
+    is not a tautology."""
+    names = ["a"]
+    placed = _with_outcomes(names, [("took", "won"), ("took", "lost"),
+                                    ("pass", "won")])
+    text = "\n".join(P.render(placed, [], _fake_ref(names), names,
+                              ["2026-09-14"], 10, 1, 1.0, "p.json"))
+    assert "LABEL AND OUTCOME DISAGREE" in text
+    assert "took marked lost" in text
+    assert "pass marked won" in text
+    assert "the winners' group contains a loser" in text
+
+
+def test_no_cross_tab_when_the_sheet_has_no_outcomes():
+    """A section of dashes tells the reader nothing and trains them to skip."""
+    names = ["a"]
+    placed = _with_outcomes(names, [("took", None), ("pass", None)])
+    text = "\n".join(P.render(placed, [], _fake_ref(names), names,
+                              ["2026-09-14"], 10, 1, 1.0, "p.json"))
+    assert "LABEL AGAINST OUTCOME" not in text
+
+
+def test_a_qualified_outcome_is_surfaced_in_the_report():
+    names = ["a"]
+    placed = _with_outcomes(names, [("took", "won")])
+    placed[0][0]["outcome_note"] = "won (but it was honestly a fluke)"
+    text = "\n".join(P.render(placed, [], _fake_ref(names), names,
+                              ["2026-09-14"], 10, 1, 1.0, "p.json"))
+    assert "outcomes the sheet qualifies in words" in text
+    assert "fluke" in text
+    assert "does not endorse" in text
+
+
+def test_the_loader_carries_the_qualifying_sentence_through(tmp_path):
+    """Not just `normalise_outcome`. A mutation that emptied `outcome_note` in
+    the loader survived, because the report test set the field by hand -- a
+    check one step short of the thing it protects, again."""
+    csv = tmp_path / "q.csv"
+    csv.write_text(
+        "symbol,date,time_et,label (x),wonl/loss,note\n"
+        'PLYX,2026-02-17,06:34,took,"won (but it was honestly a fluke)",12.png\n',
+        encoding="utf-8")
+    got = P.load_samples(csv)
+    assert got[0]["outcome"] == "won"
+    assert "fluke" in got[0]["outcome_note"]
+
+    text = "\n".join(P.render(
+        [(got[0], {tf: {"a": 0.0, "_bar": "06:34"} for tf in P.TIMEFRAMES})],
+        [], _fake_ref(["a"]), ["a"], ["2026-02-17"], 10, 1, 1.0, "p.json"))
+    assert "fluke" in text, "the sheet's own caveat must reach the report"
