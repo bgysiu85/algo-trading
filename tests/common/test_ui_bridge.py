@@ -1143,3 +1143,87 @@ def test_a_read_failure_cannot_swallow_a_defect_silently(tmp_path, caplog, monke
         "the failure was swallowed without a word; an empty dashboard would be "
         "the only symptom")
     assert any(r.levelno >= logging.WARNING for r in caplog.records)
+
+
+# -- one realised figure, not two -------------------------------------------
+
+def test_the_page_cannot_contradict_itself_about_realised(tmp_path):
+    """Ben spotted three numbers for one quantity on a single screen: the curve
+    ended at 25.71, the strategy bars summed to 25.71, and the Realised tile
+    said 25.74.
+
+    The per-strategy figures summed the fill log; the headline read the
+    trader's own accumulator. Both were correct. The log rounds each trade to
+    2dp as it is written and the accumulator adds the unrounded values, so
+    across seventeen trades they drifted three cents apart. A dashboard that
+    contradicts itself by a little teaches you to trust none of it, so the log
+    is now the single source and the parts sum to the whole by construction."""
+    trader = _trader_with_a_log(tmp_path)
+    name = trader.strategies[0].name
+    for i, pnl in enumerate([1.005, 2.005, 3.005, -0.005]):
+        trader.log.write(ts_et=f"2026-09-16 07:{10 + i:02d}:00", strategy=name,
+                         symbol="AAA", action="BUY", status="FILLED",
+                         filled_qty=100, fill_price=4.00)
+        trader.log.write(ts_et=f"2026-09-16 07:{20 + i:02d}:00", strategy=name,
+                         symbol="AAA", action="SELL", status="FILLED",
+                         filled_qty=100, fill_price=4.05, entry_price=4.00,
+                         exit_price=4.05, trade_pnl=pnl, hold_minutes=10.0)
+    # what the trader itself would have accumulated, unrounded
+    trader.session_pnl = sum([1.005, 2.005, 3.005, -0.005])
+
+    doc = bridge(paper=True).build_state(trader, NOW)
+
+    headline = doc["pnl"]["realized"]
+    bars = round(sum(s["pnl"]["realized"] for s in doc["strategies"]), 2)
+    curve = round(sum(f["trade_pnl"] for f in doc["fills_today"]
+                      if f["trade_pnl"] is not None), 2)
+
+    assert headline == bars == curve, (
+        f"headline {headline}, strategy bars {bars}, curve {curve} — the same "
+        f"quantity shown three ways and disagreeing")
+
+
+def test_a_gap_too_large_to_be_rounding_is_reported(tmp_path, caplog):
+    """A few cents is rounding and expected. A large gap means the log is
+    missing a round trip the trader counted — a real defect, and one that would
+    otherwise surface only as a slightly wrong number nobody queries."""
+    import logging
+
+    trader = _trader_with_a_log(tmp_path)
+    name = trader.strategies[0].name
+    trader.log.write(ts_et="2026-09-16 07:10:00", strategy=name, symbol="AAA",
+                     action="BUY", status="FILLED", filled_qty=100, fill_price=4.00)
+    trader.log.write(ts_et="2026-09-16 07:20:00", strategy=name, symbol="AAA",
+                     action="SELL", status="FILLED", filled_qty=100,
+                     fill_price=4.05, entry_price=4.00, exit_price=4.05,
+                     trade_pnl=5.00, hold_minutes=10.0)
+    trader.session_pnl = 91.0             # a whole trade adrift
+
+    with caplog.at_level(logging.WARNING, logger="ui_bridge"):
+        doc = bridge(paper=True).build_state(trader, NOW)
+
+    assert doc["pnl"]["realized"] == 5.00, "the log stays the published figure"
+    assert any("realised P&L disagrees" in r.message for r in caplog.records), (
+        "a missing round trip passed without a word")
+
+
+def test_rounding_alone_stays_quiet(tmp_path, caplog):
+    """The warning has to be worth reading. Cents of rounding must not fire it,
+    or it becomes noise on every single push and stops being a signal."""
+    import logging
+
+    trader = _trader_with_a_log(tmp_path)
+    name = trader.strategies[0].name
+    trader.log.write(ts_et="2026-09-16 07:10:00", strategy=name, symbol="AAA",
+                     action="BUY", status="FILLED", filled_qty=100, fill_price=4.00)
+    trader.log.write(ts_et="2026-09-16 07:20:00", strategy=name, symbol="AAA",
+                     action="SELL", status="FILLED", filled_qty=100,
+                     fill_price=4.05, entry_price=4.00, exit_price=4.05,
+                     trade_pnl=5.00, hold_minutes=10.0)
+    trader.session_pnl = 5.03             # three cents, as on 2026-09-16
+
+    with caplog.at_level(logging.WARNING, logger="ui_bridge"):
+        bridge(paper=True).build_state(trader, NOW)
+
+    assert not [r for r in caplog.records if "realised P&L disagrees" in r.message], (
+        "rounding drift fired the warning; it will cry wolf every 5 seconds")

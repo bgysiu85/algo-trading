@@ -373,6 +373,34 @@ class UIBridge:
             })
 
         unrealized = round(sum(p["unrealized_pnl"] or 0.0 for p in positions), 2)
+
+        # ONE SOURCE FOR REALISED, and this file used to have two. The
+        # per-strategy figures above sum the fill log; this total used to read
+        # `trader.session_pnl`, the trader's own accumulator. Both are correct
+        # and they do not agree: the log rounds each trade to 2dp as it is
+        # written, the accumulator adds the unrounded values. On 2026-09-16
+        # that put 25.71 on the curve, 25.71 across the strategy bars and 25.74
+        # in the headline -- the same quantity, three times, on one screen,
+        # disagreeing by three cents. A dashboard that contradicts itself by a
+        # little teaches you to trust none of it.
+        #
+        # The log wins because it is the auditable record: every figure on the
+        # page can now be checked against the CSV, and the parts sum to the
+        # whole by construction.
+        realized = round(sum(f["trade_pnl"] for f in fills
+                             if f.get("trade_pnl") is not None), 2)
+
+        # A FEW CENTS is rounding and expected. A LARGE gap is not: it means the
+        # log is missing a round trip the trader counted, which is a real defect
+        # and one that would otherwise show up as a slightly wrong number nobody
+        # queries. Telegram and the trader's own log still quote session_pnl, so
+        # the two are visible side by side and should stay close.
+        session_pnl = getattr(trader, "session_pnl", None)
+        if session_pnl is not None and abs(float(session_pnl) - realized) > 0.10:
+            LOG.warning("realised P&L disagrees: fill log %.2f, trader %.2f "
+                        "(%.2f apart) -- more than rounding; a round trip may be "
+                        "missing from the log", realized, float(session_pnl),
+                        abs(float(session_pnl) - realized))
         return {
             "schema_version": CONTRACT_VERSION,
             "sent_at": _utc_now(),
@@ -393,7 +421,7 @@ class UIBridge:
             "positions": positions,
             "fills_today": fills[-MAX_FILLS:],
             "pnl": {
-                "realized": round(float(getattr(trader, "session_pnl", 0.0)), 2),
+                "realized": realized,
                 "unrealized": unrealized,
                 "commission": None,
                 # The fill log charges commission only. Saying so is the rule:
