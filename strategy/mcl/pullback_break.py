@@ -165,7 +165,12 @@ def walk(sig: pd.DataFrame, idx: list[int], allowed: list[bool],
                     else:
                         lowest.trade, lowest.fill_px = t, float(t.entry_price)
                         out.trades.append(t)
-                        flat_after = sig.index.get_loc(pd.Timestamp(t.exit_time))
+                        # LAST row at the exit timestamp. The XNAS.BASIC slice for
+                        # 2025-06-09 carries duplicate timestamps, and get_loc
+                        # then returns a slice: eleven symbol-days raised on it
+                        # and fell out of every book in the v2 and v3 runs.
+                        flat_after = int(np.flatnonzero(
+                            sig.index == pd.Timestamp(t.exit_time)).max())
                         end(lowest, TRIGGERED, j)
                         for st in [x for x in hit if x is not lowest]:
                             end(st, REFUSED_BUSY, j)
