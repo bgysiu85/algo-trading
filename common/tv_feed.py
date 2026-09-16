@@ -304,11 +304,11 @@ def write_watchlist(path: Path, symbols: list[str], header: str = "") -> bool:
     existing = ""
     if path.exists():
         existing = "\n".join(
-            ln.strip() for ln in path.read_text().splitlines()
+            ln.strip() for ln in path.read_text(encoding="utf-8").splitlines()
             if ln.strip() and not ln.startswith("#"))
     tmp = path.with_suffix(path.suffix + ".tmp")
     text = (f"# {header}\n" if header else "") + body + ("\n" if body else "")
-    tmp.write_text(text)
+    tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)
     return body != existing
 

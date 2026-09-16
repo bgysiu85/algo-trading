@@ -75,7 +75,7 @@ SESSION_END_MIN = 20 * 60   # 20:00 ET
 def load_pairs(path: Path) -> dict[str, list[str]]:
     """Screened pairs grouped by date, which is how the archive is chunked."""
     by_date: dict[str, list[str]] = defaultdict(list)
-    for row in json.load(open(path)):
+    for row in json.load(open(path, encoding="utf-8")):
         by_date[row["date"]].append(row["symbol"])
     return {d: sorted(set(s)) for d, s in sorted(by_date.items())}
 

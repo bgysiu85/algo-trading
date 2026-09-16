@@ -153,7 +153,7 @@ def load_bars(cache: Path, symbol: str, day: str) -> pd.DataFrame | None:
     p = cache / f"{symbol}_{day}.csv.gz"
     if not p.exists():
         return None
-    with gzip.open(p, "rt") as fh:
+    with gzip.open(p, "rt", encoding="utf-8") as fh:
         df = pd.read_csv(fh, index_col=0, parse_dates=True)
     if df.empty:
         return None
@@ -675,7 +675,7 @@ def main(argv=None) -> int:
     pops = []
     for i, p in enumerate(a.pairs):
         label = "survivors" if i == 0 else "rejected"
-        pops.append((label, json.loads(Path(p).read_text())))
+        pops.append((label, json.loads(Path(p).read_text(encoding="utf-8"))))
 
     rows: list[DayRow] = []
     seen = 0
@@ -697,7 +697,7 @@ def main(argv=None) -> int:
 
     if a.csv:
         Path(a.csv).parent.mkdir(parents=True, exist_ok=True)
-        with open(a.csv, "w", newline="") as fh:
+        with open(a.csv, "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=list(asdict(DayRow("", "", "", 0))))
             w.writeheader()
             for r in rows:

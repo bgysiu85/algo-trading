@@ -96,14 +96,14 @@ class BarSource:
     def _load_state(self) -> dict:
         if self.state_path.exists():
             try:
-                return json.loads(self.state_path.read_text())
+                return json.loads(self.state_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 LOG.warning("state file unreadable -- starting fresh")
         return {"done": {}}
 
     def _save_state(self) -> None:
         tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.state))
+        tmp.write_text(json.dumps(self.state), encoding="utf-8")
         tmp.replace(self.state_path)
 
     def _cache_path(self, symbol: str, date_str: str) -> Path:

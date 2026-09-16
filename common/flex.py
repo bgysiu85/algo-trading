@@ -564,7 +564,7 @@ def round_trips(execs: list[Execution]) -> list[RoundTrip]:
 def new_against(pair_list: list[dict], existing_path: str | Path) -> list[dict]:
     """The pairs not already in an existing pair file."""
     have = {(p["symbol"], p["date"])
-            for p in json.load(open(existing_path))}
+            for p in json.load(open(existing_path, encoding="utf-8"))}
     return [p for p in pair_list if (p["symbol"], p["date"]) not in have]
 
 
@@ -700,13 +700,13 @@ def main(argv=None) -> int:
 
     if a.pairs:
         Path(a.pairs).parent.mkdir(parents=True, exist_ok=True)
-        json.dump(pl, open(a.pairs, "w"), indent=1)
+        json.dump(pl, open(a.pairs, "w", encoding="utf-8"), indent=1)
         print(f"\nwrote {a.pairs}  ({len(pl)} pairs)")
 
     if a.summary:
         sd = symbol_days(execs)
         Path(a.summary).parent.mkdir(parents=True, exist_ok=True)
-        with open(a.summary, "w", newline="") as fh:
+        with open(a.summary, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(["symbol", "date", "executions", "round_trips",
                         "shares",
@@ -727,7 +727,7 @@ def main(argv=None) -> int:
     if a.round_trips:
         rt = round_trips(execs)
         Path(a.round_trips).parent.mkdir(parents=True, exist_ok=True)
-        with open(a.round_trips, "w", newline="") as fh:
+        with open(a.round_trips, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(["symbol", "date", "entry_et", "exit_et", "fills",
                         "shares", "max_position", "avg_buy_price",

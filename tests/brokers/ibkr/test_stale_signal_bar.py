@@ -246,7 +246,7 @@ def drive(tag, df, now, adapter=MCL, polls=1, fill_price=5.00):
             await tr.step_symbol(st, at(now) + timedelta(seconds=i))
     asyncio.run(go())
     log.close()
-    return st, list(csv.DictReader(out.open()))
+    return st, list(csv.DictReader(out.open(encoding="utf-8")))
 
 
 def rows_with(rows, status):

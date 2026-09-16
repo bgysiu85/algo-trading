@@ -37,7 +37,7 @@ def trade(symbol="AAA", date="2026-03-16", entry=5.0, exit=6.0, qty=100,
 def write_trades(tmp_path, name, rows, cols=None):
     p = tmp_path / f"backtest_trades_{name}.csv"
     cols = cols or TRADE_COLS
-    with open(p, "w", newline="") as fh:
+    with open(p, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
@@ -46,7 +46,7 @@ def write_trades(tmp_path, name, rows, cols=None):
 
 def write_state(tmp_path, name, done):
     p = tmp_path / f"backtest_state_{name}.json"
-    p.write_text(json.dumps({"done": done, "trades": []}))
+    p.write_text(json.dumps({"done": done, "trades": []}), encoding="utf-8")
     return p
 
 
@@ -59,7 +59,7 @@ SUMMARY_COLS = ["symbol", "date", "executions", "round_trips", "shares",
 
 def write_summary(tmp_path, rows):
     p = tmp_path / "summary.csv"
-    with open(p, "w", newline="") as fh:
+    with open(p, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=SUMMARY_COLS, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
@@ -210,7 +210,7 @@ def test_ibkrs_negative_commission_becomes_a_positive_cost(tmp_path):
 
 def test_an_old_summary_without_the_buy_sell_split_is_refused(tmp_path):
     p = tmp_path / "old.csv"
-    with open(p, "w", newline="") as fh:
+    with open(p, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["symbol", "date", "executions", "shares", "gross_pnl",
                     "commission", "net_pnl", "in_band"])
@@ -279,7 +279,7 @@ def test_the_csv_writes_blanks_for_absences(tmp_path):
     rows, _ = D.build(s, tmp_path, tmp_path, ["mcl"])
     out = tmp_path / "cmp.csv"
     D.write_csv(rows, ["mcl"], out)
-    got = list(csv.DictReader(open(out)))[0]
+    got = list(csv.DictReader(open(out, encoding="utf-8")))[0]
     assert got["mcl_status"] == "NO BARS"
     assert got["mcl_net"] == ""
     assert got["mine_net"] == "988.0"
@@ -296,14 +296,14 @@ def test_my_trade_count_is_round_trips_and_the_fills_sit_beside_it(tmp_path):
     rows, _ = D.build(s, tmp_path, tmp_path, [])
     out = tmp_path / "cmp.csv"
     D.write_csv(rows, [], out)
-    got = list(csv.DictReader(open(out)))[0]
+    got = list(csv.DictReader(open(out, encoding="utf-8")))[0]
     assert got["mine_trades"] == "3" and got["mine_fills"] == "31"
 
 
 def test_a_summary_without_round_trips_is_refused(tmp_path):
     p = tmp_path / "old.csv"
     cols = [c for c in SUMMARY_COLS if c != "round_trips"]
-    with open(p, "w", newline="") as fh:
+    with open(p, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         w.writerow(sday())
@@ -401,7 +401,7 @@ def test_my_round_trip_costs_are_flipped_to_positive(tmp_path):
     """Same convention as everywhere else in the sheet, so 'gross minus cost'
     is one subtraction in every column."""
     p = tmp_path / "rt.csv"
-    with open(p, "w", newline="") as fh:
+    with open(p, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["symbol", "date", "entry_et", "exit_et", "fills", "shares",
                     "max_position", "gross_pnl", "commission", "net_pnl",
@@ -416,7 +416,7 @@ def test_my_round_trip_costs_are_flipped_to_positive(tmp_path):
 
 def test_a_round_trip_with_no_entry_time_survives_as_NO_TIME(tmp_path):
     p = tmp_path / "rt.csv"
-    with open(p, "w", newline="") as fh:
+    with open(p, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["symbol", "date", "entry_et", "gross_pnl", "commission",
                     "net_pnl"])

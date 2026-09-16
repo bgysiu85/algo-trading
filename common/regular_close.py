@@ -791,7 +791,7 @@ def main(argv=None) -> int:
                "closes": out}
         if relaxed:
             doc[RELAXED_KEY] = relaxed
-        path.write_text(json.dumps(doc, indent=1))
+        path.write_text(json.dumps(doc, indent=1), encoding="utf-8")
         print(f"  wrote {path} using {n} "
               f"({doc['symbol_days']:,} symbol-days over "
               f"{doc['sessions']} session(s))")

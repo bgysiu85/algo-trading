@@ -93,7 +93,7 @@ def _pid_alive(pid: int) -> bool:
 def read(path: Path = LOCK_PATH) -> dict | None:
     """Raw contents of the lock file, or None if absent/unreadable."""
     try:
-        return json.loads(Path(path).read_text())
+        return json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
 
@@ -164,7 +164,7 @@ def held(mode: str, strategy: str, path: Path = LOCK_PATH, **extra):
         "started_epoch": time.time(),
         **extra,
     }
-    path.write_text(json.dumps(info, indent=2))
+    path.write_text(json.dumps(info, indent=2), encoding="utf-8")
     try:
         yield info
     finally:

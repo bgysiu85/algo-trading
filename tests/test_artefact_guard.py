@@ -109,7 +109,7 @@ def test_the_protected_roots_are_what_we_think_they_are():
 @pytest.mark.parametrize("mode", ["w", "a", "x", "wb", "r+", "w+b"])
 def test_open_for_writing_is_refused(mode):
     with pytest.raises(AssertionError, match="holdout"):
-        open(HOLDOUT, mode)
+        open(HOLDOUT, mode)    # mode is parametrised; the encoding guard skips it
 
 
 def test_open_for_reading_is_allowed_and_still_works():

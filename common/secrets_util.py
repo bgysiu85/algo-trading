@@ -73,7 +73,7 @@ def _read_file() -> dict:
     if not CRED_FILE.exists():
         return {}
     try:
-        return json.loads(CRED_FILE.read_text())
+        return json.loads(CRED_FILE.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         sys.exit(f"{CRED_FILE.name} is not valid JSON: {e}")
 

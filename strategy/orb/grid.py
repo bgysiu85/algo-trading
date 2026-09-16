@@ -544,7 +544,7 @@ def load_pairs(paths: list[str], limit: int | None) -> list[dict]:
     out = []
     for i, p in enumerate(paths):
         label = "survivors" if i == 0 else "rejected"
-        rows = json.loads(Path(p).read_text())
+        rows = json.loads(Path(p).read_text(encoding="utf-8"))
         if limit:
             rows = rows[:limit]
         for r in rows:
@@ -654,7 +654,7 @@ def main(argv=None) -> int:
                 d[f"status_{status}"] = cnt
             rows.append(d)
         fields = sorted({k for r in rows for k in r})
-        with open(a.csv, "w", newline="") as fh:
+        with open(a.csv, "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=fields)
             w.writeheader()
             for r in rows:

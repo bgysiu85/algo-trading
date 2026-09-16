@@ -293,7 +293,7 @@ def test_the_probe_can_scope_a_price_to_the_watchlist(tmp_path):
     p = tmp_path / "pairs.json"
     p.write_text(json.dumps(
         [{"date": "2026-01-02", "symbol": s} for s in ("CCC", "AAA", "BBB")]
-        + [{"date": "2026-01-05", "symbol": "ZZZ"}]))
+        + [{"date": "2026-01-05", "symbol": "ZZZ"}]), encoding="utf-8")
     assert P.universe_symbols(p, "2026-01-02") == ["AAA", "BBB", "CCC"]
     assert P.universe_symbols(p, "2026-01-05") == ["ZZZ"]
 
@@ -305,7 +305,7 @@ def test_the_busiest_session_is_used_when_no_day_is_named(tmp_path):
     p = tmp_path / "pairs.json"
     p.write_text(json.dumps(
         [{"date": "2026-01-05", "symbol": "ZZZ"}]
-        + [{"date": "2026-01-02", "symbol": s} for s in ("AAA", "BBB")]))
+        + [{"date": "2026-01-02", "symbol": s} for s in ("AAA", "BBB")]), encoding="utf-8")
     assert P.universe_symbols(p) == ["AAA", "BBB"]
 
 
@@ -315,7 +315,7 @@ def test_the_scope_limit_matches_the_live_watchlist_cap(tmp_path):
     from common.tv_feed import MAX_SYMBOLS
     p = tmp_path / "pairs.json"
     p.write_text(json.dumps([{"date": "d", "symbol": f"S{i:03d}"}
-                             for i in range(100)]))
+                             for i in range(100)]), encoding="utf-8")
     assert len(P.universe_symbols(p, limit=MAX_SYMBOLS)) == MAX_SYMBOLS
     assert P.build_parser_default_scope_limit() == MAX_SYMBOLS
 

@@ -108,7 +108,7 @@ def universe_symbols(pairs_path: "str | Path", day: str | None = None,
     conservative choice -- a quiet day would understate every other one.
     """
     import json
-    rows = json.loads(Path(pairs_path).read_text())
+    rows = json.loads(Path(pairs_path).read_text(encoding="utf-8"))
     by_day: dict[str, list[str]] = {}
     for r in rows:
         by_day.setdefault(str(r["date"]), []).append(str(r["symbol"]))

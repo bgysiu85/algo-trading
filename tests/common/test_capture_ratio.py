@@ -173,7 +173,7 @@ def test_pairs_group_by_date_and_dedupe(tmp_path):
     json.dump([{"symbol": "AAA", "date": "2025-04-09"},
                {"symbol": "AAA", "date": "2025-04-09"},
                {"symbol": "BBB", "date": "2025-04-09"},
-               {"symbol": "CCC", "date": "2025-04-10"}], open(p, "w"))
+               {"symbol": "CCC", "date": "2025-04-10"}], open(p, "w", encoding="utf-8"))
     assert C.load_pairs(p) == {"2025-04-09": ["AAA", "BBB"],
                                "2025-04-10": ["CCC"]}
 

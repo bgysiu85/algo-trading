@@ -158,5 +158,5 @@ def test_the_report_says_which_window_it_priced(tmp_path):
     P.probe_sizes(FakeClient(FakeMeta(1.0)), "2026-08-04",
                   [("XNAS.BASIC", "ohlcv-1m")], out=str(p),
                   window="04:00-04:30")
-    text = p.read_text()
+    text = p.read_text(encoding="utf-8")
     assert "04:00-04:30" in text and "ET" in text

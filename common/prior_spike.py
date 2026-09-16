@@ -387,7 +387,7 @@ def halves_split(dates: list[str]) -> tuple[str, str]:
     if not ds:
         return "", "no sessions"
     try:
-        reg = json.loads(HOLDOUT.read_text())["both_halves_split"]
+        reg = json.loads(HOLDOUT.read_text(encoding="utf-8"))["both_halves_split"]
         if ds[0] < reg <= ds[-1]:
             return reg, "registered in holdout.json"
     except Exception:                                       # noqa: BLE001
@@ -398,7 +398,7 @@ def halves_split(dates: list[str]) -> tuple[str, str]:
 def lock_from() -> str | None:
     """The first locked session date, or None if there is no committed cut."""
     try:
-        return json.loads(HOLDOUT.read_text())["lock_from"]
+        return json.loads(HOLDOUT.read_text(encoding="utf-8"))["lock_from"]
     except Exception:                                       # noqa: BLE001
         return None
 

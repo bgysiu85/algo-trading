@@ -203,7 +203,7 @@ def test_as_screened_is_marked_not_comparable_to_the_brackets():
 
 def test_an_empty_pairs_file_names_the_command_that_fills_it(tmp_path):
     p = tmp_path / "pit.json"
-    p.write_text("[]")
+    p.write_text("[]", encoding="utf-8")
     with pytest.raises(SystemExit) as e:
         P.load_pit(p)
     assert "screen_sim" in str(e.value)

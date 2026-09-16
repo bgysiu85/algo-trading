@@ -452,7 +452,7 @@ def test_load_repaired_reads_the_construction_and_the_relaxation(tmp_path):
         "construction": "auction_else_last",
         RELAXED_KEY: {"achieved": "19/24"},
         "closes": {"2026-09-10": {"ACVA": 7.22, "TNON": 5.30}},
-    }))
+    }), encoding="utf-8")
     got = SS.load_repaired(p)
     assert len(got) == 2
     assert got.attrs["construction"] == "auction_else_last"
@@ -461,7 +461,7 @@ def test_load_repaired_reads_the_construction_and_the_relaxation(tmp_path):
 
 def test_load_repaired_treats_an_empty_closes_block_as_nothing(tmp_path):
     p = tmp_path / "rc.json"
-    p.write_text(json.dumps({"construction": "x", "closes": {}}))
+    p.write_text(json.dumps({"construction": "x", "closes": {}}), encoding="utf-8")
     assert SS.load_repaired(p) is None
 
 
@@ -489,7 +489,7 @@ def test_a_relaxed_file_produces_a_LOUD_banner(tmp_path):
                       "by_venue": {"NYSE": "2/2", "NASDAQ": "17/19",
                                    "AMEX": "0/3"}},
         "closes": {"2026-09-10": {"ACVA": 7.22}},
-    }))
+    }), encoding="utf-8")
     text = "\n".join(SS.relaxation_banner(SS.load_repaired(p)))
     assert "BELOW THE PRE-REGISTERED BAR" in text
     assert "19/24" in text
@@ -518,7 +518,7 @@ def test_a_venue_with_no_rows_at_all_is_not_a_failure():
 def test_an_unrelaxed_file_produces_no_banner(tmp_path):
     p = tmp_path / "rc.json"
     p.write_text(json.dumps({"construction": "auction_else_last",
-                             "closes": {"2026-09-10": {"ACVA": 7.22}}}))
+                             "closes": {"2026-09-10": {"ACVA": 7.22}}}), encoding="utf-8")
     assert SS.relaxation_banner(SS.load_repaired(p)) == []
 
 

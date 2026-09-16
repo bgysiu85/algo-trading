@@ -36,7 +36,7 @@ def fills_csv(tmp_path, rows, name="mcl_fills_20260910.csv"):
     lines = [",".join(FIELDS)]
     for r in rows:
         lines.append(",".join(str(r.get(f, "")) for f in FIELDS))
-    p.write_text("\n".join(lines) + "\n")
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return p
 
 

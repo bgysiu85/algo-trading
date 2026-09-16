@@ -64,7 +64,7 @@ def trader_with(positions, log_path, strategies=("mcl",)):
 
 
 def write_log(path: Path, rows):
-    with open(path, "w", newline="") as fh:
+    with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=M.FIELDS)
         w.writeheader()
         for r in rows:

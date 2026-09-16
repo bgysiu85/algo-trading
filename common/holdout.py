@@ -74,7 +74,7 @@ def sessions(paths) -> list[str]:
     """Every distinct session date across the given pair lists, sorted."""
     days: set[str] = set()
     for p in paths:
-        for row in json.loads(Path(p).read_text()):
+        for row in json.loads(Path(p).read_text(encoding="utf-8")):
             days.add(row["date"])
     return sorted(days)
 
@@ -88,7 +88,7 @@ def fingerprint(paths) -> str:
     """
     pairs = set()
     for p in paths:
-        for row in json.loads(Path(p).read_text()):
+        for row in json.loads(Path(p).read_text(encoding="utf-8")):
             pairs.add((row["symbol"], row["date"]))
     h = hashlib.sha256()
     for s, d in sorted(pairs):
@@ -145,7 +145,7 @@ def cut(paths, lock_fraction: float = LOCK_FRACTION) -> dict:
 def load() -> dict | None:
     if not CUT_PATH.exists():
         return None
-    return json.loads(CUT_PATH.read_text())
+    return json.loads(CUT_PATH.read_text(encoding="utf-8"))
 
 
 def is_locked(rec: dict, day: str) -> bool:
@@ -219,7 +219,7 @@ def main(argv=None) -> int:
             print("in the diff rather than only on one machine.")
             return 1
         rec = cut([Path(p) for p in a.cut], a.lock_fraction)
-        CUT_PATH.write_text(json.dumps(rec, indent=2) + "\n")
+        CUT_PATH.write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
         print(f"wrote {CUT_PATH}\n")
         print(f"  sessions          {rec['n_sessions']:,}  "
               f"({rec['train_first']} -> {rec['lock_from']} -> last)")

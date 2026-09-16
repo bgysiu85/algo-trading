@@ -153,7 +153,7 @@ def test_the_cli_runs_on_real_mcl_trades(tmp_path):
         pytest.skip("MCL produced no trades on the cached cases")
 
     tpath = tmp_path / "trades.csv"
-    with open(tpath, "w", newline="") as fh:
+    with open(tpath, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=list(trades[0].keys()))
         w.writeheader(); w.writerows(trades)
     out = tmp_path / "r.txt"
@@ -162,7 +162,7 @@ def test_the_cli_runs_on_real_mcl_trades(tmp_path):
                          "--out", str(out), "--csv", str(tmp_path / "r.csv")],
                         capture_output=True, text=True, cwd=REPO)
     assert rc.returncode == 0, rc.stderr[-800:]
-    text = out.read_text()
+    text = out.read_text(encoding="utf-8")
     assert f"trades measured   {len(trades):,}" in text
     assert "signal bar not found in cache: 0" in text, \
         "the engine's own trades did not match its own bars"
@@ -190,7 +190,7 @@ def test_a_5_minute_strategy_is_measured_against_5_minute_bars(tmp_path):
     if not trades:
         pytest.skip("MC5 produced no trades on the cached cases")
     tpath = tmp_path / "t.csv"
-    with open(tpath, "w", newline="") as fh:
+    with open(tpath, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=list(trades[0].keys()))
         w.writeheader(); w.writerows(trades)
     out = tmp_path / "r.txt"
@@ -200,13 +200,13 @@ def test_a_5_minute_strategy_is_measured_against_5_minute_bars(tmp_path):
                          "--csv", str(tmp_path / "r.csv")],
                         capture_output=True, text=True, cwd=REPO)
     assert rc.returncode == 0, rc.stderr[-800:]
-    text = out.read_text()
+    text = out.read_text(encoding="utf-8")
     assert "signal bar not found in cache: 0" in text, \
         "MC5's own 5-minute signal bars must all be found at 5 minutes"
     # Every fill sits within a plausible distance of its own bar: the +1 tick
     # can push it just above the high, never several ranges above it.
     import csv as _csv
-    rows = list(_csv.DictReader(open(tmp_path / "r.csv")))
+    rows = list(_csv.DictReader(open(tmp_path / "r.csv", encoding="utf-8")))
     for r in rows:
         if r["fill_pos"]:
             assert -0.5 <= float(r["fill_pos"]) <= 1.5, r

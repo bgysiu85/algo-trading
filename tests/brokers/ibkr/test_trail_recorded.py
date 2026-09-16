@@ -39,7 +39,7 @@ def test_a_column_missing_from_FIELDS_is_dropped_in_silence(tmp_path):
     log.write(symbol="AAA", action="BUY", trail_pct=7.5, not_a_column=1)
     log.close()
 
-    row = next(csv.DictReader((tmp_path / "f.csv").open(newline="")))
+    row = next(csv.DictReader((tmp_path / "f.csv").open(newline="", encoding="utf-8")))
     assert row["trail_pct"] == "7.5"
     assert "not_a_column" not in row
 
@@ -53,7 +53,7 @@ def test_a_log_from_before_the_column_is_rolled_aside_not_appended_to(tmp_path):
     log = T.FillLog(path)
     log.close()
 
-    assert list(csv.DictReader(path.open(newline="")).fieldnames) == T.FIELDS
+    assert list(csv.DictReader(path.open(newline="", encoding="utf-8")).fieldnames) == T.FIELDS
     rolled = [p for p in tmp_path.iterdir() if "_pre" in p.name]
     assert len(rolled) == 1, "the old log must be kept, not overwritten"
     assert "2026-09-14,AAA,BUY" in rolled[0].read_text(encoding="utf-8")

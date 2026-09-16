@@ -181,7 +181,7 @@ def test_the_guard_matches_the_traders_source():
     import inspect
     from pathlib import Path
     src = Path(inspect.getsourcefile(__import__(
-        "brokers.ibkr.trader", fromlist=["x"]))).read_text()
+        "brokers.ibkr.trader", fromlist=["x"]))).read_text(encoding="utf-8")
     assert 'signal_ts = getattr(sig, "bar_ts", None) or last_ts' in src
     assert "if st.last_bar_ts == signal_ts:" in src
     assert "st.last_bar_ts = signal_ts" in src

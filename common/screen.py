@@ -508,7 +508,7 @@ def main(argv=None) -> int:
 
     known = None
     if a.validate:
-        known = [(p["symbol"], p["date"]) for p in json.load(open(a.validate))]
+        known = [(p["symbol"], p["date"]) for p in json.load(open(a.validate, encoding="utf-8"))]
 
     emit(report(df, sel, cfg, known), a.out,
          header=f"common.screen  dataset={a.dataset}  archive={a.archive}")
@@ -516,14 +516,14 @@ def main(argv=None) -> int:
     if a.pairs:
         Path(a.pairs).parent.mkdir(parents=True, exist_ok=True)
         pl = pairs(sel)
-        json.dump(pl, open(a.pairs, "w"), indent=1)
+        json.dump(pl, open(a.pairs, "w", encoding="utf-8"), indent=1)
         print(f"\nwrote {a.pairs}  ({len(pl)} candidate symbol-days)")
     if a.rejects:
         rej = rejects(df, cfg)
         smp = sample_rejects(rej, sel, a.reject_sample, a.seed)
         Path(a.rejects).parent.mkdir(parents=True, exist_ok=True)
         pl = pairs(smp)
-        json.dump(pl, open(a.rejects, "w"), indent=1)
+        json.dump(pl, open(a.rejects, "w", encoding="utf-8"), indent=1)
         print(f"\nwrote {a.rejects}  ({len(pl):,} of {len(rej):,} rejected "
               f"symbol-days, seed {a.seed})")
         print("  These are days a live scanner WOULD have offered and stage 2")

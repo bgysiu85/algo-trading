@@ -246,6 +246,6 @@ def test_a_repeat_run_does_not_rewrite_the_audit_record(tmp_path, monkeypatch):
     is allowed; moving that timestamp is not."""
     monkeypatch.setattr(R, "SPENT_PATH", tmp_path / "spent.json")
     R.mark_holdout_spent("H1", 8.0)
-    first = (tmp_path / "spent.json").read_text()
+    first = (tmp_path / "spent.json").read_text(encoding="utf-8")
     R.mark_holdout_spent("H1", 8.0)
-    assert (tmp_path / "spent.json").read_text() == first
+    assert (tmp_path / "spent.json").read_text(encoding="utf-8") == first

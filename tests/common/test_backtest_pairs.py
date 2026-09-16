@@ -21,7 +21,7 @@ from common.backtest import load_pairs
 
 
 def write(p, pairs):
-    p.write_text(json.dumps([{"symbol": s, "date": d} for s, d in pairs]))
+    p.write_text(json.dumps([{"symbol": s, "date": d} for s, d in pairs]), encoding="utf-8")
     return p
 
 

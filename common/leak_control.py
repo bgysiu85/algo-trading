@@ -53,7 +53,7 @@ from common.day_compare import read_state, read_trades
 
 
 def population(pairs_path: Path) -> set[tuple[str, str]]:
-    return {(p["symbol"], p["date"]) for p in json.load(open(pairs_path))}
+    return {(p["symbol"], p["date"]) for p in json.load(open(pairs_path, encoding="utf-8"))}
 
 
 def measure(reports: Path, states: Path, name: str, keys: set) -> dict:
@@ -224,7 +224,7 @@ def main(argv=None) -> int:
                 "net", "entries_per_day", "share_of_days_traded",
                 "net_per_day", "net_per_trade"]
         Path(a.csv).parent.mkdir(parents=True, exist_ok=True)
-        with open(a.csv, "w", newline="") as fh:
+        with open(a.csv, "w", newline="", encoding="utf-8") as fh:
             w = _csv.DictWriter(fh, fieldnames=cols)
             w.writeheader()
             for name, (surv, rej) in rows.items():

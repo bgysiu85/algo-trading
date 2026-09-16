@@ -69,14 +69,14 @@ def test_no_test_file_is_silently_uncollected():
 def test_the_guard_can_tell_the_difference(tmp_path):
     """A checker that passes everything proves nothing."""
     good = tmp_path / "test_good.py"
-    good.write_text("def test_x():\n    assert True\n")
+    good.write_text("def test_x():\n    assert True\n", encoding="utf-8")
     bad = tmp_path / "test_bad.py"
     bad.write_text("def main():\n    return 0\n\n"
-                   'if __name__ == "__main__":\n    main()\n')
+                   'if __name__ == "__main__":\n    main()\n', encoding="utf-8")
     klass = tmp_path / "test_klass.py"
-    klass.write_text("class TestThing:\n    def test_y(self):\n        pass\n")
+    klass.write_text("class TestThing:\n    def test_y(self):\n        pass\n", encoding="utf-8")
     helper = tmp_path / "test_helper_only.py"
-    helper.write_text("def build():\n    return 1\n")
+    helper.write_text("def build():\n    return 1\n", encoding="utf-8")
 
     assert defines_a_test(good)
     assert defines_a_test(klass)

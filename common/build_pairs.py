@@ -87,7 +87,7 @@ def main() -> int:
 
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(
-        [{"symbol": s, "date": d} for s, d in clean], indent=0))
+        [{"symbol": s, "date": d} for s, d in clean], indent=0), encoding="utf-8")
     print(f"\nwrote {len(clean)} pairs to {a.out}")
     by_year = collections.Counter(d[:4] for _, d in clean)
     print("by year:", dict(sorted(by_year.items())))

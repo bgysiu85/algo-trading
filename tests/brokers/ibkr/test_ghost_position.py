@@ -148,7 +148,7 @@ def held_position(st, qty=100, entry=3.82, at=None):
 
 def rows_of(log, out):
     log.close()
-    return list(csv.DictReader(out.open()))
+    return list(csv.DictReader(out.open(encoding="utf-8")))
 
 
 @pytest.fixture(autouse=True)

@@ -42,7 +42,7 @@ def load_pairs(paths) -> list[dict]:
     seen: set[tuple[str, str]] = set()
     out = []
     for path in paths:
-        for p in json.loads(Path(path).read_text()):
+        for p in json.loads(Path(path).read_text(encoding="utf-8")):
             sym = str(p["symbol"]).upper().strip()
             # forex and anything with a dot is not a US equity
             if "." in sym or not sym.isalpha():

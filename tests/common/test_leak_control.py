@@ -20,7 +20,7 @@ from tests.common.test_day_compare import trade, write_trades, write_state
 
 def pairs_file(tmp_path, name, keys):
     p = tmp_path / f"{name}.json"
-    p.write_text(json.dumps([{"symbol": s, "date": d} for s, d in keys]))
+    p.write_text(json.dumps([{"symbol": s, "date": d} for s, d in keys]), encoding="utf-8")
     return p
 
 
