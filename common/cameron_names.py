@@ -82,7 +82,15 @@ TOP_N = 5
 # mean is stable; the closed form below is what says the draw is unbiased.
 CONTROL_DRAWS = 2000
 CONTROL_SEED = 20260916
-# The registered pass criterion, in percentage points over the control.
+# The registered pass criterion, AMENDED before the first run: mean rank-AUC.
+# The original -- top-5 rate 15 points over the control -- cannot be passed,
+# because a random name from our own universe is already inside the top 5
+# 93.7% of the time on a median 11-name list. See the amendment in the
+# registration. A criterion that cannot pass is a control whose output is
+# indistinguishable from the failure it detects.
+AUC_MIN = 0.60
+# Kept only so the superseded figure can still be printed beside its real
+# control, which is the thing that makes it readable rather than misleading.
 MARGIN_PP = 15.0
 # The census `symbols` cell is free text. This one is a company, not a ticker,
 # and is excluded BY NAME and counted rather than silently dropped -- a filter
@@ -196,44 +204,93 @@ def coverage(sym_days: list[dict], pit: dict[str, dict[str, dict]]) -> dict:
     }
 
 
-def expected_top_rate(sym_days: list[dict], pit: dict) -> float:
-    """The closed-form control: a name drawn uniformly from a session's own
-    universe lands in the top N with probability min(N, n)/n.
+def rank_auc(rank: int, pool: list[int]) -> float:
+    """One name's rank against the REST of its own session's universe.
 
-    Computed as well as simulated, and the two must agree. A matched draw that
-    silently sampled the wrong pool -- all sessions instead of this one -- would
-    still produce a plausible number, and nothing but this would say so.
+    The chance it outranks a randomly chosen other name from our list that
+    day, ties at a half. 0.500 is no information, exactly and by symmetry --
+    which is what makes the control below an exact expectation rather than an
+    assumed one.
+
+    A lower rank number is better, so a "win" is another name ranking HIGHER.
     """
-    tot = 0.0
-    n = 0
+    others = [r for r in pool]
+    # self appears once in the pool; remove exactly one instance, not all the
+    # names that happen to share its rank -- 550 of 551 sessions have ties.
+    others.remove(rank)
+    if not others:
+        return 0.5                      # a one-name session orders nothing
+    wins = sum(1 for r in others if r > rank)
+    ties = sum(1 for r in others if r == rank)
+    return (wins + 0.5 * ties) / len(others)
+
+
+def pool_ranks(universe: dict, field: str) -> list[int]:
+    return [r[field] for r in universe.values()]
+
+
+def observed_auc(present: list[dict], pit: dict, field: str) -> list[float]:
+    """His names' rank-AUCs. One per present mention, never pooled across
+    fields -- best_rank and first_rank are different questions."""
+    out = []
+    for p in present:
+        u = pit.get(p["date"])
+        if not u:
+            continue
+        out.append(rank_auc(p["rec"][field], pool_ranks(u, field)))
+    return out
+
+
+def control_top_rate(sym_days: list[dict], pit: dict, field: str) -> float:
+    """The share of a session's OWN universe inside the top cut, averaged over
+    the matched sessions. The exact expectation of the matched draw.
+
+    Computed from the ranks rather than assumed to be `min(N, n)/n`. That
+    closed form needs the ranks to enumerate 1..n within a session and they do
+    not: `best_rank` is the best a name ever reached, so 2024-07-02 ranks six
+    names 1, 1, 3, 3, 3, 4. The assumed form gives 0.536 against a true 0.937
+    and would have raised a wrong-pool alarm on correct data.
+    """
+    tot, n = 0.0, 0
     for sd in sym_days:
         u = pit.get(sd["date"])
         if not u:
             continue
-        tot += min(TOP_N, len(u)) / len(u)
+        ranks = pool_ranks(u, field)
+        tot += sum(1 for r in ranks if r <= TOP_N) / len(ranks)
         n += 1
     return 100.0 * tot / n if n else 0.0
 
 
-def control(sym_days: list[dict], pit: dict, draws: int, seed: int) -> dict:
-    """Matched random draws: one symbol per mention, from THAT session's
-    universe.
+def control(sym_days: list[dict], pit: dict, field: str, draws: int,
+            seed: int) -> dict:
+    """Matched random draws: one name per mention, from THAT session's universe.
 
     Drawn from the pooled universe instead, the control would inherit the size
     distribution of busy sessions and beat his names on arithmetic alone.
+
+    Returns the mean rank-AUC per draw (the statistic) and the top-cut rate per
+    draw (the superseded one, kept so it can be printed with its real control).
+    The rank-AUC control has an exact expectation of 0.500 by symmetry, and the
+    report checks the draws against it -- a draw that sampled the wrong pool
+    would still return a plausible percentage, and nothing else would say so.
     """
     rng = random.Random(seed)
-    pools = [list(pit[sd["date"]].values()) for sd in sym_days
-             if pit.get(sd["date"])]
+    pools = [(pit[sd["date"]], pool_ranks(pit[sd["date"]], field))
+             for sd in sym_days if pit.get(sd["date"])]
     if not pools:
-        return {"mean": 0.0, "rates": [], "n": 0}
-    rates = []
+        return {"auc": 0.5, "aucs": [], "top": 0.0, "n": 0}
+    aucs, tops = [], []
     for _ in range(draws):
-        hits = sum(1 for pool in pools
-                   if rng.choice(pool)["best_rank"] <= TOP_N)
-        rates.append(100.0 * hits / len(pools))
-    return {"mean": sum(rates) / len(rates), "rates": sorted(rates),
-            "n": len(pools)}
+        a, t = [], 0
+        for u, ranks in pools:
+            r = rng.choice(ranks)
+            a.append(rank_auc(r, ranks))
+            t += r <= TOP_N
+        aucs.append(sum(a) / len(a))
+        tops.append(100.0 * t / len(pools))
+    return {"auc": sum(aucs) / len(aucs), "aucs": sorted(aucs),
+            "top": sum(tops) / len(tops), "n": len(pools)}
 
 
 def beat_rate(observed: float, rates: list[float]) -> float:
@@ -354,13 +411,12 @@ def diagnose_absent(absent, slices, daily, cadence):
 
 
 # ---------------------------------------------------------------- report
-def render(cov, ctrl, exp, early, late, ctrl_e, ctrl_l, dropped, unmapped,
+def render(cov, ctrl, aucs, auc_e, auc_l, ctrl_e, ctrl_l, dropped, unmapped,
            dupes, causes, pnl, n_sessions, elapsed) -> list[str]:
     from common.pit_h0 import DROP, FRICTIONS, score, halves_split
 
     pres = len(cov["present"])
     obs = top_rate(cov)
-    gap = obs - ctrl["mean"]
     L = ["DOES HIS NAME SELECTION BEAT OUR RANKING?", "",
          "  Registered in docs/research/REGISTERED_cameron_names.md,",
          "  commit f1fa64c, BEFORE this module was written.", "",
@@ -403,63 +459,75 @@ def render(cov, ctrl, exp, early, late, ctrl_e, ctrl_l, dropped, unmapped,
                      f"{cov['first'].get(r, 0):>10}{mark}")
         L += ["",
               f"  reached top {TOP_N} (best_rank)    {cov['top_best']:>5} of "
-              f"{pres}   {obs:.1f}%   <- the criterion",
+              f"{pres}   {obs:.1f}%",
               f"  top {TOP_N} when first seen        {cov['top_first']:>5} of "
               f"{pres}   {top_rate(cov, 'top_first'):.1f}%",
+              f"  a random name from OUR OWN list   "
+              f"{ctrl['top']:.1f}%   <- why these three lines settle nothing",
+              "",
+              "  The top-5 rate was the registered criterion and it was AMENDED",
+              "  before this ran. The median session carries 11 names and almost",
+              "  all of them touch the top 5 at some tick, so the measure cannot",
+              "  discriminate at any threshold. It is printed with its control",
+              "  rather than removed, because the superseded figure is the one a",
+              "  reader is most likely to have in their head.",
               "",
               f"  over ALL {cov['n_all']:,} mentions   "
               f"{100.0 * cov['top_best'] / cov['n_all'] if cov['n_all'] else 0:.1f}%"
-              "  -- NOT comparable to the control below;",
-              "  its denominator includes names the control cannot have.", ""]
+              "  -- a third denominator, listed and", "  not compared to anything.",
+              ""]
 
-    L += ["3. THE CONTROL -- a random name from the SAME session's universe", "",
-          f"  {ctrl['n']:,} matched draws x {len(ctrl['rates']):,} iterations",
-          ""]
-    if not ctrl["rates"]:
-        L += ["  REFUSED: no session had a universe to draw from.", ""]
+    L += ["3. THE TEST -- WHERE HIS NAMES SIT IN OUR OWN ORDERING", "",
+          "  For each of his names, the chance it outranks a randomly chosen",
+          "  OTHER name from our list that day, ties at a half. Immune to where",
+          "  a cut falls and to how many names a session carries.", "",
+          f"  0.500 is no information. The registered bar is {AUC_MIN:.2f}, and",
+          "  it is deliberately low: only a null closes this thread, so a",
+          "  generous bar makes the closure worth more.", ""]
+    if not aucs or not ctrl["aucs"]:
+        L += ["  REFUSED: nothing to order.", ""]
     else:
-        lo, hi_ = ctrl["rates"][len(ctrl["rates"]) // 40],             ctrl["rates"][-max(1, len(ctrl["rates"]) // 40)]
-        L += [f"  his names        {obs:.1f}%",
-              f"  random draw      {ctrl['mean']:.1f}%   "
-              f"(90% of draws {lo:.1f}-{hi_:.1f}%)",
-              f"  closed form      {exp:.1f}%   "
-              "(mean of min(5, n)/n over the same sessions)"]
-        drift = abs(ctrl["mean"] - exp)
-        L += [f"  draw vs form     {drift:.2f} pp   "
-              + ("OK" if drift < 1.5 else
+        mean = sum(aucs) / len(aucs)
+        lo = ctrl["aucs"][len(ctrl["aucs"]) // 40]
+        hi_ = ctrl["aucs"][-max(1, len(ctrl["aucs"]) // 40)]
+        drift = abs(ctrl["auc"] - 0.5)
+        L += [f"  his names        rank-AUC {mean:.3f}   (n={len(aucs)})",
+              f"  random draw      rank-AUC {ctrl['auc']:.3f}   "
+              f"(90% of draws {lo:.3f}-{hi_:.3f})",
+              f"  exact form       rank-AUC 0.500   by symmetry",
+              f"  draw vs form     {drift:.3f}   "
+              + ("OK" if drift < 0.02 else
                  "*** THE DRAW DOES NOT MATCH ITS OWN EXPECTATION -- "
                  "the control is sampling the wrong pool ***"),
               "",
-              f"  gap  {gap:+.1f} pp   against a registered {MARGIN_PP:.0f} pp",
-              f"  chance alone reaches his rate {beat_rate(obs, ctrl['rates']):.1%} "
-              "of the time", ""]
-        if gap >= MARGIN_PP:
-            L += ["  *** PASSES the registered margin. ***", "",
+              f"  chance alone reaches his figure "
+              f"{beat_rate(mean, ctrl['aucs']):.1%} of the time", ""]
+        if mean >= AUC_MIN:
+            L += [f"  *** PASSES the registered {AUC_MIN:.2f} bar. ***", "",
                   "  Note what this does NOT say: that his names are better.",
                   "  It says OUR ranking already puts them near the top, which",
                   "  is an argument that our LIST is not the problem.", ""]
         else:
-            L += ["  DOES NOT pass the registered margin.", "",
+            L += [f"  DOES NOT pass the registered {AUC_MIN:.2f} bar.", "",
                   "  On the registered reading our ranking orders his names no",
                   "  better than a draw from our own list, and item 1c is",
                   "  CLOSED: name selection is not where the gap is.", ""]
 
     L += ["4. BOTH HALVES", ""]
-    for name, c, k in (("early", early, ctrl_e), ("late", late, ctrl_l)):
-        if not c["present"]:
+    for name, a, k in (("early", auc_e, ctrl_e), ("late", auc_l, ctrl_l)):
+        if not a:
             L.append(f"  {name:<6} REFUSED: no present mentions")
         else:
-            g = top_rate(c) - k["mean"]
-            L.append(f"  {name:<6} his {top_rate(c):5.1f}%   "
-                     f"random {k['mean']:5.1f}%   gap {g:+5.1f} pp   "
-                     f"(n={len(c['present'])})")
-    if early["present"] and late["present"]:
-        ge = top_rate(early) - ctrl_e["mean"]
-        gl = top_rate(late) - ctrl_l["mean"]
-        if (ge >= MARGIN_PP) != (gl >= MARGIN_PP):
-            L += ["", "  *** THE HALVES DISAGREE about the criterion. "
+            m = sum(a) / len(a)
+            L.append(f"  {name:<6} rank-AUC {m:.3f}   random {k['auc']:.3f}   "
+                     f"(n={len(a)})   "
+                     + ("passes" if m >= AUC_MIN else "does not pass"))
+    if auc_e and auc_l:
+        me, ml = sum(auc_e) / len(auc_e), sum(auc_l) / len(auc_l)
+        if (me >= AUC_MIN) != (ml >= AUC_MIN):
+            L += ["", "  *** THE HALVES DISAGREE about the bar. "
                   "No verdict. ***"]
-        elif (ge > 0) != (gl > 0):
+        elif (me > 0.5) != (ml > 0.5):
             L += ["", "  *** THE HALVES DISAGREE in direction. No verdict. ***"]
         else:
             L += ["", "  the halves agree."]
@@ -551,14 +619,19 @@ def main(argv=None) -> int:
                  "same dates.")
 
     cov = coverage(sym_days, pit)
-    ctrl = control(sym_days, pit, a.draws, a.seed)
-    exp = expected_top_rate(sym_days, pit)
+    # best_rank throughout: it is the field the registration names, and the
+    # amendment changed the STATISTIC, not which column it reads.
+    FIELD = "best_rank"
+    ctrl = control(sym_days, pit, FIELD, a.draws, a.seed)
+    aucs = observed_auc(cov["present"], pit, FIELD)
     e_days, l_days = halves(sym_days)
     early, late = coverage(e_days, pit), coverage(l_days, pit)
+    auc_e = observed_auc(early["present"], pit, FIELD)
+    auc_l = observed_auc(late["present"], pit, FIELD)
     # A separate seed per half, or both halves draw the same sequence and
     # "the halves agree" would be partly an artefact of the random stream.
-    ctrl_e = control(e_days, pit, a.draws, a.seed + 1)
-    ctrl_l = control(l_days, pit, a.draws, a.seed + 2)
+    ctrl_e = control(e_days, pit, FIELD, a.draws, a.seed + 1)
+    ctrl_l = control(l_days, pit, FIELD, a.draws, a.seed + 2)
 
     causes, pnl = None, None
     if not a.coverage_only:
@@ -580,7 +653,7 @@ def main(argv=None) -> int:
             print(f"  {len(unread)} session(s) unread: {unread[:5]}", flush=True)
         pnl = got
 
-    text = render(cov, ctrl, exp, early, late, ctrl_e, ctrl_l, dropped,
+    text = render(cov, ctrl, aucs, auc_e, auc_l, ctrl_e, ctrl_l, dropped,
                   unmapped, dupes, causes, pnl,
                   len({sd["date"] for sd in sym_days}), time.time() - t0)
     emit("\n".join(text), a.out,
