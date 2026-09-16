@@ -24,21 +24,79 @@ from pathlib import Path
 import pytest
 
 # the guard lives in tests/conftest.py, which pytest loads as a plugin rather
-# than as an importable module -- reach it through the plugin manager so this
-# file tests THE GUARD IN FORCE, not a second import of the same source.
+# than as an importable module -- reach it through sys.modules so this file
+# tests THE GUARD IN FORCE, not a second import of the same source.
+#
+# BY PATH IDENTITY, NOT BY MATCHING THE END OF A STRING. The first version of
+# this compared `__file__.replace('\\\\', '/').endswith('tests/conftest.py')`,
+# which is wrong twice over. `'\\\\'` in a non-raw literal is TWO backslashes
+# and a Windows path has one, so the normalisation normalised nothing and the
+# whole suite failed to collect on the only platform it was written for. And
+# a suffix match would have accepted any other project's tests/conftest.py
+# that happened to be imported -- this file would then have reported on a
+# guard that is not the one protecting this run.
+CONFTEST = Path(__file__).resolve().parent / "conftest.py"
+
+
+def find_guard(modules) -> object:
+    """The loaded conftest at CONFTEST, or None. Takes the mapping so it can
+    be tested against a decoy rather than only against the real one."""
+    for mod in list(modules.values()):
+        f = getattr(mod, "__file__", None)
+        if not f:
+            continue
+        try:
+            if Path(f).resolve() == CONFTEST:
+                return mod
+        except (OSError, ValueError):        # a __file__ that is not a path
+            continue                        # ValueError: embedded null byte
+    return None
+
+
 def _guard_module():
     import sys
-    for name, mod in sys.modules.items():
-        if getattr(mod, '__file__', '') and \
-                mod.__file__.replace('\\\\', '/').endswith('tests/conftest.py'):
-            return mod
-    raise AssertionError('tests/conftest.py is not loaded -- the guard is off')
+    mod = find_guard(sys.modules)
+    if mod is None:
+        raise AssertionError(
+            f"the guard is off -- no loaded module is {CONFTEST}")
+    return mod
+
 
 G = _guard_module()
 
 HOLDOUT = G.REPO / "var" / "state" / "holdout.json"
 FILLS = G.REPO / "var" / "fills" / "mcl_fills_20260915.csv"
 CACHE = G.REPO / "bar_cache" / "anything.parquet"
+
+
+def test_the_guard_is_located_by_path_and_not_by_the_end_of_a_string():
+    """A DECOY: another checkout's tests/conftest.py, imported for any reason.
+
+    A suffix match accepts it, and every assertion in this file then reports
+    on a guard that is not the one protecting this run -- green, and about
+    the wrong object. Path identity rejects it.
+    """
+    decoy = type(pytest)("decoy")
+    decoy.__file__ = str(Path("/somewhere/else/tests/conftest.py"))
+    assert find_guard({"decoy": decoy}) is None
+
+
+def test_a_module_with_no_usable_file_is_skipped_rather_than_raising():
+    """Namespace packages and frozen modules carry a `__file__` that is None
+    or not a path. One of them must not take the whole collection down --
+    which is a collection error, so it takes the SUITE down, not one test."""
+    ns = type(pytest)("ns")
+    ns.__file__ = None
+    weird = type(pytest)("weird")
+    weird.__file__ = "\x00not-a-path"
+    assert find_guard({"ns": ns, "weird": weird}) is None
+
+
+def test_the_conftest_it_found_is_this_directory_s_conftest():
+    """Anchored to THIS file's folder, so a tests/ tree moved or vendored
+    elsewhere cannot silently satisfy it."""
+    assert Path(G.__file__).resolve() == CONFTEST
+    assert CONFTEST.parent == Path(__file__).resolve().parent
 
 
 def test_the_protected_roots_are_what_we_think_they_are():
