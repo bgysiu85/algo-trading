@@ -641,6 +641,94 @@ def schema_drift(eng) -> dict[str, list[str]]:
     return out
 
 
+def addable_columns(eng) -> tuple[dict[str, list], dict[str, list[str]]]:
+    """Drift split into what may be ALTERed in and what may not.
+
+    (addable, refused) keyed by table. `addable` holds Column objects, in the
+    model's own order; `refused` holds (name, reason) strings.
+
+    THE RULE, AND IT IS NARROW ON PURPOSE. A column may be added to a live
+    table only when every existing row's honest value for it is NULL. That
+    means the column must be nullable, carry no server default and no primary
+    key membership.
+
+    A NOT NULL addition needs a value for rows that predate the measurement,
+    and any value it picked would be invented. That is the failure the
+    `dataset` column was added to prevent: a backfill that GUESSES provenance
+    and then reads exactly like one that knows it.
+
+    A primary-key addition is not an addition at all -- it changes what a row
+    IS, so two rows that were distinct can collide. That is a rebuild.
+
+    Nothing outside `META` is considered. This function cannot be asked to add
+    a column the model does not declare, so there is no path from here to
+    arbitrary DDL.
+    """
+    from sqlalchemy import inspect as _inspect
+
+    insp = _inspect(eng)
+    live = set(insp.get_table_names())
+    addable: dict[str, list] = {}
+    refused: dict[str, list[str]] = {}
+    for t in META.sorted_tables:
+        if t.name not in live:
+            continue
+        have = {c["name"] for c in insp.get_columns(t.name)}
+        ok, no = [], []
+        for c in t.columns:
+            if c.name in have:
+                continue
+            if c.primary_key:
+                no.append(f"{c.name}: in the primary key -- adding it changes "
+                          "what a row IS, so rows that were distinct can "
+                          "collide. Rebuild instead.")
+            elif not c.nullable:
+                no.append(f"{c.name}: NOT NULL -- every existing row would "
+                          "need a value it predates, and inventing one is the "
+                          "defect this refuses to commit.")
+            elif c.server_default is not None:
+                no.append(f"{c.name}: carries a server default, which would "
+                          "write a value into every existing row.")
+            else:
+                ok.append(c)
+        if ok:
+            addable[t.name] = ok
+        if no:
+            refused[t.name] = no
+    return addable, refused
+
+
+def add_column_sql(table: str, col, dialect) -> str:
+    """The one statement this module will ever emit against a live table.
+
+    Built from the model's own type through the ENGINE'S dialect compiler
+    rather than hand-written, so the column this ALTER creates is the column
+    `create_all` would have created on that same database. A hand-written type
+    is a second source of truth about the schema, and a type compiled for a
+    dialect other than the one being altered is the same fault wearing a
+    compiler.
+    """
+    ddl = col.type.compile(dialect=dialect)
+    return f"ALTER TABLE {table} ADD {col.name} {ddl} NULL"
+
+
+def add_missing_columns(eng, addable: dict[str, list]) -> list[str]:
+    """Run the statements. Returns them, in the order executed.
+
+    Each ALTER is its own transaction: a failure on the fourth column must
+    leave the first three added rather than rolling back into a state that
+    matches neither the model nor the report just printed.
+    """
+    done = []
+    for table, cols in sorted(addable.items()):
+        for c in cols:
+            stmt = add_column_sql(table, c, eng.dialect)
+            with eng.begin() as conn:
+                conn.exec_driver_sql(stmt)
+            done.append(stmt)
+    return done
+
+
 def rebuild_table(eng, name: str) -> int:
     """Drop and recreate ONE derived table. Returns the row count discarded.
 
@@ -799,6 +887,20 @@ def main(argv=None) -> int:
                          "rows, then reload it with its own loader. This is how "
                          "a column added to a model reaches a table that "
                          "already exists: create_all never alters one.")
+    ap.add_argument("--add-columns", action="store_true",
+                    help="ADD the model's missing columns to tables that "
+                         "already exist, in place, leaving every row where it "
+                         "is. Nullable additions only -- see addable_columns. "
+                         "Prints the exact statements and changes NOTHING "
+                         "unless --apply is also given.")
+    ap.add_argument("--apply", action="store_true",
+                    help="with --add-columns, actually run the statements. "
+                         "Separate flag because the printed plan is the last "
+                         "chance to read what will touch a live table.")
+    ap.add_argument("--check-rebuildable", metavar="NAME",
+                    help="ask the rebuild precondition WITHOUT dropping "
+                         "anything: which sessions the table holds that "
+                         "--fills-dir cannot reproduce.")
     ap.add_argument("--fills-dir", default="var/fills",
                     help="where the trader's fill logs live. Only read when "
                          "rebuilding paper_fill, whose rows come from them -- "
@@ -854,6 +956,73 @@ def main(argv=None) -> int:
         print("    not the database: CREATE DATABASE Trading; first.")
         return 1
 
+    if a.check_rebuildable:
+        # Asking the precondition is not the same act as acting on it. Without
+        # this the only way to learn whether a rebuild is safe was to start
+        # one, which makes "check first" advice nobody can follow.
+        if a.check_rebuildable not in REBUILD_PRECONDITION:
+            print(f"\n{a.check_rebuildable} has no rebuild precondition. "
+                  "Only these do: "
+                  f"{', '.join(sorted(REBUILD_PRECONDITION))}")
+            return 1
+        ok, missing = paper_fill_is_rebuildable(eng, a.fills_dir)
+        if ok:
+            print(f"\nREBUILDABLE: every session in {a.check_rebuildable} "
+                  f"can be read back from {a.fills_dir}/.")
+            return 0
+        print(f"\nNOT REBUILDABLE: {a.check_rebuildable} holds "
+              f"{len(missing)} session(s) that {a.fills_dir}/ cannot "
+              "reproduce.")
+        print("  A rebuild would destroy real trading history.")
+        for d in missing[:10]:
+            print(f"    {d}")
+        if len(missing) > 10:
+            print(f"    ... and {len(missing) - 10} more")
+        return 1
+
+    if a.add_columns:
+        addable, refused = addable_columns(eng)
+        if not addable and not refused:
+            print("\nnothing to add: every table already has the model's "
+                  "columns.")
+            return 0
+        if refused:
+            print("\nWILL NOT ADD -- these need a rebuild, not an ALTER:")
+            for t, why in sorted(refused.items()):
+                for line in why:
+                    print(f"  {t:<20} {line}")
+        if not addable:
+            print("\nnothing addable in place.")
+            return 1
+        print("\nSTATEMENTS" + ("" if a.apply else "  (nothing has run)"))
+        planned = [add_column_sql(t, c, eng.dialect)
+                   for t, cols in sorted(addable.items()) for c in cols]
+        for stmt in planned:
+            print(f"  {stmt};")
+        print("\n  Every one is a nullable ADD. No existing row is read, "
+              "written or")
+        print("  moved: the rows that predate the column get NULL, which is "
+              "what they")
+        print("  honestly have -- the measurement did not exist when they "
+              "were made.")
+        if not a.apply:
+            print("\n  Re-run with --apply to execute. Until then this "
+                  "command has")
+            print("  changed nothing.")
+            return 0
+        done = add_missing_columns(eng, addable)
+        print(f"\napplied {len(done)} statement(s).")
+        left = schema_drift(eng)
+        if left:
+            print("REMAINING DRIFT:")
+            for t, cols in sorted(left.items()):
+                print(f"  {t:<20} missing: {', '.join(cols)}")
+            print("  These are the refusals above. Rebuild them, or leave "
+                  "them.")
+        else:
+            print("schema now matches the model.")
+        return 0
+
     if a.rebuild_table:
         # The precondition is checked HERE, before the drop, and not inside
         # rebuild_table -- which does not know where the fill logs live. A
@@ -905,14 +1074,29 @@ def main(argv=None) -> int:
                   "  to a model after its table was made is silently absent "
                   "until a query",
                   "  naming it fails mid-load."]
-            fixable = sorted(t for t in drift if t in DERIVED_TABLES)
+            # The cheap fix FIRST. A report that leads with "drop the
+            # table" for a column every existing row can honestly hold as
+            # NULL is teaching the destructive option as the normal one.
+            addable, _refused = addable_columns(eng)
+            if addable:
+                L += ["", "  Added IN PLACE -- nullable, no row touched, the "
+                          "rows that predate", "  the column get NULL:",
+                      "    python -m common.db --add-columns",
+                      "      then, to run it:  python -m common.db "
+                      "--add-columns --apply"]
+            fixable = sorted(t for t in drift if t in DERIVED_TABLES
+                             and t not in addable)
             if fixable:
-                L += ["", "  These hold only what a file can reproduce, so they "
-                          "can be rebuilt:"]
+                L += ["", "  These cannot be altered in place and hold only "
+                          "what a file can", "  reproduce, so they can be "
+                          "rebuilt:"]
                 for t in fixable:
                     L.append(f"    python -m common.db --rebuild-table {t}")
+                    L.append(f"      check first:  python -m common.db "
+                             f"--check-rebuildable {t}")
                     L.append(f"      then:  {DERIVED_TABLES[t]}")
-            other = sorted(t for t in drift if t not in DERIVED_TABLES)
+            other = sorted(t for t in drift if t not in DERIVED_TABLES
+                            and t not in addable)
             if other:
                 L += ["", "  NOT auto-rebuildable, because their rows may be "
                           "the only copy:",
