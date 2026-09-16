@@ -129,6 +129,23 @@ ORDER_TIMEOUT_S = 20        # cancel and record a no-fill after this long
 # price.
 EXIT_ABANDON_POLLS = 2
 
+# THE MEDS GHOST, 2026-09-16. The abandon path above broke out of its poll
+# loop, read `trade.fills` in the same instant, saw nothing, cancelled, and
+# recorded NO_FILL_ABANDONED. The fill had landed at IB in between. The trader
+# kept 100 shares on its books that the account no longer held and sent 850+
+# more SELLs into a flat account over three and a half hours -- every one a
+# short sale had it filled. An order's outcome is not known until IB says the
+# order is finished, so after ANY cancel the trader now waits for that, bounded
+# by this. Past the bound the outcome is UNKNOWN, and unknown is handled by
+# asking IB what the account actually holds before anything else is sent.
+CANCEL_CONFIRM_S = 3.0
+# After this many consecutive exit attempts that did not fill, alert once and
+# slow down. Not stop: by then IB has confirmed the shares are really held
+# (every retry reconciles first), and a real position that cannot fill still
+# needs managing -- at a cadence that is not 850 orders a morning.
+MAX_EXIT_ATTEMPTS = 5
+EXIT_RETRY_BACKOFF_S = 30.0
+
 # IBKR STATES THE ACCEPTABLE LIMIT IN THE TEXT OF THE REJECTION.
 #
 #   Error 202: Order Canceled - reason:We cannot accept an order at a limit
@@ -310,6 +327,14 @@ class Position:
     trail_pct: float = S.TRAIL_PCT
     exiting: str | None = None      # sticky: once we decide to exit, keep trying
     exit_attempts: int = 0
+    # Set once the exit has failed MAX_EXIT_ATTEMPTS times with IB confirming
+    # the shares are still held. The portal shows it; the alert fires once.
+    needs_attention: bool = False
+    last_retry_at: float = 0.0      # monotonic; throttles retries past the cap
+    # The last closed bar whose high the peak has consumed. While an order is
+    # waiting (up to 20s) bars close unseen; the next feed reads every bar
+    # after this one rather than only the newest.
+    last_bar_seen: datetime | None = None
     def trail_level(self) -> float:
         return self.peak * (1.0 - self.trail_pct / 100.0)
 
@@ -377,6 +402,10 @@ class SymbolState:
     position: Position | None = None
     last_bar_ts: datetime | None = None
     retired: bool = False           # removed from the watchlist; no new entries
+    # An order whose outcome IB never confirmed within CANCEL_CONFIRM_S. Local
+    # state may be wrong in either direction until the next exit reconciles
+    # against IB's own position -- and nothing is sent until it has.
+    unknown_order: bool = False
 
     def __post_init__(self):
         if self.feed is None:
@@ -1269,6 +1298,31 @@ class MCLPaperTrader:
             return getattr(st.position, "trail_pct", None)
         return getattr(getattr(st, "strategy", None), "trail_pct", None)
 
+    async def _settle(self, trade, order) -> bool:
+        """Cancel `order` and wait for IB to say the order is FINISHED.
+
+        True when a terminal status arrived within CANCEL_CONFIRM_S -- and
+        `trade.fills` may now hold a fill that was in flight when the cancel
+        went out, which the caller must re-read rather than assume away.
+        False when nothing terminal arrived: the outcome is UNKNOWN and the
+        caller must treat it as such, never as a no-fill.
+
+        The MEDS ghost was exactly the gap this closes: a snapshot of
+        `trade.fills` taken before IB had answered.
+        """
+        try:
+            self.ib.cancelOrder(order)
+        except Exception as e:                              # noqa: BLE001
+            LOG.error("cancelOrder raised (%s: %s) -- outcome treated as "
+                      "unknown", type(e).__name__, e)
+            return False
+        t0 = asyncio.get_event_loop().time()
+        while asyncio.get_event_loop().time() - t0 < CANCEL_CONFIRM_S:
+            if trade.isDone():
+                return True
+            await asyncio.sleep(0.1)
+        return trade.isDone()
+
     async def marketable_limit(self, st: SymbolState, action: str, qty: int,
                                ref_close: float, reason: str, detail: dict,
                                closing: "Position | None" = None,
@@ -1388,6 +1442,26 @@ class MCLPaperTrader:
                 abandoned = True
                 break
 
+        if not trade.isDone():
+            # Timed out or abandoned with the order still working. Cancel it
+            # and WAIT for IB to say what became of it. The read of
+            # `trade.fills` used to happen right here, in the same instant as
+            # the break, and on MEDS the fill landed between that read and the
+            # cancel arriving at IB. See CANCEL_CONFIRM_S.
+            if not await self._settle(trade, order):
+                waited = asyncio.get_event_loop().time() - t0
+                LOG.error("%s %s order outcome UNKNOWN -- cancel sent, no "
+                          "terminal status in %.1fs. Nothing is sent for this "
+                          "symbol until IB's position has been read.",
+                          action, st.symbol, CANCEL_CONFIRM_S)
+                st.unknown_order = True
+                self.log.write(status="ORDER_UNKNOWN", filled_qty=0,
+                               seconds_to_fill=round(waited, 2),
+                               reject_reason="no terminal order status within "
+                                             f"{CANCEL_CONFIRM_S:.0f}s of cancel",
+                               **row)
+                return None
+
         filled = int(sum(f.execution.shares for f in trade.fills))
         status = trade.orderStatus.status
 
@@ -1439,10 +1513,13 @@ class MCLPaperTrader:
             elapsed = asyncio.get_event_loop().time() - t0
             slip = (avg - ref_close) if action == "BUY" else (ref_close - avg)
 
-            # A partial fill leaves the remainder working. Cancel it, or the
-            # position on the book drifts away from the position in this script.
+            # A partial fill's remainder was cancelled -- and CONFIRMED -- by
+            # the settle above: every path that reaches this line has
+            # `trade.isDone()`, so the count below is IB's final word and not
+            # a snapshot. A second settle here was written first and removed
+            # when mutation showed it could never run; a guard that cannot
+            # fire is the shape this whole fix exists to remove.
             if filled < qty:
-                self.ib.cancelOrder(order)
                 LOG.warning("%s %s PARTIAL %d/%d @ %.4f — remainder cancelled",
                             action, st.symbol, filled, qty, avg)
 
@@ -1462,7 +1539,8 @@ class MCLPaperTrader:
                              strategy=self._name_of(st) or STRATEGY_NAME)
             return avg, filled
 
-        self.ib.cancelOrder(order)
+        # No fill, and IB has CONFIRMED it (the settle above returned). A second
+        # cancel here would only log error 10147 against an order already dead.
         waited = asyncio.get_event_loop().time() - t0
         if abandoned:
             # A DISTINCT STATUS, deliberately. Pooled with the timeout these
@@ -1563,6 +1641,125 @@ class MCLPaperTrader:
 
     # -- position management ----------------------------------------------
 
+    def _adopt_unknown_entry(self, st: SymbolState, now_et: datetime,
+                             detail: dict) -> None:
+        held = self._ib_held(st)
+        if not held:
+            if held is None:
+                LOG.error("%s entry outcome unknown AND IB unreadable; the "
+                          "next poll's reconcile is the only safety left",
+                          st.symbol)
+            else:
+                st.unknown_order = False       # IB says flat: nothing to adopt
+            return
+        cost = None
+        try:
+            for p in self.ib.positions():
+                if getattr(p.contract, "symbol", None) == st.symbol:
+                    cost = float(getattr(p, "avgCost", 0) or 0) or None
+        except Exception:                                   # noqa: BLE001
+            cost = None
+        px = cost if cost else float(self.quote(st)[1])
+        LOG.error("%s ADOPTED %d shares IB holds from an entry the trader "
+                  "never saw fill, at %.4f", st.symbol, held, px)
+        st.position = Position(symbol=st.symbol, qty=held, entry_price=px,
+                               entry_time=now_et, peak=px,
+                               trail_pct=st.strategy.trail_pct)
+        self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                       strategy=self._name_of(st), symbol=st.symbol,
+                       action="BUY", reason="adopted_unknown_entry",
+                       status="FILLED", fill_price=round(px, 4),
+                       filled_qty=held, qty=held, ref_kind="ib_position",
+                       trail_pct=st.strategy.trail_pct, **detail)
+
+    def _ib_held(self, st: SymbolState) -> int | None:
+        """Shares of `st.symbol` the ACCOUNT holds, per IB, or None if that
+        cannot be read. `ib.positions()` is a local snapshot of pushed
+        positions, not a request, so this costs nothing against pacing."""
+        try:
+            return int(sum(p.position for p in self.ib.positions()
+                           if getattr(p.contract, "symbol", None) == st.symbol))
+        except Exception as e:                              # noqa: BLE001
+            LOG.error("could not read positions from IBKR: %s", e)
+            return None
+
+    def _ib_exit_fill(self, st: SymbolState, since: datetime):
+        """(avg price, shares) of SELL executions in `st.symbol` since `since`,
+        from IB's own fill list, or None when there are none it can see."""
+        try:
+            fills = self.ib.fills()
+        except Exception as e:                              # noqa: BLE001
+            LOG.warning("could not read fills from IBKR: %s", e)
+            return None
+        shares, notional = 0, 0.0
+        for f in fills:
+            ex = getattr(f, "execution", None)
+            c = getattr(f, "contract", None)
+            if ex is None or c is None or getattr(c, "symbol", None) != st.symbol:
+                continue
+            if getattr(ex, "side", "") != "SLD":
+                continue
+            t = getattr(ex, "time", None)
+            if t is not None and since is not None:
+                try:
+                    if t < since:
+                        continue
+                except TypeError:
+                    pass                # naive vs aware: keep it, do not drop it
+            shares += int(ex.shares)
+            notional += float(ex.shares) * float(ex.price)
+        if shares <= 0:
+            return None
+        return notional / shares, shares
+
+    def _reconcile_flat(self, st: SymbolState, pos: "Position", reason: str,
+                        detail: dict) -> None:
+        """IB says flat; the trader thought it held `pos`. Close the position
+        LOCALLY, from IB's own executions where they can be seen.
+
+        When IB can show the sell, this is an ordinary late-discovered fill and
+        is recorded as FILLED with reason `reconciled_flat`, so every reader
+        that pairs BUY and SELL rows keeps working. When it cannot, the row is
+        RECONCILED_FLAT with no price: the position is gone and its P/L is
+        unknown, and a reader must not pretend otherwise. Either way the
+        position is released -- which is what frees the concurrency slot MEDS
+        held from 06:17 to 09:30.
+        """
+        found = self._ib_exit_fill(st, pos.entry_time)
+        ts = now_et_str()
+        base = dict(ts_et=ts, strategy=self._name_of(st), symbol=st.symbol,
+                    action="SELL", qty=pos.qty, ref_kind="ib_execution",
+                    trail_pct=pos.trail_pct, **detail)
+        if found:
+            avg, shares = found
+            comm = (order_cost(shares, pos.entry_price, False, COMMISSION_PLAN)
+                    + order_cost(shares, avg, True, COMMISSION_PLAN))
+            pnl = (avg - pos.entry_price) * shares - comm
+            held_min = (datetime.now(ET) - pos.entry_time).total_seconds() / 60.0
+            self.session_pnl += pnl
+            self.session_trades += 1
+            LOG.error("%s RECONCILED: IB is flat; its executions show %d sold "
+                      "@ %.4f (the trader had missed the fill). P/L %+.2f",
+                      st.symbol, shares, avg, pnl)
+            self.log.write(status="FILLED", reason="reconciled_flat",
+                           fill_price=round(avg, 4), filled_qty=shares,
+                           ref_close=round(avg, 4),
+                           entry_price=round(pos.entry_price, 4),
+                           exit_price=round(avg, 4), trade_pnl=round(pnl, 2),
+                           trade_pct=round((avg / pos.entry_price - 1) * 100, 3),
+                           hold_minutes=round(held_min, 1), **base)
+        else:
+            LOG.error("%s RECONCILED: IB is flat and shows no execution the "
+                      "trader can see. Position released; P/L UNKNOWN -- read "
+                      "it from the Flex statement.", st.symbol)
+            self.log.write(status="RECONCILED_FLAT", reason="reconciled_flat",
+                           filled_qty=0,
+                           reject_reason="IB flat, local qty "
+                                         f"{pos.qty}, no execution visible",
+                           **base)
+        st.position = None
+        st.unknown_order = False
+
     @staticmethod
     def _exit_reference(pos: "Position", reason: str,
                         bar_close: float | None,
@@ -1594,6 +1791,13 @@ class MCLPaperTrader:
         """
         if reason == "trailing_stop":
             return pos.trail_level(), "trail_level"
+        if reason == "window_close":
+            # Triggered by the CLOCK, not by a bar. Measured against the bar
+            # the rows from the bar path carried a close that was minutes
+            # stale while the fast loop's rows carried the quote, and the two
+            # alternated row by row on MEDS -- so `slippage_vs_ref` meant two
+            # different things under one heading. One reference: the quote.
+            return last_price, "quote"
         if bar_close is not None:
             return bar_close, "bar_close"
         # Only reachable if a bar-triggered exit is retried from the fast loop,
@@ -1661,6 +1865,55 @@ class MCLPaperTrader:
             LOG.warning("%s exit retry #%d (%s) — still holding %d",
                         st.symbol, pos.exit_attempts, reason, pos.qty)
 
+        # BEFORE ANY RE-SEND, ASK IB WHAT THE ACCOUNT HOLDS. The first attempt
+        # trusts local state -- IB's position push can lag a fill by a moment
+        # and refusing a legitimate first exit would leave a real position
+        # unmanaged. Every attempt after that, and any attempt following an
+        # order whose outcome IB never confirmed, is checked against IB's own
+        # number first. A long-only book must be UNABLE to sell what it does
+        # not hold; MEDS proved the local count can be wrong for hours.
+        if pos.exit_attempts > 1 or st.unknown_order:
+            held = self._ib_held(st)
+            if held is None:
+                LOG.error("%s cannot read IB's position; NOT sending an exit "
+                          "it cannot verify", st.symbol)
+                return
+            if held <= 0:
+                self._reconcile_flat(st, pos, reason, detail)
+                return
+            if held < pos.qty:
+                LOG.error("%s IB holds %d, trader thought %d -- sizing the "
+                          "exit to IB's number", st.symbol, held, pos.qty)
+                self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                               strategy=self._name_of(st), symbol=st.symbol,
+                               action="SELL", reason=reason, qty=pos.qty,
+                               filled_qty=held, status="RECONCILED_QTY",
+                               reject_reason=f"IB holds {held}, local {pos.qty}",
+                               **detail)
+                pos.qty = held
+            st.unknown_order = False
+
+        # Past the cap, alert ONCE and slow down. IB has just confirmed the
+        # shares are held, so the position is real and still needs an exit --
+        # at thirty-second intervals rather than one a second.
+        if pos.exit_attempts > MAX_EXIT_ATTEMPTS:
+            if not pos.needs_attention:
+                pos.needs_attention = True
+                msg = (f"NEEDS ATTENTION: {st.symbol} exit ({reason}) has not "
+                       f"filled after {pos.exit_attempts - 1} attempts; IB "
+                       f"confirms {pos.qty} still held. Retrying every "
+                       f"{EXIT_RETRY_BACKOFF_S:.0f}s.")
+                LOG.error(msg)
+                try:
+                    self.tg.send(msg, force=True)
+                except Exception as e:                      # noqa: BLE001
+                    LOG.warning("alert failed (%s) — trading unaffected", e)
+            since = time.monotonic() - pos.last_retry_at
+            if since < EXIT_RETRY_BACKOFF_S:
+                pos.exit_attempts -= 1      # this poll did not count
+                return
+        pos.last_retry_at = time.monotonic()
+
         ref, ref_kind = self._exit_reference(pos, reason, bar_close, last_price)
         res = await self.marketable_limit(st, "SELL", pos.qty, ref,
                                           reason, detail, closing=pos,
@@ -1722,9 +1975,17 @@ class MCLPaperTrader:
             # high is pre-entry — seeding the peak with it makes the trail
             # instantly too tight and can stop the position out within seconds.
             # Pine's peakSinceEntry only ever sees bars from the entry onward.
-            bar_high = None
-            if last_ts > st.position.entry_time:
-                bar_high = float(df["high"].iloc[-1])
+            # And EVERY bar that closed since the last one fed, not only the
+            # newest: marketable_limit can block for twenty seconds, bars close
+            # unseen in that time, and a skipped bar's high never reached the
+            # peak. On MEDS the tape printed 4.96 and the trader's peak read
+            # 4.79 -- a trail loosened at random by the order queue.
+            pos = st.position
+            after = max(filter(None, (pos.entry_time, pos.last_bar_seen)))
+            closed = df[df.index > after]
+            bar_high = float(closed["high"].max()) if len(closed) else None
+            if len(closed):
+                pos.last_bar_seen = last_ts
             await self.manage_position(st, now_et, bar_close=sig.close,
                                        detail=detail, bar_high=bar_high,
                                        exit_signal=sig.exit_signal)
@@ -1864,6 +2125,14 @@ class MCLPaperTrader:
         res = await self.marketable_limit(st, "BUY", qty, sig.close,
                                           "entry_signal", detail,
                                           ref_kind="signal_close")
+        if res is None and st.unknown_order:
+            # THE REVERSE GHOST. An entry whose outcome IB never confirmed may
+            # have filled -- shares in the account with no position on the
+            # book, unmanaged, untrailed, and free to be bought again on the
+            # next signal. Ask IB now; adopt whatever it holds at its own
+            # average cost, with the flag left set so the first exit
+            # reconciles before it sends.
+            self._adopt_unknown_entry(st, now_et, detail)
         if res:
             avg, filled = res
             # The trail travels with the POSITION, not with whichever strategy

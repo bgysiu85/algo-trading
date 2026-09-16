@@ -28,11 +28,17 @@ class FakeLogEntry:
 
 
 class FakeTrade:
-    def __init__(self, filled, avg, status, msgs=()):
+    """A scripted outcome. `Submitted` with a PARTIAL fill models a remainder
+    still working at IB -- not done until cancelled -- because that is the
+    only honest state a partial-with-Submitted can be in. Every other
+    scripted status is terminal on arrival, as before."""
+    def __init__(self, filled, avg, status, msgs=(), qty=100):
         self.fills = [FakeFill(filled)] if filled else []
         self.orderStatus = types.SimpleNamespace(status=status, avgFillPrice=avg)
         self.log = [FakeLogEntry(m) for m in msgs]
-    def isDone(self): return True
+        self._working = status == "Submitted" and 0 < filled < qty
+        self.cancelled = False
+    def isDone(self): return self.cancelled or not self._working
 
 
 class FakeIB:
@@ -42,12 +48,24 @@ class FakeIB:
         self.placed, self.cancelled = [], []
         from tests.brokers.ibkr.test_dryrun_roundtrip import FakeEvent
         self.errorEvent = FakeEvent()
+        # What IB says the account holds, by symbol. The exit path reconciles
+        # against this on every retry (the MEDS ghost), so a test that expects
+        # a retry to be SENT has to say the shares are really there.
+        self.held = {}
+        self.trades = []
     def placeOrder(self, contract, order):
         self.placed.append(order)
-        return self.outcomes.pop(0) if self.outcomes else \
-            FakeTrade(0, 0.0, "Submitted")
-    def cancelOrder(self, order): self.cancelled.append(order)
-    def positions(self): return []
+        t = self.outcomes.pop(0) if self.outcomes else FakeTrade(0, 0.0, "Submitted")
+        self.trades.append(t)
+        return t
+    def cancelOrder(self, order):
+        self.cancelled.append(order)
+        for t in self.trades:
+            t.cancelled = True
+    def positions(self):
+        return [types.SimpleNamespace(contract=types.SimpleNamespace(symbol=s),
+                                      position=q) for s, q in self.held.items()]
+    def fills(self): return []
 
 
 def build(tag, outcomes):
@@ -135,6 +153,10 @@ async def main():
         FakeTrade(0, 0.0, "Submitted"),             # second SELL: no fill
         FakeTrade(100, 9.90, "Filled"),             # third SELL: fills
     ])
+    # IB really holds the shares, so the retries are legitimate. Without this
+    # the second attempt reconciles against a flat account and RELEASES the
+    # position instead -- which is test 5 below, and the MEDS case.
+    ib.held["TEST"] = 100
     await feed(tr, st, seq)
     log.close()
     rows = list(csv.DictReader(out.open()))
