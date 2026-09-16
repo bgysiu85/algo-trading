@@ -77,19 +77,19 @@ def test_render_prints_verdict_population_cells_and_level_outcomes():
                              [3, 5, 8], 40, 1, ["2026-01-10", "2026-03-10"], 1.0, 1,
                              Counter(close=4, vol=9, macd=1), 33, ["ZZZ 2026-01-10: KeyError: x"]))
     for must in ("POPULATION CHECK", "DOES NOT MATCH", "refused_busy", "THE VERDICT",
-                 "PRE-07", "before 07:00", "PB4-g0", "PB3-g3", "CLEARS",
-                 "read on PB4-g3", "median 5", "volume not above", "ZZZ 2026-01-10",
-                 "THE SECOND READING"):
+                 "PRE-07", "before 07:00", "PB5-rsi-g3", "PB3-g3", "CLEARS",
+                 "read on PB5-atr-g3", "median 5", "volume not above", "ZZZ 2026-01-10",
+                 "THE SECOND READING", "decisive"):
         assert must in txt
 
 
 def test_csv_carries_every_book(tmp_path):
     p = tmp_path / "t.csv"
-    pbs = {"PB4-g3": rows("2026-01-10", [2, 3]), "PB3-g3": rows("2026-01-10", [1])}
+    pbs = {"PB5-atr-g3": rows("2026-01-10", [2, 3]), "PB3-g3": rows("2026-01-10", [1])}
     S.write_csv(str(p), rows("2026-01-10", [1]), pbs)
     lines = p.read_text().splitlines()
     assert len(lines) == 5
-    assert sum(l.startswith("PB4-g3,") for l in lines) == 2
+    assert sum(l.startswith("PB5-atr-g3,") for l in lines) == 2
     assert sum(l.startswith("PB3-g3,") for l in lines) == 1
 
 
@@ -128,32 +128,38 @@ def test_run_day_returns_every_book_from_one_pass(monkeypatch):
                                      "first_seen": fs}]))
         assert err == "" and res["errors"] == 0 and res["symdays"] == 1
         assert set(res["pb"]) == {n for n, _ in S.CELLS}
-        if res["mcl"] and res["pb"]["PB4-g3"]:
+        if res["mcl"] and res["pb"]["PB3-g3"]:
             hit = res
             break
     assert hit, "no seed produced trades in both books"
-    assert hit["setups"]["triggered"] + hit["setups"]["band_refused"] >= len(hit["pb"]["PB4-g3"])
+    assert hit["setups"]["triggered"] + hit["setups"]["band_refused"] >= len(hit["pb"]["PB5-atr-g3"])
     assert hit["levels_per_symday"] == [sum(hit["setups"].values())]
-    assert hit["breaks"] >= len(hit["pb"]["PB4-g3"]) + sum(hit["refused"].values())
-    for r in hit["pb"]["PB4-g3"]:
+    assert hit["breaks"] >= len(hit["pb"]["PB5-atr-g3"]) + sum(hit["refused"].values())
+    assert len(hit["pb"]["PB5-atr-g3"]) <= len(hit["pb"]["PB3-g3"])
+    for r in hit["pb"]["PB3-g3"]:
         # the chart coordinates a person needs to find the trade
         assert r["top_et"] <= r["armed_et"] < r["entry_et"] <= r["exit_et"]
         assert r["reds"] >= 2
         assert r["entry_px"] > r["level"]
     assert not any("level" in r for r in hit["mcl"])
-    # the cells share their first entry
-    assert hit["pb"]["PB3-g3"][0]["entry_et"] == hit["pb"]["PB4-g3"][0]["entry_et"]
+    # the decisive close can only refuse: never more trades than v3. (Not a
+    # subset by entry time -- a refused break raises the level, so later
+    # entries can land on different bars.)
+    assert len(hit["pb"]["PB5-rsi-g3"]) <= len(hit["pb"]["PB3-g3"])
 
 
-def test_second_reading_needs_both_legs():
-    ctl = rows("2026-01-10", [-20] * 5, ) + rows("2026-03-10", [-20] * 5)
+def test_second_reading_needs_a_friction_sized_margin_and_the_total():
+    ctl = rows("2026-01-10", [-20] * 5) + rows("2026-03-10", [-20] * 5)
     for r in ctl:
         r["reason"] = "trailing_stop"
     better = rows("2026-01-10", [-8] * 5) + rows("2026-03-10", [-8] * 5)
-    for r in better:
-        r["reason"] = "structure_stop"
-    txt = "\n".join(S.second_reading(better, ctl, CUT, "PB4-g3", "PB3-g3"))
-    assert "THE STOP IS A DIRECTION" in txt
-    worse = [dict(r, net=r["net"] - 30) for r in better]
-    txt = "\n".join(S.second_reading(worse, ctl, CUT, "PB4-g3", "PB3-g3"))
-    assert "CLOSED" in txt
+    txt = "\n".join(S.second_reading(better, ctl, CUT, "PB5-atr-g3", "PB3-g3"))
+    assert "A DIRECTION" in txt
+    # v4's case: better by a fraction of friction -> NOTHING
+    thin = rows("2026-01-10", [-19.8] * 5) + rows("2026-03-10", [-19.8] * 5)
+    txt = "\n".join(S.second_reading(thin, ctl, CUT, "PB5-atr-g3", "PB3-g3"))
+    assert "NOTHING against v3" in txt
+    # better per trade by a lot, but a smaller total in one half -> NOTHING
+    few = rows("2026-01-10", [-8] * 5) + rows("2026-03-10", [-8] * 20)
+    txt = "\n".join(S.second_reading(few, ctl, CUT, "PB5-atr-g3", "PB3-g3"))
+    assert "NOTHING against v3" in txt
