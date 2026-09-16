@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-r"""MCL-PB v5 against MCL and against v3 -- the decisive close.
+r"""MCL-PB v6 -- v3 on five-minute bars, against MCL, MC5 and v3 itself.
 
     python -m common.pullback_break --jobs 8
 
-Registered in docs/research/REGISTERED_pullback_break_v5.md before this
-version ran (v1-v4 all returned NOTHING; v4 passed its own second reading by
-+0.18 a trade, which is why v5 §3 requires a friction-sized margin). The
-verdict rule below is v1 §3, verbatim in code, read on the primary cell against
-MCL, plus the second reading against v3's cell. Four cells, all printed, none
-chosen from the table.
+Registered in docs/research/REGISTERED_pullback_break_v6.md before this
+version ran (v1-v5 all returned NOTHING on one-minute bars). The verdict rule
+below is v1 §3, verbatim in code, read on the primary cell against MCL; the
+same form is read against MC5, the project's own 5-minute strategy, as the
+like-for-like control on this timeframe.
 
 SAME TAPE, SAME PROCESS, SAME SETTINGS. Both books come out of one `run_day`
 per session, over the same point-in-time universe, the same warm-up frames
@@ -48,11 +47,11 @@ PRE_CUT = dtime(7, 0)          # Ben's "before 7am ET"
 
 MCL_NAME, PB_NAME = "MCL", "MCL-PB"
 # (name, engine kwargs). The first is the primary cell the verdict is read on.
-CELLS = (("PB5-atr-g3", {"green_hold_bars": 3, "decisive": "atr"}),
-         ("PB5-rsi-g3", {"green_hold_bars": 3, "decisive": "rsi"}),
-         ("PB5-atr-g0", {"decisive": "atr"}),
+CELLS = (("PB3-5m-g3", {"green_hold_bars": 3, "bar_minutes": 5}),
+         ("PB3-5m-g0", {"bar_minutes": 5}),
          ("PB3-g3", {"green_hold_bars": 3}))
 CONTROL_CELL = "PB3-g3"
+MC5_NAME = "MC5"
 # REGISTERED v5 §3: the second reading needs the per-trade gain to be at least
 # one round trip's friction in BOTH halves. v4 passed on +0.18; not again.
 MIN_MARGIN = MEASURED_FRICTION
@@ -97,6 +96,7 @@ def run_day(args: tuple) -> tuple:
 
     paths, day, universe = args
     mod, extra = engine("mcl")
+    mc5, mc5_extra = engine("mc5")
     parts = []
     for pth in paths:
         try:
@@ -110,7 +110,7 @@ def run_day(args: tuple) -> tuple:
     frame = build_frame(parts, day)
     d = _date.fromisoformat(day)
 
-    res = {"mcl": [], "pb": {name: [] for name, _ in CELLS},
+    res = {"mcl": [], "mc5": [], "pb": {name: [] for name, _ in CELLS},
            "setups": Counter(), "refused": Counter(), "breaks": 0,
            "levels_per_symday": [], "symdays": 0, "errors": 0, "error_days": []}
     for rec in universe:
@@ -124,6 +124,8 @@ def run_day(args: tuple) -> tuple:
         try:
             base = mod.backtest_session(df, d, ET, entry_shares=QTY,
                                         not_before=floor, **extra)
+            base5 = mc5.backtest_session(df, d, ET, entry_shares=QTY,
+                                         not_before=floor, **mc5_extra)
             dets = {name: PB.backtest_session_detail(df, d, ET, entry_shares=QTY,
                                                      not_before=floor,
                                                      **kw, **extra)
@@ -134,6 +136,7 @@ def run_day(args: tuple) -> tuple:
             continue
         res["symdays"] += 1
         res["mcl"] += [trade_row(t, rec["symbol"], day) for t in base]
+        res["mc5"] += [trade_row(t, rec["symbol"], day) for t in base5]
         primary = dets[CELLS[0][0]]
         res["setups"].update(st.outcome for st in primary.setups)
         res["refused"].update(primary.refused)
@@ -220,7 +223,7 @@ def second_reading(pb, ctl, cut: str, name: str, ctl_name: str) -> list[str]:
     f = MEASURED_FRICTION
     pa, pb2 = halves(pb, cut)
     ca, cb = halves(ctl, cut)
-    L = [f"THE SECOND READING (registered v5 §3): {name} against {ctl_name}", ""]
+    L = [f"THE SECOND READING: {name} against {ctl_name}", ""]
     if not (pa and pb2 and ca and cb):
         return L + ["  a half is empty; no reading", ""]
     d1 = per_trade(pa, f) - per_trade(ca, f)
@@ -279,12 +282,12 @@ def cohort_table(mcl, pb, cut: str) -> list[str]:
 def render(mcl, pbs: dict, setups: Counter, levels_per_symday: list, symdays: int,
            errors: int, days: list[str], elapsed: float, jobs: int,
            refused: Counter | None = None, breaks: int = 0,
-           error_days: list | None = None) -> list[str]:
+           error_days: list | None = None, mc5=None) -> list[str]:
     cut = days[len(days) // 2] if len(days) >= 2 else (days[0] if days else "")
     primary = CELLS[0][0]
     pb = pbs[primary]
-    L = ["MCL-PB v5: THE DECISIVE CLOSE", "",
-         "  registered  docs/research/REGISTERED_pullback_break_v5.md",
+    L = ["MCL-PB v6: v3 ON FIVE-MINUTE BARS", "",
+         "  registered  docs/research/REGISTERED_pullback_break_v6.md",
          f"  {len(days):,} sessions   {symdays:,} symbol-days   halves cut at {cut}",
          f"  {QTY} shares   commission in, friction per round trip   "
          f"elapsed {elapsed:.1f}s on {jobs} worker(s)", ""]
@@ -326,6 +329,8 @@ def render(mcl, pbs: dict, setups: Counter, levels_per_symday: list, symdays: in
 
     L += ["THE BOOKS", ""]
     L += book_block(MCL_NAME, mcl, cut, symdays)
+    if mc5 is not None:
+        L += book_block(MC5_NAME + " (5m control)", mc5, cut, symdays)
     for name, _kw in CELLS:
         L += book_block(name, pbs[name], cut, symdays)
     for name, _kw in CELLS:
@@ -344,10 +349,15 @@ def render(mcl, pbs: dict, setups: Counter, levels_per_symday: list, symdays: in
         t2, w2 = verdict(pbs[name], mcl, cut)
         L.append(f"  {name} would read {t2}: {w2}  -- reported, not registered")
     L += [""]
+    if mc5 is not None:
+        t5, w5 = verdict(pb, mc5, cut)
+        L += [f"AGAINST MC5 (registered v6 §3.2, same rule form, read on {primary})", "",
+              f"  {t5}: {w5}", ""]
     for name, _kw in CELLS:
         if name != CONTROL_CELL:
             L += second_reading(pbs[name], pbs[CONTROL_CELL], cut, name, CONTROL_CELL)
-    L += ["  Only the primary cell's reading is registered; the others are reported.", ""]
+    L += ["  Against v3's 1-minute cell the reading is reported, not registered --",
+          "  different bar counts make it a description of the timeframe.", ""]
     if tag == "CLEARS":
         L += ["  A candidate for the holdout, under its own registration. Not a rule to ship.", ""]
 
@@ -431,11 +441,12 @@ def main(argv=None) -> int:
 
     # DAY ORDER, not completion order -- float sums must not move with --jobs.
     mcl, pbs, setups, lps, symdays, errors = [], {n: [] for n, _ in CELLS}, Counter(), [], 0, 0
-    refused, breaks, error_days = Counter(), 0, []
+    refused, breaks, error_days, mc5 = Counter(), 0, [], []
     run_days = sorted(got)
     for day in run_days:
         r = got[day]
         mcl += r["mcl"]
+        mc5 += r["mc5"]
         for name in pbs:
             pbs[name] += r["pb"][name]
         setups.update(r["setups"])
@@ -447,8 +458,8 @@ def main(argv=None) -> int:
         error_days += r["error_days"]
 
     emit("\n".join(render(mcl, pbs, setups, lps, symdays, errors, run_days,
-                          time.time() - t0, jobs, refused, breaks, error_days)), a.out)
-    write_csv(a.csv, mcl, pbs)
+                          time.time() - t0, jobs, refused, breaks, error_days, mc5)), a.out)
+    write_csv(a.csv, mcl, dict(pbs, **{MC5_NAME: mc5}))
     return 0
 
 

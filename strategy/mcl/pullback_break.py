@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from common.indicators import resample_bars
 from strategy.mcl import mcl as MCL
 
 STRATEGY_NAME = "MCL-PB"
@@ -233,11 +234,19 @@ def backtest_session_detail(df: pd.DataFrame, session_date, tz,
     `entry_px_by_bar` / `entry_delay_bars` / `hard_stop` are owned here and
     refused. `structure_stop=True` (v4) sets the engine's hard stop one tick
     under each trade's own pullback low. `decisive="atr"` / `"rsi"` (v5) adds
-    the decisive-close condition to the break bar.
+    the decisive-close condition to the break bar. `bar_minutes=5` (v6) runs
+    the whole thing on resampled 5-minute bars.
     """
     for bad in ("entry_bars", "entry_px_by_bar", "entry_delay_bars", "hard_stop"):
         if bad in engine_kw:
             raise TypeError(f"{bad} is set by MCL-PB itself")
+    # v6: the same rule on coarser bars. Resampled once here, so the walk, the
+    # indicators and MCL's engine all see the same 5-minute frame -- every
+    # bar-denominated parameter (two reds, SMA20, green hold, expiry) then
+    # counts 5-minute bars, as registered.
+    bar_minutes = engine_kw.pop("bar_minutes", 1)
+    if bar_minutes != 1:
+        df = resample_bars(df, bar_minutes)
     sig = MCL.signals(df, require_macd_pos=engine_kw.get("require_macd_pos"))
     idx, allowed = session_positions(sig, session_date, tz, not_before)
     if not idx:
