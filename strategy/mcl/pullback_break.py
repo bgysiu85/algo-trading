@@ -69,6 +69,7 @@ class Setup:
     refused_vol: int = 0           # ... because volume was not above its 20-bar average
     refused_macd: int = 0          # ... because MACD was not above its signal on the bar
     trade: object = None
+    pullback_low: float | None = None   # lowest low, peak bar through break bar
 
     @property
     def level(self) -> float:
@@ -107,6 +108,7 @@ def walk(sig: pd.DataFrame, idx: list[int], allowed: list[bool],
     h = sig["high"].to_numpy(float)
     c = sig["close"].to_numpy(float)
     v = sig["volume"].to_numpy(float)
+    lo = sig["low"].to_numpy(float)
     m = sig["macd"].to_numpy(float)
     ms = sig["macd_sig"].to_numpy(float)
     red = c < o
@@ -158,12 +160,16 @@ def walk(sig: pd.DataFrame, idx: list[int], allowed: list[bool],
                 elif not macd_open[j]:
                     lowest.refused_macd += 1; out.refused["macd"] += 1; ok = False
                 if ok:
-                    t = take_trade(j)
+                    # v4: the pullback low, swing-high bar through the break
+                    # bar inclusive. The engine only uses it when asked to.
+                    plow = float(lo[lowest.peak_i:j + 1].min())
+                    t = take_trade(j, plow)
                     if t is None:
                         for st in hit:
                             end(st, BAND, j)
                     else:
                         lowest.trade, lowest.fill_px = t, float(t.entry_price)
+                        lowest.pullback_low = plow
                         out.trades.append(t)
                         # LAST row at the exit timestamp. The XNAS.BASIC slice for
                         # 2025-06-09 carries duplicate timestamps, and get_loc
@@ -205,10 +211,12 @@ def backtest_session_detail(df: pd.DataFrame, session_date, tz,
     """Every setup and every trade for one session.
 
     `engine_kw` goes to MCL.backtest_session unchanged (use_apex,
-    require_macd_pos, entry_shares, target_cents, ...). `entry_bars` /
-    `entry_px_by_bar` / `entry_delay_bars` are owned here and refused.
+    require_macd_pos, entry_shares, green_hold_bars, ...). `entry_bars` /
+    `entry_px_by_bar` / `entry_delay_bars` / `hard_stop` are owned here and
+    refused. `structure_stop=True` (v4) sets the engine's hard stop one tick
+    under each trade's own pullback low.
     """
-    for bad in ("entry_bars", "entry_px_by_bar", "entry_delay_bars"):
+    for bad in ("entry_bars", "entry_px_by_bar", "entry_delay_bars", "hard_stop"):
         if bad in engine_kw:
             raise TypeError(f"{bad} is set by MCL-PB itself")
     sig = MCL.signals(df, require_macd_pos=engine_kw.get("require_macd_pos"))
@@ -216,11 +224,17 @@ def backtest_session_detail(df: pd.DataFrame, session_date, tz,
     if not idx:
         return SessionResult(index=sig.index)
 
-    def take_trade(j: int):
+    structure_stop = engine_kw.pop("structure_stop", False)
+
+    def take_trade(j: int, pullback_low: float):
         take = pd.Series(False, index=sig.index)
         take.iloc[j] = True
+        kw = dict(engine_kw)
+        if structure_stop:
+            # REGISTERED v4: one tick under the pullback low.
+            kw["hard_stop"] = pullback_low - MCL.TICK
         tr = MCL.backtest_session(df, session_date, tz, not_before=not_before,
-                                  entry_bars=take, **engine_kw)
+                                  entry_bars=take, **kw)
         if not tr:
             return None
         if len(tr) != 1:
