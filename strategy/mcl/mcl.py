@@ -369,6 +369,30 @@ def size_for(price: float, equity: float = EQUITY) -> int:
                       math.floor(equity * MAX_EQUITY_PCT / 100.0 / price)))
 
 
+def in_session_mask(index, session_date, tz):
+    """Which bars of `index` belong to `session_date`'s session, bar for bar.
+
+    EXTRACTED from backtest_session 2026-09-16, unchanged, so that the live
+    trader's stale-bar gate has something REAL to be tested against. It was
+    three inline lines; the live path had no equivalent at all, and when one
+    was finally written the only way to check the two agreed would have been to
+    copy the expression into the test -- and a guard tested by a copy of itself
+    is not tested.
+
+    `backtest_session` calls this, `tests/brokers/ibkr/test_stale_signal_bar.py`
+    calls this and compares it against `trader.bar_session_ok` bar for bar. One
+    construction, so the engine and the live path cannot drift.
+
+    Bars are LEFT-LABELLED: the 09:29 bar covers 09:29:00-09:29:59 and is the
+    last one in a session ending at 09:30, which is why the interval is
+    half-open at the end.
+    """
+    local = index.tz_convert(tz)
+    return ((local.date == session_date)
+            & (local.time >= SESSION_START)
+            & (local.time < SESSION_END))
+
+
 def backtest_session(df: pd.DataFrame, session_date, tz,
                      use_apex: bool | None = None,
                      require_macd_pos: bool | None = None,
@@ -518,9 +542,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         commission_plan = COMMISSION_PLAN
     sig = signals(df, require_macd_pos=require_macd_pos)
     local = sig.index.tz_convert(tz)
-    in_sess = ((local.date == session_date)
-               & (local.time >= SESSION_START)
-               & (local.time < SESSION_END))
+    in_sess = in_session_mask(sig.index, session_date, tz)
     idx = [i for i, f in enumerate(in_sess) if f]
     if not idx:
         return []

@@ -404,6 +404,59 @@ def drop_forming_bar(df: "pd.DataFrame") -> "pd.DataFrame":
     return df.iloc[:-1] if len(df) > 1 else df
 
 
+def bar_session_ok(signal_ts, now_et: datetime,
+                   session_start: dtime, session_end: dtime) -> tuple[bool, str]:
+    """Whether the bar a signal was COMPUTED ON belongs to the session running now.
+
+    THE DEFECT THIS EXISTS FOR, found live 2026-09-16.
+
+    `MCLPaperTrader.in_session` asks what time it is. Nothing asked what time
+    the BAR was. At 04:00:10 the frame IB hands back still ends with
+    yesterday's 19:59 bar -- nothing has printed today yet -- so the strategy
+    evaluated a fourteen-hour-old bar, the dedupe saw a timestamp it had never
+    seen before and let it through, and the trader bought at the open on a
+    signal from last night's close. Two checks that look like one check: a
+    CLOCK inside the window is not a BAR inside the window.
+
+    That is this project's own shape `a check placed one step short of the
+    thing it protects`. The clock gate protects "are we trading now"; what
+    needed protecting was "is this signal about now".
+
+    The rule is TODAY and inside [session_start, session_end) -- which is
+    exactly the `in_sess` mask of `strategy/mcl/mcl.backtest_session`: same
+    date equality, same half-open interval, same left-labelled bars.
+    tests/brokers/ibkr/test_stale_signal_bar.py runs both over one frame and
+    asserts they agree bar for bar, so the live path and the engine cannot go
+    back to trading two different rules.
+
+    `signal_ts` is the value the DEDUPE used, not a second read of `sig.bar_ts`.
+    A gate that works out "which bar" independently of the guard standing next
+    to it is two values that look comparable and are not.
+
+    The window comes from the ADAPTER, never a module constant: MCL and MC5
+    share 04:00-09:30 so today every answer is the same, and VW9 runs to 20:00
+    and will not.
+    """
+    if signal_ts is None:
+        return False, "signal carries no bar timestamp"
+    ts = pd.Timestamp(signal_ts)
+    if ts.tz is None:
+        # Every live frame is tz-aware: _fetch_bars parses with utc=True, and
+        # test_stale_signal_bar pins that. A naive stamp therefore comes from a
+        # caller this function has never seen, and guessing its zone is a
+        # five-hour error in whichever direction the guess fell. Refusing is
+        # the only answer that cannot be wrong in the permissive direction.
+        return False, f"bar {ts} carries no timezone"
+    bar_et = ts.tz_convert(ET)
+    if bar_et.date() != now_et.date():
+        return False, (f"bar {bar_et:%Y-%m-%d %H:%M} ET is not today "
+                       f"({now_et:%Y-%m-%d})")
+    if not (session_start <= bar_et.time() < session_end):
+        return False, (f"bar {bar_et:%H:%M} ET outside "
+                       f"{session_start:%H:%M}-{session_end:%H:%M}")
+    return True, ""
+
+
 def parse_watchlist(path: Path) -> list[str]:
     """One ticker per line. Blank lines and # comments ignored, including
     trailing comments — `UPC  # added 05:55, rank 1` yields `UPC`, so the file
@@ -447,10 +500,11 @@ FIELDS = [
     "entry_price", "exit_price", "trade_pnl", "trade_pct", "hold_minutes",
     # THE DETAIL BEHIND THE STATUS, not evidence of a rejection. This comment
     # used to say "populated only when IB refused the order outright" and that
-    # stopped being true the moment SKIPPED_PAUSED, SKIPPED_CONCURRENCY_CAP and
-    # SKIPPED_PRICE_BAND started writing their own reasons here. A reader that
-    # treats a non-empty reject_reason as "this was rejected" is wrong on three
-    # row shapes already; `status` is the field that says what happened.
+    # stopped being true the moment SKIPPED_PAUSED, SKIPPED_CONCURRENCY_CAP,
+    # SKIPPED_PRICE_BAND and SKIPPED_STALE_BAR started writing their own
+    # reasons here. A reader that treats a non-empty reject_reason as "this was
+    # rejected" is wrong on four row shapes already; `status` is the field that
+    # says what happened.
     "reject_reason",
     "macd", "macd_sig", "mfi", "rsi", "vol", "prev_vol", "trail_avg",
     # -- the trail this trade is running, in percent -------------------------
@@ -1655,6 +1709,31 @@ class MCLPaperTrader:
         if not sig.long_entry:
             return
 
+        # STALE SIGNAL BAR. First among the refusals, and deliberately so:
+        # every check below this one is about US -- paused, capped, out of band
+        # -- and this one is about whether the SIGNAL is about today at all.
+        # A bar that does not belong to this session should not be reported as
+        # having been declined for the concurrency cap it also happened to hit.
+        #
+        # It sits AFTER the dedupe on purpose. The stale bar is still marked
+        # evaluated, so the same fourteen-hour-old timestamp is not re-declined
+        # and re-logged on every poll until a real bar arrives; one row per
+        # stale bar is the record, not one row per second.
+        ok, why = bar_session_ok(signal_ts, now_et,
+                                 st.strategy.session_start,
+                                 st.strategy.session_end)
+        if not ok:
+            LOG.warning("%s %s entry signal declined — stale bar: %s",
+                        st.strategy.name, st.symbol, why)
+            self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                           strategy=self._name_of(st),
+                           symbol=st.symbol, action="BUY",
+                           reason="entry_signal", ref_close=round(sig.close, 4),
+                           ref_kind="signal_close",
+                           status="SKIPPED_STALE_BAR", reject_reason=why,
+                           **detail)
+            return
+
         # Stopped from the portal. Recorded in the fill log like every other
         # declined entry, so a later reader can see the signal fired and why it
         # was not taken -- an absence would look like the strategy never fired.
@@ -1743,8 +1822,25 @@ class MCLPaperTrader:
             # module happens to be imported. H2 in the spec: MCL and MC5 are
             # both at 5.0 today, so reading the wrong one is invisible until
             # the day one of them changes.
+            # THE PEAK STARTS AT THE FILL, and at nothing else.
+            #
+            # It was `max(avg, sig.close)` until 2026-09-16. `sig.close` is the
+            # SIGNAL bar's close -- a price from BEFORE the order existed --
+            # and on VEEA that day the signal bar closed at 5.8709 while the
+            # fill came at 5.70. The position opened with a peak it had never
+            # traded at, a trail level of 5.577 against an entry of 5.70, and
+            # was eleven cents from a stop the moment it existed. The trail is
+            # a giveback rule: it can only measure giveback from a high the
+            # position actually saw.
+            #
+            # This is the same rule the two neighbouring paths already keep.
+            # The manage_position peak feed refuses any bar high from a bar
+            # that closed before entry; the restart-adoption path seeds from
+            # `max(entry_price, highs SINCE entry)`. Pine's peakSinceEntry
+            # never sees a pre-entry bar either. Three of four agreed and the
+            # fourth was the one placing the orders.
             st.position = Position(symbol=st.symbol, qty=filled, entry_price=avg,
-                                   entry_time=now_et, peak=max(avg, sig.close),
+                                   entry_time=now_et, peak=avg,
                                    trail_pct=st.strategy.trail_pct)
 
     def notify_fill(self, symbol: str, action: str, price: float,
