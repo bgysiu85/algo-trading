@@ -307,3 +307,45 @@ def test_decisive_none_is_v3(patched):
 def test_unknown_decisive_is_refused(patched):
     with pytest.raises(ValueError):
         patched(frame(shape() + [G, G], vol={5: BIG}), decisive="bb")
+
+
+def test_bar_minutes_5_walks_resampled_bars(monkeypatch):
+    """The 1-minute frame below has a swing high, two red 5-minute bars, a
+    bounce and a break -- only when read in 5-minute buckets. MCL.signals is
+    left real here, so the resampled frame's own MACD is used; a break on a
+    bar of 3x volume with a steadily rising close keeps MACD open."""
+    from common.indicators import resample_bars
+    import numpy as np
+    t0 = datetime.combine(DAY, dtime(4, 0), tzinfo=ET)
+    n = 60 * 5
+    idx = pd.DatetimeIndex([t0 + timedelta(minutes=i) for i in range(n)])
+    c = np.full(n, 5.00)
+    # 5-minute buckets 0..49 quiet (rising a hair so MACD stays open), then:
+    c[:250] = 5.00 + np.arange(250) * 0.0004
+    peak_b, r1, r2, bounce, brk = 50, 51, 52, 53, 54
+    def bucket(b, o, h, l, cl):
+        j = b * 5
+        c[j:j + 5] = [o, h, l, (o + cl) / 2, cl]
+    bucket(peak_b, 5.10, 5.30, 5.10, 5.28)     # swing high 5.30
+    bucket(r1, 5.27, 5.28, 5.15, 5.18)         # red
+    bucket(r2, 5.17, 5.19, 5.05, 5.08)         # red -> armed, level = 5.30
+    bucket(bounce, 5.08, 5.20, 5.07, 5.18)     # bounce top 5.20 -> level 5.20
+    bucket(brk, 5.19, 5.45, 5.18, 5.42)        # breaks 5.21, closes 5.42
+    for b in range(55, 60):
+        bucket(b, 5.42, 5.44, 5.40, 5.43)
+    df = pd.DataFrame({"open": c, "high": c, "low": c, "close": c, "volume": 10_000}, index=idx)
+    # give the bucket shapes real highs/lows
+    for b, (h, l) in {peak_b: (5.30, 5.10), r1: (5.28, 5.15), r2: (5.19, 5.05), bounce: (5.20, 5.07), brk: (5.45, 5.18)}.items():
+        df.iloc[b * 5:(b + 1) * 5, df.columns.get_loc("high")] = h
+        df.iloc[b * 5:(b + 1) * 5, df.columns.get_loc("low")] = l
+    df.iloc[brk * 5:(brk + 1) * 5, df.columns.get_loc("volume")] = 30_000
+    r = PB.backtest_session_detail(df.tz_convert("UTC"), DAY, ET, entry_shares=100,
+                                   bar_minutes=5, use_apex=False)
+    assert len(r.trades) == 1
+    t = r.trades[0]
+    assert pd.Timestamp(t.entry_time).tz_convert(ET) == idx[brk * 5]
+    assert t.entry_price == pytest.approx(5.43)
+    assert len(r.index) == len(resample_bars(df, 5))
+    # on 1-minute bars the same tape has no two-red-bar pullback at these levels
+    r1m = PB.backtest_session_detail(df.tz_convert("UTC"), DAY, ET, entry_shares=100, use_apex=False)
+    assert [x.entry_price for x in r1m.trades] != [5.43]
