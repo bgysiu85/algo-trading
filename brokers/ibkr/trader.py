@@ -106,6 +106,27 @@ LIVE_PORTS = {7496: "TWS LIVE", 4001: "IB Gateway LIVE"}
 LIMIT_CROSS_BPS = 20        # how far through the touch to price the limit (20bps)
 ORDER_TIMEOUT_S = 20        # cancel and record a no-fill after this long
 
+# AN EXIT DOES NOT WAIT OUT THE TIMEOUT WHEN ITS LIMIT CAN NO LONGER FILL.
+#
+# CRBP, 2026-09-14. The trail fired at 07:02:10 with the bid at 9.08 and the
+# order went out at 9.06. It then sat for the full ORDER_TIMEOUT_S while the
+# stock fell to 5.28, and the next attempt did not leave until 07:02:31. The
+# position was unprotected for twenty seconds during a 42% collapse, and the
+# round trip cost $241.37 -- 46% of that week's two-day loss.
+#
+# The limit was unfillable within about a second of being placed. A marketable
+# SELL limit fills against the BID; once the bid is below the limit there is no
+# counterparty at the touch and waiting is pure loss. So an exit order is
+# abandoned and re-priced the moment its own quote says it cannot fill.
+#
+# ENTRIES KEEP THEIR PATIENCE. Twenty seconds of waiting is how a buy gets a
+# good fill, and a missed entry costs the signal, not the position.
+#
+# The poll count is a DEBOUNCE ON THE FEED -- two consecutive reads, half a
+# second -- not a judgement about the market. Nothing here is a threshold on
+# price.
+EXIT_ABANDON_POLLS = 2
+
 # Commission for the round-trip P/L recorded in the fill log. This is a
 # REPORTING figure only -- it is not consulted when deciding or pricing an
 # order -- but it is not cosmetic either: common/friction.py derives measured
@@ -1086,9 +1107,26 @@ class MCLPaperTrader:
         trade = self.ib.placeOrder(st.contract, order)
 
         t0 = asyncio.get_event_loop().time()
+        through = 0          # consecutive polls with the quote past our limit
+        abandoned = False
         while asyncio.get_event_loop().time() - t0 < ORDER_TIMEOUT_S:
             await asyncio.sleep(0.25)
             if trade.isDone():
+                break
+            if closing is None:
+                continue     # entries wait; see EXIT_ABANDON_POLLS
+            b, a = self.quote(st)
+            # A marketable SELL limit fills against the BID, a BUY against the
+            # ASK. Once the touch is past our limit there is nobody to fill it.
+            touch = b if action == "SELL" else a
+            if touch != touch:
+                through = 0          # no quote is not evidence of anything
+            elif (touch < limit) if action == "SELL" else (touch > limit):
+                through += 1
+            else:
+                through = 0
+            if through >= EXIT_ABANDON_POLLS:
+                abandoned = True
                 break
 
         filled = int(sum(f.execution.shares for f in trade.fills))
@@ -1156,9 +1194,27 @@ class MCLPaperTrader:
             return avg, filled
 
         self.ib.cancelOrder(order)
+        waited = asyncio.get_event_loop().time() - t0
+        if abandoned:
+            # A DISTINCT STATUS, deliberately. Pooled with the timeout these
+            # two become one number and the change that produced them is
+            # unmeasurable -- "waited 20s and nobody came" and "was unfillable
+            # after half a second" are different facts about the market and
+            # about this code.
+            b, a = self.quote(st)
+            LOG.warning("%s %s exit limit %.4f is through the market "
+                        "(bid %.4f ask %.4f) after %.1fs — abandoned to "
+                        "re-price", action, st.symbol, limit, b, a, waited)
+            self.log.write(status="NO_FILL_ABANDONED", filled_qty=0,
+                           seconds_to_fill=round(waited, 2),
+                           reject_reason=f"limit {limit:.4f} through the "
+                                         f"market (bid {b:.4f} ask {a:.4f})",
+                           **row)
+            return None
         LOG.warning("%s %s NO FILL in %ds at limit %.4f — cancelled",
                     action, st.symbol, ORDER_TIMEOUT_S, limit)
-        self.log.write(status="NO_FILL_CANCELLED", filled_qty=0, **row)
+        self.log.write(status="NO_FILL_CANCELLED", filled_qty=0,
+                       seconds_to_fill=round(waited, 2), **row)
         return None
 
     # -- end of session ----------------------------------------------------
