@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 Dump what YOUR IB Gateway's market scanner can actually do.
 
     .\.venv\Scripts\python.exe scan_params.py

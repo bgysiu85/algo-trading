@@ -27,6 +27,7 @@ indistinguishable from the failure it detects is not a control.
 from __future__ import annotations
 
 import ast
+import warnings
 from pathlib import Path
 
 import pytest
@@ -87,7 +88,16 @@ def bare_text_opens(source: str, filename: str = "<unknown>") -> list[tuple[int,
     parsing -- Python 3.14 warns on `"\\."` in a non-raw string -- names the
     file it came from instead of `<unknown>`, which is what Ben saw."""
     hits = []
-    tree = ast.parse(source, filename=filename)
+    # A SyntaxWarning at parse time -- Python 3.14 warns on `"\\."` in a
+    # non-raw string -- is an error in a later Python. Refused here, now,
+    # where the file is named, rather than found on the day the interpreter
+    # moves. brokers/ibkr/scan_params.py carried one in its docstring.
+    # 3.12+ raises SyntaxWarning for it; 3.11 raised DeprecationWarning for
+    # the same thing. Both are the same defect and both are refused.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", SyntaxWarning)
+        warnings.simplefilter("error", DeprecationWarning)
+        tree = ast.parse(source, filename=filename)
     textio = _textio_aliases(tree)
     for n in ast.walk(tree):
         if not isinstance(n, ast.Call):
@@ -177,6 +187,15 @@ def test_the_guard_can_fail(src, want):
     """A guard that never fires is indistinguishable from its own absence.
     Each shape above is one the fixer had to handle on 2026-09-16."""
     assert len(bare_text_opens(src)) == want, src
+
+
+def test_an_invalid_escape_is_refused_not_warned():
+    """The compiler turns a parse-time warning under an "error" filter into a
+    SyntaxError carrying the filename and line -- not into the warning class
+    itself, which is what the first draft of this test waited for."""
+    with pytest.raises(SyntaxError, match=r"planted\.py"):
+        bare_text_opens('x = "a\\.b"', filename="planted.py")
+    assert bare_text_opens('x = r"a\\.b"') == []
 
 
 def test_the_guard_reads_the_tree_it_claims_to():
