@@ -91,6 +91,37 @@ ET = ZoneInfo("America/New_York")
 PAIRS = "var/state/screen_pairs_pit.json"
 TIMEFRAMES = (1, 5)
 
+# WHICH BARS THE SAMPLES ARE COMPARED AGAINST, and it decides what the word
+# "unusual" in this report means.
+#
+# The first run used `all` and reported 22 of 27 features as unusual on the
+# 1-minute view, with medians clustered at the 80th-94th percentile. That is
+# not a finding about Ben's eye. `all` is every bar of the pre-market window,
+# and that population is mostly DEAD MINUTES -- the archive frames are
+# gap-filled and LGHL 2026-05-21 has 1,999 of its 2,770 bars at zero volume.
+# He screenshots bars where something is happening. Of course they sit at the
+# 93rd percentile of volume against a tape that is mostly not trading.
+#
+# That is this project's signature defect appearing inside the instrument
+# built to look for it: a control whose output is indistinguishable from the
+# thing it is meant to detect. The fix is not a different threshold, it is a
+# different denominator.
+#
+# Every alternative below is defined by the STRATEGY'S OWN columns, never by a
+# cut-off chosen here -- a hand-picked activity threshold would be a fitted
+# parameter smuggled into the control.
+REFERENCES = {
+    "all": "every bar of the 04:00-09:30 window. Mostly dead minutes, so "
+           "almost any bar a human would screenshot scores as unusual; useful "
+           "only for the RULED OUT direction.",
+    "signal": "bars where MCL's volume clause holds (c_vol: volume >= 3x "
+              "prev_vol, prev_vol > 0). The bars something was happening on, "
+              "by the strategy's own definition.",
+    "entry": "bars MCL would have ENTERED on -- all five conditions. The "
+             "sharpest question available: of the bars the strategy picks, "
+             "do Ben's look different?",
+}
+
 # The label vocabulary in Ben's spreadsheet, as actually spelled there. Case
 # and the "and" are both inconsistent across rows, and a row whose label does
 # not match must be counted as UNLABELLED rather than dropped: a sample that
@@ -352,7 +383,24 @@ def bars_of_day(sig, day: str) -> np.ndarray:
     return np.flatnonzero(np.array([t.date() == want for t in local]))
 
 
-def score_frame(df, day: str, tf: int, stride: int) -> np.ndarray:
+def reference_mask(sig, which: str) -> np.ndarray:
+    """Boolean over `sig` selecting the bars the reference is built from.
+
+    The columns are MCL's own (`c_vol`, `entry`), so nothing here invents a
+    threshold. An unknown name is a crash, not a silent fall back to `all`:
+    a reference that is not the one asked for is the one error this module
+    cannot afford, because every percentile in the report is measured
+    against it.
+    """
+    n = len(sig)
+    if which == "all":
+        return np.ones(n, dtype=bool)
+    col = {"signal": "c_vol", "entry": "entry"}[which]
+    return sig[col].to_numpy(dtype=bool, na_value=False)
+
+
+def score_frame(df, day: str, tf: int, stride: int,
+                which: str = "all") -> np.ndarray:
     """(n_bars, n_features) float32 for one symbol-day at one timeframe."""
     from common.entry_features import frame_ctx, features_at
     from strategy.mcl import mcl as MCL
@@ -364,6 +412,8 @@ def score_frame(df, day: str, tf: int, stride: int) -> np.ndarray:
         return np.empty((0, len(feature_names())), dtype=np.float32)
     sig = MCL.signals(df)
     idx = bars_of_day(sig, day)
+    keep = reference_mask(sig, which)
+    idx = idx[keep[idx]]
     if stride > 1:
         idx = idx[::stride]
     if len(idx) == 0:
@@ -388,7 +438,7 @@ def run_day(args):
 
     from common.dbn_io import read_dbn
 
-    paths, day, universe, stride, tfs = args
+    paths, day, universe, stride, tfs, which = args
     parts = []
     for pth in paths:
         try:
@@ -410,7 +460,7 @@ def run_day(args):
         n_sym += 1
         for tf in tfs:
             try:
-                a = score_frame(df, day, tf, stride)
+                a = score_frame(df, day, tf, stride, which)
             except Exception:                               # noqa: BLE001
                 continue
             if len(a):
@@ -572,6 +622,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="keep every Nth bar of each session in the reference. "
                         "1 is every bar. Raising it shrinks memory and the "
                         "report says what was used.")
+    p.add_argument("--reference", default="all", choices=sorted(REFERENCES),
+                   help="which bars the samples are placed against. "
+                        + "  ".join(f"`{k}`: {v}" for k, v in REFERENCES.items()))
     p.add_argument("--jobs", type=int, default=0)
     p.add_argument("--out", default=None)
     return p
@@ -602,7 +655,8 @@ def main(argv=None) -> int:
     for k, day in enumerate(have):
         first = max(0, k - WARMUP_SESSIONS)
         tasks.append(([str(slices[d]) for d in have[first:k + 1]], day,
-                      by_date[day], max(1, a.bar_stride), TIMEFRAMES))
+                      by_date[day], max(1, a.bar_stride), TIMEFRAMES,
+                      a.reference))
 
     jobs = (os.cpu_count() or 1) if a.jobs == 0 else max(1, a.jobs)
     print(f"entry_place: {len(tasks):,} session(s) on {jobs} worker(s)",
@@ -640,14 +694,30 @@ def main(argv=None) -> int:
             placed.append((s, f))
 
     text = render(placed, failed, ref, names, have, syms,
-                  a.bar_stride, time.time() - t0, a.pairs)
-    emit("\n".join(text), a.out or "var/reports/entry_place.txt",
-         header=f"common.entry_place  samples={Path(a.samples).name}")
+                  a.bar_stride, time.time() - t0, a.pairs, a.reference)
+    out = a.out or f"var/reports/entry_place_{a.reference}.txt"
+    emit("\n".join(text), out,
+         header=f"common.entry_place  samples={Path(a.samples).name}  "
+                f"reference={a.reference}")
     return 0
 
 
+# A feature has to be measurable on most of the samples before it is called
+# either ruled out or unusual. The first run printed
+#
+#     vol_over_trail   median 93.1%   0/2 in the middle half
+#
+# on the 5-minute view and listed it under `unusual` beside features measured
+# on all 21 -- a median of two, presented as comparable with a median of
+# twenty-one. `vol_over_trail` and `floor_margin` need MCL's 60-bar shifted
+# mean, and a sample whose symbol did not trade the previous pre-market
+# session has no warm-up and so has no value. That is honest as an `n/a` per
+# sample and dishonest as a summary line.
+MIN_COVERAGE = 0.6
+
+
 def render(placed, failed, ref, names, have, syms, stride, elapsed,
-           pairs_path) -> list[str]:
+           pairs_path, which="all") -> list[str]:
     n_ref = {tf: (max(len(v) for v in ref[tf].values()) if ref[tf] else 0)
              for tf in ref}
     L = ["WHERE DO BEN'S LABELLED SAMPLES SIT IN THE TAPE THEY CAME FROM?", "",
@@ -658,6 +728,7 @@ def render(placed, failed, ref, names, have, syms, stride, elapsed,
          f"             {syms:,} symbol-day(s), every "
          + ("bar" if stride == 1 else f"{stride}th bar")
          + " of the 04:00-09:30 window",
+         f"  reference population: {which} -- {REFERENCES[which]}",
          "  ".join(f"    {tf}m: {n_ref[tf]:,} bars" for tf in sorted(ref)),
          f"  elapsed {elapsed:.1f}s", ""]
 
@@ -716,7 +787,9 @@ def render(placed, failed, ref, names, have, syms, stride, elapsed,
               "    middle = percentile 25-75, where an ordinary bar sits.",
               "    Expect about half the samples there if the feature says",
               "    nothing about them.", ""]
-        ruled_out, unusual, absent = [], [], []
+        ruled_out, unusual, absent, thin = [], [], [], []
+        n_meas = sum(1 for s, f in placed if tf in f)
+        floor = max(2, int(np.ceil(n_meas * MIN_COVERAGE)))
         for n in names:
             ps = [percentile_of(ref[tf][n], f[tf].get(n))
                   for s, f in placed if tf in f]
@@ -727,9 +800,13 @@ def render(placed, failed, ref, names, have, syms, stride, elapsed,
                 continue
             mid = sum(1 for p in have_p if middle(p))
             med = float(np.median(have_p))
+            tag = "" if len(have_p) >= floor else "   TOO THIN TO PLACE"
             L.append(f"    {n:<20} median {med:>5.1f}%   "
                      f"{mid}/{len(have_p)} in the middle half   "
-                     f"[{min(have_p):.0f}% .. {max(have_p):.0f}%]")
+                     f"[{min(have_p):.0f}% .. {max(have_p):.0f}%]{tag}")
+            if len(have_p) < floor:
+                thin.append(f"{n} ({len(have_p)}/{n_meas})")
+                continue
             # "Ruled out" is the CONSERVATIVE call and it is deliberately hard
             # to earn: at least half the samples ordinary AND a median that is
             # not itself extreme. Anything else goes on the other list, which
@@ -743,6 +820,10 @@ def render(placed, failed, ref, names, have, syms, stride, elapsed,
               + (", ".join(ruled_out) if ruled_out else "none"),
               f"    unusual    {len(unusual):>2}          "
               + (", ".join(unusual) if unusual else "none")]
+        if thin:
+            L.append(f"    too thin   {len(thin):>2}          "
+                     f"measured on fewer than {floor} of {n_meas} samples: "
+                     + ", ".join(thin))
         if absent:
             L.append(f"    absent     {len(absent):>2}          "
                      + ", ".join(absent))
