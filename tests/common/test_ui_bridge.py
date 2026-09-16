@@ -1039,6 +1039,61 @@ def test_two_partial_exits_of_one_position_do_not_double_count(tmp_path):
     assert [f["partial"] for f in closed] == [True, False]
 
 
+def test_both_exits_of_one_position_carry_the_same_entry_time(tmp_path):
+    """Found by a dry run, not by reasoning. Once partial exits are listed, one
+    position produces TWO rows in Closed today -- and the pairing popped the
+    opening time on the first, so the second rendered "--" in the Entered
+    column. Both rows closed shares opened at the same moment.
+
+    The rule mirrors the trader: forget the opening time only when the position
+    is flat, which is the FILLED exit, because that order's quantity IS the
+    remaining position."""
+    trader = _log_with(tmp_path, [
+        dict(ts_et="2026-09-16 10:02:44", strategy="MC5", symbol="BDRX",
+             action="BUY", status="FILLED", filled_qty=100, fill_price=3.05),
+        dict(ts_et="2026-09-16 10:19:03", strategy="MC5", symbol="BDRX",
+             action="SELL", status="PARTIAL_FILL", filled_qty=40, qty=100,
+             fill_price=3.18, entry_price=3.05, exit_price=3.18,
+             trade_pnl=4.40, hold_minutes=16.3),
+        dict(ts_et="2026-09-16 10:20:11", strategy="MC5", symbol="BDRX",
+             action="SELL", status="FILLED", filled_qty=60, qty=60,
+             fill_price=3.12, entry_price=3.05, exit_price=3.12,
+             trade_pnl=2.60, hold_minutes=17.4),
+    ])
+    closed = [f for f in ui_bridge.UIBridge._fills_today(trader)
+              if f["trade_pnl"] is not None]
+
+    assert len(closed) == 2
+    assert [f["entry_ts_et"] for f in closed] == ["10:02:44", "10:02:44"], (
+        "an exit of the same position lost its entry time")
+
+
+def test_a_new_position_after_a_full_exit_starts_its_own_clock(tmp_path):
+    """The other half of the rule. Holding the opening time past the FILLED
+    exit would attribute a later trade to an earlier entry -- which is the
+    same defect in the opposite direction, and much harder to notice because
+    the column would be populated and wrong rather than empty."""
+    trader = _log_with(tmp_path, [
+        dict(ts_et="2026-09-16 09:00:00", strategy="MCL", symbol="AAA",
+             action="BUY", status="FILLED", filled_qty=100, fill_price=4.00),
+        dict(ts_et="2026-09-16 09:10:00", strategy="MCL", symbol="AAA",
+             action="SELL", status="FILLED", filled_qty=100, fill_price=4.10,
+             entry_price=4.00, exit_price=4.10, trade_pnl=9.00,
+             hold_minutes=10.0),
+        dict(ts_et="2026-09-16 11:00:00", strategy="MCL", symbol="AAA",
+             action="BUY", status="FILLED", filled_qty=100, fill_price=4.50),
+        dict(ts_et="2026-09-16 11:20:00", strategy="MCL", symbol="AAA",
+             action="SELL", status="FILLED", filled_qty=100, fill_price=4.40,
+             entry_price=4.50, exit_price=4.40, trade_pnl=-11.00,
+             hold_minutes=20.0),
+    ])
+    closed = [f for f in ui_bridge.UIBridge._fills_today(trader)
+              if f["trade_pnl"] is not None]
+
+    assert [f["entry_ts_et"] for f in closed] == ["09:00:00", "11:00:00"], (
+        "the second round trip inherited the first one's entry time")
+
+
 def test_a_partially_filled_entry_does_not_become_a_phantom_close(tmp_path):
     """Widening the list must not invent closes. A partial ENTRY is a fill and
     belongs in the list, but it closed nothing, so it carries no round trip and

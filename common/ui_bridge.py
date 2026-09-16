@@ -467,7 +467,24 @@ class UIBridge:
                             # shorten every partially-filled trade.
                             opened_by.setdefault(key, row.get("ts_et") or "")
                         elif action in ("SELL", "SHORT"):
-                            entry_ts = opened_by.pop(key, None)
+                            # READ, and only forget once the position is flat.
+                            # A partial exit leaves the rest held, so the SAME
+                            # position produces a second exit row later -- and
+                            # popping on the first one left that second row with
+                            # no entry time at all ("--" in the Entered column,
+                            # seen in the 2026-09-16 dry run). Both rows closed
+                            # shares opened at the same moment and both should
+                            # say so.
+                            #
+                            # This mirrors the trader exactly: it does
+                            # `pos.qty -= sold` on a partial and
+                            # `st.position = None` only when the position is
+                            # fully closed -- and that final exit is always
+                            # FILLED, because its order quantity IS the
+                            # remaining position.
+                            entry_ts = opened_by.get(key)
+                            if status == "FILLED":
+                                opened_by.pop(key, None)
 
                     # BOTH statuses, on the strategy side's ruling of
                     # 2026-09-16. A partial EXIT is a real close: the trader
