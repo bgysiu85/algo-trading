@@ -425,7 +425,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      entry_px_by_bar: "pd.Series | None" = None,
                      ladder: "PL.LadderConfig | None" = None,
                      target_exit: "TE.TargetExit | None" = None,
-                     target_cents: float | None = None) -> list[Trade]:
+                     target_cents: float | None = None,
+                     green_hold_bars: int | None = None) -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -798,6 +799,16 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
 
         if exit_px is None and last_of_session:
             exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "window_close"
+        elif (exit_px is None and green_hold_bars is not None
+                and i - pos["entry_i"] >= green_hold_bars
+                and float(row["close"]) > pos["entry_px"]):
+            # GREEN HOLD (Ben, 2026-09-16, for MCL-PB v3): a position that is in
+            # profit N bars after entry is closed at that close; one that is not
+            # keeps riding the trail. After the trail (stop wins ties) and after
+            # the window close (the session forcing the issue is not this
+            # rule's exit). `is not None`: 0 bars means "sell the entry bar's
+            # own close if green", not "off". None is bit-identical.
+            exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "green_hold"
         elif exit_px is None and use_apex and bool(row["exit_sig"]):
             exit_px, exit_reason = (float(row["close"]) - SLIPPAGE_TICKS * TICK,
                                     EXIT_SIGNAL_REASON)
