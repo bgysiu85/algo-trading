@@ -61,6 +61,8 @@ import asyncio
 import csv
 import logging
 import math
+import os
+import re
 import signal as _signal
 import sys
 import time
@@ -126,6 +128,22 @@ ORDER_TIMEOUT_S = 20        # cancel and record a no-fill after this long
 # second -- not a judgement about the market. Nothing here is a threshold on
 # price.
 EXIT_ABANDON_POLLS = 2
+
+# IBKR STATES THE ACCEPTABLE LIMIT IN THE TEXT OF THE REJECTION.
+#
+#   Error 202: Order Canceled - reason:We cannot accept an order at a limit
+#   price at or more aggressive than 6.31944. Please submit your order using
+#   a limit price that is closer to the current market
+#
+# CRBP 2026-09-14 took three of these in consecutive seconds -- 5.26, then
+# 5.52, then 6.04 -- while holding a position in a stock that was collapsing.
+# The broker had already supplied the answer on the first one and nothing
+# read it.
+#
+# The band is consumed ONCE, by the next order on that symbol, and then
+# cleared. It is a fact about the market a second ago, not a setting: keeping
+# it would mean clamping a later order to a price the market has left.
+BAND_RE = re.compile(r"more aggressive than\s*([0-9]*\.?[0-9]+)")
 
 # Commission for the round-trip P/L recorded in the fill log. This is a
 # REPORTING figure only -- it is not consulted when deciding or pricing an
@@ -319,12 +337,16 @@ class SymbolFeed:
     bars_df: object = None          # cached history (see bars(): IB paces requests)
     bars_minute: tuple | None = None
     bars_fetched_at: float = 0.0
+    # (action, price) from IB's own 202 rejection -- see BAND_RE. It lives on
+    # the FEED, not the state: the band is a fact about the contract at the
+    # broker, and both strategies watching this name hit the same one.
+    price_band: tuple | None = None
 
 
 # The shared fields, delegated below. Named once so the property pairs and the
 # test that checks them cannot drift apart.
 _FEED_FIELDS = ("contract", "ticker", "min_tick", "blocked",
-                "bars_df", "bars_minute", "bars_fetched_at")
+                "bars_df", "bars_minute", "bars_fetched_at", "price_band")
 
 
 @dataclass
@@ -443,7 +465,61 @@ FIELDS = [
     # It cannot be reconstructed afterwards -- the rows that need it are the
     # ones written during the experiment.
     "trail_pct",
+    # -- HOW FAR THE MARKET HAD ALREADY MOVED WHEN THE ORDER WENT OUT --------
+    # (mid at order / ref_close - 1), in percent.
+    #
+    # `slippage_vs_ref` alone called the worst trade in the book a good fill.
+    # CRBP 2026-09-14: the decision was priced off 9.75, the bid on the SAME
+    # ROW was 9.11, the buy filled at 9.16 -- and slippage_vs_ref recorded
+    # +0.59, a fifty-nine cent FAVOURABLE fill, on a round trip that lost
+    # $241.37 in forty-two seconds.
+    #
+    # A buy that fills far BELOW its reference is not a bargain. It is the
+    # reference being stale, and the two readings are indistinguishable
+    # without this column beside it. Every number needed was already on the
+    # row; nothing computed it.
+    #
+    # It is a DIAGNOSTIC, not a filter. Tested across 138 live round trips,
+    # drift does not separate outcomes -- quartiles are non-monotone and the
+    # whole extreme-bucket effect is that one trade.
+    "ref_drift_pct",
 ]
+
+
+def clamp_to_band(limit: float, action: str, edge: float,
+                  min_tick: float) -> float:
+    """The limit moved onto the acceptable side of IB's stated band.
+
+    "More aggressive" is HIGHER for a buy and LOWER for a sell, and the number
+    IB quotes is ITSELF refused ("at or more aggressive than"), so the limit
+    has to land a tick past it rather than on it.
+
+    A limit already inside the band is returned unchanged: the clamp exists to
+    turn a rejection into a fill, never to make an acceptable order worse.
+
+    THIS IS A FUNCTION because the first version lived inline and its tests
+    reimplemented the arithmetic beside it -- three mutations of the real code
+    survived a green suite. A guard tested by a copy of itself is not tested.
+    """
+    tick = min_tick or 0.01
+    if action == "BUY" and limit >= edge:
+        return round_to_tick(edge - tick, action, min_tick)
+    if action == "SELL" and limit <= edge:
+        return round_to_tick(edge + tick, action, min_tick)
+    return limit
+
+
+def ref_drift(bid: float, ask: float, ref_close: float) -> float:
+    """(mid / ref_close - 1) * 100, or NaN when it cannot be computed.
+
+    NaN rather than 0.0 when a side of the book is missing: a drift of zero
+    means "the market is exactly where the decision was priced", which is a
+    strong and specific claim, and it is not the same statement as "there was
+    no quote". Writing 0.0 here would be the shape this column exists to fix.
+    """
+    if bid != bid or ask != ask or not ref_close or ref_close != ref_close:
+        return float("nan")
+    return ((bid + ask) / 2.0 / ref_close - 1.0) * 100.0
 
 
 class FillLog:
@@ -542,6 +618,7 @@ class MCLPaperTrader:
         self.ib.errorEvent += self._on_error
 
     def _on_error(self, reqId, errorCode, errorString, contract):  # noqa: ANN001
+
         if reqId and reqId > 0:
             self._errors[reqId] = f"Error {errorCode}: {errorString}"
 
@@ -908,7 +985,56 @@ class MCLPaperTrader:
                         adapter.trail_pct, st.position.trail_level())
         return []
 
+    def bridge_state(self) -> str:
+        """`off`, `configured-but-unattached`, or `attached`.
+
+        THREE STATES, and the ledger could previously tell only two apart.
+        The CONFIG row was written by the bridge, so a session with no bridge
+        left no row -- and "no bridge configured" and "a bridge was configured
+        and refused to attach" are not the same fact. On 2026-09-15 the second
+        happened (the agent token had just been deleted by a test run in the
+        portal repo) and the log was indistinguishable from the first.
+        """
+        if self.ui is not None:
+            return "attached"
+        return ("configured-but-unattached" if os.environ.get("UI_RELAY_URL")
+                else "off")
+
+    def record_config(self, reason: str = "session_open") -> None:
+        """Write what this trader is running with, unconditionally.
+
+        FROM THE TRADER, NOT THE BRIDGE. The row records a fact about the
+        TRADER -- the trail, the cap, what is paused -- and routing it through
+        an optional component made the audit trail depend on that component
+        being there. A check placed one step short of the thing it protects.
+
+        Every value is read back off `self`, never off the constant or the
+        command-line argument it came from: those can drift from what is
+        actually running, and this row exists precisely for the case where
+        someone changed one of them.
+        """
+        # _trail_for takes a SymbolState and there is no state yet. Read the
+        # trail off each ADAPTER, and name them: with two strategies running,
+        # one number in this column would be a claim about both that is only
+        # true while they happen to agree.
+        trails = " ".join(f"{a.name}:{getattr(a, 'trail_pct', None)}"
+                          for a in self.strategies)
+        cfg = (f"trail_pct={trails} "
+               f"paused={self.paused} "
+               f"max_positions={self.max_positions} "
+               f"strategies={'+'.join(a.name for a in self.strategies)} "
+               f"disabled={','.join(sorted(self.disabled_strategies)) or '-'} "
+               f"dry_run={self.dry_run} "
+               f"bridge={self.bridge_state()}")
+        self.log.write(ts_et=now_et_str(), action="CONFIG", reason=reason,
+                       status="APPLIED", reject_reason=cfg[:200])
+        LOG.info("config: %s", cfg)
+
     async def prepare(self):
+        # BEFORE anything can change it, and before the first order. A session
+        # that dies in sync_watchlist still leaves a row saying what it was
+        # about to run with.
+        self.record_config()
         await self.sync_watchlist(first=True)
         await asyncio.sleep(2)
         await self.refresh_equity()
@@ -1081,11 +1207,31 @@ class MCLPaperTrader:
         raw = base + cross if action == "BUY" else base - cross
         limit = round_to_tick(raw, action, st.min_tick)
 
+        # Consume a band IB handed us on the previous attempt for this action.
+        # "More aggressive" is HIGHER for a buy and LOWER for a sell, and the
+        # quoted number is itself refused, so the limit has to land a tick on
+        # the acceptable side of it.
+        band = st.price_band
+        if band and band[0] == action:
+            st.price_band = None
+            tick = st.min_tick or 0.01
+            edge = band[1]
+            if action == "BUY":
+                limit = round_to_tick(edge - tick, action, st.min_tick)
+            elif action == "SELL" and limit <= edge:
+                limit = round_to_tick(edge + tick, action, st.min_tick)
+            else:
+                edge = None
+            if edge is not None:
+                LOG.info("%s %s limit clamped to %.4f by IB's stated band %.5f",
+                         action, st.symbol, limit, band[1])
+
         row = dict(ts_et=now_et_str(), strategy=self._name_of(st),
                    symbol=st.symbol, action=action, reason=reason,
                    ref_close=ref_close, ref_kind=ref_kind, bid=bid, ask=ask,
                    spread=spread, spread_pct=spread_pct, limit_sent=limit,
-                   qty=qty, trail_pct=trail_pct, **detail)
+                   qty=qty, trail_pct=trail_pct,
+                   ref_drift_pct=ref_drift(bid, ask, ref_close), **detail)
 
         if self.dry_run:
             # Assume the marketable limit fills at its own price. That is the
@@ -1158,6 +1304,16 @@ class MCLPaperTrader:
             elif "minimum price variation" in low:
                 LOG.error("  >> Limit price was off the tick grid. minTick for %s "
                           "is %s.", st.symbol, st.min_tick or "unknown")
+            # No try/except around the float(): BAND_RE only matches digits
+            # with at most one dot, so it cannot raise. A mutation pass showed
+            # the handler was unreachable, and an unreachable guard is noise
+            # that reads like protection.
+            m = BAND_RE.search(why)
+            if m:
+                st.price_band = (action, float(m.group(1)))
+                LOG.warning("  >> IB's acceptable %s limit for %s is past %s; "
+                            "the next attempt will respect it.",
+                            action, st.symbol, m.group(1))
             # already dead at IB — cancelling again just logs error 10147/10148
             if status not in ("Cancelled", "ApiCancelled", "Inactive"):
                 self.ib.cancelOrder(order)

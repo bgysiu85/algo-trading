@@ -664,6 +664,13 @@ def load_paper_fills(conn, paths) -> tuple[int, list[str]]:
                 # column exists is to tell a 5% row from a 9% one in a
                 # session where someone moved it from the portal.
                 "trail_pct": _f(r.get("trail_pct")),
+                # THE SAME THREE PLACES, EVERY TIME. trader.FIELDS, the table
+                # in db.py, and this loader. trail_pct made it into the first
+                # two and not the third, and the guard that was supposed to
+                # catch it checked the TABLE -- one step short of the loader
+                # that fills it. Both halves of that guard now run on this
+                # column too.
+                "ref_drift_pct": _f(r.get("ref_drift_pct")),
                 "source_file": path.name[:255], "loaded_at": now})
 
     # DE-DUPLICATE WITHIN THE BATCH, on the primary key. Two files can overlap:
