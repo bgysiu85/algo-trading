@@ -177,3 +177,62 @@ cannot later be quoted as having passed it.
 Expect rejection. §11.1's base rate for clearing this bar in full is zero of
 four, and MC5 — the only strategy ever to clear criterion 1 — is still being
 re-scored under criterion 2 as replaced.
+
+---
+
+# AMENDMENT — 2026-09-16, PRE-RUN. No ORB P/L exists.
+
+Two things arrived after this document was written and before the runner did.
+Both are recorded here so that neither can be quoted afterwards as something
+the grid discovered.
+
+## A. MCL-PB does NOT transfer as a prior on the retest arms, and here is why
+
+`claude/pullback_break_RESULT_20260916.md` ran the wait-for-a-pullback shape on
+MCL's universe and returned NOTHING: 72.5% of setups cancelled on depth, a
+median **+2.86%** entry premium over the signal close, and a per-trade result
+that stayed negative while the total shrank. The obvious move is to read that
+as a prior against ORB's `required` and `zone` arms.
+
+**It is the wrong prior, because the entry moves in the opposite direction.**
+
+| | what "confirmation" does to the entry price | what it does to R |
+|---|---|---|
+| MCL-PB | buys the break of a peak — **higher**, +2.86% median | larger |
+| ORB retest | buys back near the level after a pullback — **lower** | **smaller** |
+
+MCL-PB paid a premium to be confirmed. ORB's retest is paid a discount to be
+confirmed, and §5.3 says so outright. Carrying the direction across would be
+reasoning from a shared word rather than a shared mechanism.
+
+**What DOES transfer is the abstention, and only that.** Confirmation trades
+far less often, in both. The pre-flight already prices it here: at 15 minutes
+a zone retest follows only **27.0%** of up-triggers, so requiring one discards
+**73%** of them. Registered consequence: **retest cells will frequently fall
+under §5's 100-trade floor and must be printed with their trade count and NO
+verdict**, exactly like any other thin cell. A thin retest cell that looks good
+is a thin cell.
+
+## B. A stated prediction, on the one race the pre-flight has already measured
+
+`orb_preflight_RESULT_20260916.md` §10.5: **6,001 triggers touched the
+structure stop at a median of 4 bars; 5,787 reached 2R at a median of 6.** With
+§7.2's stop-wins-the-shared-bar, the stop is nearer in time than the modal
+source's target.
+
+> **Prediction, registered before any cell runs: at the baseline length,
+> `EXIT_MODE = r_2` will be beaten on per-trade net by at least one of the four
+> other exits — most likely `r_1_5` or `trail_pct`.**
+
+This is a prediction about the GRID, not about §11. §11 is judged on the
+baseline cell and nothing here changes that; a cell that beats the baseline is
+still a LEAD (§3).
+
+Why write it down: I predicted MC5 would clear the replaced criterion 2 and it
+failed at 90.2% against a 95% bar, and that prediction being on record is what
+made the failure informative instead of a shrug. A prediction that turns out
+right is worth more than the same number unregistered, and one that turns out
+wrong is worth more still.
+
+**If `r_2` wins anyway**, that is evidence the stop/target race does not decide
+the exit, and it is reported as a surprise rather than quietly dropped.

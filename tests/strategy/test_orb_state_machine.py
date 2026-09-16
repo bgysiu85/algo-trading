@@ -577,3 +577,35 @@ def test_the_baseline_is_the_one_registered_before_any_data_was_seen():
     assert (b.retest_mode, b.stop_mode, b.exit_mode) == ("none", "structure", "r_2")
     assert b.max_entries_per_session == 1
     assert b.entry_buffer_pct == 0.0
+
+
+# --------------------------------------------------------------------------
+# the cached bar view
+# --------------------------------------------------------------------------
+
+def test_a_cached_bar_view_gives_identical_results():
+    """The grid resamples ONCE per symbol-day and hands the same view to all
+    ninety cells. Ninety independent resamples of one frame should agree --
+    and "should" is how two arms of a comparison end up measuring different
+    objects. This runs both ways and compares the trades, which is an
+    equivalence test rather than a copy of the construction.
+    """
+    rows = opening() + [TRIGGER, ENTRY_BAR, ("09:55", 10.60, 11.40, 10.50, 11.30)]
+    df = frame(rows)
+    view = O.trigger_bars(df, O.BASELINE.trigger_bar_minutes)
+    for mode in O.EXIT_MODES:
+        cfg = O.replace(O.BASELINE, exit_mode=mode)
+        fresh = O.backtest_session(df, "TEST", DAY, cfg)
+        cached = O.backtest_session(df, "TEST", DAY, cfg, bars=view)
+        assert fresh.status == cached.status
+        assert [(t.exit_px, t.exit_reason, t.shares) for t in fresh.trades] == \
+               [(t.exit_px, t.exit_reason, t.shares) for t in cached.trades], mode
+
+
+def test_a_cached_view_at_the_wrong_bar_size_is_refused():
+    """Silently resampling here would end the one-resample-per-day invariant
+    and nothing in the output would show it."""
+    df = frame(opening() + [TRIGGER, ENTRY_BAR])
+    with pytest.raises(ValueError, match="minute"):
+        O.backtest_session(df, "TEST", DAY, O.BASELINE,
+                           bars=O.trigger_bars(df, 15))
