@@ -236,3 +236,54 @@ wrong is worth more still.
 
 **If `r_2` wins anyway**, that is evidence the stop/target race does not decide
 the exit, and it is reported as a surprise rather than quietly dropped.
+
+---
+
+# AMENDMENT C — 2026-09-16, POST-RUN. Written after `orb_first_results.md`.
+
+Three things the first XNAS.BASIC run exposed in this document. Each is a
+defect in the registration, none changes a criterion, and all are marked
+POST-RUN because they were found by reading a result.
+
+## C.1 "Wins" in §4 was undefined, and its two readings disagree
+
+§4 says *if 5 or 30 wins, the box is pushed*. Read on the baseline row
+(structure / none / r_2), **5 wins**. Read jointly on length × stop as §3.2
+demands, **30 wins**. Opposite edges. The joint reading is the registered one
+— §3.2 forbids reading length at a fixed stop — and it is now the rule:
+
+> **"Wins" means the best readable per-trade cell over the joint length × stop
+> search within the `none` retest arm.** Retest arms are excluded from the
+> boundary read because they change the trade population.
+
+The runner's `_boundary_block` reads across all readable cells including
+retest arms; it must be narrowed to the `none` arm. Recorded as a defect.
+
+## C.2 The lower edge cannot be pushed
+
+§4 says push to 3 minutes if 5 wins. A 3-minute range does not end on a
+5-minute trigger-bar boundary, and `orb.Config` refuses it. Pushing the lower
+edge means changing `TRIGGER_BAR_MINUTES`, which is a fifth family and a
+different grid. **5 is therefore a hard boundary of this design**, reported
+the way `STOP_MODE`'s two values are: the rule cannot apply there, and the
+report says so rather than passing silently.
+
+**45 minutes is constructible and is added.** `GRID_MINUTES` becomes
+(5, 15, 30, 45), 120 cells. Criterion 7 is read only after that run.
+
+## C.3 A leg is not a trade
+
+`Trade` records one closing leg, and `r_3_trim` books two per position, so
+its `trades` column counts legs (6,722 on 4,875 symbol-days at the baseline
+length). Its per-trade figure is per-leg and is not comparable to any other
+cell's — which is exactly what the comparison-level refusal caught. The fix
+is to count round trips in `Cell.add` (one per symbol-day under
+`MAX_ENTRIES_PER_SESSION = 1`) and keep legs as a separate column. Until
+then `r_3_trim`'s per-trade column is not read.
+
+## What C does not do
+
+It does not touch the baseline, any threshold, the split rule, the bootstrap
+parameters, or the 100-trade floor. It does not re-score anything. The
+first-run figures in `orb_first_results.md` stand as written, with §1.2 and
+§3 of that document already reading them under C.1–C.3.
