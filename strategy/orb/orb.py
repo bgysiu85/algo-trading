@@ -200,6 +200,12 @@ class SessionResult:
     open_at_close: bool = False
     both_in_bar: int = 0                 # §7.2 -- how often the stop-wins bit
     faded: bool | None = None            # §7.4 -- V2's counter-hypothesis
+    # §10.2, set by the runner and NOT by the rule: whether a 09:30 RTH screen
+    # would have picked this symbol-day. It lives here so the split is computed
+    # from the same trades as the headline, and it is FALSE until something
+    # sets it -- the rule itself never looks at it, because a strategy that
+    # filtered on its own buildability check would make §10.2 unanswerable.
+    passes_rth_screen: bool = False
     fade_return_pct: float | None = None
 
     @property
@@ -248,23 +254,73 @@ def opening_range(sess: pd.DataFrame, cfg: Config) -> tuple[str, dict]:
 
 
 # --------------------------------------------------------------------------
+# the bar view
+# --------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Bars:
+    """Trigger-sized bars as PLAIN PYTHON LISTS, not a DataFrame.
+
+    Built once per symbol-day and handed to all ninety cells. Two reasons, and
+    the second is the one that matters:
+
+      * `df.iloc[j]` inside a walk costs tens of microseconds. Ninety cells
+        over 27,777 symbol-days is 2.5 million session walks, and at pandas
+        speed the grid takes hours instead of minutes -- long enough that it
+        would get run once, on a subset, and believed.
+      * ONE resample per symbol-day means every cell sees exactly the same
+        bars. Ninety independent resamples of the same frame should agree, and
+        would; but "should" is how two arms of a comparison end up measuring
+        different objects.
+
+    `backtest_session` builds this itself when it is not given one, and
+    `test_a_cached_bar_view_gives_identical_results` runs both ways over the
+    same frames and asserts the trades match -- an equivalence test, not a copy
+    of the construction.
+    """
+
+    t: list                 # ET timestamps, bucket START (left-labelled)
+    tm: list                # the same instants as datetime.time, precomputed
+    o: list
+    h: list
+    l: list
+    c: list
+    minutes: int
+
+    def __len__(self) -> int:
+        return len(self.t)
+
+
+def trigger_bars(sess: "pd.DataFrame", minutes: int) -> Bars:
+    b = resample_bars(sess, minutes)
+    # `Timestamp.time()` is not free and the grid asks for it three times per
+    # cell per bar -- ninety cells over 27,777 symbol-days is where a
+    # microsecond becomes six minutes.
+    return Bars(t=list(b.index), tm=[x.time() for x in b.index],
+                o=[float(v) for v in b["open"]],
+                h=[float(v) for v in b["high"]],
+                l=[float(v) for v in b["low"]],
+                c=[float(v) for v in b["close"]],
+                minutes=minutes)
+
+
+# --------------------------------------------------------------------------
 # fills
 # --------------------------------------------------------------------------
 
-def fill_below(bar, level: float) -> float | None:
+def fill_below(o: float, lo: float, level: float) -> float | None:
     """A sell at or below `level` -- a stop. Gap-through honoured.
 
     §9: you cannot sell AT a level the market never offered. When the bar OPENS
     below the stop the fill is the OPEN, which is worse. 48% of MC5's stop
     exits were affected by this one line.
     """
-    o, lo = float(bar["open"]), float(bar["low"])
     if o <= level:
         return o
     return level if lo <= level else None
 
 
-def fill_above(bar, level: float) -> float | None:
+def fill_above(o: float, hi: float, level: float) -> float | None:
     """A sell at or above `level` -- a target.
 
     The asymmetry with `fill_below` is DELIBERATE and both halves are
@@ -273,7 +329,6 @@ def fill_above(bar, level: float) -> float | None:
     gap is NOT taken and the level stands. Modelling both the same way would
     make one of the two flatter us.
     """
-    o, hi = float(bar["open"]), float(bar["high"])
     if o >= level:
         return level
     return level if hi >= level else None
@@ -320,7 +375,8 @@ def _targets(cfg: Config, entry: float, r: float, orb_width: float):
 
 
 def backtest_session(sess: pd.DataFrame, symbol: str, day: str,
-                     cfg: Config = BASELINE) -> SessionResult:
+                     cfg: Config = BASELINE,
+                     bars: "Bars | None" = None) -> SessionResult:
     """One symbol-day, one cell. `sess` is RTH 1-minute bars, ET-indexed.
 
     Returns a SessionResult whatever happens, including when nothing happens.
@@ -351,10 +407,19 @@ def backtest_session(sess: pd.DataFrame, symbol: str, day: str,
     # unreachable and the fallback would have been orb_low, i.e. a `structure`
     # cell quietly running `opposite` on exactly the rows where the two differ
     # most.
-    bars = resample_bars(sess, cfg.trigger_bar_minutes)
+    if bars is None:
+        bars = trigger_bars(sess, cfg.trigger_bar_minutes)
+    elif bars.minutes != cfg.trigger_bar_minutes:
+        # A cached view built at a different bar size is not this cell's data.
+        # Refusing beats silently resampling, because a grid that quietly
+        # re-derived its own bars here would stop being one resample per day
+        # and nobody would see the difference in the output.
+        raise ValueError(
+            f"cached bars are {bars.minutes}-minute; cfg wants "
+            f"{cfg.trigger_bar_minutes}")
     end_min = 9 * 60 + 30 + cfg.orb_minutes
     end = dtime(end_min // 60, end_min % 60)
-    after = [i for i, t in enumerate(bars.index) if t.time() >= end]
+    after = [i for i, t in enumerate(bars.tm) if t >= end]
     if not after:
         res.status = "NO_TRIGGER"
         return res
@@ -368,19 +433,18 @@ def backtest_session(sess: pd.DataFrame, symbol: str, day: str,
     # is where the edge is, that is worth knowing before the borrow-feasibility
     # work, not after it.
     for j in range(start, len(bars)):
-        if float(bars["close"].iloc[j]) < lo:
+        if bars.c[j] < lo:
             res.down_trigger, res.down_trigger_bar = True, j - start
             break
 
     # ---- the trigger -----------------------------------------------------
     trig = None
     for j in range(start, len(bars)):
-        bar = bars.iloc[j]
         if cfg.entry_on_close:
-            if float(bar["close"]) > level:
+            if bars.c[j] > level:
                 trig = j
                 break
-        elif float(bar["high"]) >= level:
+        elif bars.h[j] >= level:
             # V8's resting stop order. It fills on any wick, which is the
             # whole difference: a close-based rule requires the market to HOLD
             # the level for a full bar. Kept as a cell precisely because this
@@ -397,9 +461,9 @@ def backtest_session(sess: pd.DataFrame, symbol: str, day: str,
     # One source in ten does not trade this breakout. He fades the failed one.
     # It costs two columns to find out whether the premise holds at all here.
     for j in range(trig + 1, min(trig + 1 + cfg.fade_window_bars, len(bars))):
-        if float(bars["close"].iloc[j]) < hi:
+        if bars.c[j] < hi:
             res.faded = True
-            back_inside = float(bars["close"].iloc[j])
+            back_inside = bars.c[j]
             res.fade_return_pct = (back_inside - lo) / back_inside * 100.0
             break
     else:
@@ -427,27 +491,26 @@ def backtest_session(sess: pd.DataFrame, symbol: str, day: str,
     if anchor_bar < 0:
         res.status = "NO_STOP_ANCHOR"
         return res
-    if bars.index[entry_bar].time() >= LAST_ENTRY:
+    if bars.tm[entry_bar] >= LAST_ENTRY:
         # §3.3. An entry at 15:56 is a position opened to be flattened four
         # minutes later at the close; it is not the strategy.
         res.status = "TOO_LATE"
         return res
 
     if cfg.entry_on_close:
-        entry = buy_fill(float(bars["open"].iloc[entry_bar]))
+        entry = buy_fill(bars.o[entry_bar])
     else:
         # A resting stop at the level fills AT the level, or at the open when
         # the bar gapped through it -- the same gap logic as a stop exit, in
         # the other direction.
-        o = float(bars["open"].iloc[entry_bar])
-        entry = buy_fill(max(level, o))
+        entry = buy_fill(max(level, bars.o[entry_bar]))
     res.entry_px = entry
 
     if cfg.enforce_price_band and not (PRICE_MIN <= entry <= PRICE_MAX):
         res.status = "OUT_OF_BAND"
         return res
 
-    anchor_low = float(bars["low"].iloc[anchor_bar])
+    anchor_low = bars.l[anchor_bar]
     stop = _stop_for(cfg, entry, anchor_low, lo, width)
     r = entry - stop
     res.stop_px, res.r = stop, r
@@ -497,14 +560,14 @@ def _resolve_entry(bars, trig: int, cfg: Config, hi: float, lo: float,
 
     touched = False
     for j in range(trig + 1, min(trig + 1 + cfg.retest_max_bars, len(bars))):
-        c = float(bars["close"].iloc[j])
+        c = bars.c[j]
         if c < lo:
             # The setup is dead, not merely waiting. Price closing back below
             # the far side of the range is the break failing, and a rule that
             # kept waiting here would be entering on a third attempt at a level
             # that has already failed twice.
             return -1, "RETEST_FAILED"
-        if float(bars["low"].iloc[j]) <= depth:
+        if bars.l[j] <= depth:
             touched = True
         # One bar may BOTH reach the depth and close back above the level --
         # a textbook retest-and-reclaim. Testing the touch first and the
@@ -530,7 +593,7 @@ def _run_position(bars, entry_bar: int, res: SessionResult, cfg: Config,
     """
     shares = cfg.shares
     remaining = shares
-    entry_time = bars.index[entry_bar]
+    entry_time = bars.t[entry_bar]
     peak = entry                    # §9: from the fill, never the trigger bar
     stop_level = stop
     targets = _targets(cfg, entry, r, width)
@@ -540,8 +603,7 @@ def _run_position(bars, entry_bar: int, res: SessionResult, cfg: Config,
     leg = 0
 
     for j in range(entry_bar, len(bars)):
-        bar = bars.iloc[j]
-        ts = bars.index[j]
+        ts = bars.t[j]
         held = j - entry_bar
 
         # The trail and the break-even move both use the peak as it stood at
@@ -555,8 +617,9 @@ def _run_position(bars, entry_bar: int, res: SessionResult, cfg: Config,
             effective_stop = trail_level
 
         want = targets[ti][0] if ti < len(targets) else None
-        hit_stop = fill_below(bar, effective_stop)
-        hit_target = fill_above(bar, want) if want is not None else None
+        hit_stop = fill_below(bars.o[j], bars.l[j], effective_stop)
+        hit_target = (fill_above(bars.o[j], bars.h[j], want)
+                      if want is not None else None)
 
         if hit_stop is not None and hit_target is not None:
             # §7.2. On 5-minute bars on a name moving 20% intraday this is not
@@ -585,17 +648,17 @@ def _run_position(bars, entry_bar: int, res: SessionResult, cfg: Config,
 
         # Now the bar's own extremes may move the peak and arm break-even, for
         # the bars that follow.
-        peak = max(peak, float(bar["high"]))
-        if be_armed and be_level is not None and float(bar["high"]) >= be_level:
+        peak = max(peak, bars.h[j])
+        if be_armed and be_level is not None and bars.h[j] >= be_level:
             stop_level = max(stop_level, entry)
 
         if cfg.time_stop_bars is not None and held >= cfg.time_stop_bars:
-            _close(res, cfg, entry_time, ts, sell_fill(float(bar["close"])),
+            _close(res, cfg, entry_time, ts, sell_fill(bars.c[j]),
                    remaining, entry, r, width, "time_stop", held, leg)
             return
 
-        if ts.time() >= FLATTEN_BAR:
-            _close(res, cfg, entry_time, ts, sell_fill(float(bar["close"])),
+        if bars.tm[j] >= FLATTEN_BAR:
+            _close(res, cfg, entry_time, ts, sell_fill(bars.c[j]),
                    remaining, entry, r, width, "session_end", held, leg)
             return
 
@@ -603,9 +666,8 @@ def _run_position(bars, entry_bar: int, res: SessionResult, cfg: Config,
     # printing. The position is closed at the last bar there was, and the day
     # is FLAGGED, because a silently-carried position is a P/L that never
     # happened.
-    last = bars.iloc[-1]
     res.open_at_close = True
-    _close(res, cfg, entry_time, bars.index[-1], sell_fill(float(last["close"])),
+    _close(res, cfg, entry_time, bars.t[-1], sell_fill(bars.c[-1]),
            remaining, entry, r, width, "session_end", len(bars) - 1 - entry_bar, leg)
 
 
