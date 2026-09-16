@@ -56,3 +56,11 @@ def test_render_with_ib_rows_prints_the_cross_check():
     got["2025-08-11"]["ib"] = [{"symbol": "A", "ib_bars": 300, "ib_spikes": 0, "xn_bars": 330, "xn_spikes": 3}]
     txt = "\n".join(S.render(["2025-08-11"], got, 1.0, 1, "bar_cache/3d_to_2000"))
     assert "THE SAME SYMBOL-DAYS ON IB'S BARS" in txt and "1 symbol-days" in txt
+
+
+def test_at_survives_a_repeated_timestamp():
+    idx = pd.DatetimeIndex(["2025-06-09 12:00", "2025-06-09 12:00", "2025-06-09 12:01"], tz="UTC")
+    m = pd.Series([False, True, False], index=idx)
+    assert S.at(m, idx[0]) is True
+    assert S.at(m, idx[2]) is False
+    assert S.at(m, pd.Timestamp("2025-06-09 12:05", tz="UTC")) is False

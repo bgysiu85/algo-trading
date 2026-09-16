@@ -74,6 +74,13 @@ def spike_mask(df: pd.DataFrame) -> pd.Series:
     return (df["high"] > SPIKE_UP * oc_hi) | (df["low"] * SPIKE_UP < oc_lo)
 
 
+def at(mask: pd.Series, ts) -> bool:
+    """The mask at one timestamp. By value, not `.get`: 2025-06-09's slice
+    repeats timestamps, where `.get` returns a Series and `bool()` raises --
+    the same trap that dropped eleven symbol-days from the pullback runs."""
+    return bool(mask[mask.index == ts].any())
+
+
 def run_day(args: tuple) -> tuple:
     """One session: spike bars on the whole slice, the dump census, and MCL's
     trades on the PIT universe marked by whether they touched a spike bar."""
@@ -133,7 +140,7 @@ def run_day(args: tuple) -> tuple:
             e = pd.Timestamp(t.entry_time); x = pd.Timestamp(t.exit_time)
             res["mcl"].append({
                 "symbol": rec["symbol"], "date": day, "net": float(t.net),
-                "entry_spike": bool(m.get(e, False)), "exit_spike": bool(m.get(x, False)),
+                "entry_spike": at(m, e), "exit_spike": at(m, x),
                 "entry_hour": int(e.tz_convert(ET).hour), "reason": t.reason})
 
     # Cross-check against IB's cache for the same symbol-days, where present.
