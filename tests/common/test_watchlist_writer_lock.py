@@ -43,7 +43,7 @@ def test_a_dead_writer_does_not_block_forever(tmp_path):
     the session lock -- this reuses that code rather than reimplementing it."""
     p = tmp_path / "w.lock"
     p.write_text(json.dumps({"mode": "watchlist-writer", "strategy": "tv_feed",
-                             "pid": 999_999_999, "started_epoch": 0}))
+                             "pid": 999_999_999, "started_epoch": 0}), encoding="utf-8")
     assert L.active(p) is None
     assert not p.exists(), "a stale lock should be reaped, not just ignored"
 

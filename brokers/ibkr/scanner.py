@@ -110,7 +110,7 @@ def read_pinned(path: Path) -> list[str]:
     if not path.exists():
         return []
     out = []
-    for ln in path.read_text().splitlines():
+    for ln in path.read_text(encoding="utf-8").splitlines():
         s = ln.split("#", 1)[0].strip().upper()
         if s and s not in out:
             out.append(s)
@@ -262,8 +262,8 @@ async def main_async(args) -> int:
                 print("-" * 60)
                 print("(preview -- nothing written)")
                 break
-            if not wl.exists() or wl.read_text() != text:
-                wl.write_text(text)
+            if not wl.exists() or wl.read_text(encoding="utf-8") != text:
+                wl.write_text(text, encoding="utf-8")
                 LOG.info("wrote %s (%d symbols)", wl, len(selected))
 
             await asyncio.sleep(args.interval)

@@ -82,6 +82,6 @@ def test_symbology_sidecars_are_not_counted_as_chunks(tmp_path):
     """ohlcv-1d directories hold a .symbology.json beside every chunk. Counting
     those would double every figure in the table."""
     chunk(tmp_path, "EQUS.MINI", "ohlcv-1d", "2026-01")
-    (tmp_path / "EQUS.MINI" / "ohlcv-1d" / "2026-01.symbology.json").write_text("{}")
+    (tmp_path / "EQUS.MINI" / "ohlcv-1d" / "2026-01.symbology.json").write_text("{}", encoding="utf-8")
     rows, _, _ = A.scan(tmp_path)
     assert rows[0]["files"] == 1

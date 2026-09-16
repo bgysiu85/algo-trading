@@ -165,7 +165,7 @@ def strategy_legs(path: Path, source: str) -> list[Leg]:
     out = []
     if not path.exists():
         return out
-    with open(path, newline="") as fh:
+    with open(path, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             a, b = _iso_to_et(r.get("entry_time", "")), _iso_to_et(r.get("exit_time", ""))
             if a is None or b is None:
@@ -190,7 +190,7 @@ def my_legs(path: Path) -> list[Leg]:
     out = []
     if not path.exists():
         return out
-    with open(path, newline="") as fh:
+    with open(path, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             mx = float(r.get("max_position") or 0)
             ep = float(r.get("avg_buy_price") or 0)
@@ -319,7 +319,7 @@ def load_dollar_volume(path: Path) -> dict:
     out = {}
     if not path or not Path(path).exists():
         return out
-    with open(path, newline="") as fh:
+    with open(path, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             try:
                 out[(r["symbol"], r["date"])] = float(r["dollar_volume"])
@@ -411,7 +411,7 @@ def main(argv=None) -> int:
                            dv_cap_pct=a.dv_cap_pct):
                 rows.append({"source": src, **r})
         Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-        with open(a.out, "w", newline="") as fh:
+        with open(a.out, "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=list(rows[0]))
             w.writeheader()
             w.writerows(rows)
@@ -443,7 +443,7 @@ def main(argv=None) -> int:
         # actual decision gets made on -- was the only figure here that could
         # not be loaded, queried or compared against a later run.
         Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-        with open(a.out, "w", newline="") as fh:
+        with open(a.out, "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=[
                 "source", "capital", "per_trade_pct", "total_pct",
                 "dv_cap_pct", "dv_applied", "taken", "skipped_concurrency",

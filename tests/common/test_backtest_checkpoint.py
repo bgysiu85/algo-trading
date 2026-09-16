@@ -77,7 +77,7 @@ def test_force_writes_immediately(tmp_path):
     wait for an interval that may never be reached."""
     r = FakeRunner(tmp_path, done=3)
     r._save_state(force=True)
-    assert len(json.loads(r.state_path.read_text())["done"]) == 3
+    assert len(json.loads(r.state_path.read_text(encoding="utf-8"))["done"]) == 3
 
 
 def test_the_counter_resets_so_saves_stay_periodic(tmp_path):
@@ -203,7 +203,7 @@ def test_run_records_how_many_pairs_it_was_asked_for(tmp_path, monkeypatch):
     import json
 
     (tmp_path / "p.json").write_text(json.dumps(
-        [{"symbol": s, "date": "2026-03-16"} for s in ("AAA", "BBB", "CCC")]))
+        [{"symbol": s, "date": "2026-03-16"} for s in ("AAA", "BBB", "CCC")]), encoding="utf-8")
     r = B.Runner(None, tmp_path / "out", cache_dir=tmp_path / "nocache",
                  state_dir=tmp_path / "state", strategy="mcl", offline=True)
     assert r.requested is None
@@ -226,10 +226,10 @@ def test_the_final_save_is_forced_so_the_tail_is_not_lost(tmp_path):
     n = max(3, B.CHECKPOINT_EVERY - 10)
     syms = [f"A{chr(65 + i // 26)}{chr(65 + i % 26)}" for i in range(n)]
     (tmp_path / "p.json").write_text(json.dumps(
-        [{"symbol": s, "date": "2026-03-16"} for s in syms]))
+        [{"symbol": s, "date": "2026-03-16"} for s in syms]), encoding="utf-8")
     r = B.Runner(None, tmp_path / "out", cache_dir=tmp_path / "nocache",
                  state_dir=tmp_path / "state", strategy="mcl", offline=True)
     asyncio.run(r.run(B.load_pairs(tmp_path / "p.json"), False, None))
     assert not r.state_path.exists()      # interval never reached
     r._save_state(force=True)             # what main_async's finally does
-    assert len(json.loads(r.state_path.read_text())["done"]) == len(set(syms))
+    assert len(json.loads(r.state_path.read_text(encoding="utf-8"))["done"]) == len(set(syms))

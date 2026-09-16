@@ -531,7 +531,7 @@ def parse_watchlist(path: Path) -> list[str]:
     if not path.exists():
         return []
     out, seen = [], set()
-    for ln in path.read_text().splitlines():
+    for ln in path.read_text(encoding="utf-8").splitlines():
         s = ln.split("#", 1)[0].strip().upper()
         if not s:
             continue
@@ -918,7 +918,7 @@ class MCLPaperTrader:
 
         # 2. comment the symbol out of watchlist.txt in place
         try:
-            lines = self.watchlist.read_text().splitlines()
+            lines = self.watchlist.read_text(encoding="utf-8").splitlines()
             out, changed = [], False
             for ln in lines:
                 bare = ln.split("#", 1)[0].strip().upper()
@@ -928,7 +928,7 @@ class MCLPaperTrader:
                 else:
                     out.append(ln)
             if changed:
-                self.watchlist.write_text("\n".join(out) + "\n")
+                self.watchlist.write_text("\n".join(out) + "\n", encoding="utf-8")
                 self._wl_mtime = self.watchlist.stat().st_mtime   # our own edit
                 LOG.warning("%s commented out of %s", st.symbol,
                             self.watchlist.name)
@@ -1036,7 +1036,7 @@ class MCLPaperTrader:
         is the only place they exist.
         """
         try:
-            rows = list(csv.DictReader(self.log.path.open(newline="")))
+            rows = list(csv.DictReader(self.log.path.open(newline="", encoding="utf-8")))
         except OSError:
             return None
         buys = [r for r in rows

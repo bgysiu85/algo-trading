@@ -62,7 +62,7 @@ LEAK_MIN_TRADES = 30       # same as common.leak_control.QUALITY_MIN_TRADES
 # --- pairs and sets --------------------------------------------------------------
 
 def load_pairs(path: Path) -> list[tuple[str, str]]:
-    rows = json.loads(Path(path).read_text())
+    rows = json.loads(Path(path).read_text(encoding="utf-8"))
     out = sorted({(r["symbol"], r["date"]) for r in rows})
     # Dotted and non-alphabetic tickers are not US equities and the engines
     # drop them; do the same here so counts reconcile with earlier runs.
@@ -189,7 +189,7 @@ def criteria(s: dict, b0: dict, rej: dict, robust: dict) -> list[tuple[str, bool
 
 def check_holdout_guard(name: str, trail: float) -> None:
     if SPENT_PATH.exists():
-        prev = json.loads(SPENT_PATH.read_text())
+        prev = json.loads(SPENT_PATH.read_text(encoding="utf-8"))
         if prev.get("hypothesis") == name and float(prev.get("trail")) == float(trail):
             print(f"holdout already spent on {name} at {trail:g}% on "
                   f"{prev.get('at')} -- this is a repeat of that run, allowed")
@@ -211,7 +211,7 @@ def mark_holdout_spent(name: str, trail: float) -> None:
         "hypothesis": name, "trail": trail,
         "at": pd.Timestamp.now(tz="UTC").isoformat(),
         "registration": "docs/premarket_hypotheses_20260908.md @ 5075784",
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
 
 
 # --- main ---------------------------------------------------------------------------
@@ -270,7 +270,7 @@ def main(argv=None) -> int:
     def save(tag, trades):
         p = out_dir / f"{a.set}_{tag}.csv"
         if trades:
-            with open(p, "w", newline="") as fh:
+            with open(p, "w", newline="", encoding="utf-8") as fh:
                 w = csv.DictWriter(fh, fieldnames=list(trades[0].keys()))
                 w.writeheader()
                 w.writerows(trades)

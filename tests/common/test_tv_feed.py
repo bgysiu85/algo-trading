@@ -127,7 +127,7 @@ def test_write_is_atomic_and_leaves_no_temp_file(tmp_path):
     p = tmp_path / "watchlist.txt"
     F.write_watchlist(p, ["AAA", "BBB"], header="test")
     assert not p.with_suffix(".txt.tmp").exists()
-    lines = [ln for ln in p.read_text().splitlines() if not ln.startswith("#")]
+    lines = [ln for ln in p.read_text(encoding="utf-8").splitlines() if not ln.startswith("#")]
     assert lines == ["AAA", "BBB"]
 
 
@@ -143,7 +143,7 @@ def test_write_reports_whether_the_symbols_actually_changed(tmp_path):
 def test_an_empty_screen_writes_an_empty_file_not_a_broken_one(tmp_path):
     p = tmp_path / "watchlist.txt"
     F.write_watchlist(p, [], header="nothing screening")
-    body = [ln for ln in p.read_text().splitlines() if not ln.startswith("#")]
+    body = [ln for ln in p.read_text(encoding="utf-8").splitlines() if not ln.startswith("#")]
     assert body == []
 
 

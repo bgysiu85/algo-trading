@@ -106,7 +106,7 @@ def pick_symbols(pairs_file: Path, n: int, *, not_before: str = "",
     and the request would fail with a range error that reads like a broken tool
     rather than a mis-chosen day.
     """
-    rows = json.load(open(pairs_file))
+    rows = json.load(open(pairs_file, encoding="utf-8"))
     if not_before:
         rows = [r for r in rows if r["date"] >= not_before]
     if not_after:

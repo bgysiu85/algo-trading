@@ -177,7 +177,7 @@ def _repo(tmp_path):
     subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
     for k, v in (("user.email", "t@t"), ("user.name", "t")):
         subprocess.run(["git", "-C", str(tmp_path), "config", k, v], check=True)
-    (tmp_path / "tracked.txt").write_text("one\n")
+    (tmp_path / "tracked.txt").write_text("one\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(tmp_path), "commit", "-qm", "init"],
                    check=True)
@@ -199,7 +199,7 @@ def test_an_uncommitted_edit_to_a_tracked_file_still_blocks_it(tmp_path,
     uncommitted edits fails halfway and leaves a state that needs git knowledge
     to get out of."""
     repo = _repo(tmp_path / "r")
-    (repo / "tracked.txt").write_text("two\n")
+    (repo / "tracked.txt").write_text("two\n", encoding="utf-8")
     monkeypatch.chdir(repo)
     assert F.dirty() == [" M tracked.txt"]
 
@@ -207,7 +207,7 @@ def test_an_uncommitted_edit_to_a_tracked_file_still_blocks_it(tmp_path,
 def test_a_staged_addition_still_blocks_it(tmp_path, monkeypatch):
     import subprocess
     repo = _repo(tmp_path / "r")
-    (repo / "new.txt").write_text("x\n")
+    (repo / "new.txt").write_text("x\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repo), "add", "new.txt"], check=True)
     monkeypatch.chdir(repo)
     assert F.dirty() == ["A  new.txt"]

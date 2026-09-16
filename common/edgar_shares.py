@@ -266,7 +266,7 @@ def load_universe(path: str | Path) -> dict[str, list[str]]:
     if not p.exists():
         sys.exit(f"{p} does not exist -- run `python -m common.screen_sim` "
                  f"first, or pass --pairs")
-    rows = json.loads(p.read_text())
+    rows = json.loads(p.read_text(encoding="utf-8"))
     if not rows:
         sys.exit(f"{p} is empty")
     days: dict[str, list[str]] = defaultdict(list)

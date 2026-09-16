@@ -46,7 +46,7 @@ def test_dead_pid_is_stale_and_cleared(tmp_path):
     lock = tmp_path / "session.lock"
     lock.write_text(json.dumps({"mode": "paper", "strategy": "mcl",
                                 "pid": 2 ** 22,          # not a live pid
-                                "started_at": "x", "started_epoch": time.time()}))
+                                "started_at": "x", "started_epoch": time.time()}), encoding="utf-8")
     assert SL.active(lock) is None
     assert not lock.exists(), "a stale lock must be removed, not just ignored"
 
@@ -57,14 +57,14 @@ def test_old_lock_is_stale_even_with_a_live_pid(tmp_path):
     lock.write_text(json.dumps({
         "mode": "paper", "strategy": "mcl", "pid": os.getpid(),
         "started_at": "x",
-        "started_epoch": time.time() - (SL.MAX_AGE_H + 1) * 3600}))
+        "started_epoch": time.time() - (SL.MAX_AGE_H + 1) * 3600}), encoding="utf-8")
     assert SL.active(lock) is None
     assert not lock.exists()
 
 
 def test_unreadable_lock_does_not_wedge_the_guard(tmp_path):
     lock = tmp_path / "session.lock"
-    lock.write_text("{ not json")
+    lock.write_text("{ not json", encoding="utf-8")
     assert SL.active(lock) is None
 
 

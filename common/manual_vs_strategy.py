@@ -175,7 +175,7 @@ def tuning_overlap(rows: list[Row], pair_file="var/state/traded_pairs.json") -> 
     """
     try:
         import json as _json
-        train = {(p["symbol"], p["date"]) for p in _json.load(open(pair_file))}
+        train = {(p["symbol"], p["date"]) for p in _json.load(open(pair_file, encoding="utf-8"))}
     except Exception:  # noqa: BLE001
         return -1
     return sum(1 for r in rows if (r.symbol, r.date) in train)
@@ -289,7 +289,7 @@ def main(argv=None) -> int:
 
     if a.csv_out:
         Path(a.csv_out).parent.mkdir(parents=True, exist_ok=True)
-        with open(a.csv_out, "w", newline="") as fh:
+        with open(a.csv_out, "w", newline="", encoding="utf-8") as fh:
             w = csvmod.writer(fh)
             w.writerow(["symbol", "date", "ben_net", "ben_execs", "ben_max_pos",
                         "in_band", "mcl_100", "mcl_matched", "mcl_trades",

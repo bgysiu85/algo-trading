@@ -109,7 +109,7 @@ async def main():
             ok = False
 
         log.close()
-        rows = list(csv.DictReader(out.open()))
+        rows = list(csv.DictReader(out.open(encoding="utf-8")))
 
         if declined(rows, "CCC"):
             r = declined(rows, "CCC")[0]
@@ -147,7 +147,7 @@ async def main():
         for sym in ("AAA", "BBB"):
             await feed_one(tr, sts[sym], seq)
         log.close()
-        rows = list(csv.DictReader(out.open()))
+        rows = list(csv.DictReader(out.open(encoding="utf-8")))
         held = sorted(s for s, st in sts.items() if st.position is not None)
         if held == ["AAA"] and declined(rows, "BBB"):
             print("PASS  cap 1 admits one position and declines the second")

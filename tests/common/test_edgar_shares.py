@@ -384,7 +384,7 @@ def test_the_universe_is_the_same_file_pit_h0_scores():
     """A coverage figure and a trade count that do not share a denominator are
     two numbers that look comparable and are not."""
     from common import pit_h0
-    src = Path(pit_h0.__file__).read_text()
+    src = Path(pit_h0.__file__).read_text(encoding="utf-8")
     assert E.PAIRS in src, (
         "pit_h0 no longer defaults to the universe this module reads")
 
@@ -393,7 +393,7 @@ def test_the_universe_dedupes_a_repeated_symbol_day(tmp_path):
     p = tmp_path / "pairs.json"
     p.write_text(json.dumps([{"symbol": "AAA", "date": "d1"},
                              {"symbol": "AAA", "date": "d1"},
-                             {"symbol": "aaa", "date": "d2"}]))
+                             {"symbol": "aaa", "date": "d2"}]), encoding="utf-8")
     assert E.load_universe(p) == {"AAA": ["d1", "d2"]}
 
 
@@ -405,7 +405,7 @@ def _pairs_file(tmp_path):
     p.write_text(json.dumps([
         {"symbol": "AAA", "date": "2026-08-10"},
         {"symbol": "AAA", "date": "2026-08-20"},
-        {"symbol": "ZZZ", "date": "2026-08-10"}]))
+        {"symbol": "ZZZ", "date": "2026-08-10"}]), encoding="utf-8")
     return p
 
 
@@ -439,15 +439,15 @@ def test_end_to_end_coverage_pull_and_asof(tmp_path, monkeypatch, capsys):
             "--asof-out", str(tmp_path / "asof.csv")]
 
     assert E.main(args + ["--coverage", "--out", str(tmp_path / "cov.txt")]) == 0
-    cov = (tmp_path / "cov.txt").read_text()
+    cov = (tmp_path / "cov.txt").read_text(encoding="utf-8")
     assert "ZZZ" in cov and "1 of 2" in cov.replace(",", "")
 
     assert E.main(args + ["--pull", "--out", str(tmp_path / "pull.txt")]) == 0
-    facts = (tmp_path / "facts.csv").read_text()
+    facts = (tmp_path / "facts.csv").read_text(encoding="utf-8")
     assert "AAA" in facts and "2026-08-14" in facts
 
     assert E.main(args + ["--asof", "--out", str(tmp_path / "asof.txt")]) == 0
-    rows = list(csv.DictReader((tmp_path / "asof.csv").open()))
+    rows = list(csv.DictReader((tmp_path / "asof.csv").open(encoding="utf-8")))
     assert len(rows) == 3, "a symbol-day was dropped rather than written empty"
     got = {(r["symbol"], r["date"]): r["status"] for r in rows}
     assert got[("AAA", "2026-08-10")] == "before_first_filing"

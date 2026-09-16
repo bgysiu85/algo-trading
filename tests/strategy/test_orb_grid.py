@@ -50,7 +50,7 @@ def write_day(cache: Path, symbol: str, day: str, seed: int) -> None:
                        "volume": [5000.0] * len(idx)},
                       index=idx.tz_convert("UTC"))
     cache.mkdir(parents=True, exist_ok=True)
-    with gzip.open(cache / f"{symbol}_{day}.csv.gz", "wt") as fh:
+    with gzip.open(cache / f"{symbol}_{day}.csv.gz", "wt", encoding="utf-8") as fh:
         df.to_csv(fh)
 
 
@@ -71,16 +71,16 @@ def built(tmp_path_factory):
             write_day(cache, s, d, seed)
             (survivors if int(s[1:]) < 9 else rejects).append(
                 {"symbol": s, "date": d})
-    sp = root / "pairs.json"; sp.write_text(json.dumps(survivors))
-    rp = root / "rejects.json"; rp.write_text(json.dumps(rejects))
-    (cache / "SOURCE.txt").write_text("databento XNAS.BASIC ohlcv-1m\n")
+    sp = root / "pairs.json"; sp.write_text(json.dumps(survivors), encoding="utf-8")
+    rp = root / "rejects.json"; rp.write_text(json.dumps(rejects), encoding="utf-8")
+    (cache / "SOURCE.txt").write_text("databento XNAS.BASIC ohlcv-1m\n", encoding="utf-8")
     out = root / "grid.txt"; csvp = root / "cells.csv"
     rc = G.main(["--pairs", str(sp), str(rp), "--cache", str(cache),
                  "--window", "3d_to_2000", "--jobs", "1",
                  "--out", str(out), "--csv", str(csvp)])
     assert rc == 0
-    return {"text": out.read_text(),
-            "rows": list(csv.DictReader(csvp.open())),
+    return {"text": out.read_text(encoding="utf-8"),
+            "rows": list(csv.DictReader(csvp.open(encoding="utf-8"))),
             "root": root, "cache": cache, "pairs": (sp, rp)}
 
 
@@ -360,7 +360,7 @@ def test_the_runner_produces_the_same_numbers_on_one_job_and_several(built):
     assert G.main(["--pairs", str(sp), str(rp), "--cache", str(built["cache"]),
                    "--window", "3d_to_2000", "--jobs", "4",
                    "--out", str(out), "--csv", str(csvp)]) == 0
-    many = list(csv.DictReader(csvp.open()))
+    many = list(csv.DictReader(csvp.open(encoding="utf-8")))
     one = {(r["orb_minutes"], r["stop_mode"], r["retest_mode"],
             r["exit_mode"]): r for r in built["rows"]}
     for r in many:
@@ -386,9 +386,9 @@ def test_the_first_full_run_was_on_the_wrong_tape_and_this_is_why_it_refuses(bui
     root, cache = built["root"], built["cache"]
     sp, rp = built["pairs"]
     marker = cache / "SOURCE.txt"
-    keep = marker.read_text()
+    keep = marker.read_text(encoding="utf-8")
     try:
-        marker.write_text("databento EQUS.MINI ohlcv-1m\n")
+        marker.write_text("databento EQUS.MINI ohlcv-1m\n", encoding="utf-8")
         with pytest.raises(SystemExit) as e:
             G.main(["--pairs", str(sp), str(rp), "--cache", str(cache),
                     "--window", "3d_to_2000", "--jobs", "1", "--limit", "5",
@@ -400,12 +400,12 @@ def test_the_first_full_run_was_on_the_wrong_tape_and_this_is_why_it_refuses(bui
         assert G.main(["--pairs", str(sp), str(rp), "--cache", str(cache),
                        "--window", "3d_to_2000", "--jobs", "1", "--limit", "5",
                        "--out", str(out), "--csv", "", "--anyway"]) == 0
-        text = out.read_text()
+        text = out.read_text(encoding="utf-8")
         assert "NOT THE REGISTERED TAPE" in text
         assert "tape         EQUS.MINI" in text
         assert "none of it enters section 11" in text
     finally:
-        marker.write_text(keep)
+        marker.write_text(keep, encoding="utf-8")
 
 
 def test_an_unknown_tape_is_refused_rather_than_measured(built):

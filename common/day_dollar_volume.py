@@ -41,7 +41,7 @@ from common.databento_fetch import default_archive
 def wanted(paths) -> set[tuple[str, str]]:
     out: set[tuple[str, str]] = set()
     for p in paths:
-        for row in json.load(open(p)):
+        for row in json.load(open(p, encoding="utf-8")):
             out.add((row["symbol"], row["date"]))
     return out
 
@@ -76,7 +76,7 @@ def main(argv=None) -> int:
     keys = wanted(a.pairs)
     rows = build(Path(a.archive), a.dataset, keys)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-    with open(a.out, "w", newline="") as fh:
+    with open(a.out, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=["symbol", "date", "close", "volume",
                                            "dollar_volume"])
         w.writeheader()

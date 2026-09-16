@@ -179,7 +179,7 @@ def capture_ratios(rows: list[Row], cache: Path, day_volume: Path) -> list[float
     truth, and nothing else in the report would say so.
     """
     day: dict[tuple[str, str], float] = {}
-    with open(day_volume, newline="") as fh:
+    with open(day_volume, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             try:
                 day[(r["symbol"], r["date"])] = float(r["volume"])
@@ -320,7 +320,7 @@ def main(argv=None) -> int:
     if not cache.is_dir():
         sys.exit(f"no bar cache at {cache}")
 
-    with open(a.trades, newline="") as fh:
+    with open(a.trades, newline="", encoding="utf-8") as fh:
         trades = list(csv.DictReader(fh))
 
     rows: list[Row] = []
@@ -346,7 +346,7 @@ def main(argv=None) -> int:
 
     if a.csv and rows:
         Path(a.csv).parent.mkdir(parents=True, exist_ok=True)
-        with open(a.csv, "w", newline="") as fh:
+        with open(a.csv, "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=list(asdict(rows[0]).keys()))
             w.writeheader()
             for r in rows:

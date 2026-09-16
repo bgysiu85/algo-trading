@@ -157,7 +157,7 @@ def read_trades(path: Path) -> tuple[dict, list]:
     scaled: list[tuple[str, str]] = []
     if not path.exists():
         return out, scaled
-    with open(path, newline="") as fh:
+    with open(path, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             key = (r["symbol"], r["date"])
             b = out.setdefault(key, Block(status="TRADED"))
@@ -185,7 +185,7 @@ def read_state(path: Path) -> dict[tuple[str, str], str]:
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
     out = {}
@@ -226,7 +226,7 @@ def read_summary(path: Path) -> dict[tuple[str, str], Block]:
     thing and 'gross minus cost' is one subtraction everywhere.
     """
     out: dict[tuple[str, str], Block] = {}
-    with open(path, newline="") as fh:
+    with open(path, newline="", encoding="utf-8") as fh:
         rd = csv.DictReader(fh)
         need = {"buy_shares", "sell_shares", "avg_buy_price", "avg_sell_price",
                 "round_trips"}
@@ -420,7 +420,7 @@ def strategy_units(path: Path) -> list[dict]:
     out = []
     if not path.exists():
         return out
-    with open(path, newline="") as fh:
+    with open(path, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             out.append({"symbol": r["symbol"], "date": r["date"],
                         "minute": _et_minute(r.get("entry_time", "")),
@@ -435,7 +435,7 @@ def my_units(path: Path) -> list[dict]:
     out = []
     if not path.exists():
         return out
-    with open(path, newline="") as fh:
+    with open(path, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             t = r.get("entry_et") or ""
             minute = None
@@ -487,7 +487,7 @@ def cells(b: Block, raw: bool = False) -> list:
 
 def write_csv(rows, names, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", newline="") as fh:
+    with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(header(names))
         for r in rows:

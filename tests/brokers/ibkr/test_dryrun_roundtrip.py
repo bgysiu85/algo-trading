@@ -93,7 +93,7 @@ async def run_case(tag, bars_seq):
         await tr.step_symbol(st, now + timedelta(minutes=i))
 
     log.close()
-    rows = list(csv.DictReader(out.open()))
+    rows = list(csv.DictReader(out.open(encoding="utf-8")))
     return rows, tr
 
 

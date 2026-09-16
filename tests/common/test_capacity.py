@@ -164,7 +164,7 @@ def test_the_cli_writes_a_report_and_a_csv(tmp_path: Path):
     out.to_csv(cache / "T_2026-01-07.csv.gz", compression="gzip")
 
     trades = tmp_path / "trades.csv"
-    with open(trades, "w", newline="") as fh:
+    with open(trades, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=list(trade(df, 1, 3).keys()))
         w.writeheader()
         w.writerow(trade(df, 1, 3))
@@ -174,10 +174,10 @@ def test_the_cli_writes_a_report_and_a_csv(tmp_path: Path):
     rc = CAP.main(["--trades", str(trades), "--cache", str(cache),
                    "--out", str(report), "--csv", str(csv_out)])
     assert rc == 0
-    text = report.read_text()
+    text = report.read_text(encoding="utf-8")
     assert "CAPACITY" in text
     assert "trades measured   1" in text
-    with open(csv_out, newline="") as fh:
+    with open(csv_out, newline="", encoding="utf-8") as fh:
         got = list(csv.DictReader(fh))
     assert len(got) == 1
     assert float(got[0]["binding_volume"]) == 8_000

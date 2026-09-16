@@ -216,7 +216,7 @@ def test_unfilled_rows_are_not_treated_as_trades(tmp_path):
     p = tmp_path / "f.csv"
     rows = [fill(), fill(symbol="ZZZ", status="CANCELLED")]
     import csv
-    with open(p, "w", newline="") as fh:
+    with open(p, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=[k for k in rows[0] if k != "_ts"])
         w.writeheader()
         for r in rows:

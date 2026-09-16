@@ -71,7 +71,7 @@ def test_a_bom_is_stripped_not_read_as_a_column_name(tmp_path):
 
 def test_an_ascii_file_is_identical_either_way(tmp_path):
     p = tmp_path / "f.csv"
-    p.write_text("a,b\n1,2\n")
+    p.write_text("a,b\n1,2\n", encoding="utf-8")
     assert T.read_csv(p)[0] == [{"a": "1", "b": "2"}]
 
 

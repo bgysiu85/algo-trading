@@ -29,7 +29,7 @@ _ID = itertools.count(1)
 
 
 def write_csv(path, rows, header=HEADER):
-    with open(path, "w", newline="") as fh:
+    with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(header)
         w.writerows(rows)
@@ -237,7 +237,7 @@ def test_a_non_flex_csv_fails_loudly(tmp_path):
 
 def test_new_against_finds_only_genuinely_new_pairs(tmp_path):
     existing = tmp_path / "existing.json"
-    json.dump([{"symbol": "AAA", "date": "2026-08-04"}], open(existing, "w"))
+    json.dump([{"symbol": "AAA", "date": "2026-08-04"}], open(existing, "w", encoding="utf-8"))
     p = write_csv(tmp_path / "f.csv", [
         row(sym="AAA", trade_date="2026-08-04"),
         row(sym="BBB", trade_date="2026-08-04"),
@@ -274,14 +274,14 @@ def test_the_holdout_list_is_well_formed_where_it_exists():
                     "the training pairs. var/ is gitignored, so the file has "
                     "to be copied in rather than pulled.")
 
-    h = json.load(open(holdout))
+    h = json.load(open(holdout, encoding="utf-8"))
     assert len(h) == 176
     assert all(set(p) == {"symbol", "date"} for p in h)
     assert len({(p["symbol"], p["date"]) for p in h}) == len(h)
     assert min(p["date"] for p in h) >= "2026-07-01"
 
     if train.exists():
-        t = json.load(open(train))
+        t = json.load(open(train, encoding="utf-8"))
         overlap = ({(p["symbol"], p["date"]) for p in h}
                    & {(p["symbol"], p["date"]) for p in t})
         assert not overlap, f"holdout contaminated by {len(overlap)} training pairs"

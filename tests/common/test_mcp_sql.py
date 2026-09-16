@@ -221,7 +221,7 @@ def test_the_installed_mcp_satisfies_the_pin_the_code_needs():
     import importlib.metadata as md
     from pathlib import Path
     req = Path(__file__).resolve().parents[2] / "requirements.txt"
-    spec = [l.strip() for l in req.read_text().splitlines()
+    spec = [l.strip() for l in req.read_text(encoding="utf-8").splitlines()
             if l.strip().startswith("mcp")]
     assert spec, "requirements.txt no longer pins mcp"
     from packaging.requirements import Requirement

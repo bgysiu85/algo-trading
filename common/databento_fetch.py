@@ -231,7 +231,7 @@ def load_pairs(paths) -> list[tuple[str, str]]:
         paths = [paths]
     out: set[tuple[str, str]] = set()
     for path in paths:
-        out |= {(p["symbol"], p["date"]) for p in json.load(open(path))}
+        out |= {(p["symbol"], p["date"]) for p in json.load(open(path, encoding="utf-8"))}
     return sorted(out)
 
 
@@ -306,11 +306,11 @@ def write_manifest(root: Path, dataset: str, entries: dict) -> Path:
     old = {}
     if p.exists():
         try:
-            old = json.load(open(p))
+            old = json.load(open(p, encoding="utf-8"))
         except Exception:  # noqa: BLE001
             old = {}
     old.update(entries)
-    json.dump(dict(sorted(old.items())), open(p, "w"), indent=1)
+    json.dump(dict(sorted(old.items())), open(p, "w", encoding="utf-8"), indent=1)
     return p
 
 
@@ -323,7 +323,7 @@ def manifest_symbols(root: Path, dataset: str) -> dict:
     if not p.exists():
         return {}
     try:
-        data = json.load(open(p))
+        data = json.load(open(p, encoding="utf-8"))
     except Exception:  # noqa: BLE001 -- a broken manifest must not stop a pull
         return {}
     out = {}

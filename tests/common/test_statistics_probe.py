@@ -43,7 +43,7 @@ def test_symbols_come_from_the_busiest_day_in_the_pair_list(tmp_path):
     json.dump([{"symbol": "AAA", "date": "2026-08-04"},
                {"symbol": "BBB", "date": "2026-08-04"},
                {"symbol": "CCC", "date": "2026-08-04"},
-               {"symbol": "ZZZ", "date": "2026-08-05"}], open(p, "w"))
+               {"symbol": "ZZZ", "date": "2026-08-05"}], open(p, "w", encoding="utf-8"))
     day, syms = P.pick_symbols(p, 2)
     assert day == "2026-08-04"
     assert syms == ["AAA", "BBB"]
@@ -51,7 +51,7 @@ def test_symbols_come_from_the_busiest_day_in_the_pair_list(tmp_path):
 
 def test_an_empty_pair_list_is_an_error(tmp_path):
     p = tmp_path / "pairs.json"
-    json.dump([], open(p, "w"))
+    json.dump([], open(p, "w", encoding="utf-8"))
     with pytest.raises(SystemExit, match="no pairs"):
         P.pick_symbols(p, 5)
 
@@ -117,7 +117,7 @@ def test_days_outside_the_dataset_range_are_excluded_when_sampling(tmp_path):
                {"symbol": "OLD2", "date": "2023-05-01"},
                {"symbol": "OLD3", "date": "2023-05-01"},   # busiest overall
                {"symbol": "NEW1", "date": "2025-02-03"},
-               {"symbol": "NEW2", "date": "2025-02-03"}], open(p, "w"))
+               {"symbol": "NEW2", "date": "2025-02-03"}], open(p, "w", encoding="utf-8"))
     day, syms = P.pick_symbols(p, 5, not_before="2024-07-01", not_after="2026-09-05")
     assert day == "2025-02-03"
     assert syms == ["NEW1", "NEW2"]
@@ -125,7 +125,7 @@ def test_days_outside_the_dataset_range_are_excluded_when_sampling(tmp_path):
 
 def test_a_pair_list_entirely_outside_the_range_says_which_window_was_empty(tmp_path):
     p = tmp_path / "pairs.json"
-    json.dump([{"symbol": "OLD", "date": "2023-05-01"}], open(p, "w"))
+    json.dump([{"symbol": "OLD", "date": "2023-05-01"}], open(p, "w", encoding="utf-8"))
     with pytest.raises(SystemExit, match="2024-07-01"):
         P.pick_symbols(p, 5, not_before="2024-07-01")
 

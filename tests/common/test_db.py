@@ -81,7 +81,7 @@ def write_trades(tmp_path, name, rows):
     cols = ["symbol", "date", "entry_time", "exit_time", "entry_price",
             "exit_price", "qty", "reason", "bars_held", "gross", "commission",
             "net"]
-    with open(p, "w", newline="") as fh:
+    with open(p, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
@@ -98,7 +98,7 @@ def trade(symbol="AAA", date="2026-03-16", net=99.0):
 
 def state(tmp_path, name, done):
     p = tmp_path / f"backtest_state_{name}.json"
-    p.write_text(json.dumps({"done": done, "trades": []}))
+    p.write_text(json.dumps({"done": done, "trades": []}), encoding="utf-8")
     return p
 
 
@@ -168,7 +168,7 @@ def write_cache(root, symbol, date, times):
     df = pd.DataFrame({"open": 1.0, "high": 1.1, "low": 0.9, "close": 1.0,
                        "volume": 100}, index=idx)
     p = root / f"{symbol}_{date}.csv.gz"
-    with gzip.open(p, "wt") as fh:
+    with gzip.open(p, "wt", encoding="utf-8") as fh:
         df.to_csv(fh)
     return p
 
@@ -239,7 +239,7 @@ def test_an_unparseable_stamp_is_null_not_epoch_zero():
 
 def pairs(tmp_path, name, keys):
     p = tmp_path / f"{name}.json"
-    p.write_text(json.dumps([{"symbol": s, "date": d} for s, d in keys]))
+    p.write_text(json.dumps([{"symbol": s, "date": d} for s, d in keys]), encoding="utf-8")
     return p
 
 
@@ -406,7 +406,7 @@ SWEEP_CSV = ("source,per_trade_pct,total_pct,final,multiple,max_drawdown,taken,"
 
 def test_a_single_run_lands_in_compound_run(eng, tmp_path):
     p = tmp_path / "compound_run.csv"
-    p.write_text(RUN_CSV)
+    p.write_text(RUN_CSV, encoding="utf-8")
     with eng.begin() as c:
         kind, _, n = L.load_compound(c, p)
     assert kind == "compound_run" and n == 1
@@ -416,7 +416,7 @@ def test_a_single_run_lands_in_compound_run(eng, tmp_path):
 
 def test_a_sweep_lands_in_compound_sweep(eng, tmp_path):
     p = tmp_path / "compound_sweep.csv"
-    p.write_text(SWEEP_CSV)
+    p.write_text(SWEEP_CSV, encoding="utf-8")
     with eng.begin() as c:
         kind, _, n = L.load_compound(c, p)
     assert kind == "compound_sweep" and n == 1
@@ -428,7 +428,7 @@ def test_the_header_decides_not_the_filename(eng, tmp_path):
     """The two modes share a --out flag. Dispatching on the name would put a
     sweep in the run table the first time somebody passed one."""
     p = tmp_path / "compound_run.csv"          # named like a run
-    p.write_text(SWEEP_CSV)                    # shaped like a sweep
+    p.write_text(SWEEP_CSV, encoding="utf-8")                    # shaped like a sweep
     with eng.begin() as c:
         kind, _, _ = L.load_compound(c, p)
     assert kind == "compound_sweep"
@@ -436,7 +436,7 @@ def test_the_header_decides_not_the_filename(eng, tmp_path):
 
 def test_an_unrecognised_csv_is_refused_with_its_columns(eng, tmp_path):
     p = tmp_path / "compound_run.csv"
-    p.write_text("a,b\n1,2\n")
+    p.write_text("a,b\n1,2\n", encoding="utf-8")
     with pytest.raises(SystemExit) as e:
         with eng.begin() as c:
             L.load_compound(c, p)
@@ -445,7 +445,7 @@ def test_an_unrecognised_csv_is_refused_with_its_columns(eng, tmp_path):
 
 def test_reloading_a_compound_run_does_not_double_it(eng, tmp_path):
     p = tmp_path / "compound_run.csv"
-    p.write_text(RUN_CSV)
+    p.write_text(RUN_CSV, encoding="utf-8")
     for _ in range(2):
         with eng.begin() as c:
             L.load_compound(c, p)
@@ -460,7 +460,7 @@ FLEX_HEADER = ["Symbol", "TradeDate", "DateTime", "Quantity", "TradePrice",
 
 
 def write_flex(path, rows):
-    with open(path, "w", newline="") as fh:
+    with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(FLEX_HEADER)
         w.writerows(rows)
@@ -522,7 +522,7 @@ LEAK_CSV = ("strategy,population,days,trades,days_with_a_trade,net,"
 
 def test_the_leak_control_measurements_load(eng, tmp_path):
     p = tmp_path / "leak_control.csv"
-    p.write_text(LEAK_CSV)
+    p.write_text(LEAK_CSV, encoding="utf-8")
     with eng.begin() as c:
         _rid, n = L.load_leak_control(c, p)
     assert n == 2
@@ -535,7 +535,7 @@ def test_the_leak_control_measurements_load(eng, tmp_path):
 
 def test_reloading_the_leak_control_does_not_double_it(eng, tmp_path):
     p = tmp_path / "leak_control.csv"
-    p.write_text(LEAK_CSV)
+    p.write_text(LEAK_CSV, encoding="utf-8")
     for _ in range(2):
         with eng.begin() as c:
             L.load_leak_control(c, p)
@@ -549,7 +549,7 @@ def test_a_population_with_no_trades_stores_null_not_zero(eng, tmp_path):
     p.write_text("strategy,population,days,trades,days_with_a_trade,net,"
                  "entries_per_day,share_of_days_traded,net_per_day,"
                  "net_per_trade\n"
-                 "vw9,rejected,10,0,0,0,0,0,0,\n")
+                 "vw9,rejected,10,0,0,0,0,0,0,\n", encoding="utf-8")
     with eng.begin() as c:
         L.load_leak_control(c, p)
     with eng.connect() as c:
@@ -569,7 +569,7 @@ HOLDOUT = {
 
 def test_the_holdout_cut_loads(eng, tmp_path):
     p = tmp_path / "holdout.json"
-    p.write_text(json.dumps(HOLDOUT))
+    p.write_text(json.dumps(HOLDOUT), encoding="utf-8")
     with eng.begin() as c:
         fp, n = L.load_holdout(c, p)
     assert n == 1 and fp == "a" * 64
@@ -581,7 +581,7 @@ def test_the_holdout_cut_loads(eng, tmp_path):
 
 def test_loading_the_same_cut_twice_is_a_no_op(eng, tmp_path):
     p = tmp_path / "holdout.json"
-    p.write_text(json.dumps(HOLDOUT))
+    p.write_text(json.dumps(HOLDOUT), encoding="utf-8")
     for _ in range(2):
         with eng.begin() as c:
             L.load_holdout(c, p)
@@ -593,11 +593,11 @@ def test_a_cut_against_a_different_universe_keeps_both_rows(eng, tmp_path):
     fingerprint means the universe changed, and BOTH rows must survive so the
     move is visible rather than overwritten."""
     p = tmp_path / "holdout.json"
-    p.write_text(json.dumps(HOLDOUT))
+    p.write_text(json.dumps(HOLDOUT), encoding="utf-8")
     with eng.begin() as c:
         L.load_holdout(c, p)
     p.write_text(json.dumps({**HOLDOUT, "universe_fingerprint": "b" * 64,
-                             "lock_from": "2026-03-01"}))
+                             "lock_from": "2026-03-01"}), encoding="utf-8")
     with eng.begin() as c:
         L.load_holdout(c, p)
     assert count(eng, D.holdout_cut) == 2
@@ -624,7 +624,7 @@ def bars_dir(tmp_path, symbol, day, rows):
     import gzip as _gz
     d = tmp_path / "3d_to_2000"
     d.mkdir(parents=True, exist_ok=True)
-    with _gz.open(d / f"{symbol}_{day}.csv.gz", "wt") as fh:
+    with _gz.open(d / f"{symbol}_{day}.csv.gz", "wt", encoding="utf-8") as fh:
         fh.write("timestamp,open,high,low,close,volume\n")
         for ts, o, h, lo, c, v in rows:
             fh.write(f"{ts},{o},{h},{lo},{c},{v}\n")
@@ -686,7 +686,7 @@ ORB_CSV = ("symbol,date,population,orb_minutes,status,range_bars,rth_bars,"
 
 def test_orb_preflight_rows_load_with_their_dataset(eng, tmp_path):
     p = tmp_path / "orb_preflight.csv"
-    p.write_text(ORB_CSV)
+    p.write_text(ORB_CSV, encoding="utf-8")
     with eng.begin() as c:
         n = L.load_orb_preflight(c, p, "XNAS.BASIC")
     assert n == 2
@@ -701,7 +701,7 @@ def test_an_empty_orb_field_is_null_not_zero(eng, tmp_path):
     """A symbol-day with no usable range has NO width, which is not a width of
     zero -- and zero would land inside every percentile this feeds."""
     p = tmp_path / "orb_preflight.csv"
-    p.write_text(ORB_CSV)
+    p.write_text(ORB_CSV, encoding="utf-8")
     with eng.begin() as c:
         L.load_orb_preflight(c, p, "XNAS.BASIC")
     with eng.connect() as c:
@@ -714,7 +714,7 @@ def test_the_two_tapes_preflight_rows_coexist(eng, tmp_path):
     """The entire point of the XNAS.BASIC pull is comparing these against the
     EQUS.MINI ones."""
     p = tmp_path / "orb_preflight.csv"
-    p.write_text(ORB_CSV)
+    p.write_text(ORB_CSV, encoding="utf-8")
     with eng.begin() as c:
         L.load_orb_preflight(c, p, "EQUS.MINI")
         L.load_orb_preflight(c, p, "XNAS.BASIC")
@@ -851,7 +851,7 @@ def test_the_status_can_be_written_to_a_file(tmp_path):
     D.main(["--check", "--url", f"sqlite:///{tmp_path/'t.db'}",
             "--report", str(out)])
     assert out.exists()
-    text = out.read_text()
+    text = out.read_text(encoding="utf-8")
     assert "ROW COUNTS" in text
     assert "generated" in text.splitlines()[0], "no timestamp on a saved report"
 
@@ -876,7 +876,7 @@ def test_row_counts_are_broken_out_by_dataset(tmp_path):
 
     out = tmp_path / "s.txt"
     D.main(["--check", "--url", url, "--report", str(out)])
-    text = out.read_text()
+    text = out.read_text(encoding="utf-8")
     assert "bar_minute by dataset" in text
     assert "EQUS.MINI" in text and "5" in text
     assert "XNAS.BASIC" in text and "17" in text
@@ -903,7 +903,7 @@ def _fills_dir(tmp_path, rows):
     d = tmp_path / "fills"
     d.mkdir()
     for name, stamps in rows:
-        with (d / name).open("w", newline="") as fh:
+        with (d / name).open("w", newline="", encoding="utf-8") as fh:
             fh.write("ts_et,symbol\n")
             for s in stamps:
                 fh.write(f"{s},AAA\n")

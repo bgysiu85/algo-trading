@@ -209,7 +209,7 @@ class Runner:
     def _load_state(self) -> dict:
         if self.state_path.exists():
             try:
-                return json.loads(self.state_path.read_text())
+                return json.loads(self.state_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 LOG.warning("state file unreadable -- starting fresh")
         return {"done": {}, "trades": []}
@@ -233,7 +233,7 @@ class Runner:
             return
         self._since_save = 0
         tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.state))
+        tmp.write_text(json.dumps(self.state), encoding="utf-8")
 
         # WINDOWS LOSES THIS RACE. os.replace fails with WinError 5 (access
         # denied) when anything else holds a handle to either file for an
@@ -713,7 +713,7 @@ def load_sizes(path: Path) -> dict[str, int]:
     comparison is supposed to hold fixed.
     """
     out: dict[str, int] = {}
-    with open(path, newline="") as fh:
+    with open(path, newline="", encoding="utf-8") as fh:
         rd = csv.DictReader(fh)
         if "max_position" not in (rd.fieldnames or []):
             sys.exit(f"{path} has no max_position column. Regenerate it with "

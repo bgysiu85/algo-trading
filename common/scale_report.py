@@ -32,7 +32,7 @@ def main() -> int:
     path = Path(sys.argv[1] if len(sys.argv) > 1
                 else "var/reports/scale_grid_peak.csv")
     rows = []
-    with path.open() as fh:
+    with path.open(encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             rows.append({k: (float(v) if v not in ("", "nan") else float("nan"))
                          for k, v in r.items()})

@@ -278,7 +278,7 @@ def test_var_is_gitignored_WITHOUT_a_trailing_slash():
     A warning that always fires is worse than no warning. `var` without the
     slash matches the directory AND the link.
     """
-    lines = [l.strip() for l in (P.TREE / ".gitignore").read_text().splitlines()]
+    lines = [l.strip() for l in (P.TREE / ".gitignore").read_text(encoding="utf-8").splitlines()]
     assert "var" in lines, "var must be ignored"
     assert "var/" not in lines, (
         "a trailing slash makes this directory-only, and the production copy "

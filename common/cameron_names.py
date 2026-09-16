@@ -172,7 +172,7 @@ def to_symbol_days(ment: list[dict], sessions: set[str]) -> tuple[list, int, int
 
 # ---------------------------------------------------------------- coverage
 def load_pairs(path: Path) -> dict[str, dict[str, dict]]:
-    rows = json.loads(Path(path).read_text())
+    rows = json.loads(Path(path).read_text(encoding="utf-8"))
     if not rows:
         sys.exit(f"{path} is empty -- run `python -m common.screen_sim` first")
     by: dict[str, dict[str, dict]] = defaultdict(dict)

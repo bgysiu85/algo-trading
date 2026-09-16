@@ -327,10 +327,10 @@ def test_the_tape_is_read_from_the_caches_own_marker(tmp_path):
     so a cache can say what it is. Read it rather than assuming."""
     root = tmp_path / "bar_cache_x"
     (root / "3d_to_2000").mkdir(parents=True)
-    (root / "SOURCE.txt").write_text("databento XNAS.BASIC ohlcv-1m\nRAW\n")
+    (root / "SOURCE.txt").write_text("databento XNAS.BASIC ohlcv-1m\nRAW\n", encoding="utf-8")
     assert P.cache_tape(root / "3d_to_2000") == "XNAS.BASIC"
 
-    (root / "SOURCE.txt").write_text("databento EQUS.MINI ohlcv-1m\nRAW\n")
+    (root / "SOURCE.txt").write_text("databento EQUS.MINI ohlcv-1m\nRAW\n", encoding="utf-8")
     assert P.cache_tape(root / "3d_to_2000") == "EQUS.MINI"
 
     (root / "SOURCE.txt").unlink()

@@ -82,7 +82,7 @@ async def drive(tag, target_price):
         if st.position is not None:
             break
     log.close()
-    return st, list(csv.DictReader(out.open()))
+    return st, list(csv.DictReader(out.open(encoding="utf-8")))
 
 
 def main():

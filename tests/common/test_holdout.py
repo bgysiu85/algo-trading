@@ -134,17 +134,17 @@ def test_the_fingerprint_is_of_the_universe_not_of_the_files(tmp_path):
     b = tmp_path / "b.json"
     rows = [{"symbol": "BBB", "date": "2026-01-02"},
             {"symbol": "AAA", "date": "2026-01-01"}]
-    a.write_text(json.dumps(rows))
-    b.write_text(json.dumps(list(reversed(rows))))     # same pairs, new order
+    a.write_text(json.dumps(rows), encoding="utf-8")
+    b.write_text(json.dumps(list(reversed(rows))), encoding="utf-8")     # same pairs, new order
     assert H.fingerprint([a]) == H.fingerprint([b])
 
 
 def test_a_changed_universe_changes_the_fingerprint(tmp_path):
     a = tmp_path / "a.json"
-    a.write_text(json.dumps([{"symbol": "AAA", "date": "2026-01-01"}]))
+    a.write_text(json.dumps([{"symbol": "AAA", "date": "2026-01-01"}]), encoding="utf-8")
     one = H.fingerprint([a])
     a.write_text(json.dumps([{"symbol": "AAA", "date": "2026-01-01"},
-                             {"symbol": "AAA", "date": "2026-01-02"}]))
+                             {"symbol": "AAA", "date": "2026-01-02"}]), encoding="utf-8")
     assert H.fingerprint([a]) != one
 
 
@@ -155,12 +155,12 @@ def test_recutting_over_an_existing_cut_is_refused(tmp_path, monkeypatch,
     """A holdout you can re-cut after seeing a result is not a holdout."""
     p = tmp_path / "holdout.json"
     src = tmp_path / "s.json"
-    src.write_text(json.dumps([{"symbol": "A", "date": d} for d in DAYS]))
+    src.write_text(json.dumps([{"symbol": "A", "date": d} for d in DAYS]), encoding="utf-8")
     monkeypatch.setattr(H, "CUT_PATH", p)
     assert H.main(["--cut", str(src)]) == 0
-    first = p.read_text()
+    first = p.read_text(encoding="utf-8")
     assert H.main(["--cut", str(src)]) == 1          # refused
-    assert p.read_text() == first                    # and unchanged
+    assert p.read_text(encoding="utf-8") == first                    # and unchanged
     out = capsys.readouterr().out
     assert "DESTROYS THE" in out and "--force" in out
 
@@ -168,7 +168,7 @@ def test_recutting_over_an_existing_cut_is_refused(tmp_path, monkeypatch,
 def test_force_re_cuts_and_is_the_only_way(tmp_path, monkeypatch):
     p = tmp_path / "holdout.json"
     src = tmp_path / "s.json"
-    src.write_text(json.dumps([{"symbol": "A", "date": d} for d in DAYS]))
+    src.write_text(json.dumps([{"symbol": "A", "date": d} for d in DAYS]), encoding="utf-8")
     monkeypatch.setattr(H, "CUT_PATH", p)
     H.main(["--cut", str(src)])
     assert H.main(["--cut", str(src), "--force"]) == 0
@@ -177,12 +177,12 @@ def test_force_re_cuts_and_is_the_only_way(tmp_path, monkeypatch):
 def test_check_reports_a_universe_that_has_moved(tmp_path, monkeypatch, capsys):
     p = tmp_path / "holdout.json"
     src = tmp_path / "s.json"
-    src.write_text(json.dumps([{"symbol": "A", "date": d} for d in DAYS]))
+    src.write_text(json.dumps([{"symbol": "A", "date": d} for d in DAYS]), encoding="utf-8")
     monkeypatch.setattr(H, "CUT_PATH", p)
     H.main(["--cut", str(src)])
     assert H.main(["--check", str(src)]) == 0
     src.write_text(json.dumps([{"symbol": "A", "date": d} for d in DAYS]
-                              + [{"symbol": "ZZZ", "date": DAYS[0]}]))
+                              + [{"symbol": "ZZZ", "date": DAYS[0]}]), encoding="utf-8")
     assert H.main(["--check", str(src)]) == 1
     assert "DIFFERS" in capsys.readouterr().out
 

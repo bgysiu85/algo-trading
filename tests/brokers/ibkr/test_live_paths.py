@@ -104,7 +104,7 @@ async def main():
     ] * 20)
     await feed(tr, st, seq)
     log.close()
-    rows = list(csv.DictReader(out.open()))
+    rows = list(csv.DictReader(out.open(encoding="utf-8")))
     rejected = [r for r in rows if r["status"] == "REJECTED"]
     nofill = [r for r in rows if r["status"] == "NO_FILL_CANCELLED"]
     if rejected and not nofill:
@@ -127,7 +127,7 @@ async def main():
     ])
     await feed(tr, st, seq)
     log.close()
-    rows = list(csv.DictReader(out.open()))
+    rows = list(csv.DictReader(out.open(encoding="utf-8")))
     part = [r for r in rows if r["status"] == "PARTIAL_FILL"]
     if part and int(part[0]["filled_qty"]) == 40:
         print("PASS  partial fill recorded as PARTIAL_FILL with qty 40")
@@ -159,7 +159,7 @@ async def main():
     ib.held["TEST"] = 100
     await feed(tr, st, seq)
     log.close()
-    rows = list(csv.DictReader(out.open()))
+    rows = list(csv.DictReader(out.open(encoding="utf-8")))
     sells = [r for r in rows if r["action"] == "SELL"]
     if len(sells) >= 3:
         print(f"PASS  exit retried after no-fill ({len(sells)} sell attempts)")

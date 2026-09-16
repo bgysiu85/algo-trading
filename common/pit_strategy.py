@@ -172,7 +172,7 @@ def engine(name: str):
 # --- universes ---------------------------------------------------------------
 
 def load_pit(path: Path) -> dict[str, list[dict]]:
-    rows = json.loads(Path(path).read_text())
+    rows = json.loads(Path(path).read_text(encoding="utf-8"))
     if not rows:
         sys.exit(f"{path} is empty -- run `python -m common.screen_sim` first")
     out: dict[str, list[dict]] = defaultdict(list)
@@ -190,7 +190,7 @@ def load_stage2(path: Path, dates: set[str]) -> dict[str, list[dict]]:
     path with the others and the absence is explicit rather than implied by a
     missing key.
     """
-    rows = json.loads(Path(path).read_text())
+    rows = json.loads(Path(path).read_text(encoding="utf-8"))
     out: dict[str, list[dict]] = defaultdict(list)
     for r in rows:
         if r["date"] in dates:

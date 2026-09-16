@@ -91,7 +91,7 @@ DROP = 5
 
 
 def load_pit(path: Path) -> dict[str, list[dict]]:
-    rows = json.loads(Path(path).read_text())
+    rows = json.loads(Path(path).read_text(encoding="utf-8"))
     if not rows:
         sys.exit(f"{path} is empty -- run `python -m common.screen_sim` first")
     by_date: dict[str, list[dict]] = defaultdict(list)

@@ -261,7 +261,7 @@ def main() -> int:
 
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    with out.open("w", newline="") as fh:
+    with out.open("w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["trail_pct", "up_pct", "portion_pct", "dip_pct", "trades",
                     "real_net", "real_per_trade", "drop5", "symbols",

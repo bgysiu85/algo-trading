@@ -106,7 +106,7 @@ def load_repaired(path: Path | str = REPAIRED_CLOSES) -> pd.DataFrame | None:
         return None
     from common.regular_close import RELAXED_KEY
 
-    doc = json.loads(p.read_text())
+    doc = json.loads(p.read_text(encoding="utf-8"))
     closes = doc.get("closes") or {}
     if not closes:
         return None
@@ -732,7 +732,7 @@ def main(argv=None) -> int:
           flush=True)
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(pairs, indent=1))
+    out.write_text(json.dumps(pairs, indent=1), encoding="utf-8")
     print(f"\nwrote {len(pairs):,} symbol-days to {out}")
 
     emit("\n".join(render(rows, len(rows), cfg, a.cadence, agree,

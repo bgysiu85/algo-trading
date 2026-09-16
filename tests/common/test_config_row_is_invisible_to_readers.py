@@ -98,7 +98,7 @@ def test_the_fixture_really_does_differ(books):
     """Guard the guard: if the CONFIG rows were not written, every comparison
     below would pass by comparing a book with itself."""
     clean, noisy = books
-    rows = {p: list(csv.DictReader(p.open(newline=""))) for p in (clean, noisy)}
+    rows = {p: list(csv.DictReader(p.open(newline="", encoding="utf-8"))) for p in (clean, noisy)}
     assert len(rows[noisy]) == len(rows[clean]) + 4
     assert any(r["action"] == "CONFIG" for r in rows[noisy])
     assert not any(r["action"] == "CONFIG" for r in rows[clean])

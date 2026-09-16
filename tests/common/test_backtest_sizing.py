@@ -23,7 +23,7 @@ from common import backtest as B
 def summary(tmp_path, rows, fields=None):
     fields = fields or ["symbol", "date", "shares", "max_position"]
     p = tmp_path / "summary.csv"
-    with open(p, "w", newline="") as fh:
+    with open(p, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=fields)
         w.writeheader()
         w.writerows(rows)

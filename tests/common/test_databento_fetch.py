@@ -19,7 +19,7 @@ from common import databento_fetch as F
 
 def pairs_file(tmp_path, pairs):
     p = tmp_path / "pairs.json"
-    json.dump([{"symbol": s, "date": d} for s, d in pairs], open(p, "w"))
+    json.dump([{"symbol": s, "date": d} for s, d in pairs], open(p, "w", encoding="utf-8"))
     return p
 
 
@@ -182,7 +182,7 @@ def test_manifest_merges_and_never_drops_earlier_entries(tmp_path):
                      {"tbbo/2025-06-04": {"condition": "degraded"}})
     F.write_manifest(root, "EQUS.MINI",
                      {"tbbo/2025-06-06": {"condition": "available"}})
-    m = json.load(open(F.manifest_path(root, "EQUS.MINI")))
+    m = json.load(open(F.manifest_path(root, "EQUS.MINI"), encoding="utf-8"))
     assert set(m) == {"tbbo/2025-06-04", "tbbo/2025-06-06"}
     assert m["tbbo/2025-06-04"]["condition"] == "degraded"
 
@@ -191,9 +191,9 @@ def test_a_corrupt_manifest_is_replaced_not_fatal(tmp_path):
     root = tmp_path / "arch"
     p = F.manifest_path(root, "EQUS.MINI")
     p.parent.mkdir(parents=True)
-    p.write_text("{ not json")
+    p.write_text("{ not json", encoding="utf-8")
     F.write_manifest(root, "EQUS.MINI", {"tbbo/2025-06-04": {"condition": "ok"}})
-    assert json.load(open(p))["tbbo/2025-06-04"]["condition"] == "ok"
+    assert json.load(open(p, encoding="utf-8"))["tbbo/2025-06-04"]["condition"] == "ok"
 
 
 # --- universe chunking ------------------------------------------------------
@@ -537,7 +537,7 @@ def test_a_corrupt_manifest_does_not_stop_a_pull(tmp_path):
     from common import databento_fetch as FE
     p = FE.manifest_path(tmp_path, "EQUS.SUMMARY")
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("{not json")
+    p.write_text("{not json", encoding="utf-8")
     assert FE.manifest_symbols(tmp_path, "EQUS.SUMMARY") == {}
 
 
@@ -614,7 +614,7 @@ def test_the_backfill_still_records_the_condition(tmp_path):
 
 def _plist(tmp_path, name, pairs):
     p = tmp_path / name
-    p.write_text(json.dumps([{"symbol": s, "date": d} for s, d in pairs]))
+    p.write_text(json.dumps([{"symbol": s, "date": d} for s, d in pairs]), encoding="utf-8")
     return p
 
 

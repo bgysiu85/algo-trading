@@ -26,9 +26,9 @@ HAND = ("# MCL watchlist -- one ticker per line.\n"
 
 
 def write(tmp, stem, body, blocked=None):
-    (tmp / f"watchlist_{stem}.txt").write_text(body)
+    (tmp / f"watchlist_{stem}.txt").write_text(body, encoding="utf-8")
     if blocked is not None:
-        (tmp / f"watchlist_blocked_{stem}.txt").write_text(blocked)
+        (tmp / f"watchlist_blocked_{stem}.txt").write_text(blocked, encoding="utf-8")
 
 
 # --- provenance -------------------------------------------------------------
@@ -178,7 +178,7 @@ def test_no_comparable_session_refuses_a_verdict(tmp_path):
 
 def test_an_empty_universe_file_names_the_command(tmp_path):
     p = tmp_path / "pairs.json"
-    p.write_text("[]")
+    p.write_text("[]", encoding="utf-8")
     with pytest.raises(SystemExit) as e:
         V.load_sim(p)
     assert "screen_sim" in str(e.value)

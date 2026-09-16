@@ -796,7 +796,7 @@ def sessions_on_disk(fills_dir) -> set:
         return out
     for path in sorted(d.glob("*.csv")):
         try:
-            with path.open(newline="") as fh:
+            with path.open(newline="", encoding="utf-8") as fh:
                 for r in _csv.DictReader(fh):
                     raw = (r.get("ts_et") or "").strip()
                     if not raw:

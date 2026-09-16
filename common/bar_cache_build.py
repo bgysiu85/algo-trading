@@ -73,7 +73,7 @@ SOURCE_NAME = "SOURCE.txt"
 def load_pairs(paths) -> list[tuple[str, str]]:
     out = set()
     for p in paths:
-        for row in json.load(open(p)):
+        for row in json.load(open(p, encoding="utf-8")):
             out.add((row["symbol"], row["date"]))
     return sorted(out)
 

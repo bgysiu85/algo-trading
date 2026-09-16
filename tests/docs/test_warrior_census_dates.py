@@ -26,7 +26,7 @@ LABELS = ("hot", "mixed", "cold")
 
 
 def _dates() -> dict[str, str]:
-    return dict(line.split() for line in DATES.read_text().splitlines() if line)
+    return dict(line.split() for line in DATES.read_text(encoding="utf-8").splitlines() if line)
 
 
 def _rows(path: Path) -> list[dict]:
@@ -43,7 +43,7 @@ def test_every_video_in_the_census_has_a_date():
 
 
 def test_no_video_id_is_dated_twice():
-    lines = [ln for ln in DATES.read_text().splitlines() if ln]
+    lines = [ln for ln in DATES.read_text(encoding="utf-8").splitlines() if ln]
     ids = [ln.split()[0] for ln in lines]
     assert len(ids) == len(set(ids)) == 401
 

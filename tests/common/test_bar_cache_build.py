@@ -125,7 +125,7 @@ def test_a_disagreeing_source_marker_is_refused(tmp_path):
 def test_a_matching_source_marker_is_accepted_so_runs_resume(tmp_path):
     B.check_source(tmp_path, "EQUS.MINI", "ohlcv-1m")
     B.check_source(tmp_path, "EQUS.MINI", "ohlcv-1m")      # must not raise
-    marker = (tmp_path / B.SOURCE_NAME).read_text()
+    marker = (tmp_path / B.SOURCE_NAME).read_text(encoding="utf-8")
     assert "RAW" in marker and "EQUS.MINI" in marker
 
 
@@ -142,9 +142,9 @@ def test_pairs_merge_and_dedupe_across_files(tmp_path):
     import json
     a = tmp_path / "a.json"
     b = tmp_path / "b.json"
-    json.dump([{"symbol": "AAA", "date": "2026-01-06"}], open(a, "w"))
+    json.dump([{"symbol": "AAA", "date": "2026-01-06"}], open(a, "w", encoding="utf-8"))
     json.dump([{"symbol": "AAA", "date": "2026-01-06"},
-               {"symbol": "BBB", "date": "2026-01-06"}], open(b, "w"))
+               {"symbol": "BBB", "date": "2026-01-06"}], open(b, "w", encoding="utf-8"))
     assert B.load_pairs([a, b]) == [("AAA", "2026-01-06"), ("BBB", "2026-01-06")]
 
 
@@ -338,14 +338,14 @@ def test_the_report_says_which_layout_and_why_nothing_was_written(
     (tmp_path / "E" / "XNAS.BASIC" / "ohlcv-1m").mkdir(parents=True)
     monkeypatch.setattr(B, "trading_calendar", lambda archive, dataset: CAL)
     pairs = tmp_path / "p.json"
-    json.dump([{"symbol": "AAA", "date": "2026-01-07"}], open(pairs, "w"))
+    json.dump([{"symbol": "AAA", "date": "2026-01-07"}], open(pairs, "w", encoding="utf-8"))
     report = tmp_path / "r.txt"
 
     assert B.main(["--pairs", str(pairs), "--archive", str(tmp_path / "E"),
                    "--dataset", "XNAS.BASIC", "--out", str(tmp_path / "cache"),
                    "--report", str(report), "--confirm"]) == 0
 
-    text = report.read_text()
+    text = report.read_text(encoding="utf-8")
     assert "archive layout          none" in text
     assert "NO SOURCE FILE          1" in text
     assert "neither monthly" in text
@@ -359,14 +359,14 @@ def test_the_report_flags_the_daily_layouts_winter_hour(tmp_path, monkeypatch):
     src, content = _fake_archive(tmp_path, "daily")
     _stub_reads(monkeypatch, content)
     pairs = tmp_path / "p.json"
-    json.dump([{"symbol": "AAA", "date": "2026-01-07"}], open(pairs, "w"))
+    json.dump([{"symbol": "AAA", "date": "2026-01-07"}], open(pairs, "w", encoding="utf-8"))
     report = tmp_path / "r.txt"
 
     B.main(["--pairs", str(pairs), "--archive", str(tmp_path / "E"),
             "--dataset", "XNAS.BASIC", "--out", str(tmp_path / "cache"),
             "--report", str(report), "--confirm"])
 
-    text = report.read_text()
+    text = report.read_text(encoding="utf-8")
     assert "archive layout          daily" in text
     assert "19:00 ET in winter" in text
     assert "WRITTEN                 1" in text

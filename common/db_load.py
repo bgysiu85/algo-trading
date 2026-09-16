@@ -290,7 +290,7 @@ def load_backtest(conn, reports: Path, states: Path, strategy: str,
     cov = []
     if state_p.exists():
         try:
-            done = (json.loads(state_p.read_text()).get("done") or {})
+            done = (json.loads(state_p.read_text(encoding="utf-8")).get("done") or {})
         except json.JSONDecodeError:
             done = {}
         for key, rec in done.items():
@@ -457,7 +457,7 @@ def load_holdout(conn, path: Path) -> tuple[str, int]:
     visible. A holdout that quietly moved is the thing this makes impossible to
     miss.
     """
-    rec = json.loads(path.read_text())
+    rec = json.loads(path.read_text(encoding="utf-8"))
     row = {
         "universe_fingerprint": rec["universe_fingerprint"],
         "cut_at": _ts(rec.get("cut_at")),
