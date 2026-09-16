@@ -174,3 +174,66 @@ on our list. Entry quality is `entry_place`'s question and is separate.
 
 `var/state/holdout.json` is not touched. It was cut 2026-09-07 and remains
 unspent.
+
+---
+
+# AMENDMENT — 2026-09-16, BEFORE THE FIRST RUN
+
+The criterion in §2.1 above **cannot be passed**, and I found that by checking
+the shape of the universe rather than by running the test. Recorded here, with
+the numbers, before any result exists.
+
+## What the check found
+
+`best_rank` is the best rank a name ever reached at any tick. The median
+session carries 11 names. Almost every name in a list that short touches the
+top 5 at some point:
+
+| field | share of a session's own universe inside the top 5 | sessions where the field enumerates 1..n |
+|---|---:|---:|
+| `best_rank` | **93.7%** | 1 of 551 |
+| `first_rank` | **89.6%** | 3 of 551 |
+
+So a random name drawn from our own universe is already in the "top 5" more
+than nine times in ten. §2.1 asked his names to beat that by 15 points, which
+would require a rate of 108.7%.
+
+**A criterion that cannot pass is a control whose output is indistinguishable
+from the failure it detects** — this project's recurring shape, in its own
+registration. Running it would have produced a null, and that null would have
+closed item 1c on an instrument incapable of saying anything else.
+
+It also invalidates the closed-form control I had planned, `min(N, n)/n`. That
+assumes the ranks enumerate 1..n within a session, and 550 of 551 sessions
+have ties (2024-07-02 has six names ranked 1, 1, 3, 3, 3, 4). The assumed form
+gives 0.536 against the true 0.937 — it would have fired a "the control is
+sampling the wrong pool" alarm on correct data.
+
+## The replacement criterion
+
+Ordering, not a bucket — the same instrument `common/regime_labels.py` uses,
+and for the same reason: it is immune to where a cut falls and to how many
+names a session carries.
+
+> For each of his named symbols present in our universe, its **rank-AUC**
+> within that session: the chance it outranks a randomly chosen *other* name
+> from our own universe that day, ties counted as a half. The statistic is the
+> mean over his names.
+>
+> **0.500 is no information**, exactly and by symmetry — which also replaces
+> the broken closed form with an exact one.
+
+**Pass criterion: mean rank-AUC >= 0.60, with both halves on the same side of
+it.**
+
+The bar is deliberately low. The inference here is one-directional — only a
+null closes the thread — so a generous bar is the conservative choice: a null
+against an easy bar is worth more than a null against a hard one.
+
+Also reported, and now correctly controlled: the top-5 rates on both fields,
+with their true ~90% control printed beside them so nobody reads a 90% figure
+as a finding. And rank-1 rate, where the control is ~1/n and the measure can
+still discriminate.
+
+Everything else in this document stands unchanged — in particular §1, which is
+the part that governs how any of it may be read.
