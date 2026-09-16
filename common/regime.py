@@ -266,25 +266,27 @@ def score(f: DayFeatures) -> float:
     return f.n_movers * (1.0 + f.lead) * (1.0 - f.round_trip)
 
 
-def classify(feats: dict[str, DayFeatures]) -> dict[str, str]:
-    """hot / mixed / cold by TERCILE of a rank composite.
+def composite(feats: dict[str, DayFeatures]) -> dict[str, float]:
+    """The rank composite `classify` cuts, for the RATED sessions only.
 
     Each of the three components is ranked across the sessions independently
     and the ranks are averaged, so a count, a multiple and a fraction never
-    get added to each other. Terciles of the result are the buckets.
+    get added to each other. The result is a percentile in [0, 1] and bigger
+    is hotter.
 
-    Days with too few movers to rate are labelled "cold" and NOT dropped: a
-    market with under five names moving 30% is the coldest reading available,
-    and dropping those days would remove the coldest third of a cold sample
-    and then report that cold days are rare.
+    THIS IS A FUNCTION BECAUSE IT HAS A SECOND CALLER. `regime_labels` places
+    a human's hot and cold days on this scale to ask whether our reading and
+    his agree. A second composite written over there, with its own weighting,
+    would be a different instrument wearing this one's name -- it would agree
+    with itself and not with the thing that actually labels sessions here. One
+    construction, or the comparison measures nothing.
+
+    Empty below three rated sessions: terciles of two points are not terciles,
+    and the caller decides what that means for it.
     """
     rated = {d: f for d, f in feats.items() if f.usable}
-    out = {d: "cold" for d, f in feats.items() if not f.usable}
     if len(rated) < 3:
-        # Not enough rated days to cut terciles. Everything unrated rather
-        # than a two-bucket split that would read like a three-bucket one.
-        out.update({d: "unrated" for d in rated})
-        return out
+        return {}
     dates = sorted(rated)
     df = pd.DataFrame({
         "movers": [rated[d].n_movers for d in dates],
@@ -292,9 +294,27 @@ def classify(feats: dict[str, DayFeatures]) -> dict[str, str]:
         # NEGATED, so every column points the same way: bigger is hotter.
         "held": [-rated[d].round_trip for d in dates],
     }, index=dates)
-    composite = df.rank(pct=True).mean(axis=1)
-    lo, hi = composite.quantile(1 / 3), composite.quantile(2 / 3)
-    for d, v in composite.items():
+    return {d: float(v) for d, v in df.rank(pct=True).mean(axis=1).items()}
+
+
+def classify(feats: dict[str, DayFeatures]) -> dict[str, str]:
+    """hot / mixed / cold by TERCILE of the rank composite above.
+
+    Days with too few movers to rate are labelled "cold" and NOT dropped: a
+    market with under five names moving 30% is the coldest reading available,
+    and dropping those days would remove the coldest third of a cold sample
+    and then report that cold days are rare.
+    """
+    out = {d: "cold" for d, f in feats.items() if not f.usable}
+    comp = composite(feats)
+    if not comp:
+        # Not enough rated days to cut terciles. Everything unrated rather
+        # than a two-bucket split that would read like a three-bucket one.
+        out.update({d: "unrated" for d, f in feats.items() if f.usable})
+        return out
+    s = pd.Series(comp)
+    lo, hi = s.quantile(1 / 3), s.quantile(2 / 3)
+    for d, v in s.items():
         out[d] = "cold" if v <= lo else ("hot" if v > hi else "mixed")
     return out
 
