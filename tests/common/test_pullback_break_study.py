@@ -69,21 +69,26 @@ def test_money_brackets_negatives():
     assert S.money(-3.5) == "(3.50)" and S.money(2) == "2.00"
 
 
-def test_render_prints_verdict_population_and_setup_outcomes():
+def test_render_prints_verdict_population_cells_and_level_outcomes():
     mcl = rows("2026-01-10", [-5] * 4) + rows("2026-03-10", [-5] * 4)
-    pb = [dict(r, premium_pct=1.2) for r in rows("2026-01-10", [1] * 7) + rows("2026-03-10", [1] * 7)]
-    txt = "\n".join(S.render(mcl, pb, Counter(triggered=14, cancel_depth=3), 40, 0,
-                             ["2026-01-10", "2026-03-10"], 1.0, 1))
-    for must in ("POPULATION CHECK", "DOES NOT MATCH", "cancel_depth", "THE VERDICT",
-                 "PRE-07", "before 07:00", "median +1.20%", "CLEARS"):
+    pb = rows("2026-01-10", [1] * 7) + rows("2026-03-10", [1] * 7)
+    pbs = {n: pb for n, _ in S.CELLS}
+    txt = "\n".join(S.render(mcl, pbs, Counter(triggered=14, refused_macd=3, expired=2),
+                             [3, 5, 8], 40, 0, ["2026-01-10", "2026-03-10"], 1.0, 1))
+    for must in ("POPULATION CHECK", "DOES NOT MATCH", "refused_macd", "THE VERDICT",
+                 "PRE-07", "before 07:00", "PB2-10c", "PB2-25c", "CLEARS",
+                 "read on PB2", "median 5"):
         assert must in txt
 
 
-def test_csv_carries_both_books(tmp_path):
+def test_csv_carries_every_book(tmp_path):
     p = tmp_path / "t.csv"
-    S.write_csv(str(p), rows("2026-01-10", [1]), rows("2026-01-10", [2, 3]))
+    pbs = {"PB2": rows("2026-01-10", [2, 3]), "PB2-10c": rows("2026-01-10", [1])}
+    S.write_csv(str(p), rows("2026-01-10", [1]), pbs)
     lines = p.read_text().splitlines()
-    assert len(lines) == 4 and sum(l.startswith("MCL-PB,") for l in lines) == 2
+    assert len(lines) == 5
+    assert sum(l.startswith("PB2,") for l in lines) == 2
+    assert sum(l.startswith("PB2-10c,") for l in lines) == 1
 
 
 # --- run_day against the real engines -----------------------------------------
@@ -109,7 +114,7 @@ def _frame(n=330, seed=7):
                          "close": c, "volume": v}, index=pd.DatetimeIndex(idx)), D
 
 
-def test_run_day_returns_both_books_from_one_pass(monkeypatch):
+def test_run_day_returns_every_book_from_one_pass(monkeypatch):
     import pandas as pd
     hit = None
     for seed in range(40):
@@ -120,11 +125,19 @@ def test_run_day_returns_both_books_from_one_pass(monkeypatch):
                                    [{"symbol": "AAA", "date": D.isoformat(),
                                      "first_seen": fs}]))
         assert err == "" and res["errors"] == 0 and res["symdays"] == 1
-        if res["mcl"] and res["pb"]:
+        assert set(res["pb"]) == {n for n, _ in S.CELLS}
+        if res["mcl"] and res["pb"]["PB2"]:
             hit = res
             break
     assert hit, "no seed produced trades in both books"
-    assert sum(hit["setups"].values()) >= len(hit["pb"])
-    assert hit["setups"]["triggered"] + hit["setups"]["band_refused"] >= len(hit["pb"])
-    assert all("premium_pct" in r for r in hit["pb"])
-    assert not any("premium_pct" in r for r in hit["mcl"])
+    assert hit["setups"]["triggered"] + hit["setups"]["band_refused"] >= len(hit["pb"]["PB2"])
+    assert hit["levels_per_symday"] == [sum(hit["setups"].values())]
+    for r in hit["pb"]["PB2"]:
+        # the chart coordinates a person needs to find the trade
+        assert r["top_et"] <= r["armed_et"] < r["entry_et"] <= r["exit_et"]
+        assert r["reds"] >= 2
+        assert r["entry_px"] >= r["level"] + 0.02 - 1e-4
+    assert not any("level" in r for r in hit["mcl"])
+    # the target cells are the same entries, exited differently or the same
+    e0 = [r["entry_et"] for r in hit["pb"]["PB2"]]
+    assert hit["pb"]["PB2-10c"][0]["entry_et"] == e0[0]

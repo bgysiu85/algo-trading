@@ -424,7 +424,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      entry_bars: "pd.Series | None" = None,
                      entry_px_by_bar: "pd.Series | None" = None,
                      ladder: "PL.LadderConfig | None" = None,
-                     target_exit: "TE.TargetExit | None" = None) -> list[Trade]:
+                     target_exit: "TE.TargetExit | None" = None,
+                     target_cents: float | None = None) -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -781,6 +782,19 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
             # results stay reproducible.
             fill = (min(trail, float(row["open"])) if gap_fills else trail)
             exit_px, exit_reason = fill - SLIPPAGE_TICKS * TICK, "trailing_stop"
+
+        # FIXED PROFIT TARGET IN CENTS (Ben, 2026-09-16, for MCL-PB): a limit
+        # sell resting at entry + target_cents for the WHOLE position. Tested
+        # AFTER the trail so a bar that reaches both resolves as the stop, the
+        # project's standing tie rule. A bar that OPENS above the target fills
+        # at the open -- a resting limit is filled at its price or better -- and
+        # no slippage tick is charged, as for every limit fill in this engine.
+        # Distinct from `target_exit`, which is a PARTIAL at a percentage with
+        # a breakeven stop. None leaves the engine bit-identical.
+        if (exit_px is None and target_cents is not None
+                and float(row["high"]) >= pos["entry_px"] + target_cents - 1e-9):
+            tgt = pos["entry_px"] + target_cents
+            exit_px, exit_reason = max(tgt, float(row["open"])), "target"
 
         if exit_px is None and last_of_session:
             exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "window_close"
