@@ -426,7 +426,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      ladder: "PL.LadderConfig | None" = None,
                      target_exit: "TE.TargetExit | None" = None,
                      target_cents: float | None = None,
-                     green_hold_bars: int | None = None) -> list[Trade]:
+                     green_hold_bars: int | None = None,
+                     hard_stop: float | None = None) -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -719,6 +720,15 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         if (target_exit is not None and target_exit.breakeven
                 and pos.get("target_taken")):
             trail = pos["avg_px"]
+        # HARD STOP (MCL-PB v4, 2026-09-16): a fixed price under the position,
+        # the pullback low the entry was bought above. It is tested exactly as
+        # the trail is -- same gap-through, same tick -- and simply replaces
+        # the trail level while it is the higher of the two, so a trade is
+        # protected by whichever is tighter. The exit is labelled by which
+        # level did the work. None is bit-identical.
+        stop_label = "trailing_stop"
+        if hard_stop is not None and hard_stop > trail:
+            trail, stop_label = hard_stop, "structure_stop"
         exit_px = exit_reason = None
 
         # HOW THE TRAIL IS TESTED, which is a separate question from how wide
@@ -757,7 +767,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
             elif i - pos["breached_at"] >= trail_confirm_bars:
                 if float(row["close"]) <= pos["breach_level"]:
                     exit_px = float(row["close"]) - SLIPPAGE_TICKS * TICK
-                    exit_reason = "trailing_stop"
+                    exit_reason = stop_label
                 else:
                     # Back above the level at the check: forget the breach.
                     # Without this the rule would be a DELAYED stop (one early
@@ -766,7 +776,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         elif trail_on_close:
             if float(row["close"]) <= trail:
                 exit_px = float(row["close"]) - SLIPPAGE_TICKS * TICK
-                exit_reason = "trailing_stop"
+                exit_reason = stop_label
         elif float(row["low"]) <= trail:
             # GAP-THROUGH. Selling AT the trail assumes the market offered that
             # price. When the bar OPENS below the level it never did: price was
@@ -782,7 +792,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
             # gap_fills=False restores the optimistic model, purely so old
             # results stay reproducible.
             fill = (min(trail, float(row["open"])) if gap_fills else trail)
-            exit_px, exit_reason = fill - SLIPPAGE_TICKS * TICK, "trailing_stop"
+            exit_px, exit_reason = fill - SLIPPAGE_TICKS * TICK, stop_label
 
         # FIXED PROFIT TARGET IN CENTS (Ben, 2026-09-16, for MCL-PB): a limit
         # sell resting at entry + target_cents for the WHOLE position. Tested

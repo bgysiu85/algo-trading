@@ -240,3 +240,23 @@ def test_duplicate_timestamps_do_not_raise(patched):
     sig = pd.concat([sig.iloc[:27], dup, sig.iloc[27:]])
     r = patched(sig, green_hold_bars=1)             # exit at frame row 26, the duplicated stamp
     assert len(r.trades) == 1 and r.trades[0].reason == "green_hold"
+
+
+def test_structure_stop_sits_one_tick_under_the_pullback_low(patched):
+    """Lowest low from the peak bar (row 1, low 5.00) through the break bar is
+    5.00, so the stop is 4.99. Row 7 dips to 4.98."""
+    b = shape() + [(5.14, 5.15, 4.98, 5.10), (5.10, 5.12, 5.08, 5.11), G]
+    sig = frame(b, vol={5: BIG})
+    r = patched(sig, structure_stop=True)
+    (t,) = r.trades
+    assert t.reason == "structure_stop" and t.exit_price == pytest.approx(4.98)
+    s = [x for x in r.setups if x.outcome == PB.TRIGGERED][0]
+    assert s.pullback_low == pytest.approx(5.00)
+    # without it the trail (5.15 * 0.95 = 4.89) holds and the trade runs to the close
+    (u,) = patched(sig).trades
+    assert u.reason == "window_close"
+
+
+def test_hard_stop_is_engine_owned_and_refused():
+    with pytest.raises(TypeError):
+        PB.backtest_session_detail(frame([G]), DAY, ET, hard_stop=1.0)
