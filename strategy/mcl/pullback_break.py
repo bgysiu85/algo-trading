@@ -46,6 +46,9 @@ STOP_OFFSET = 0.01        # registered: the break is level + 1c
 MIN_RED_BARS = 2          # registered: Ben, "at least 2 red bars from the peak"
 TIME_LIMIT_BARS = 60      # registered: mine, fixed before any run
 VOL_MA_LEN = 20           # registered: Ben, "volume above volume MA 20"
+ATR_LEN = 10              # registered v5: mean true range of the 10 bars before the break
+ATR_MULT = 1.0            # registered v5: close must clear the level by one average bar
+RSI_MIN = 64.0            # registered v5: the lowest RSI14 of Ben's eight good breaks
 
 TRIGGERED = "triggered"
 BAND = "band_refused"     # triggered, but the engine refused the price band
@@ -68,6 +71,7 @@ class Setup:
     refused_close: int = 0         # breaks refused because the bar closed at/below the level
     refused_vol: int = 0           # ... because volume was not above its 20-bar average
     refused_macd: int = 0          # ... because MACD was not above its signal on the bar
+    refused_decisive: int = 0      # ... because the close did not clear the level decisively (v5)
     trade: object = None
     pullback_low: float | None = None   # lowest low, peak bar through break bar
 
@@ -84,7 +88,7 @@ class SessionResult:
     index: object = None
     peaks: int = 0                 # every candidate swing high, armed or not
     breaks: int = 0                # bars that reached a live level
-    refused: dict = field(default_factory=lambda: {"close": 0, "vol": 0, "macd": 0})
+    refused: dict = field(default_factory=lambda: {"close": 0, "vol": 0, "macd": 0, "decisive": 0})
 
 
 def session_positions(sig: pd.DataFrame, session_date, tz, not_before=None):
@@ -100,7 +104,7 @@ def session_positions(sig: pd.DataFrame, session_date, tz, not_before=None):
 
 
 def walk(sig: pd.DataFrame, idx: list[int], allowed: list[bool],
-         take_trade) -> SessionResult:
+         take_trade, decisive: str | None = None) -> SessionResult:
     """The state machine. `take_trade(j)` enters at bar j's close through MCL's
     engine and returns its Trade, or None when the engine refused the price
     band; entries are suppressed until after that trade's exit bar."""
@@ -116,6 +120,15 @@ def walk(sig: pd.DataFrame, idx: list[int], allowed: list[bool],
     # SMA of the 20 bars BEFORE each bar -- the break bar's own volume is the
     # thing being judged, so it is not in its own average.
     vma = pd.Series(v).rolling(VOL_MA_LEN).mean().shift(1).to_numpy()
+    # v5 -- the decisive close. ATR of the bars BEFORE the break bar; RSI is
+    # MCL's own column on the break bar itself (known at its close).
+    if decisive not in (None, "atr", "rsi"):
+        raise ValueError(f"decisive must be None, 'atr' or 'rsi', not {decisive!r}")
+    if decisive == "atr":
+        prev_c = pd.Series(c).shift(1)
+        trng = np.maximum(h - lo, np.maximum((h - prev_c).abs(), (lo - prev_c).abs()))
+        atr = pd.Series(trng).rolling(ATR_LEN).mean().shift(1).to_numpy()
+    rsi = sig["rsi"].to_numpy(float) if decisive == "rsi" else None
 
     out = SessionResult(index=sig.index)
     n = len(idx)
@@ -159,6 +172,11 @@ def walk(sig: pd.DataFrame, idx: list[int], allowed: list[bool],
                     lowest.refused_vol += 1; out.refused["vol"] += 1; ok = False
                 elif not macd_open[j]:
                     lowest.refused_macd += 1; out.refused["macd"] += 1; ok = False
+                elif decisive == "atr" and not (atr[j] == atr[j]
+                                                and c[j] - lowest.level >= ATR_MULT * atr[j] - 1e-9):
+                    lowest.refused_decisive += 1; out.refused["decisive"] += 1; ok = False
+                elif decisive == "rsi" and not (rsi[j] == rsi[j] and rsi[j] >= RSI_MIN):
+                    lowest.refused_decisive += 1; out.refused["decisive"] += 1; ok = False
                 if ok:
                     # v4: the pullback low, swing-high bar through the break
                     # bar inclusive. The engine only uses it when asked to.
@@ -214,7 +232,8 @@ def backtest_session_detail(df: pd.DataFrame, session_date, tz,
     require_macd_pos, entry_shares, green_hold_bars, ...). `entry_bars` /
     `entry_px_by_bar` / `entry_delay_bars` / `hard_stop` are owned here and
     refused. `structure_stop=True` (v4) sets the engine's hard stop one tick
-    under each trade's own pullback low.
+    under each trade's own pullback low. `decisive="atr"` / `"rsi"` (v5) adds
+    the decisive-close condition to the break bar.
     """
     for bad in ("entry_bars", "entry_px_by_bar", "entry_delay_bars", "hard_stop"):
         if bad in engine_kw:
@@ -225,6 +244,7 @@ def backtest_session_detail(df: pd.DataFrame, session_date, tz,
         return SessionResult(index=sig.index)
 
     structure_stop = engine_kw.pop("structure_stop", False)
+    decisive = engine_kw.pop("decisive", None)
 
     def take_trade(j: int, pullback_low: float):
         take = pd.Series(False, index=sig.index)
@@ -244,7 +264,7 @@ def backtest_session_detail(df: pd.DataFrame, session_date, tz,
             raise AssertionError("engine entered on a different bar from the break")
         return t
 
-    return walk(sig, idx, allowed, take_trade)
+    return walk(sig, idx, allowed, take_trade, decisive=decisive)
 
 
 def backtest_session(df: pd.DataFrame, session_date, tz, **kw) -> list:

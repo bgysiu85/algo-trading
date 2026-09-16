@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-r"""MCL-PB v4 against MCL and against v3 -- the structure stop.
+r"""MCL-PB v5 against MCL and against v3 -- the decisive close.
 
     python -m common.pullback_break --jobs 8
 
-Registered in docs/research/REGISTERED_pullback_break_v4.md before this
-version ran (v1-v3 all returned NOTHING; v3 beat MCL per trade). The verdict
-rule below is v1 §3, verbatim in code, read on the primary cell against MCL,
-plus v4 §2's second reading against v3's cell. Three cells, all printed, none
+Registered in docs/research/REGISTERED_pullback_break_v5.md before this
+version ran (v1-v4 all returned NOTHING; v4 passed its own second reading by
++0.18 a trade, which is why v5 §3 requires a friction-sized margin). The
+verdict rule below is v1 §3, verbatim in code, read on the primary cell against
+MCL, plus the second reading against v3's cell. Four cells, all printed, none
 chosen from the table.
 
 SAME TAPE, SAME PROCESS, SAME SETTINGS. Both books come out of one `run_day`
@@ -47,12 +48,16 @@ PRE_CUT = dtime(7, 0)          # Ben's "before 7am ET"
 
 MCL_NAME, PB_NAME = "MCL", "MCL-PB"
 # (name, engine kwargs). The first is the primary cell the verdict is read on.
-CELLS = (("PB4-g3", {"green_hold_bars": 3, "structure_stop": True}),
-         ("PB4-g0", {"structure_stop": True}),
+CELLS = (("PB5-atr-g3", {"green_hold_bars": 3, "decisive": "atr"}),
+         ("PB5-rsi-g3", {"green_hold_bars": 3, "decisive": "rsi"}),
+         ("PB5-atr-g0", {"decisive": "atr"}),
          ("PB3-g3", {"green_hold_bars": 3}))
 CONTROL_CELL = "PB3-g3"
+# REGISTERED v5 §3: the second reading needs the per-trade gain to be at least
+# one round trip's friction in BOTH halves. v4 passed on +0.18; not again.
+MIN_MARGIN = MEASURED_FRICTION
 OUTCOMES = ("triggered", "band_refused", "refused_busy", "expired", "window")
-REFUSALS = ("close", "vol", "macd")
+REFUSALS = ("close", "vol", "macd", "decisive")
 
 
 # --- the tape ---------------------------------------------------------------
@@ -204,31 +209,37 @@ def stop_mean(rows) -> tuple[int, float]:
     return len(sel), per_trade(sel, f)
 
 
-def second_reading(pb, ctl, cut: str, name: str, ctl_name: str) -> list[str]:
-    """REGISTERED v4 §2: the primary cell against v3's cell. Both must hold."""
-    f = MEASURED_FRICTION
-    pa, pb2 = halves(pb, cut)
-    ca, cb = halves(ctl, cut)
-    L = [f"THE SECOND READING (registered v4 §2): {name} against {ctl_name}", ""]
-    if not (pa and pb2 and ca and cb):
-        return L + ["  a half is empty; no reading", ""]
-    avg_ok = per_trade(pa, f) > per_trade(ca, f) and per_trade(pb2, f) > per_trade(cb, f)
-    n1, m1 = stop_mean(pb)
-    n0, m0 = stop_mean(ctl)
-    stop_ok = m1 > m0
-    L += [f"  per trade, halves   {name} {money(per_trade(pa, f))} / {money(per_trade(pb2, f))}"
-          f"   {ctl_name} {money(per_trade(ca, f))} / {money(per_trade(cb, f))}"
-          f"   -> {'holds' if avg_ok else 'does not hold'}",
-          f"  stopped trades      {name} {n1:,} at {money(m1)}   {ctl_name} {n0:,} at {money(m0)}"
-          f"   -> {'cheaper' if stop_ok else 'not cheaper'}",
-          f"  {'THE STOP IS A DIRECTION' if avg_ok and stop_ok else 'THE STOP LEVER IS CLOSED FOR THE PULLBACK LINE TOO'}",
-          ""]
-    return L
-
-
 def money(x: float) -> str:
     """Negatives bracketed, as every report here prints them."""
     return f"({abs(x):,.2f})" if x < 0 else f"{x:,.2f}"
+
+
+def second_reading(pb, ctl, cut: str, name: str, ctl_name: str) -> list[str]:
+    """REGISTERED v5 §3: the cell against v3's cell. Per trade better by at
+    least MIN_MARGIN in both halves AND total better in both halves."""
+    f = MEASURED_FRICTION
+    pa, pb2 = halves(pb, cut)
+    ca, cb = halves(ctl, cut)
+    L = [f"THE SECOND READING (registered v5 §3): {name} against {ctl_name}", ""]
+    if not (pa and pb2 and ca and cb):
+        return L + ["  a half is empty; no reading", ""]
+    d1 = per_trade(pa, f) - per_trade(ca, f)
+    d2 = per_trade(pb2, f) - per_trade(cb, f)
+    avg_ok = d1 >= MIN_MARGIN and d2 >= MIN_MARGIN
+    tot_ok = net(pa, f) > net(ca, f) and net(pb2, f) > net(cb, f)
+    n1, m1 = stop_mean(pb)
+    n0, m0 = stop_mean(ctl)
+    L += [f"  per trade, halves   {name} {money(per_trade(pa, f))} / {money(per_trade(pb2, f))}"
+          f"   {ctl_name} {money(per_trade(ca, f))} / {money(per_trade(cb, f))}"
+          f"   margins {d1:+.2f} / {d2:+.2f} against {MIN_MARGIN:.2f}"
+          f"   -> {'holds' if avg_ok else 'does not hold'}",
+          f"  total, halves       {name} {money(net(pa, f))} / {money(net(pb2, f))}"
+          f"   {ctl_name} {money(net(ca, f))} / {money(net(cb, f))}"
+          f"   -> {'holds' if tot_ok else 'does not hold'}",
+          f"  stopped trades      {name} {n1:,} at {money(m1)}   {ctl_name} {n0:,} at {money(m0)}",
+          f"  {'A DIRECTION' if avg_ok and tot_ok else 'NOTHING against v3'}",
+          ""]
+    return L
 
 
 def book_block(name: str, rows, cut: str, symdays: int) -> list[str]:
@@ -272,8 +283,8 @@ def render(mcl, pbs: dict, setups: Counter, levels_per_symday: list, symdays: in
     cut = days[len(days) // 2] if len(days) >= 2 else (days[0] if days else "")
     primary = CELLS[0][0]
     pb = pbs[primary]
-    L = ["MCL-PB v4: THE STRUCTURE STOP, AGAINST A CLOSED LEVER", "",
-         "  registered  docs/research/REGISTERED_pullback_break_v4.md",
+    L = ["MCL-PB v5: THE DECISIVE CLOSE", "",
+         "  registered  docs/research/REGISTERED_pullback_break_v5.md",
          f"  {len(days):,} sessions   {symdays:,} symbol-days   halves cut at {cut}",
          f"  {QTY} shares   commission in, friction per round trip   "
          f"elapsed {elapsed:.1f}s on {jobs} worker(s)", ""]
@@ -302,7 +313,7 @@ def render(mcl, pbs: dict, setups: Counter, levels_per_symday: list, symdays: in
     if refused is not None:
         L += ["", f"  bars that reached a live level: {breaks:,}; refused at the close because"]
         for k, lab in (("close", "closed at/below the level"), ("vol", "volume not above the prior-20 average"),
-                       ("macd", "MACD not above its signal")):
+                       ("macd", "MACD not above its signal"), ("decisive", "not a decisive close (v5)")):
             L.append(f"    {lab:<40}{refused.get(k, 0):>8,}")
         L.append("  (a refused break is not consumed; the level rises to that bar's high)")
     if levels_per_symday:
@@ -333,7 +344,10 @@ def render(mcl, pbs: dict, setups: Counter, levels_per_symday: list, symdays: in
         t2, w2 = verdict(pbs[name], mcl, cut)
         L.append(f"  {name} would read {t2}: {w2}  -- reported, not registered")
     L += [""]
-    L += second_reading(pbs[primary], pbs[CONTROL_CELL], cut, primary, CONTROL_CELL)
+    for name, _kw in CELLS:
+        if name != CONTROL_CELL:
+            L += second_reading(pbs[name], pbs[CONTROL_CELL], cut, name, CONTROL_CELL)
+    L += ["  Only the primary cell's reading is registered; the others are reported.", ""]
     if tag == "CLEARS":
         L += ["  A candidate for the holdout, under its own registration. Not a rule to ship.", ""]
 

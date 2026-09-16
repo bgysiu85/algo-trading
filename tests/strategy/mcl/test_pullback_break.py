@@ -35,6 +35,7 @@ def frame(bars, macd_closed=(), vol=None, start=dtime(4, 0)):
     for r, x in (vol or {}).items():
         d.iloc[20 + r, d.columns.get_loc("volume")] = x
     d["macd"], d["macd_sig"] = 1.0, 0.0
+    d["rsi"] = 70.0
     for r in macd_closed:
         d.iloc[20 + r, d.columns.get_loc("macd")] = -1.0
     d["entry"] = False
@@ -260,3 +261,49 @@ def test_structure_stop_sits_one_tick_under_the_pullback_low(patched):
 def test_hard_stop_is_engine_owned_and_refused():
     with pytest.raises(TypeError):
         PB.backtest_session_detail(frame([G]), DAY, ET, hard_stop=1.0)
+
+
+def test_decisive_atr_needs_the_close_one_average_bar_over_the_level(patched):
+    """Quiet bars have a true range of ~0.02-0.03; the shape's break closes 5.14
+    against a 5.06 level, 8c clear -- decisive. Move the close to 5.08 and it is
+    not."""
+    b = shape() + [G, G]
+    r = patched(frame(b, vol={5: BIG}), decisive="atr")
+    assert len(r.trades) == 1
+    b[5] = (5.05, 5.15, 5.04, 5.08)
+    r = patched(frame(b, vol={5: BIG}), decisive="atr")
+    assert r.trades == [] and r.refused["decisive"] == 1
+
+
+def test_the_atr_excludes_the_break_bar_itself(patched):
+    """A huge break bar would inflate its own ATR and refuse itself. Quiet
+    bars ~0.03 range; break bar 5.05-5.60 closes 5.14, 8c over the level:
+    decisive against the prior bars' ATR, not against one that includes its
+    own 0.55 range."""
+    b = shape() + [G, G]
+    b[5] = (5.05, 5.60, 5.04, 5.14)
+    r = patched(frame(b, vol={5: BIG}), decisive="atr")
+    assert len(r.trades) == 1
+
+
+def test_decisive_rsi_reads_the_break_bar(patched):
+    b = shape() + [G, G]
+    sig = frame(b, vol={5: BIG})
+    assert len(patched(sig, decisive="rsi").trades) == 1
+    sig.iloc[25, sig.columns.get_loc("rsi")] = 63.9          # the break bar, row 5
+    r = patched(sig, decisive="rsi")
+    assert r.trades == [] and r.refused["decisive"] == 1
+    sig.iloc[25, sig.columns.get_loc("rsi")] = 64.0
+    assert len(patched(sig, decisive="rsi").trades) == 1
+
+
+def test_decisive_none_is_v3(patched):
+    b = shape() + [G, G]
+    sig = frame(b, vol={5: BIG})
+    a = [t.__dict__ for t in patched(sig).trades]
+    assert a == [t.__dict__ for t in patched(sig, decisive=None).trades]
+
+
+def test_unknown_decisive_is_refused(patched):
+    with pytest.raises(ValueError):
+        patched(frame(shape() + [G, G], vol={5: BIG}), decisive="bb")
