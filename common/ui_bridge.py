@@ -52,7 +52,7 @@ LOG = logging.getLogger("ui_bridge")
 # fact about the market, not a value anyone configures.
 ET = ZoneInfo("America/New_York")
 
-CONTRACT_VERSION = "1.6"
+CONTRACT_VERSION = "1.7"
 PUSH_EVERY_S = 5.0
 HTTP_TIMEOUT_S = 3.0
 MAX_FILLS = 500
@@ -469,7 +469,25 @@ class UIBridge:
                         elif action in ("SELL", "SHORT"):
                             entry_ts = opened_by.pop(key, None)
 
-                    if status != "FILLED":
+                    # BOTH statuses, on the strategy side's ruling of
+                    # 2026-09-16. A partial EXIT is a real close: the trader
+                    # cancels the remainder, reduces pos.qty and keeps the
+                    # position open (trader.py, "still holding %d after partial
+                    # exit"), and the row's trade_pnl is
+                    # (exit_px - entry_price) * filled - commission -- realised
+                    # P&L on the shares that went, not a projection. A
+                    # FILLED-only list therefore DROPPED realised money, and
+                    # understated the P&L column by exactly the sum of those
+                    # rows. No double counting: pos.qty falls with each partial
+                    # so the quantities are disjoint, and entry_price is set
+                    # once at position open and never reassigned.
+                    #
+                    # This also makes the portal agree with the rest of the
+                    # codebase. common/friction.py has FILLED =
+                    # ("FILLED", "PARTIAL_FILL") and the trader's own position
+                    # reconstruction reads both. The portal was the only reader
+                    # that did not.
+                    if status not in ("FILLED", "PARTIAL_FILL"):
                         continue
                     qty = _num(row.get("filled_qty")) or _num(row.get("qty")) or 0
                     price = _num(row.get("fill_price")) or 0.0
@@ -483,6 +501,12 @@ class UIBridge:
                         "symbol": row.get("symbol") or "",
                         "action": (row.get("action") or "").upper(),
                         "qty": qty,
+                        # A reader cannot infer this from qty alone: "40" is
+                        # the same whether it closed a 40-share position or
+                        # part of a 100-share one. Without it the only clue is
+                        # the same symbol appearing twice, which is an
+                        # inference, not a fact the row states.
+                        "partial": status == "PARTIAL_FILL",
                         "entry_ts_et": _clock(entry_ts) or _minus_minutes(
                             row.get("ts_et"), _num(row.get("hold_minutes"))),
                         "entry_price": entry,

@@ -986,15 +986,75 @@ def test_a_second_partial_does_not_move_the_opening_time(tmp_path):
     assert closed["entry_ts_et"] == "07:21:00", "took the second partial's time"
 
 
-def test_a_partial_fill_is_still_not_listed_as_a_completed_fill(tmp_path):
-    """Pairing reads a wider set of rows than the fills list does. That is
-    deliberate and worth pinning: the list is FILLED-only, unchanged."""
+def test_a_partially_filled_exit_is_a_real_close_and_is_listed(tmp_path):
+    """The strategy side's ruling of 2026-09-16, checked against the trader.
+
+    A partial exit cancels the remainder, reduces pos.qty and leaves the
+    position open -- so its row IS a close of the shares that went, and its
+    trade_pnl is (exit_px - entry_price) * filled - commission: realised money.
+    A FILLED-only list dropped it, and the P&L column understated by exactly
+    the sum of the rows it dropped.
+    """
+    trader = _log_with(tmp_path, [
+        dict(ts_et="2026-09-14 07:21:00", strategy="MCL", symbol="AAA",
+             action="BUY", status="FILLED", filled_qty=100, fill_price=4.02),
+        dict(ts_et="2026-09-14 07:42:00", strategy="MCL", symbol="AAA",
+             action="SELL", status="PARTIAL_FILL", filled_qty=40, qty=100,
+             fill_price=3.88, entry_price=4.02, exit_price=3.88,
+             trade_pnl=-6.20, hold_minutes=21.0),
+    ])
+    closed = [f for f in ui_bridge.UIBridge._fills_today(trader)
+              if f["trade_pnl"] is not None]
+
+    assert len(closed) == 1, "the partial exit was dropped; that is realised P&L"
+    assert closed[0]["trade_pnl"] == -6.20
+    assert closed[0]["qty"] == 40
+    assert closed[0]["partial"] is True
+    assert closed[0]["entry_ts_et"] == "07:21:00"
+
+
+def test_two_partial_exits_of_one_position_do_not_double_count(tmp_path):
+    """The condition the ruling turns on. The quantities are disjoint because
+    the trader reduces pos.qty by each fill, and entry_price is written once at
+    position open and never reassigned -- so the two rows describe different
+    shares and their P&L adds rather than overlapping."""
+    trader = _log_with(tmp_path, [
+        dict(ts_et="2026-09-14 07:21:00", strategy="MCL", symbol="AAA",
+             action="BUY", status="FILLED", filled_qty=100, fill_price=4.00),
+        dict(ts_et="2026-09-14 07:40:00", strategy="MCL", symbol="AAA",
+             action="SELL", status="PARTIAL_FILL", filled_qty=40, qty=100,
+             fill_price=3.90, entry_price=4.00, exit_price=3.90,
+             trade_pnl=-4.00, hold_minutes=19.0),
+        dict(ts_et="2026-09-14 07:41:00", strategy="MCL", symbol="AAA",
+             action="SELL", status="FILLED", filled_qty=60, qty=60,
+             fill_price=3.95, entry_price=4.00, exit_price=3.95,
+             trade_pnl=-3.00, hold_minutes=20.0),
+    ])
+    closed = [f for f in ui_bridge.UIBridge._fills_today(trader)
+              if f["trade_pnl"] is not None]
+
+    assert len(closed) == 2
+    assert sum(f["qty"] for f in closed) == 100, "the shares must not overlap"
+    assert round(sum(f["trade_pnl"] for f in closed), 2) == -7.00
+    assert [f["partial"] for f in closed] == [True, False]
+
+
+def test_a_partially_filled_entry_does_not_become_a_phantom_close(tmp_path):
+    """Widening the list must not invent closes. A partial ENTRY is a fill and
+    belongs in the list, but it closed nothing, so it carries no round trip and
+    the dashboard's Closed today -- which selects on trade_pnl -- must not show
+    it. Getting this wrong would add a row with a blank P&L to a table whose
+    subtotals are money."""
     trader = _log_with(tmp_path, [
         dict(ts_et="2026-09-14 07:21:00", strategy="MCL", symbol="AAA",
              action="BUY", status="PARTIAL_FILL", filled_qty=40, qty=100,
              fill_price=4.02),
     ])
-    assert ui_bridge.UIBridge._fills_today(trader) == []
+    fills = ui_bridge.UIBridge._fills_today(trader)
+
+    assert len(fills) == 1 and fills[0]["action"] == "BUY"
+    assert fills[0]["trade_pnl"] is None, "an entry closed nothing"
+    assert [f for f in fills if f["trade_pnl"] is not None] == []
 
 
 def test_a_read_failure_cannot_swallow_a_defect_silently(tmp_path, caplog, monkeypatch):
