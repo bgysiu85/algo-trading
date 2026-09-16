@@ -80,10 +80,14 @@ def _textio_aliases(tree: ast.AST) -> set[str]:
     return names
 
 
-def bare_text_opens(source: str) -> list[tuple[int, str]]:
-    """(line, call name) for every text-mode open with no `encoding=`."""
+def bare_text_opens(source: str, filename: str = "<unknown>") -> list[tuple[int, str]]:
+    """(line, call name) for every text-mode open with no `encoding=`.
+
+    `filename` reaches `ast.parse` so that a SyntaxWarning raised while
+    parsing -- Python 3.14 warns on `"\\."` in a non-raw string -- names the
+    file it came from instead of `<unknown>`, which is what Ben saw."""
     hits = []
-    tree = ast.parse(source)
+    tree = ast.parse(source, filename=filename)
     textio = _textio_aliases(tree)
     for n in ast.walk(tree):
         if not isinstance(n, ast.Call):
@@ -135,7 +139,8 @@ def _tree_files():
 def test_no_text_mode_open_in_the_tree_is_missing_its_encoding():
     offenders = []
     for p in _tree_files():
-        for line, name in bare_text_opens(p.read_text(encoding="utf-8")):
+        for line, name in bare_text_opens(p.read_text(encoding="utf-8"),
+                                          filename=str(p)):
             offenders.append(f"{p.relative_to(ROOT)}:{line}  {name}()")
     assert not offenders, (
         f"{len(offenders)} text-mode open(s) without encoding= -- each is a "
