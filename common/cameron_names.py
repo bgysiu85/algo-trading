@@ -319,11 +319,30 @@ def top_rate(cov: dict, key: str = "top_best") -> float:
 
 
 # ---------------------------------------------------------------- the arms
-def arm_universes(sym_days, pit, present_only=True):
-    """Per session: the HIS universe and the OURS universe, as `pit_h0.run_day`
-    takes them.
+def strict_top(universe: dict, field: str = "first_rank") -> list[dict]:
+    """The five names a watchlist could actually have carried that session.
 
-    Both arms are the SAME pair records off the SAME file, subset two ways. A
+    `best_rank <= TOP_N` is NOT five names. best_rank is the best a name ever
+    reached and 550 of 551 sessions have ties, so that filter takes 90.5% of
+    every symbol-day in the universe -- a median of 10 per session and as many
+    as 28. An arm built that way is our WHOLE LIST wearing the label "top 5",
+    and a reader comparing it to his 451 names would be told they were
+    comparing against a five-name watchlist.
+
+    Ranked on `first_rank`, not `best_rank`: a watchlist is built from what you
+    can see when you see it. It is still an approximation -- a real list
+    re-orders through the morning -- and it is labelled as one in the report.
+    """
+    return sorted(universe.values(),
+                  key=lambda r: (r[field], r["symbol"]))[:TOP_N]
+
+
+def arm_universes(sym_days, pit):
+    """Per session: his names, the strict five, and everything we would have
+    surfaced. Three arms, because the middle one is the honest comparison and
+    the third is the number the first draft of this module actually produced.
+
+    Every arm is the SAME pair records off the SAME file, subset three ways. A
     name cannot be ranked from one tape here and scored on another, because
     there is only one tape in the function.
     """
@@ -332,17 +351,16 @@ def arm_universes(sym_days, pit, present_only=True):
         rec = pit.get(sd["date"], {}).get(sd["symbol"])
         if rec is not None:
             his[sd["date"]].append(rec)
-        elif not present_only:
-            continue
-    ours: dict[str, list[dict]] = {}
+    five, alls = {}, {}
     for day in his:
-        ours[day] = [r for r in pit.get(day, {}).values()
-                     if r["best_rank"] <= TOP_N]
-    return dict(his), ours
+        u = pit.get(day, {})
+        five[day] = strict_top(u)
+        alls[day] = [r for r in u.values() if r["best_rank"] <= TOP_N]
+    return {"HIS": dict(his), "OURS-5": five, "OURS-ALL": alls}
 
 
-def pnl_arms(his_u, ours_u, slices, trail):
-    """H0 on both arms, session by session, reading each slice ONCE.
+def pnl_arms(arms: dict, slices, trail):
+    """H0 on every arm, session by session, reading each slice ONCE.
 
     `run_day` is `pit_h0`'s, not a second copy: the entry floor, the exit and
     the share size all come from the module that produced every other H0 figure
@@ -351,9 +369,9 @@ def pnl_arms(his_u, ours_u, slices, trail):
     from common.dbn_io import read_dbn
     from common.pit_h0 import run_day
 
-    got = {"HIS": [], "OURS": []}
+    got = {k: [] for k in arms}
     unread = []
-    for day in sorted(his_u):
+    for day in sorted(arms["HIS"]):
         path = slices.get(day)
         if path is None:
             unread.append(day)
@@ -366,10 +384,9 @@ def pnl_arms(his_u, ours_u, slices, trail):
         if bars.empty:
             unread.append(f"{day} (empty)")
             continue
-        got["HIS"] += run_day(bars, day, his_u[day],
-                              as_screened=True, trail=trail)
-        got["OURS"] += run_day(bars, day, ours_u.get(day, []),
-                               as_screened=True, trail=trail)
+        for name, per_day in arms.items():
+            got[name] += run_day(bars, day, per_day.get(day, []),
+                                 as_screened=True, trail=trail)
     return got, unread
 
 
@@ -547,26 +564,39 @@ def render(cov, ctrl, aucs, auc_e, auc_l, ctrl_e, ctrl_l, dropped, unmapped,
 
     if pnl is not None:
         L += ["6. THE CONTAMINATED ARM  (read section 1 before this table)", "",
-              "  Same rule both arms: enter at max(04:30, first_seen), hold to",
-              "  the regular close, 100 shares, via pit_h0.run_day.", ""]
+              "  Same rule every arm: enter at max(04:30, first_seen), hold to",
+              "  the regular close, 100 shares, via pit_h0.run_day.", "",
+              "  HIS        his named symbols our universe carried",
+              "  OURS-5     the five lowest first_rank that session -- an",
+              "             approximation of a five-name watchlist, since a real",
+              "             list re-orders through the morning",
+              "  OURS-ALL   every name with best_rank <= 5, which is 90.5% of",
+              "             the universe and NOT a five-name list. It is printed",
+              "             because it is what the first draft of this module",
+              "             produced under the label 'our top 5', and a number",
+              "             that was once wrong is worth showing next to the one",
+              "             that replaced it.", ""]
         dates = [t["date"] for arm in pnl.values() for t in arm]
         split = halves_split(dates)
         for label, fr in FRICTIONS:
             L.append(f"  friction {label}")
-            L.append(f"    {'arm':<6}{'n':>7}{'net':>12}{'per':>9}"
-                     f"{'win%':>8}{'drop-top-' + str(DROP):>12}"
-                     f"{'early':>9}{'late':>9}")
-            for arm in ("HIS", "OURS"):
-                s = score(pnl[arm], split, fr)
-                drop = ("n/a" if s["syms"] <= DROP else f"{s['dropped']:,.0f}")
-                L.append(f"    {arm:<6}{s['n']:>7,}{s['net']:>12,.0f}"
-                         f"{s['per']:>9.2f}{s['win']:>8.1f}{drop:>12}"
-                         f"{s['early']:>9.2f}{s['late']:>9.2f}")
+            L.append(f"    {'arm':<10}{'n':>7}{'syms':>7}{'net':>12}{'per':>9}"
+                     f"{'per sym-day':>13}{'win%':>8}"
+                     f"{'drop-top-' + str(DROP):>12}{'early':>9}{'late':>9}")
+            for arm in ("HIS", "OURS-5", "OURS-ALL"):
+                if arm not in pnl:
+                    continue
+                sc = score(pnl[arm], split, fr)
+                drop = ("n/a" if sc["syms"] <= DROP else f"{sc['dropped']:,.0f}")
+                per_sym = (sc["net"] / sc["syms"]) if sc["syms"] else 0.0
+                L.append(f"    {arm:<10}{sc['n']:>7,}{sc['syms']:>7,}"
+                         f"{sc['net']:>12,.0f}{sc['per']:>9.2f}"
+                         f"{per_sym:>13.2f}{sc['win']:>8.1f}{drop:>12}"
+                         f"{sc['early']:>9.2f}{sc['late']:>9.2f}")
             L.append("")
-        L += ["  The per-symbol-day denominator is the `n` column divided by",
-              "  the distinct symbols in each arm; the two denominators are",
-              "  printed rather than reconciled, and a disagreement between",
-              "  them is a refusal, not a result.", "",
+        L += ["  Two denominators, printed rather than reconciled: per trade",
+              "  and per distinct symbol. A disagreement between them is a",
+              "  refusal, not a result.", "",
               "  AND: whatever this table says, his arm was picked after the",
               "  close. Section 3 is the registered reading.", ""]
 
@@ -646,9 +676,10 @@ def main(argv=None) -> int:
               f"{len(cov['absent']):,} declined names", flush=True)
         daily = daily_frame(archive, a.daily_dataset)
         causes = diagnose_absent(cov["absent"], slices, daily, 60)
-        his_u, ours_u = arm_universes(sym_days, pit)
-        print(f"  scoring both arms over {len(his_u):,} sessions", flush=True)
-        got, unread = pnl_arms(his_u, ours_u, slices, H.TRAIL_PRIMARY)
+        arms = arm_universes(sym_days, pit)
+        print(f"  scoring {len(arms)} arms over {len(arms['HIS']):,} sessions",
+              flush=True)
+        got, unread = pnl_arms(arms, slices, H.TRAIL_PRIMARY)
         if unread:
             print(f"  {len(unread)} session(s) unread: {unread[:5]}", flush=True)
         pnl = got
