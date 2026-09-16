@@ -111,7 +111,7 @@ def test_acted_is_the_traders_own_trim_not_a_copy_of_it():
     point of running it."""
     df = frame(last="2026-09-09 06:22")
     r = B.sample(at("06:22:30"), df)
-    expected = T.drop_forming_bar(df).index[-1].tz_convert(ET)
+    expected = T.drop_forming_bar(df, at("06:22:30")).index[-1].tz_convert(ET)
     assert r["acted"] == expected
     assert r["raw_last"] == pd.Timestamp("2026-09-09 06:22", tz=ET)
 
@@ -131,9 +131,9 @@ def test_the_trader_still_uses_the_trim_this_measures():
     tr.ib = Stub()
     st = T.SymbolState(symbol="BNC")
     st.contract = object()
-    out = asyncio.run(T.MCLPaperTrader._fetch_bars(tr, st))
+    out = asyncio.run(T.MCLPaperTrader._fetch_bars(tr, st, at("06:22:30")))
     assert out.index[-1].tz_convert(ET) == pd.Timestamp(
-        "2026-09-09 06:21", tz=ET), "the newest bar of the response is dropped"
+        "2026-09-09 06:21", tz=ET), "the forming bar of the response is dropped"
 
 
 def test_a_single_bar_response_is_not_trimmed_to_nothing():
@@ -167,19 +167,44 @@ def report(kinds, **kw):
     return "\n".join(B.render({"BNC": rows(kinds, **kw)}, 180, 15))
 
 
-def test_a_majority_of_closed_says_the_trim_is_costing_a_minute():
+def test_a_majority_of_closed_names_the_conditional_trim():
     text = report(["closed"] * 8 + ["forming"])
-    assert "discarding a bar that had" in text
-    assert "one minute later than the rule it implements" in text
+    assert "USUALLY ends at the last COMPLETED" in text
+    assert "conditional trim is doing most" in text
 
 
-def test_a_majority_of_forming_says_the_trim_is_right():
+def test_a_majority_of_forming_says_the_trim_must_stay():
     """And sends the reader somewhere else, rather than leaving them to
     conclude 'no bug found, therefore no problem' when Ben's two minutes are
     still unexplained."""
     text = report(["forming"] * 8 + ["closed"])
-    assert "trim is correct" in text
+    assert "trim must stay" in text
     assert "somewhere else" in text
+
+
+def test_the_closed_share_is_reported_whatever_the_majority_says():
+    """THE DEFECT IN THE FIRST RUN'S REPORT, 2026-09-16.
+
+    The verdict read "the trim is correct" over rows in which one sample in
+    eleven ended with an already-closed bar the trim was throwing away -- a
+    yes/no verdict over a quantity that is actually a distribution. The
+    majority answer was true and the minority was the expensive one.
+
+    The share now gets its own line, so a reader cannot take the majority for
+    the whole answer.
+    """
+    text = report(["forming"] * 10 + ["closed"])
+    assert "ENDING WITH AN ALREADY-CLOSED BAR:  1 of 11" in text
+    assert "9.1%" in text
+    assert "acted a full minute late" in text
+
+
+def test_a_clean_run_says_zero_rather_than_saying_nothing():
+    """An absent line and a line reading zero are different claims. Only the
+    second one says the probe looked."""
+    text = report(["forming"] * 10)
+    assert "ENDING WITH AN ALREADY-CLOSED BAR:  0 of 10" in text
+    assert "acted a full minute late" not in text
 
 
 def test_a_split_result_concludes_nothing():
@@ -317,7 +342,7 @@ def test_a_forming_majority_still_reaches_its_real_verdict():
              "edge": False, "raw_lag_s": 30.0, "acted_lag_s": 90.0}
             for _ in range(10)]
     text = "\n".join(B.render({"BNC": rows}, 180, 15))
-    assert "trim is correct and the second minute is somewhere else" in text
+    assert "trim must stay" in text and "somewhere else" in text
     assert "THE TAPE WAS NOT PRINTING" not in text
 
 
@@ -325,3 +350,38 @@ def test_the_override_exists_and_is_off_by_default():
     a = B.build_parser().parse_args([])
     assert a.anyway is False
     assert B.build_parser().parse_args(["--anyway"]).anyway is True
+
+
+# --- the clock the conditional trim now depends on --------------------------
+
+def test_the_clock_section_names_the_dangerous_direction():
+    """`BAR_CLOSE_SKEW_S` guards one direction: a LOCAL clock running fast
+    calls a bar closed with time still to run. A report that printed an offset
+    without saying which sign is the dangerous one is a number nobody can act
+    on."""
+    text = "\n".join(B.render({"BNC": []}, 180, 15, skew=0.4))
+    assert "+0.40s" in text
+    assert "we are AHEAD" in text
+    assert f"{T.BAR_CLOSE_SKEW_S:.1f}s" in text
+
+
+def test_an_offset_past_the_margin_says_so_outright():
+    text = "\n".join(B.render({"BNC": []}, 180, 15,
+                              skew=T.BAR_CLOSE_SKEW_S + 1.0))
+    assert "THE MARGIN IS TOO SMALL" in text
+
+
+def test_a_behind_clock_is_not_reported_as_a_problem():
+    """A slow local clock only costs lag. It cannot hand a partial bar to a
+    strategy, so it must not read like the case that can."""
+    text = "\n".join(B.render({"BNC": []}, 180, 15, skew=-3.0))
+    assert "we are behind" in text
+    assert "THE MARGIN IS TOO SMALL" not in text
+
+
+def test_an_unreadable_clock_says_unverified_rather_than_zero():
+    """A missing measurement printed as 0.00s is a control whose output cannot
+    be told apart from a clean result."""
+    text = "\n".join(B.render({"BNC": []}, 180, 15, skew=None))
+    assert "unverified" in text
+    assert "+0.00s" not in text

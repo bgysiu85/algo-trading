@@ -26,17 +26,32 @@ checked -- then the drop throws away a perfectly good closed bar and every
 entry in this project's live history is one minute late. On a name moving 12c
 in two minutes that is most of the gap.
 
+WHAT THE FIRST RUN ANSWERED, 2026-09-16, BNC
+--------------------------------------------
+IB DOES include the forming minute -- 10 of 11 countable samples. The suspect
+above is refused and the trim must stay.
+
+The same rows carried a second finding the verdict did not report. One sample
+ended with the 06:03 bar already closed, and the unconditional trim threw it
+away: a full extra minute, because a minute with no print produces no bar and
+BNC is thin. Whether IB includes the forming minute is not a property of IB.
+It is a property of the moment you ask.
+
+So `drop_forming_bar` became conditional on the clock, and this probe now
+reports the ALREADY-CLOSED SHARE as its own line rather than only the majority
+-- the majority answer was true and the minority was the expensive one. See
+docs/research/REGISTERED_bar_trim.md.
+
 WHAT IS MEASURED
 ----------------
 The same request the trader makes, repeatedly, recording three things:
 
     now          the wall clock at the moment of the response
     raw last     the last bar in the response, before any trimming
-    acted        what the trader would use, i.e. raw last minus one bar
+    acted        what the trader would use, i.e. what its own trim returns
 
-The decisive comparison is `now` against `raw last`. If the raw response ends
-at the minute in progress, the trim is right. If it ends at the last COMPLETED
-minute, the trim is costing a minute on every signal.
+Plus one reading of IB's clock against ours, because the conditional trim now
+depends on the local clock being no more than BAR_CLOSE_SKEW_S fast.
 
 PACING. This runs alongside a live session and spends the same budget: IB
 allows about 60 historical requests per 10 minutes ACROSS ALL CONTRACTS, and
@@ -62,7 +77,8 @@ try:
 except ImportError:  # pragma: no cover
     sys.exit("ib_async not installed.  pip install ib_async pandas")
 
-from brokers.ibkr.trader import (HISTORY_DURATION, LIVE_PORTS, PAPER_PORTS,
+from brokers.ibkr.trader import (BAR_CLOSE_SKEW_S, HISTORY_DURATION,
+                                 LIVE_PORTS, PAPER_PORTS,
                                  drop_forming_bar, parse_watchlist)
 from common.report_io import emit
 
@@ -138,12 +154,13 @@ def sample(now: datetime, df: pd.DataFrame) -> dict:
     `acted` comes from the TRADER's own trim, not from a copy of it here. A
     probe that reimplemented `iloc[:-1]` would keep reporting the old answer
     after the trim changed, which is the one failure this measurement cannot
-    afford.
+    afford. That was not hypothetical: the 2026-09-16 run made the trim
+    conditional, and this line followed it without being edited for content.
     """
     if df is None or df.empty:
         return {"now": now, "empty": True}
     raw_last = df.index[-1].tz_convert(ET)
-    acted = drop_forming_bar(df).index[-1].tz_convert(ET)
+    acted = drop_forming_bar(df, now).index[-1].tz_convert(ET)
     return {
         "now": now,
         "raw_last": raw_last,
@@ -176,7 +193,30 @@ async def watch(ib, symbol: str, seconds: int, interval: int) -> list[dict]:
     return out
 
 
-def render(by_symbol: dict, seconds: int, interval: int) -> list[str]:
+async def clock_skew(ib) -> float | None:
+    """Seconds our clock reads AHEAD of IB's, or None if it cannot be had.
+
+    `trader.BAR_CLOSE_SKEW_S` guards exactly one failure: a local clock running
+    fast calls a bar closed with time still to run, and a partial bar reaches a
+    strategy. That constant is a floor chosen in a comment. This is the number
+    that says whether the floor is high enough, and it costs one request.
+
+    Measured either side of the call so the round trip is visible rather than
+    silently charged to the offset. A POSITIVE result is the dangerous
+    direction.
+    """
+    try:
+        t0 = datetime.now(ET)
+        theirs = await ib.reqCurrentTimeAsync()
+        t1 = datetime.now(ET)
+    except Exception:                                       # noqa: BLE001
+        return None
+    mid = t0 + (t1 - t0) / 2
+    return round((mid - theirs.astimezone(ET)).total_seconds(), 2)
+
+
+def render(by_symbol: dict, seconds: int, interval: int,
+           skew: float | None = None) -> list[str]:
     L = ["BAR FRESHNESS -- which minute the trader is actually acting on", "",
          f"  sampled every {interval}s for {seconds}s per symbol",
          f"  duration      {HISTORY_DURATION}, 1 min, useRTH=False — the same "
@@ -225,18 +265,41 @@ def render(by_symbol: dict, seconds: int, interval: int) -> list[str]:
                  "not make)")
     L.append("")
 
-    if total and kinds.get("closed", 0) > total * 0.5:
-        L += ["  VERDICT: the response ends at the last COMPLETED minute, so",
-              "  _fetch_bars's `df.iloc[:-1]` is discarding a bar that had",
-              "  already closed. Every entry in this project's live history is",
-              "  one minute later than the rule it implements, and the fix is",
-              "  to trim only when the last bar is genuinely the minute in",
-              "  progress.", ""]
+    # THE SHARE THAT MATTERS IS NOT THE MAJORITY.
+    #
+    # This block used to report only which kind won, and on 2026-09-16 that
+    # read "the trim is correct" over rows in which one sample in eleven ended
+    # with an already-closed bar the trim was throwing away. A yes/no verdict
+    # over a quantity that is actually a distribution: the majority answer was
+    # true and the minority was the expensive one.
+    #
+    # `closed` gets its own line for that reason -- it is the share the
+    # conditional trim recovers, and the mechanism ("a minute with no print
+    # produces no bar") makes it a function of how thinly the name trades, so
+    # it is never generalised past the symbols in this run.
+    closed = kinds.get("closed", 0)
+    if total:
+        L += [f"  ENDING WITH AN ALREADY-CLOSED BAR:  {closed} of {total}"
+              f"  ({100 * closed / total:.1f}%)", ""]
+        if closed:
+            L += ["  On those the OLD unconditional trim discarded a good bar",
+                  "  and the strategy acted a full minute late. Since",
+                  "  2026-09-16 the trim asks the clock instead, so these are",
+                  "  kept. This share sizes what that is worth ON THESE",
+                  "  SYMBOLS and does not generalise to a liquid name.", ""]
+
+    if total and closed > total * 0.5:
+        L += ["  VERDICT: the response USUALLY ends at the last COMPLETED",
+              "  minute, so on this symbol the conditional trim is doing most",
+              "  of the work. Nothing here says the forming bar is never sent",
+              "  -- see the count above, not this line.", ""]
     elif total and kinds.get("forming", 0) > total * 0.5:
-        L += ["  VERDICT: the response includes the minute in progress, so the",
-              "  trim is correct and the second minute is somewhere else --",
-              "  the once-a-minute fetch cadence and BAR_MIN_INTERVAL_S are",
-              "  the next places to look.", ""]
+        L += ["  VERDICT: the response usually includes the minute in",
+              "  progress, so the trim must stay. The remaining lag is",
+              "  somewhere else -- the once-a-minute fetch cadence and",
+              "  BAR_MIN_INTERVAL_S are the next places to look.",
+              "  Read this line WITH the already-closed count above it, not",
+              "  instead of it.", ""]
     elif total and kinds.get("stale", 0) > total * 0.5:
         # The backstop for a market holiday, a halted name, or a dead feed —
         # cases tape_is_live() cannot see from the clock alone. Say the run was
@@ -252,6 +315,25 @@ def render(by_symbol: dict, seconds: int, interval: int) -> list[str]:
     else:
         L += ["  VERDICT: no clear majority. Re-run with more samples inside a",
               "  session before concluding anything.", ""]
+
+    L += ["CLOCK", ""]
+    if skew is None:
+        L += ["  IB's clock could not be read, so BAR_CLOSE_SKEW_S is",
+              "  unverified on this run.", ""]
+    else:
+        L.append(f"  local clock vs IB          {skew:+.2f}s"
+                 + ("   (we are AHEAD)" if skew > 0 else "   (we are behind)"))
+        L += ["", f"  BAR_CLOSE_SKEW_S is {BAR_CLOSE_SKEW_S:.1f}s. It guards "
+                  "only the AHEAD",
+              "  direction: a fast local clock calls a bar closed with time",
+              "  still to run and a partial bar reaches a strategy."]
+        if skew > BAR_CLOSE_SKEW_S:
+            L += ["", "  >> THE MARGIN IS TOO SMALL. Raise BAR_CLOSE_SKEW_S "
+                      "above this",
+                  "  offset before trusting an entry taken near a bar "
+                  "boundary.", ""]
+        else:
+            L.append("")
 
     L += ["WHAT THIS CANNOT SEE", "",
           "  The order round trip. This measures how stale the DATA is when",
@@ -290,12 +372,13 @@ async def main_async(a) -> int:
     ib = IB()
     await ib.connectAsync(a.host, a.port, clientId=a.client_id)
     try:
+        skew = await clock_skew(ib)
         by_symbol = {s: await watch(ib, s, a.seconds, a.interval)
                      for s in symbols}
     finally:
         ib.disconnect()
 
-    emit("\n".join(render(by_symbol, a.seconds, a.interval)), a.out,
+    emit("\n".join(render(by_symbol, a.seconds, a.interval, skew)), a.out,
          header=f"common.bar_freshness  symbols={','.join(symbols)}")
     return 0
 

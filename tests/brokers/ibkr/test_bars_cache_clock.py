@@ -55,7 +55,7 @@ def a_trader(tag):
     full, _, _ = find_firing_series(140)
     calls = {"n": 0}
 
-    async def counting(_st):
+    async def counting(_st, _now):
         calls["n"] += 1
         return full
 
