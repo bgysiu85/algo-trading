@@ -44,7 +44,8 @@ from common.breadth import (BOOT_MIN_P, RESAMPLES, SEED, cluster_bootstrap,
                             pct, share_above_zero)
 from common.report_io import emit
 from strategy.orb import orb as O
-from strategy.orb.preflight import ORB_MIN_MOVE_PCT, load_bars, rth_session
+from strategy.orb.preflight import (ORB_MIN_MOVE_PCT, cache_tape, load_bars,
+                                    rth_session)
 
 # §3. `opposite` is NOT here, and its absence is a PRE-REGISTERED FILTER
 # firing rather than a search selecting: median R of 9.26% of price against a
@@ -57,6 +58,17 @@ GRID_RETESTS = O.RETEST_MODES
 GRID_EXITS = O.EXIT_MODES
 
 MIN_TRADES = 100          # §5 -- below this a cell is printed and not read
+
+# THE TAPE THE REGISTRATION WAS WRITTEN AGAINST. Every number in
+# REGISTERED_orb_grid.md §3.2 -- the R medians that eliminated `opposite`, the
+# usable-range counts, the retest availability -- was measured on XNAS.BASIC.
+# EQUS.MINI carries a median 4.8% of the consolidated prints and was retracted
+# for the pre-flight for that reason. On 2026-09-16 the first full grid ran on
+# it anyway, because the default --cache pointed at the EQUS directory and
+# this runner recorded no tape at all; the only sign was three status counts
+# that happened to match the EQUS pre-flight to the unit. A report that
+# cannot say which tape it measured cannot be reconciled with anything.
+EXPECTED_TAPE = "XNAS.BASIC"
 DROPS = (1, 3, 5)
 
 # §3.1. Four independent choices, not ninety. The report states this beside
@@ -293,8 +305,28 @@ def _row(key, d, dd) -> str:
             f"{d['boot_p']:>6.3f} {dd['delta_drop5']:>10,.0f}{flag}")
 
 
+def provenance(cache: Path, tape: str, a, seen: int, split_date: str) -> list[str]:
+    """The same block the pre-flight carries, for the same reason: two passes
+    over different caches produce different numbers from the same code, and a
+    table lifted out of one of them carries no sign of which it was."""
+    L = ["WHAT THIS RUN MEASURED", "",
+         f"  cache        {cache}",
+         f"  tape         {tape or 'UNKNOWN (no readable SOURCE.txt)'}",
+         f"  registered   {EXPECTED_TAPE}",
+         f"  pairs        {', '.join(a.pairs)}",
+         f"  symbol-days  {seen:,} with bars",
+         f"  split        {split_date}", ""]
+    if tape != EXPECTED_TAPE:
+        L += ["  >> NOT THE REGISTERED TAPE. Run with --anyway. Nothing below",
+              "  >> is ORB's registered result and none of it enters section 11.",
+              ""]
+    L += ["  Quote no figure below without this block.", "",
+          "-" * 78, ""]
+    return L
+
+
 def render(read_all: dict, delta_all: dict, split_date: str,
-           seen: int, elapsed: float, args) -> list[str]:
+           seen: int, elapsed: float, args, merged: dict | None = None) -> list[str]:
     L = [
         "ORB GRID — ninety cells, every one printed, nothing ranked", "",
         f"  symbol-days read   {seen:,}",
@@ -356,9 +388,43 @@ def render(read_all: dict, delta_all: dict, split_date: str,
           "  positive divisors and always share a sign, so a per-cell version",
           "  of this check could never fire.", ""]
 
+    if merged is not None:
+        L += _timing_block(merged)
     L += _boundary_block(read_all)
     L += _prediction_block(read_all)
     L += _screen_block(read_all)
+    return L
+
+
+def _timing_block(merged: dict) -> list[str]:
+    """§5 item 6, and section 12's own sentence: the entry-timestamp histogram
+    should be a spike at 09:45-10:15 and a long thin tail, and anything else
+    means the trigger logic is wrong. Baseline cell, half-hour buckets, with
+    the exit reasons beside it -- the first full run omitted this block
+    entirely, which is a registration requirement the runner did not meet."""
+    cell = merged[BASELINE_KEY]
+    L = ["WHEN THE BASELINE ENTERS, AND HOW IT LEAVES (§5 item 6)", ""]
+    buckets: Counter = Counter()
+    for hhmm, n in cell.entry_hhmm.items():
+        h, m = int(hhmm[:2]), int(hhmm[3:])
+        buckets[f"{h:02d}:{(m // 30) * 30:02d}"] += n
+    total = sum(buckets.values()) or 1
+    for b in sorted(buckets):
+        n = buckets[b]
+        L.append(f"  {b}  {n:>6,}  {100 * n / total:5.1f}%  "
+                 + "#" * int(60 * n / total))
+    L.append("")
+    if buckets:
+        first = sum(n for b, n in buckets.items() if b in ("09:30", "10:00"))
+        L.append(f"  09:45-10:29 holds {100 * first / total:.1f}% of entries."
+                 + ("" if first / total > 0.5 else
+                    "  << NOT a spike at the open; check the trigger logic."))
+        L.append("")
+    tot_x = sum(cell.exit_reason.values()) or 1
+    L.append("  exit reasons")
+    for r, n in sorted(cell.exit_reason.items(), key=lambda kv: -kv[1]):
+        L.append(f"    {r:<12} {n:>6,}  {100 * n / tot_x:5.1f}%")
+    L.append("")
     return L
 
 
@@ -497,7 +563,36 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int)
     p.add_argument("--out", default="var/reports/orb_grid.txt")
     p.add_argument("--csv", default="var/reports/orb_grid_cells.csv")
+    p.add_argument("--expect-tape", default=EXPECTED_TAPE,
+                   help="refuse to run on any other tape (default: %(default)s)")
+    p.add_argument("--anyway", action="store_true",
+                   help="run on a different or unknown tape regardless; the "
+                        "report will say so in its first lines")
     return p
+
+
+def tape_check(tape: str, expected: str, anyway: bool) -> str | None:
+    """None to proceed, or the refusal text.
+
+    Modelled on bar_freshness's session guard: a run that could not have
+    answered the registered question must not produce a report that looks
+    like one. An unknown tape (no SOURCE.txt) is refused too -- "we do not know
+    what this is" is not a reason to measure it and find out afterwards.
+    """
+    if anyway or (tape and tape == expected):
+        return None
+    what = f"tape {tape}" if tape else "an UNKNOWN tape (no readable SOURCE.txt)"
+    return (f"REFUSING TO RUN: this cache is {what}, and the grid is registered "
+            f"against {expected}.\n"
+            "Every figure in REGISTERED_orb_grid.md section 3.2 -- the R "
+            "medians that eliminated\n"
+            "`opposite`, the usable-range counts, the retest availability -- "
+            f"was measured on {expected}.\n"
+            "A grid on a different tape answers a different question and its "
+            "report looks identical.\n"
+            "\n"
+            "Pass --cache pointing at the "
+            f"{expected} cache, or --anyway to run regardless.")
 
 
 def main(argv=None) -> int:
@@ -506,6 +601,10 @@ def main(argv=None) -> int:
     cache = root if root.name == a.window else root / a.window
     if not cache.is_dir():
         sys.exit(f"no bar cache at {cache}")
+    tape = cache_tape(cache)
+    refusal = tape_check(tape, a.expect_tape, a.anyway)
+    if refusal:
+        sys.exit(refusal)
 
     pairs = load_pairs(a.pairs, a.limit)
     if not pairs:
@@ -562,9 +661,12 @@ def main(argv=None) -> int:
                 w.writerow(r)
         print(f"wrote {a.csv}")
 
-    emit("\n".join(render(read_all, delta_all, split_date, seen, elapsed, a)),
+    prov = provenance(cache, tape, a, seen, split_date)
+    emit("\n".join(prov + render(read_all, delta_all, split_date, seen,
+                                  elapsed, a, merged)),
          a.out,
          header=(f"strategy.orb.grid  cache={cache.name}  "
+                 f"tape={tape or 'UNKNOWN'}  "
                  f"pairs={','.join(Path(x).name for x in a.pairs)}  "
                  f"symbol_days={seen:,}  cells={len(cfgs)}  "
                  f"split={split_date}"))
