@@ -677,3 +677,92 @@ def test_trailing_blank_rows_do_not_change_the_sample_count(tmp_path,
     got = P.load_samples(p)
     assert got == want
     assert len(got) == len(SHEET) - 1
+
+
+# --- the reference population, and why the first run needed one ---------------
+#
+# The first live run placed the samples against EVERY bar of the pre-market
+# window and called 22 of 27 features unusual, with medians clustered at the
+# 80th-94th percentile. That is not a finding about Ben's eye: that population
+# is mostly dead minutes, and he screenshots bars where something is happening.
+# The control's output was indistinguishable from the thing it was meant to
+# detect -- this project's signature defect, inside the instrument built to
+# look for it.
+
+def test_the_reference_mask_uses_MCLs_own_columns():
+    """No threshold is invented here. `signal` is c_vol and `entry` is the
+    five conditions, both read off the strategy, so the denominator cannot
+    drift from what the strategy actually does."""
+    from strategy.mcl import mcl as MCL
+    sig = MCL.signals(bars(n=700))
+    for which, col in (("signal", "c_vol"), ("entry", "entry")):
+        got = P.reference_mask(sig, which)
+        np.testing.assert_array_equal(got, sig[col].to_numpy(dtype=bool))
+    assert P.reference_mask(sig, "all").all()
+
+
+def test_an_unknown_reference_name_raises_rather_than_defaulting_to_all():
+    """Every percentile in the report is measured against this population.
+    Silently falling back to `all` would produce a full, plausible report
+    answering a different question than the one asked."""
+    from strategy.mcl import mcl as MCL
+    sig = MCL.signals(bars(n=700))
+    with pytest.raises(KeyError):
+        P.reference_mask(sig, "active")
+
+
+def test_each_reference_is_a_subset_of_the_one_above_it():
+    df = bars(n=700, seed=5)
+    n_all = len(P.score_frame(df, "2026-09-14", 1, 1, "all"))
+    n_sig = len(P.score_frame(df, "2026-09-14", 1, 1, "signal"))
+    n_ent = len(P.score_frame(df, "2026-09-14", 1, 1, "entry"))
+    assert n_all > n_sig >= n_ent
+    assert n_sig > 0, "the fixture must produce some c_vol bars to test this"
+
+
+def test_the_report_names_the_population_it_measured_against():
+    """A percentile without its denominator is not a number anyone can use,
+    and two runs of this module can differ by nothing else."""
+    names = ["a"]
+    for which in P.REFERENCES:
+        text = "\n".join(P.render(_fake_placed(names), [], _fake_ref(names),
+                                  names, ["2026-09-14"], 10, 1, 1.0,
+                                  "p.json", which))
+        assert f"reference population: {which}" in text
+
+
+# --- coverage ------------------------------------------------------------------
+
+def test_a_feature_measured_on_a_handful_is_neither_ruled_out_nor_unusual():
+    """The first run printed `vol_over_trail  median 93.1%  0/2 in the middle
+    half` on the 5-minute view and listed it under `unusual` beside features
+    measured on all 21 -- a median of two presented as comparable with a
+    median of twenty-one."""
+    names = ["thin", "full"]
+    placed = _fake_placed(names, n=10)
+    for k, (_, f) in enumerate(placed):
+        for tf in P.TIMEFRAMES:
+            f[tf]["full"] = 0.0
+            f[tf]["thin"] = 9.9 if k < 2 else float("nan")   # only 2 of 10
+    text = "\n".join(P.render(placed, [], _fake_ref(names), names,
+                              ["2026-09-14"], 10, 1, 1.0, "p.json"))
+    assert "TOO THIN TO PLACE" in text
+    for block in text.split("=== ")[1:]:
+        ruled = [ln for ln in block.splitlines() if "RULED OUT" in ln][0]
+        unusual = [ln for ln in block.splitlines() if "unusual " in ln][0]
+        thin = [ln for ln in block.splitlines() if "too thin" in ln][0]
+        assert "thin" not in ruled and "thin" not in unusual.replace("too thin", "")
+        assert "thin (2/10)" in thin
+        assert "full" in ruled
+
+
+def test_full_coverage_is_still_classified():
+    names = ["full"]
+    placed = _fake_placed(names, n=10)
+    for _, f in placed:
+        for tf in P.TIMEFRAMES:
+            f[tf]["full"] = 0.0
+    text = "\n".join(P.render(placed, [], _fake_ref(names), names,
+                              ["2026-09-14"], 10, 1, 1.0, "p.json"))
+    assert "TOO THIN TO PLACE" not in text
+    assert "too thin" not in text
