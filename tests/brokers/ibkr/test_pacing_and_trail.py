@@ -52,8 +52,16 @@ async def main():
         print("FAIL  cache returned nothing — strategy would go blind")
         ok = False
 
-    # a new minute must refresh
-    st.bars_minute = (0, 0)
+    # a new minute must refresh.
+    #
+    # NOT (0, 0). That was the sentinel here until 2026-09-16 and it is a real
+    # wall-clock minute -- midnight ET, which is early afternoon in Australia.
+    # For that one minute a day `bars()` saw bars_minute == (now.hour,
+    # now.minute), called the cache fresh, and this check failed. A sentinel
+    # that is also a legal value is not a sentinel. Derived from the clock
+    # instead, so it cannot equal the current minute at any hour.
+    _n = datetime.now(M.ET)
+    st.bars_minute = ((_n.hour + 1) % 24, _n.minute)
     st.bars_fetched_at -= 999
     await tr.bars(st)
     if calls["n"] == 2:
