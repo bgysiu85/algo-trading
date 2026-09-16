@@ -73,6 +73,7 @@ def built(tmp_path_factory):
                 {"symbol": s, "date": d})
     sp = root / "pairs.json"; sp.write_text(json.dumps(survivors))
     rp = root / "rejects.json"; rp.write_text(json.dumps(rejects))
+    (cache / "SOURCE.txt").write_text("databento XNAS.BASIC ohlcv-1m\n")
     out = root / "grid.txt"; csvp = root / "cells.csv"
     rc = G.main(["--pairs", str(sp), str(rp), "--cache", str(cache),
                  "--window", "3d_to_2000", "--jobs", "1",
@@ -367,3 +368,67 @@ def test_the_runner_produces_the_same_numbers_on_one_job_and_several(built):
         for col in ("trades", "symbols", "net", "drop5", "early", "late"):
             assert float(r[col]) == pytest.approx(float(one[k][col]), abs=1e-6), \
                 (k, col)
+
+
+# --------------------------------------------------------------------------
+# the tape
+# --------------------------------------------------------------------------
+
+def test_the_first_full_run_was_on_the_wrong_tape_and_this_is_why_it_refuses(built):
+    """2026-09-16: the grid's default --cache pointed at bar_cache_db, which
+    holds EQUS.MINI -- the tape retracted for the pre-flight because it carries
+    4.8% of the consolidated prints. The runner recorded no tape, so the report
+    looked exactly like a real one. The only sign was three status counts that
+    matched the EQUS pre-flight to the unit.
+
+    So: read SOURCE.txt, refuse anything but the registered tape, and say so in
+    the first lines when overridden."""
+    root, cache = built["root"], built["cache"]
+    sp, rp = built["pairs"]
+    marker = cache / "SOURCE.txt"
+    keep = marker.read_text()
+    try:
+        marker.write_text("databento EQUS.MINI ohlcv-1m\n")
+        with pytest.raises(SystemExit) as e:
+            G.main(["--pairs", str(sp), str(rp), "--cache", str(cache),
+                    "--window", "3d_to_2000", "--jobs", "1", "--limit", "5",
+                    "--out", str(root / "x.txt"), "--csv", ""])
+        assert "REFUSING TO RUN" in str(e.value)
+        assert "EQUS.MINI" in str(e.value) and "XNAS.BASIC" in str(e.value)
+
+        out = root / "anyway.txt"
+        assert G.main(["--pairs", str(sp), str(rp), "--cache", str(cache),
+                       "--window", "3d_to_2000", "--jobs", "1", "--limit", "5",
+                       "--out", str(out), "--csv", "", "--anyway"]) == 0
+        text = out.read_text()
+        assert "NOT THE REGISTERED TAPE" in text
+        assert "tape         EQUS.MINI" in text
+        assert "none of it enters section 11" in text
+    finally:
+        marker.write_text(keep)
+
+
+def test_an_unknown_tape_is_refused_rather_than_measured(built):
+    """'We do not know what this is' is not a reason to measure it and find
+    out afterwards."""
+    assert G.tape_check("", "XNAS.BASIC", False) is not None
+    assert "UNKNOWN" in G.tape_check("", "XNAS.BASIC", False)
+    assert G.tape_check("XNAS.BASIC", "XNAS.BASIC", False) is None
+
+
+def test_the_report_names_its_tape_in_the_header_and_the_provenance_block(built):
+    t = built["text"]
+    assert "tape=XNAS.BASIC" in t.splitlines()[1]
+    assert "WHAT THIS RUN MEASURED" in t
+    assert "tape         XNAS.BASIC" in t
+    assert "Quote no figure below without this block" in t
+
+
+def test_the_entry_time_histogram_and_exit_reasons_are_printed(built):
+    """§5 item 6. The first full run omitted this block entirely -- a
+    registration requirement the runner did not meet, found by reading the
+    report against the registration rather than against itself."""
+    t = built["text"]
+    assert "WHEN THE BASELINE ENTERS" in t
+    assert "09:30" in t or "10:00" in t
+    assert "exit reasons" in t
