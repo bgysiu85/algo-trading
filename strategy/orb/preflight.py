@@ -88,6 +88,13 @@ RTH_CLOSE = dtime(16, 0)
 # Spec section 8. Every one of these is a guess until this module replaces it,
 # which is why they are read from here rather than hard-coded downstream.
 ORB_MINUTES = (5, 15, 30)
+# Which length sections 10.1b-10.5 report in DETAIL. It is the spec's default
+# and NOT a finding: §8 marks ORB_MINUTES uncalibrated and §14 says to set it
+# from data. Section 10.6 carries every length side by side so the choice can
+# actually be made -- until 2026-09-16 this file computed all three and printed
+# one, which is a report showing a single cell of a grid it had already
+# measured.
+HEADLINE_MINUTES = 15
 TRIGGER_BAR_MINUTES = 5
 MIN_RANGE_BARS_FRAC = 10 / 15        # 10 of the 15 one-minute bars
 MIN_RANGE_PCT = 0.5
@@ -340,6 +347,60 @@ def _tape_caveat(tape: str) -> list[str]:
             "  about the market or the universe did.", ""]
 
 
+def by_minutes_grid(by_min: dict) -> list[str]:
+    """Every decision that 5, 15 and 30 minutes disagree on, side by side.
+
+    Sections 10.2-10.5 report one length in detail. This module has always
+    MEASURED all three, and printing one of them turned a grid into a single
+    cell -- which is how a parameter §8 marks uncalibrated gets chosen by
+    whichever number happened to be on the page.
+
+    Nothing here is a P/L, so none of it picks the length on its own. What it
+    does is show that the lengths trade off against each other rather than one
+    dominating, which a single column cannot.
+    """
+    L = ["", "10.6  THE SAME QUESTIONS AT EVERY ORB_MINUTES", "",
+         "  ORB_MINUTES is uncalibrated (spec §8) and §14 says to set it from",
+         "  data. These are the rows that differ.", "",
+         f"  {'mins':>5}{'usable':>9}{'width p50':>11}{'RTH screen':>12}"
+         f"{'up trig':>9}{'zone retest':>13}", ""]
+    for m in sorted(by_min):
+        rs = by_min[m]
+        ok = [r for r in rs if r.status == "OK"]
+        if not ok:
+            L.append(f"  {m:>5}{'no usable range':>9}")
+            continue
+        both = sum(1 for r in ok if r.in_price_band and r.passes_rth_move)
+        up = [r for r in ok if r.up_trigger]
+        zone = sum(1 for r in up if r.retest_zone)
+        w = [r.width_pct for r in ok if r.width_pct is not None]
+        L.append(f"  {m:>5}{len(ok):>9,}{_f(pct(w, 50)):>11}"
+                 f"{both:>8,} {both / len(ok) * 100:>3.0f}%"
+                 f"{len(up):>9,}{zone:>13,}")
+    L += ["", f"  {'mins':>5}" + "".join(f"{n:>11}" for n in
+                                         ("R struct", "p90", "R opp", "p90",
+                                          "R frac", "p90")), ""]
+    for m in sorted(by_min):
+        trig = [r for r in by_min[m] if r.status == "OK" and r.entry_px]
+        cells = []
+        for name in ("structure", "opposite", "rangefrac"):
+            v = [getattr(r, f"r_{name}_pct") for r in trig]
+            v = [x for x in v if x is not None and x > 0]
+            cells += [f"{_f(pct(v, 50)):>11}", f"{_f(pct(v, 90)):>11}"]
+        L.append(f"  {m:>5}" + "".join(cells))
+    L += ["",
+          "  Read the two tables together before choosing. A shorter range is",
+          "  more often usable and triggers more often; a longer one gives the",
+          "  RTH screen more time to see a move, and tightens the STRUCTURE",
+          "  stop while widening the RANGE-FRACTION one -- the first is the",
+          "  trigger candle's low and does not scale with the range, the second",
+          "  is a fraction OF the range and does.",
+          "",
+          "  So no length dominates, and picking one from availability alone",
+          "  would be choosing on the column that happens to be biggest."]
+    return L
+
+
 def provenance(a, cache, tape, seen: int, rows: list) -> list[str]:
     """What this run measured, printed at the top of the report itself.
 
@@ -401,7 +462,7 @@ def render(rows: list[DayRow], tape: str = "") -> list[str]:
                   "guarding it,",
                   "     and their defaults are wrong (spec 10.1)."]
 
-    base = by_min.get(15, [])
+    base = by_min.get(HEADLINE_MINUTES, [])
     ok = [r for r in base if r.status == "OK"]
 
     # 10.1b. The first run of this module excluded 67% of symbol-days as
@@ -415,9 +476,9 @@ def render(rows: list[DayRow], tape: str = "") -> list[str]:
         # body saying the range is measurable -- a section arguing with its own
         # title, and the title is the part people quote.
         usable_frac = len(ok) / len(base) if base else 0.0
-        head = ("10.1b  WHY THE RANGE IS UNUSABLE (15-minute range)"
+        head = (f"10.1b  WHY THE RANGE IS UNUSABLE ({HEADLINE_MINUTES}-minute range)"
                 if usable_frac < 0.5 else
-                "10.1b  WHERE THE RANGE IS UNUSABLE, AND WHY (15-minute range)")
+                f"10.1b  WHERE THE RANGE IS UNUSABLE, AND WHY ({HEADLINE_MINUTES}-minute range)")
         L += ["", head, ""]
         L += _tape_caveat(tape)
         empty = [r for r in base if r.rth_bars == 0]
@@ -475,7 +536,7 @@ def render(rows: list[DayRow], tape: str = "") -> list[str]:
                   "  and nothing else: a measurable range is a precondition for",
                   "  evaluating ORB, not evidence for it."]
 
-    L += ["", "10.2  THE RTH SCREEN AT THE RANGE END (15-minute range)", ""]
+    L += ["", f"10.2  THE RTH SCREEN AT THE RANGE END ({HEADLINE_MINUTES}-minute range)", ""]
     if ok:
         band = sum(1 for r in ok if r.in_price_band)
         mv = sum(1 for r in ok if r.passes_rth_move)
@@ -496,7 +557,7 @@ def render(rows: list[DayRow], tape: str = "") -> list[str]:
           "  downstream. To close this, load bar_minute for the full history",
           "  and compute the baseline there."]
 
-    L += ["", "10.3  TRIGGERS, BEFORE ANY GATE (15-minute range)", ""]
+    L += ["", f"10.3  TRIGGERS, BEFORE ANY GATE ({HEADLINE_MINUTES}-minute range)", ""]
     if ok:
         up = [r for r in ok if r.up_trigger]
         both_t = sum(1 for r in ok if r.up_trigger and r.down_trigger)
@@ -578,6 +639,8 @@ def render(rows: list[DayRow], tape: str = "") -> list[str]:
           f"median {_f(pct(t2, 50))} bars",
           f"  hit the structure stop            {len(ts):>8,}   "
           f"median {_f(pct(ts, 50))} bars"]
+
+    L += by_minutes_grid(by_min)
 
     L += ["", "WHAT THIS DOES NOT ANSWER", "",
           "  Nothing here is a P/L and nothing here is an edge. These are",

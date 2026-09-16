@@ -474,3 +474,98 @@ def test_the_block_tells_the_reader_not_to_quote_a_table_without_it():
 
     txt = "\n".join(P.provenance(_Args(), Path("c"), "t", 10, _rows()))
     assert "Quote no figure below without this block" in txt
+
+
+# ==========================================================================
+# 10.6 — every ORB_MINUTES, added 2026-09-16.
+#
+# This module has always MEASURED 5, 15 and 30 and printed one of them, which
+# turned a grid into a single cell -- and ORB_MINUTES is a parameter §8 marks
+# uncalibrated and §14 says to set from data. A parameter chosen by whichever
+# number happened to be on the page is not chosen from data.
+# ==========================================================================
+def _grid_rows():
+    from strategy.orb.preflight import DayRow
+
+    out = {}
+    for m, (usable, wide) in ((5, (6, 1)), (15, (4, 2)), (30, (3, 3))):
+        rs = []
+        for i in range(usable):
+            r = DayRow("A%d" % i, "2026-01-02", "survivor", m)
+            r.status = "OK"
+            r.width_pct = float(m)
+            r.in_price_band = True
+            r.passes_rth_move = i % 2 == 0
+            r.up_trigger = True
+            r.retest_zone = i % 3 == 0
+            r.entry_px = 10.0
+            r.r_structure_pct = 3.0
+            r.r_opposite_pct = float(m)
+            r.r_rangefrac_pct = 2.0
+            rs.append(r)
+        for i in range(wide):
+            r = DayRow("W%d" % i, "2026-01-02", "survivor", m)
+            r.status = "TOO_WIDE"
+            rs.append(r)
+        out[m] = rs
+    return out
+
+
+def test_every_orb_minutes_appears_in_the_grid():
+    from strategy.orb import preflight as P
+
+    txt = "\n".join(P.by_minutes_grid(_grid_rows()))
+    for m in P.ORB_MINUTES:
+        assert f"  {m:>5}" in txt, f"{m} minutes missing from 10.6"
+
+
+def test_the_grid_counts_only_USABLE_ranges():
+    """A row whose range was skipped has no trigger and no R. Counting it
+    would make a length look more available the more often it failed."""
+    from strategy.orb import preflight as P
+
+    txt = "\n".join(P.by_minutes_grid(_grid_rows()))
+    assert "        6" in txt and "        4" in txt and "        3" in txt
+
+
+def test_the_grid_carries_all_three_stop_modes():
+    """`opposite` is eliminated on this table. If it were not printed at every
+    length, the elimination would rest on one column."""
+    from strategy.orb import preflight as P
+
+    txt = "\n".join(P.by_minutes_grid(_grid_rows()))
+    for head in ("R struct", "R opp", "R frac"):
+        assert head in txt
+
+
+def test_the_grid_says_no_length_dominates():
+    """The reason the table exists. A reader shown five numbers and no
+    interpretation will take the biggest one."""
+    from strategy.orb import preflight as P
+
+    txt = "\n".join(P.by_minutes_grid(_grid_rows()))
+    assert "no length dominates" in txt
+    assert "choosing on the column that happens to be biggest" in txt
+
+
+def test_the_headline_length_is_a_named_constant_not_a_literal():
+    """It was `by_min.get(15, [])` in four places. A default hard-coded in the
+    renderer is a second source of truth about a parameter the spec says is
+    uncalibrated."""
+    from pathlib import Path
+
+    from strategy.orb import preflight as P
+
+    assert P.HEADLINE_MINUTES in P.ORB_MINUTES
+    src = Path(P.__file__).read_text(encoding="utf-8")
+    assert "by_min.get(HEADLINE_MINUTES" in src
+    assert "by_min.get(15" not in src
+
+
+def test_the_headline_is_declared_to_be_a_DEFAULT_and_not_a_finding():
+    from pathlib import Path
+
+    from strategy.orb import preflight as P
+
+    src = Path(P.__file__).read_text(encoding="utf-8")
+    assert "NOT a finding" in src
