@@ -128,3 +128,9 @@ def test_run_day_returns_both_books_from_one_pass(monkeypatch):
     assert hit["setups"]["triggered"] + hit["setups"]["band_refused"] >= len(hit["pb"])
     assert all("premium_pct" in r for r in hit["pb"])
     assert not any("premium_pct" in r for r in hit["mcl"])
+    for r in hit["pb"]:
+        # the chart coordinates a person needs to find the trade
+        assert r["signal_et"] < r["entry_et"] <= r["exit_et"]
+        assert r["armed_et"] < r["entry_et"]
+        assert r["pole_low"] <= r["signal_close"] <= r["peak"] + 1e-9
+        assert r["entry_px"] >= r["peak"] + 0.02 - 1e-4

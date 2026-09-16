@@ -66,6 +66,7 @@ class Setup:
     peak: float = 0.0
     fill_px: float | None = None
     armed_at: int | None = None
+    pole_low: float = 0.0
     trade: object = None           # MCL.Trade once the engine has taken it
 
 
@@ -73,6 +74,7 @@ class Setup:
 class SessionResult:
     trades: list = field(default_factory=list)
     setups: list = field(default_factory=list)
+    index: object = None           # the signals frame's timestamps, for row -> time
 
 
 def session_positions(sig: pd.DataFrame, session_date, tz, not_before=None):
@@ -112,6 +114,7 @@ def next_setup(sig: pd.DataFrame, idx: list[int], allowed: list[bool],
     s = idx[k]
     st = Setup(signal_i=s, signal_close=float(sig["close"].iloc[s]), peak=h[s])
     base = float(lo[max(0, s - POLE_BARS + 1):s + 1].min())
+    st.pole_low = base
     armed = False
 
     for kk in range(k + 1, n):
@@ -164,7 +167,7 @@ def backtest_session_detail(df: pd.DataFrame, session_date, tz,
             raise TypeError(f"{bad} is set by MCL-PB itself")
     sig = MCL.signals(df, require_macd_pos=engine_kw.get("require_macd_pos"))
     idx, allowed = session_positions(sig, session_date, tz, not_before)
-    out = SessionResult()
+    out = SessionResult(index=sig.index)
     if not idx:
         return out
 

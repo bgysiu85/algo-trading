@@ -49,15 +49,31 @@ OUTCOMES = ("triggered", "band_refused", "cancel_depth", "cancel_macd", "window"
 
 # --- the tape ---------------------------------------------------------------
 
-def trade_row(t, symbol: str, day: str, signal_close: float | None = None) -> dict:
+def _et(ts) -> str:
+    import pandas as pd
+    return pd.Timestamp(ts).tz_convert(ET).strftime("%H:%M")
+
+
+def trade_row(t, symbol: str, day: str, setup=None, index=None) -> dict:
+    """One trade. With `setup` (and the signals frame's `index`), the MCL-PB
+    rows also carry where the setup began, armed and peaked -- the bars someone
+    needs to find the trade on a chart."""
     import pandas as pd
     et = pd.Timestamp(t.entry_time).tz_convert(ET)
     r = {"symbol": symbol, "date": day, "net": float(t.net),
          "entry_px": float(t.entry_price), "entry_et": et.strftime("%H:%M"),
          "pre07": et.time() < PRE_CUT, "reason": t.reason,
-         "bars_held": int(t.bars_held)}
-    if signal_close is not None:
-        r["premium_pct"] = 100.0 * (float(t.entry_price) / signal_close - 1.0)
+         "bars_held": int(t.bars_held),
+         "exit_et": _et(t.exit_time), "exit_px": float(t.exit_price)}
+    if setup is not None:
+        r["premium_pct"] = 100.0 * (float(t.entry_price) / setup.signal_close - 1.0)
+        r["signal_close"] = float(setup.signal_close)
+        r["peak"] = float(setup.peak)
+        r["pole_low"] = float(setup.pole_low)
+        if index is not None:
+            r["signal_et"] = _et(index[setup.signal_i])
+            if setup.armed_at is not None:
+                r["armed_et"] = _et(index[setup.armed_at])
     return r
 
 
@@ -106,7 +122,7 @@ def run_day(args: tuple) -> tuple:
             res["setups"][st.outcome] += 1
             if st.trade is not None:
                 res["pb"].append(trade_row(st.trade, rec["symbol"], day,
-                                           st.signal_close))
+                                           st, det.index))
     return day, res, ""
 
 
@@ -280,8 +296,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def write_csv(path: str, mcl, pb) -> None:
     import csv
-    cols = ["book", "symbol", "date", "entry_et", "pre07", "entry_px", "net",
-            "premium_pct", "reason", "bars_held"]
+    cols = ["book", "symbol", "date", "signal_et", "signal_close", "armed_et",
+            "pole_low", "peak", "entry_et", "entry_px", "premium_pct", "exit_et", "exit_px",
+            "reason", "bars_held", "net", "pre07"]
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
