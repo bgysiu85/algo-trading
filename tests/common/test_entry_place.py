@@ -897,3 +897,69 @@ def test_the_loader_carries_the_qualifying_sentence_through(tmp_path):
         [(got[0], {tf: {"a": 0.0, "_bar": "06:34"} for tf in P.TIMEFRAMES})],
         [], _fake_ref(["a"]), ["a"], ["2026-02-17"], 10, 1, 1.0, "p.json"))
     assert "fluke" in text, "the sheet's own caveat must reach the report"
+
+
+# --- the caveat must be counted, not asserted ---------------------------------
+#
+# This paragraph used to say "there is no comparison group worth the name".
+# True of the first 21 samples; false twice since -- once when the passes
+# doubled, again when the outcome column arrived. A hard-coded description of
+# the data is a second source of truth about the data.
+
+def _labelled(names, spec):
+    """spec: {label: count}."""
+    out = []
+    k = 0
+    for lab, n in spec.items():
+        for _ in range(n):
+            f = {tf: {nm: 0.0 for nm in names} for tf in P.TIMEFRAMES}
+            for tf in P.TIMEFRAMES:
+                f[tf]["_bar"] = "07:20"
+            out.append(({"symbol": f"S{k}", "date": "2026-09-14",
+                         "hhmm": "07:22", "label": lab,
+                         "outcome": "won" if lab == "took" else None,
+                         "outcome_note": "", "note": ""}, f))
+            k += 1
+    return out
+
+
+def _render(placed, names=("a",)):
+    names = list(names)
+    return "\n".join(P.render(placed, [], _fake_ref(names), names,
+                              ["2026-09-14"], 10, 1, 1.0, "p.json"))
+
+
+def test_the_caveat_counts_the_set_it_was_given():
+    text = _render(_labelled(["a"], {"took": 11, "took-and-lost": 6,
+                                     "pass": 6}))
+    assert "TAKE against PASS is available: 11 vs 6" in text
+    assert "WON against LOST is available: 11 vs 6" in text
+    assert "no comparison group worth the name" not in text
+
+
+def test_a_thin_side_removes_only_its_own_comparison():
+    """Three passes and six losses: the outcome cut stands, the selection cut
+    does not. Printing both would overstate; printing neither would understate
+    the one that is there."""
+    text = _render(_labelled(["a"], {"took": 11, "took-and-lost": 6,
+                                     "pass": 3}))
+    assert "TAKE against PASS" not in text
+    assert "WON against LOST is available: 11 vs 6" in text
+
+
+def test_with_neither_side_it_says_so_rather_than_implying_a_cut():
+    text = _render(_labelled(["a"], {"took": 11, "took-and-lost": 2,
+                                     "pass": 2}))
+    assert "Neither comparison has enough rows" in text
+    assert "is available" not in text
+
+
+def test_the_two_comparisons_are_never_presented_as_one():
+    """The mistake this module is one step from at all times: reading a
+    feature that separates his takes from his passes as evidence the selection
+    makes money."""
+    text = _render(_labelled(["a"], {"took": 11, "took-and-lost": 6,
+                                     "pass": 6}))
+    assert "describes what he SELECTS" in text
+    assert "says nothing about whether the selection makes money" in text
+    assert "only one about OUTCOME" in text
