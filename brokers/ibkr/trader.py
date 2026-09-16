@@ -561,7 +561,35 @@ class MCLPaperTrader:
             LOG.error("could not qualify %s — skipping", symbol)
             st.blocked = True
             return False
-        st.contract = qualified[0]
+        # qualified[0] CAN BE None. PSNYW on 2026-09-15 is a warrant, so there
+        # is no Stock definition for it: IB answered error 200, the list came
+        # back non-empty with a None in it, and `st.contract = None` travelled
+        # all the way to reqMktData, which reads contract.secType and raised
+        #
+        #     'NoneType' object has no attribute 'secType'
+        #
+        # out of _subscribe, out of sync_watchlist, into the run loop -- see
+        # the two further defects that turned one bad ticker into a watchlist
+        # that stopped reloading.
+        got = qualified[0]
+        if got is None:
+            LOG.error("could not qualify %s — no security definition "
+                      "(a warrant, right or unit has none as a Stock)", symbol)
+            self.block_symbol(st, "no Stock security definition")
+            return False
+        # And a contract that qualified as something OTHER than a stock is not
+        # one this strategy can trade. Checking the TYPE is the mechanism; a
+        # ticker-shaped guess at what is a warrant is a heuristic that would be
+        # wrong on the first five-letter common stock it met.
+        # The DEFAULT REFUSES. An object with no secType at all is an unknown
+        # thing, not a stock, and defaulting to "STK" would have made this
+        # guard permissive in exactly the case where nothing is known.
+        if getattr(got, "secType", "") != "STK":
+            kind = getattr(got, "secType", None) or "unknown"
+            LOG.error("%s qualified as %s, not STK — skipping", symbol, kind)
+            self.block_symbol(st, f"secType {kind}, not STK")
+            return False
+        st.contract = got
 
         # Minimum price variation. US stocks >= $1.00 must be priced in whole
         # cents; a limit like 5.3206 is rejected outright with IB error 110.
@@ -691,14 +719,26 @@ class MCLPaperTrader:
             return
         if not first and mtime == self._wl_mtime:
             return
-        self._wl_mtime = mtime
 
         wanted = set(parse_watchlist(self.watchlist))
         if not wanted and first:
             return
 
-        for sym in wanted - self.symbols:
-            await self._subscribe(sym)
+        # PER SYMBOL, not per pass. One unqualifiable ticker used to abort the
+        # whole loop, and `wanted - self.symbols` is a SET -- so which of the
+        # remaining names were silently never subscribed depended on iteration
+        # order. A symbol that raises is blocked rather than retried: it is
+        # already in self.states by this point, so it leaves `wanted -
+        # self.symbols` and cannot spin.
+        for sym in sorted(wanted - self.symbols):
+            try:
+                await self._subscribe(sym)
+            except Exception as e:                          # noqa: BLE001
+                LOG.exception("%s could not be subscribed (%s: %s) — blocked, "
+                              "the rest of the watchlist continues",
+                              sym, type(e).__name__, e)
+                for st in [v for k, v in self.states.items() if k[1] == sym]:
+                    st.blocked = True
 
         for (_name, sym), st in self.states.items():
             if sym not in wanted and not st.retired:
@@ -711,6 +751,20 @@ class MCLPaperTrader:
             elif sym in wanted and st.retired:
                 st.retired = False
                 LOG.info("%s re-added to watchlist", sym)
+
+        # THE MTIME IS SPENT LAST, and this is the defect that turned one bad
+        # ticker into a trader working from a stale list in silence.
+        #
+        # It used to be committed at the top, BEFORE the subscribe loop. So
+        # when PSNYW raised, the run loop logged "watchlist reload failed" --
+        # and every later pass saw `mtime == self._wl_mtime` and returned
+        # immediately. The reload did not retry. It only recovered because
+        # tv_feed rewrote the file minutes later and changed the mtime.
+        #
+        # State advanced before the work it guards completed: the same shape as
+        # the loader that had a column and never filled it, and the guard that
+        # checked the table instead of the loader.
+        self._wl_mtime = mtime
 
     # -- restarting into an account that is not flat ----------------------
 
