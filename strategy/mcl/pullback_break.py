@@ -1,36 +1,35 @@
 #!/usr/bin/env python3
-"""MCL-PB v2 -- a swing high, two red bars, buy the break of the high.
+"""MCL-PB v3 -- a swing high, two red bars, and a break that CLOSES on volume.
 
-Registered in docs/research/REGISTERED_pullback_break_v2.md BEFORE this
+Registered in docs/research/REGISTERED_pullback_break_v3.md BEFORE this
 version ran. If this file and that document disagree, this file is wrong.
 
-v1 (REGISTERED_pullback_break.md, verdict NOTHING) waited for MCL's five-clause
-signal and THEN looked for a pullback. Ben's own examples all have the pullback
-BEFORE the signal, so v2 drops the signal from the entry entirely:
+v1 waited for MCL's signal (NOTHING). v2 bought a stop a cent above the swing
+high with MACD read on the bar before (NOTHING; Ben's review of its trades is
+what produced v3). Now:
 
     swing high  a bar whose high exceeds the previous bar's high starts a
-                candidate; higher highs raise it. The candidate becomes a LIVE
-                LEVEL once two red bars (close < open, the peak bar counting if
-                red) have printed since its peak bar
-    levels      several can be live at once -- the 6.20 top inside a pullback
-                from a 6.79 top are both levels, and each is bought on its own
-                break (AEHL 2026-09-03 07:33 and 07:58). The lowest live level
-                is the resting buy-stop
-    trigger     buy-stop at level + 1c, fires on the first bar whose high
-                reaches it while flat, if macd > macd_sig on the LAST COMPLETED
-                bar. A break that cannot fire (MACD closed, in a trade, before
-                first_seen, final bar) just removes the level
-    fill        max(level + 1c, open) + 1 tick
-    limit       a level expires TIME_LIMIT_BARS after its peak bar
+                candidate; higher highs raise it. The candidate is ARMED once
+                two red bars (close < open, the peak bar counting if red) have
+                printed since its peak bar
+    level       once armed, the highest high printed since the arming bar --
+                the bounce top, which is what Ben buys the break of -- and the
+                peak itself until a bar has printed. Several armed setups can
+                be live; the lowest level is the one that can fire
+    break       a bar whose high reaches level + 1c. It QUALIFIES at its close
+                if close > level, volume > SMA20 of the 20 bars before it, and
+                macd > macd_sig on the bar itself. Then the entry is that
+                close + 1 tick (MCL's own fill). A break that does not qualify
+                just raises the level to the bar's high
+    limit       a setup expires TIME_LIMIT_BARS after its peak bar
 
-THE EXIT IS NOT RE-IMPLEMENTED. Each trigger is handed to MCL's own
-`backtest_session` through `entry_bars` / `entry_px_by_bar`, one at a time, so
-the trail, gap-through fills, commission, the 09:30 flatten and the optional
-`target_cents` limit are the published engine's.
+THE EXIT IS NOT RE-IMPLEMENTED. Each entry is handed to MCL's own
+`backtest_session` through `entry_bars`, one at a time, so the trail, the 09:30
+flatten and the optional `green_hold_bars` / `target_cents` exits are the
+published engine's.
 
-THE STATE IS WALKED THROUGH TRADES. Levels keep forming and being consumed
-while a position is open; only the trigger is gated on being flat. A high made
-inside a trade is a level the next setup can buy the break of.
+THE STATE IS WALKED THROUGH TRADES. Setups keep forming and being consumed
+while a position is open; only the entry is gated on being flat.
 """
 from __future__ import annotations
 
@@ -43,29 +42,38 @@ from strategy.mcl import mcl as MCL
 
 STRATEGY_NAME = "MCL-PB"
 
-STOP_OFFSET = 0.01        # registered: buy-stop at peak + 1c
+STOP_OFFSET = 0.01        # registered: the break is level + 1c
 MIN_RED_BARS = 2          # registered: Ben, "at least 2 red bars from the peak"
 TIME_LIMIT_BARS = 60      # registered: mine, fixed before any run
+VOL_MA_LEN = 20           # registered: Ben, "volume above volume MA 20"
 
 TRIGGERED = "triggered"
 BAND = "band_refused"     # triggered, but the engine refused the price band
 EXPIRED = "expired"       # live, never broken within the time limit
-REFUSED_MACD = "refused_macd"   # broken while MACD was closed
-REFUSED_BUSY = "refused_busy"   # broken while in a trade / before the floor
+REFUSED_BUSY = "refused_busy"   # crossed while in a trade / before the floor
 WINDOW = "window"         # still live at 09:30
 
 
 @dataclass
 class Setup:
-    """One LIVE LEVEL. Candidates that never reach two red bars are not setups."""
+    """One ARMED swing high. Candidates that never reach two red bars are not setups."""
     peak_i: int
     peak: float
     armed_at: int
     reds: int
+    bounce: float | None = None    # highest high since the arming bar, once one has printed
     outcome: str = WINDOW
     end_i: int | None = None
     fill_px: float | None = None
+    refused_close: int = 0         # breaks refused because the bar closed at/below the level
+    refused_vol: int = 0           # ... because volume was not above its 20-bar average
+    refused_macd: int = 0          # ... because MACD was not above its signal on the bar
     trade: object = None
+
+    @property
+    def level(self) -> float:
+        """The bounce top once a bar has printed after arming; the peak until then."""
+        return self.peak if self.bounce is None else self.bounce
 
 
 @dataclass
@@ -74,6 +82,8 @@ class SessionResult:
     setups: list = field(default_factory=list)
     index: object = None
     peaks: int = 0                 # every candidate swing high, armed or not
+    breaks: int = 0                # bars that reached a live level
+    refused: dict = field(default_factory=lambda: {"close": 0, "vol": 0, "macd": 0})
 
 
 def session_positions(sig: pd.DataFrame, session_date, tz, not_before=None):
@@ -90,21 +100,26 @@ def session_positions(sig: pd.DataFrame, session_date, tz, not_before=None):
 
 def walk(sig: pd.DataFrame, idx: list[int], allowed: list[bool],
          take_trade) -> SessionResult:
-    """The state machine. `take_trade(j, fill_px)` returns MCL's Trade or None
-    (band refused); triggers are suppressed until after that trade's exit bar."""
+    """The state machine. `take_trade(j)` enters at bar j's close through MCL's
+    engine and returns its Trade, or None when the engine refused the price
+    band; entries are suppressed until after that trade's exit bar."""
     o = sig["open"].to_numpy(float)
     h = sig["high"].to_numpy(float)
     c = sig["close"].to_numpy(float)
+    v = sig["volume"].to_numpy(float)
     m = sig["macd"].to_numpy(float)
     ms = sig["macd_sig"].to_numpy(float)
     red = c < o
     macd_open = m > ms
+    # SMA of the 20 bars BEFORE each bar -- the break bar's own volume is the
+    # thing being judged, so it is not in its own average.
+    vma = pd.Series(v).rolling(VOL_MA_LEN).mean().shift(1).to_numpy()
 
     out = SessionResult(index=sig.index)
     n = len(idx)
-    cand = None                # (high, peak_i, reds) of the forming swing high
-    live: list[Setup] = []     # ascending by peak
-    flat_after = -1            # trigger only on bars strictly after this row
+    cand = None                # [high, peak_i, reds] of the forming swing high
+    live: list[Setup] = []
+    flat_after = -1            # enter only on bars strictly after this row
 
     def end(st: Setup, outcome: str, j: int):
         st.outcome, st.end_i = outcome, j
@@ -121,34 +136,44 @@ def walk(sig: pd.DataFrame, idx: list[int], allowed: list[bool],
             if j - st.peak_i > TIME_LIMIT_BARS:
                 end(st, EXPIRED, j)
 
-        # 2. Resting stops, lowest first, decided before this bar's own close.
-        #    Every live level was armed on an earlier bar: levels are created
-        #    in step 3, after this block has run for their bar.
-        may_fire = (not last) and j > flat_after and allowed[j] and macd_open[j - 1]
-        for st in sorted(live, key=lambda x: x.peak):
-            if h[j] < st.peak + STOP_OFFSET - 1e-9:
-                continue
-            if may_fire:
-                fill = round(max(st.peak + STOP_OFFSET, o[j])
-                             + MCL.SLIPPAGE_TICKS * MCL.TICK, 6)
-                st.fill_px = fill
-                t = take_trade(j, fill)
-                if t is None:
-                    end(st, BAND, j)
-                else:
-                    st.trade = t
-                    out.trades.append(t)
-                    flat_after = sig.index.get_loc(pd.Timestamp(t.exit_time))
-                    end(st, TRIGGERED, j)
-                    may_fire = False       # the same bar cannot buy twice
-            elif last:
-                end(st, WINDOW, j)
-            elif not macd_open[j - 1] and j > flat_after and allowed[j]:
-                end(st, REFUSED_MACD, j)
+        # 2. The lowest live level, if this bar reached it, judged at the close.
+        may_enter = (not last) and j > flat_after and allowed[j]
+        hit = [st for st in live if h[j] >= st.level + STOP_OFFSET - 1e-9]
+        if hit:
+            out.breaks += 1
+            # Live levels coincide in practice -- an older setup's bounce top IS
+            # the newer setup's peak -- so the tie-break decides which setup the
+            # trade is credited to: the most recently armed, whose top is the
+            # bar a chart reader would point at.
+            lowest = min(hit, key=lambda x: (x.level, -x.armed_at))
+            if not may_enter:
+                for st in hit:
+                    end(st, WINDOW if last else REFUSED_BUSY, j)
             else:
-                end(st, REFUSED_BUSY, j)
+                ok = True
+                if not c[j] > lowest.level:
+                    lowest.refused_close += 1; out.refused["close"] += 1; ok = False
+                elif not (vma[j] == vma[j] and v[j] > vma[j]):
+                    lowest.refused_vol += 1; out.refused["vol"] += 1; ok = False
+                elif not macd_open[j]:
+                    lowest.refused_macd += 1; out.refused["macd"] += 1; ok = False
+                if ok:
+                    t = take_trade(j)
+                    if t is None:
+                        for st in hit:
+                            end(st, BAND, j)
+                    else:
+                        lowest.trade, lowest.fill_px = t, float(t.entry_price)
+                        out.trades.append(t)
+                        flat_after = sig.index.get_loc(pd.Timestamp(t.exit_time))
+                        end(lowest, TRIGGERED, j)
+                        for st in [x for x in hit if x is not lowest]:
+                            end(st, REFUSED_BUSY, j)
+                # a refused break is not consumed: the level rises below
 
-        # 3. The bar completes: the forming swing high and its red count.
+        # 3. The bar completes: levels rise, the forming swing high, arming.
+        for st in live:
+            st.bounce = h[j] if st.bounce is None else max(st.bounce, h[j])
         if cand is None:
             if prev_high is not None and h[j] > prev_high:
                 cand = [h[j], j, 1 if red[j] else 0]
@@ -159,7 +184,8 @@ def walk(sig: pd.DataFrame, idx: list[int], allowed: list[bool],
             cand[2] += 1
         if cand is not None and cand[2] >= MIN_RED_BARS:
             if not last:
-                live.append(Setup(peak_i=cand[1], peak=cand[0], armed_at=j, reds=cand[2]))
+                live.append(Setup(peak_i=cand[1], peak=cand[0], armed_at=j,
+                                  reds=cand[2]))
             cand = None
 
         if last:
@@ -185,21 +211,18 @@ def backtest_session_detail(df: pd.DataFrame, session_date, tz,
     if not idx:
         return SessionResult(index=sig.index)
 
-    def take_trade(j: int, fill: float):
+    def take_trade(j: int):
         take = pd.Series(False, index=sig.index)
         take.iloc[j] = True
-        px = pd.Series(np.nan, index=sig.index)
-        px.iloc[j] = fill
         tr = MCL.backtest_session(df, session_date, tz, not_before=not_before,
-                                  entry_bars=take, entry_px_by_bar=px,
-                                  **engine_kw)
+                                  entry_bars=take, **engine_kw)
         if not tr:
             return None
         if len(tr) != 1:
-            raise AssertionError(f"one trigger produced {len(tr)} trades")
+            raise AssertionError(f"one entry produced {len(tr)} trades")
         t = tr[0]
         if pd.Timestamp(t.entry_time) != sig.index[j]:
-            raise AssertionError("engine entered on a different bar from the trigger")
+            raise AssertionError("engine entered on a different bar from the break")
         return t
 
     return walk(sig, idx, allowed, take_trade)

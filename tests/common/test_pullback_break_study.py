@@ -73,22 +73,23 @@ def test_render_prints_verdict_population_cells_and_level_outcomes():
     mcl = rows("2026-01-10", [-5] * 4) + rows("2026-03-10", [-5] * 4)
     pb = rows("2026-01-10", [1] * 7) + rows("2026-03-10", [1] * 7)
     pbs = {n: pb for n, _ in S.CELLS}
-    txt = "\n".join(S.render(mcl, pbs, Counter(triggered=14, refused_macd=3, expired=2),
-                             [3, 5, 8], 40, 0, ["2026-01-10", "2026-03-10"], 1.0, 1))
-    for must in ("POPULATION CHECK", "DOES NOT MATCH", "refused_macd", "THE VERDICT",
-                 "PRE-07", "before 07:00", "PB2-10c", "PB2-25c", "CLEARS",
-                 "read on PB2", "median 5"):
+    txt = "\n".join(S.render(mcl, pbs, Counter(triggered=14, refused_busy=3, expired=2),
+                             [3, 5, 8], 40, 1, ["2026-01-10", "2026-03-10"], 1.0, 1,
+                             Counter(close=4, vol=9, macd=1), 33, ["ZZZ 2026-01-10: KeyError: x"]))
+    for must in ("POPULATION CHECK", "DOES NOT MATCH", "refused_busy", "THE VERDICT",
+                 "PRE-07", "before 07:00", "PB3-g5", "PB3-g0", "CLEARS",
+                 "read on PB3-g3", "median 5", "volume not above", "ZZZ 2026-01-10"):
         assert must in txt
 
 
 def test_csv_carries_every_book(tmp_path):
     p = tmp_path / "t.csv"
-    pbs = {"PB2": rows("2026-01-10", [2, 3]), "PB2-10c": rows("2026-01-10", [1])}
+    pbs = {"PB3-g3": rows("2026-01-10", [2, 3]), "PB3-g5": rows("2026-01-10", [1])}
     S.write_csv(str(p), rows("2026-01-10", [1]), pbs)
     lines = p.read_text().splitlines()
     assert len(lines) == 5
-    assert sum(l.startswith("PB2,") for l in lines) == 2
-    assert sum(l.startswith("PB2-10c,") for l in lines) == 1
+    assert sum(l.startswith("PB3-g3,") for l in lines) == 2
+    assert sum(l.startswith("PB3-g5,") for l in lines) == 1
 
 
 # --- run_day against the real engines -----------------------------------------
@@ -126,18 +127,18 @@ def test_run_day_returns_every_book_from_one_pass(monkeypatch):
                                      "first_seen": fs}]))
         assert err == "" and res["errors"] == 0 and res["symdays"] == 1
         assert set(res["pb"]) == {n for n, _ in S.CELLS}
-        if res["mcl"] and res["pb"]["PB2"]:
+        if res["mcl"] and res["pb"]["PB3-g3"]:
             hit = res
             break
     assert hit, "no seed produced trades in both books"
-    assert hit["setups"]["triggered"] + hit["setups"]["band_refused"] >= len(hit["pb"]["PB2"])
+    assert hit["setups"]["triggered"] + hit["setups"]["band_refused"] >= len(hit["pb"]["PB3-g3"])
     assert hit["levels_per_symday"] == [sum(hit["setups"].values())]
-    for r in hit["pb"]["PB2"]:
+    assert hit["breaks"] >= len(hit["pb"]["PB3-g3"]) + sum(hit["refused"].values())
+    for r in hit["pb"]["PB3-g3"]:
         # the chart coordinates a person needs to find the trade
         assert r["top_et"] <= r["armed_et"] < r["entry_et"] <= r["exit_et"]
         assert r["reds"] >= 2
-        assert r["entry_px"] >= r["level"] + 0.02 - 1e-4
+        assert r["entry_px"] > r["level"]
     assert not any("level" in r for r in hit["mcl"])
-    # the target cells are the same entries, exited differently or the same
-    e0 = [r["entry_et"] for r in hit["pb"]["PB2"]]
-    assert hit["pb"]["PB2-10c"][0]["entry_et"] == e0[0]
+    # the cells share their first entry
+    assert hit["pb"]["PB3-g0"][0]["entry_et"] == hit["pb"]["PB3-g3"][0]["entry_et"]
