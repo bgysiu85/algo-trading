@@ -30,7 +30,7 @@ apex exit off, MACD > 0 required, 5% trail seeded at the fill, flat at 09:30,
 | **Trigger** | a buy-stop resting at `peak + $0.01`. Fires on the first armed bar whose `high >= peak + $0.01` | Ben: "stop order at peak+1c" |
 | **Fill** | `max(peak + $0.01, open) + 1 tick` — gap-through, same convention as the exits, plus the engine's market-order tick | fixed here |
 | **Still met** | `macd > macd_sig AND macd > 0` on the LAST COMPLETED bar (`j-1`). If false, the break does not fire; the peak moves up and the setup is disarmed | Ben: "MACD only" |
-| **Cancel: depth** | at a bar's close, `low < peak - 0.5 x (peak - low[s])` | Ben: "pullback too deep"; 50% and the `low[s]` base fixed here (Cameron's 50% rule) |
+| **Cancel: depth** | at a bar's close, `low < peak - 0.5 x (peak - pole_low)`, `pole_low = min(low[s-4 .. s])`, with `peak` as of the PREVIOUS bar (both amended before any run — see §5, §6) | Ben: "pullback too deep"; 50% of the pole is Cameron's rule, the 5-bar pole is his "2-5 green candles" |
 | **Cancel: MACD** | at a bar's close, `macd < macd_sig` | Ben: "MACD rolls over" |
 | **Cancel: window** | no trigger on the final in-session bar; the setup dies at 09:30 | fixed here |
 | **After** | cancel or exit at bar `e` → the next setup needs a fresh MCL signal on a bar `> e` | fixed here |
@@ -80,3 +80,30 @@ The report must also print, and nothing may be read without them:
 - A best cell. There is one cell.
 - Moving the 50% depth, the base, or the MACD clause after seeing the table.
 - Anything on the holdout. If this CLEARS, the holdout run is its own registration.
+
+## 5. Amendment, before any run
+
+Found by the unit tests, before `common/pullback_break.py` had touched data.
+As first written, the depth test used a peak that **included the current bar's
+high**. A single wide green bar — low 5.08, high 5.20, after a signal bar
+5.00–5.10 — raises the peak to 5.20, puts the cancel level at 5.10, and cancels
+the setup on its own low. That is a strong bar cancelling itself, not a pullback.
+
+The depth test now uses the peak **as of the previous bar**, which is the
+convention the trailing stop already uses for the same reason. No result
+existed when this was changed.
+
+## 6. Amendment 2, before any run on real data
+
+The first base was `low[s]` — the signal bar's own low. That makes "the pole"
+one bar. A synthetic smoke run (random walk, lognormal volume, 60 sessions,
+**not market data and not read for P/L**) showed the mechanical consequence:
+**91 of 103 setups cancelled on depth**, because half of one bar's range is a
+fraction of a percent and almost any lower-high bar trades through it. The
+cancel was deciding the strategy instead of guarding it.
+
+Cameron's 50% rule is stated against the **pole**, which he describes as 2-5
+green candles. The base is now the lowest low of the signal bar and the four
+bars before it. Five is the top of his stated range, chosen because it is the
+widest reading of his words, not from any measurement. No real-tape result
+existed when this was changed.
