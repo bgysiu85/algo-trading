@@ -335,8 +335,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--csv", help="score a trades CSV instead (symbol, net)")
     p.add_argument("--label", default=None, help="what to call it in the report")
     p.add_argument("--list-runs", action="store_true",
-                   help="show the runs in backtest_trade and stop")
+                   help="write the runs in backtest_trade to --runs-out and "
+                        "stop")
     p.add_argument("--out", default="var/reports/breadth.txt")
+    p.add_argument("--runs-out", default="var/reports/breadth_runs.txt",
+                   help="where --list-runs writes. It has a file because "
+                        "EVERY result here does: a listing that exists only "
+                        "in a terminal has to be copied by hand to be used, "
+                        "and a figure copied by hand is a figure nobody can "
+                        "check later.")
     return p
 
 
@@ -345,8 +352,15 @@ def main(argv=None) -> int:
 
     a = build_parser().parse_args(argv)
     if a.list_runs:
-        for run, n, syms, net in list_runs():
-            print(f"  {run:<48}{n:>8,} trades{syms:>8,} syms{net:>12,.0f}")
+        rows = list_runs()
+        L = ["RUNS IN backtest_trade", "",
+             f"  {'run_id':<48}{'trades':>9}{'symbols':>9}{'net':>13}", ""]
+        for run, n, syms, net in rows:
+            L.append(f"  {run:<48}{n:>9,}{syms:>9,}{(net or 0):>13,.0f}")
+        if not rows:
+            L.append("  none -- backtest_trade is empty.")
+        L += ["", "  Score one with:  python -m common.breadth --run-id <run_id>"]
+        emit("\n".join(L), a.runs_out, header="common.breadth --list-runs")
         return 0
     if bool(a.run_id) == bool(a.csv):
         sys.exit("give exactly one of --run-id or --csv (or --list-runs).")

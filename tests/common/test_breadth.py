@@ -443,3 +443,31 @@ def test_the_report_marks_the_per_trade_interval_as_NOT_a_condition():
     txt = report(skewed(n_sym=300), resamples=200)
     assert "per trade over the same resamples" in txt
     assert "CONTEXT, NOT A CONDITION" in txt
+
+
+def test_list_runs_writes_a_file(tmp_path, monkeypatch):
+    """Every result here goes to a file. A listing that exists only in a
+    terminal has to be copied by hand to be used, and a figure copied by hand
+    is a figure nobody can check later. This one printed to stdout for exactly
+    one afternoon."""
+    monkeypatch.setattr(B, "list_runs",
+                        lambda: [("mc5_screened_2026", 7403, 1791, 8217.3),
+                                 ("mcl_screened_2026", 2408, 890, -1276.2)])
+    out = tmp_path / "runs.txt"
+    assert B.main(["--list-runs", "--runs-out", str(out)]) == 0
+    txt = out.read_text(encoding="utf-8")
+    assert "mc5_screened_2026" in txt and "7,403" in txt and "1,791" in txt
+    assert "--run-id" in txt, "and it must say how to score one"
+
+
+def test_an_empty_run_list_is_still_written_down(tmp_path, monkeypatch):
+    """No file and an empty file are the same thing tomorrow, and only one of
+    them means the command ran."""
+    monkeypatch.setattr(B, "list_runs", lambda: [])
+    out = tmp_path / "runs.txt"
+    assert B.main(["--list-runs", "--runs-out", str(out)]) == 0
+    assert "backtest_trade is empty" in out.read_text(encoding="utf-8")
+
+
+def test_the_runs_listing_has_a_default_path_under_var_reports():
+    assert B.build_parser().parse_args([]).runs_out.startswith("var/reports/")

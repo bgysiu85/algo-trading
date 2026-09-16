@@ -283,3 +283,87 @@ def test_paper_fill_is_still_listed_as_rebuildable_from_its_logs():
     option where it applies, and the rebuild stays for everything else."""
     assert "paper_fill" in D.DERIVED_TABLES
     assert "paper_fill" in D.REBUILD_PRECONDITION
+
+
+# ==========================================================================
+# THE CLI PATHS, EXERCISED — added 2026-09-16.
+#
+# `emit` was imported at the END of main(), which was correct while the only
+# caller was main's last line and a NameError the moment --add-columns started
+# emitting from earlier in the same function. Nothing caught it because
+# nothing ran the CLI. An import positioned by where its first caller HAPPENED
+# to be is a guard placed behind the thing it guards.
+#
+# And every one of these writes a FILE. A plan that exists only in a terminal
+# has to be copied by hand to be used, and the ALTER statements are the record
+# of what touched a live table.
+# ==========================================================================
+def _cli(monkeypatch, tmp_path, engine, argv):
+    monkeypatch.setattr(D, "database_url", lambda *a, **k: "sqlite://")
+    monkeypatch.setattr(D, "engine", lambda *a, **k: engine)
+    out = tmp_path / "migrate.txt"
+    rc = D.main(argv + ["--migrate-out", str(out)])
+    return rc, (out.read_text(encoding="utf-8") if out.exists() else "")
+
+
+def test_add_columns_writes_its_plan_to_a_file(tmp_path, model, monkeypatch):
+    model([Column("id", Integer, primary_key=True), Column("drift", Float)])
+    e = eng_at(tmp_path, {"t": [Column("id", Integer, primary_key=True)]})
+    rc, txt = _cli(monkeypatch, tmp_path, e, ["--add-columns"])
+    assert rc == 0
+    assert "ALTER TABLE t ADD drift" in txt
+    assert "nothing has run" in txt
+
+
+def test_the_dry_plan_really_changes_nothing(tmp_path, model, monkeypatch):
+    model([Column("id", Integer, primary_key=True), Column("drift", Float)])
+    e = eng_at(tmp_path, {"t": [Column("id", Integer, primary_key=True)]})
+    _cli(monkeypatch, tmp_path, e, ["--add-columns"])
+    assert D.schema_drift(e) == {"t": ["drift"]}, "the dry run applied it"
+
+
+def test_apply_writes_the_statements_it_ran_and_the_result(
+        tmp_path, model, monkeypatch):
+    model([Column("id", Integer, primary_key=True), Column("drift", Float)])
+    e = eng_at(tmp_path, {"t": [Column("id", Integer, primary_key=True)]})
+    rc, txt = _cli(monkeypatch, tmp_path, e, ["--add-columns", "--apply"])
+    assert rc == 0
+    assert "applied 1 statement" in txt
+    assert "schema now matches the model" in txt
+    assert D.schema_drift(e) == {}
+
+
+def test_a_refusal_is_written_with_its_reason(tmp_path, model, monkeypatch):
+    model([Column("id", Integer, primary_key=True),
+           Column("must", Float, nullable=False)])
+    e = eng_at(tmp_path, {"t": [Column("id", Integer, primary_key=True)]})
+    rc, txt = _cli(monkeypatch, tmp_path, e, ["--add-columns"])
+    assert rc == 1
+    assert "WILL NOT ADD" in txt and "NOT NULL" in txt
+
+
+def test_nothing_to_do_is_still_written_down(tmp_path, model, monkeypatch):
+    """An empty report and no report are the same file on disk tomorrow, and
+    only one of them means the command ran."""
+    model([Column("id", Integer, primary_key=True)])
+    e = eng_at(tmp_path, {"t": [Column("id", Integer, primary_key=True)]})
+    rc, txt = _cli(monkeypatch, tmp_path, e, ["--add-columns"])
+    assert rc == 0 and "nothing to add" in txt
+
+
+def test_check_rebuildable_writes_its_answer(tmp_path, monkeypatch):
+    e = create_engine(f"sqlite:///{tmp_path/'r.db'}", future=True)
+    rc, txt = _cli(monkeypatch, tmp_path, e,
+                   ["--check-rebuildable", "paper_fill",
+                    "--fills-dir", str(tmp_path)])
+    assert "REBUILD PRECONDITION" in txt
+    assert rc in (0, 1)
+
+
+def test_check_rebuildable_on_a_table_with_no_precondition_says_which_have_one(
+        tmp_path, monkeypatch):
+    e = create_engine(f"sqlite:///{tmp_path/'r2.db'}", future=True)
+    rc, txt = _cli(monkeypatch, tmp_path, e,
+                   ["--check-rebuildable", "bar_minute"])
+    assert rc == 1
+    assert "paper_fill" in txt, "it must name the tables that DO have one"

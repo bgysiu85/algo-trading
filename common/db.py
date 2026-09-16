@@ -189,6 +189,14 @@ def _with_password(url: str, var: str) -> str:
     return u.set(password=pw).render_as_string(hide_password=False)
 
 
+# Module level, not inside main(). It used to be imported at the END of main,
+# which was fine while the only caller was the last line of the function -- and
+# a NameError the moment --add-columns and --check-rebuildable started emitting
+# from earlier in the same function. An import positioned by where its first
+# caller HAPPENED to be is a guard placed behind the thing it guards.
+from common.report_io import emit  # noqa: E402
+
+
 def database_url(explicit: str | None = None) -> str:
     if explicit:
         return _with_password(explicit, "TRADING_DB")
@@ -897,6 +905,12 @@ def main(argv=None) -> int:
                     help="with --add-columns, actually run the statements. "
                          "Separate flag because the printed plan is the last "
                          "chance to read what will touch a live table.")
+    ap.add_argument("--migrate-out", default="var/reports/db_migrate.txt",
+                    help="where --add-columns and --check-rebuildable write. "
+                         "They have a file because every result here does: a "
+                         "plan that exists only in a terminal has to be "
+                         "copied by hand, and the ALTER statements it prints "
+                         "are the record of what touched a live table.")
     ap.add_argument("--check-rebuildable", metavar="NAME",
                     help="ask the rebuild precondition WITHOUT dropping "
                          "anything: which sessions the table holds that "
@@ -958,69 +972,80 @@ def main(argv=None) -> int:
 
     if a.check_rebuildable:
         # Asking the precondition is not the same act as acting on it. Without
-        # this the only way to learn whether a rebuild is safe was to start
+        # this the only way to learn whether a rebuild was safe was to start
         # one, which makes "check first" advice nobody can follow.
         if a.check_rebuildable not in REBUILD_PRECONDITION:
-            print(f"\n{a.check_rebuildable} has no rebuild precondition. "
-                  "Only these do: "
-                  f"{', '.join(sorted(REBUILD_PRECONDITION))}")
+            emit(f"{a.check_rebuildable} has no rebuild precondition. Only "
+                 f"these do: {', '.join(sorted(REBUILD_PRECONDITION))}",
+                 a.migrate_out, header="common.db --check-rebuildable")
             return 1
         ok, missing = paper_fill_is_rebuildable(eng, a.fills_dir)
+        L = [f"REBUILD PRECONDITION -- {a.check_rebuildable}", "",
+             f"  fills dir   {a.fills_dir}", ""]
         if ok:
-            print(f"\nREBUILDABLE: every session in {a.check_rebuildable} "
-                  f"can be read back from {a.fills_dir}/.")
-            return 0
-        print(f"\nNOT REBUILDABLE: {a.check_rebuildable} holds "
-              f"{len(missing)} session(s) that {a.fills_dir}/ cannot "
-              "reproduce.")
-        print("  A rebuild would destroy real trading history.")
-        for d in missing[:10]:
-            print(f"    {d}")
-        if len(missing) > 10:
-            print(f"    ... and {len(missing) - 10} more")
-        return 1
+            L += ["  REBUILDABLE: every session in the table can be read back "
+                  "from disk.", "",
+                  f"  python -m common.db --rebuild-table {a.check_rebuildable}",
+                  f"    then:  {DERIVED_TABLES[a.check_rebuildable]}"]
+        else:
+            L += [f"  NOT REBUILDABLE: {len(missing)} session(s) that "
+                  f"{a.fills_dir}/ cannot reproduce.",
+                  "  A rebuild would destroy real trading history: the fill "
+                  "log is the",
+                  "  only source of trade truth, so where the log is gone the "
+                  "table IS", "  the record rather than a view of one.", ""]
+            L += [f"    {d}" for d in missing[:20]]
+            if len(missing) > 20:
+                L.append(f"    ... and {len(missing) - 20} more")
+        emit("\n".join(L), a.migrate_out,
+             header="common.db --check-rebuildable")
+        return 0 if ok else 1
 
     if a.add_columns:
         addable, refused = addable_columns(eng)
+        L = ["SCHEMA MIGRATION -- additive columns only", ""]
         if not addable and not refused:
-            print("\nnothing to add: every table already has the model's "
-                  "columns.")
+            L.append("  nothing to add: every table already has the model's "
+                     "columns.")
+            emit("\n".join(L), a.migrate_out, header="common.db --add-columns")
             return 0
         if refused:
-            print("\nWILL NOT ADD -- these need a rebuild, not an ALTER:")
+            L += ["  WILL NOT ADD -- these need a rebuild, not an ALTER:", ""]
             for t, why in sorted(refused.items()):
                 for line in why:
-                    print(f"  {t:<20} {line}")
+                    L.append(f"    {t:<20} {line}")
+            L.append("")
         if not addable:
-            print("\nnothing addable in place.")
+            L.append("  nothing addable in place.")
+            emit("\n".join(L), a.migrate_out, header="common.db --add-columns")
             return 1
-        print("\nSTATEMENTS" + ("" if a.apply else "  (nothing has run)"))
         planned = [add_column_sql(t, c, eng.dialect)
                    for t, cols in sorted(addable.items()) for c in cols]
-        for stmt in planned:
-            print(f"  {stmt};")
-        print("\n  Every one is a nullable ADD. No existing row is read, "
-              "written or")
-        print("  moved: the rows that predate the column get NULL, which is "
-              "what they")
-        print("  honestly have -- the measurement did not exist when they "
-              "were made.")
+        L += ["  STATEMENTS" + ("" if a.apply else "   (nothing has run)"), ""]
+        L += [f"    {stmt};" for stmt in planned]
+        L += ["",
+              "  Every one is a nullable ADD. No existing row is read, written",
+              "  or moved: the rows that predate the column get NULL, which is",
+              "  what they honestly have -- the measurement did not exist when",
+              "  they were made.", ""]
         if not a.apply:
-            print("\n  Re-run with --apply to execute. Until then this "
-                  "command has")
-            print("  changed nothing.")
+            L += ["  Re-run with --apply to execute. Until then this command "
+                  "has changed", "  nothing."]
+            emit("\n".join(L), a.migrate_out, header="common.db --add-columns")
             return 0
         done = add_missing_columns(eng, addable)
-        print(f"\napplied {len(done)} statement(s).")
+        L.append(f"  applied {len(done)} statement(s).")
         left = schema_drift(eng)
         if left:
-            print("REMAINING DRIFT:")
+            L += ["", "  REMAINING DRIFT:"]
             for t, cols in sorted(left.items()):
-                print(f"  {t:<20} missing: {', '.join(cols)}")
-            print("  These are the refusals above. Rebuild them, or leave "
-                  "them.")
+                L.append(f"    {t:<20} missing: {', '.join(cols)}")
+            L.append("    These are the refusals above. Rebuild them, or "
+                     "leave them.")
         else:
-            print("schema now matches the model.")
+            L += ["", "  schema now matches the model."]
+        emit("\n".join(L), a.migrate_out,
+             header="common.db --add-columns --apply")
         return 0
 
     if a.rebuild_table:
@@ -1130,7 +1155,6 @@ def main(argv=None) -> int:
 
     text = "\n".join(L)
     if text.strip():
-        from common.report_io import emit
         emit(text, a.report, header=f"common.db  {_scrub(url)}")
     return 0
 
