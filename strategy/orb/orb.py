@@ -200,6 +200,12 @@ class SessionResult:
     open_at_close: bool = False
     both_in_bar: int = 0                 # §7.2 -- how often the stop-wins bit
     faded: bool | None = None            # §7.4 -- V2's counter-hypothesis
+    # §10.2, set by the runner and NOT by the rule: whether a 09:30 RTH screen
+    # would have picked this symbol-day. It lives here so the split is computed
+    # from the same trades as the headline, and it is FALSE until something
+    # sets it -- the rule itself never looks at it, because a strategy that
+    # filtered on its own buildability check would make §10.2 unanswerable.
+    passes_rth_screen: bool = False
     fade_return_pct: float | None = None
 
     @property

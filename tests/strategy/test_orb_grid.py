@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+"""The ORB grid runner, end to end on a synthetic cache.
+
+`docs/research/REGISTERED_orb_grid.md` decides how ninety cells are read. This
+file asserts the runner obeys it, because a registration that nothing checks is
+a paragraph.
+
+WHAT IS ACTUALLY AT RISK HERE, and it is not arithmetic. A grid produces ninety
+plausible tables whether or not it is measuring what it claims. The failures
+worth catching are the ones that still print a clean report: a "best cell" line
+appearing, a thin cell being read, the multiplicity family count drifting from
+four, the baseline drifting off the registered configuration, `opposite`
+sneaking back in, or the bootstrap quietly becoming a different one from the
+one MC5 was scored with.
+"""
+from __future__ import annotations
+
+import csv
+import gzip
+import json
+import random
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from common import breadth as B
+from strategy.orb import grid as G
+from strategy.orb import orb as O
+
+ET = "America/New_York"
+
+
+# --------------------------------------------------------------------------
+# a synthetic cache
+# --------------------------------------------------------------------------
+
+def write_day(cache: Path, symbol: str, day: str, seed: int) -> None:
+    """One RTH session of 1-minute bars as the real cache stores them."""
+    rng = random.Random(seed)
+    idx = pd.date_range(f"{day} 09:30", f"{day} 15:59", freq="1min", tz=ET)
+    px = 5.0
+    o, h, l, c = [], [], [], []
+    for _ in range(len(idx)):
+        nxt = px * (1 + rng.uniform(-0.006, 0.0075))
+        o.append(px); c.append(nxt)
+        h.append(max(px, nxt) * 1.004); l.append(min(px, nxt) * 0.996)
+        px = nxt
+    df = pd.DataFrame({"open": o, "high": h, "low": l, "close": c,
+                       "volume": [5000.0] * len(idx)},
+                      index=idx.tz_convert("UTC"))
+    cache.mkdir(parents=True, exist_ok=True)
+    with gzip.open(cache / f"{symbol}_{day}.csv.gz", "wt") as fh:
+        df.to_csv(fh)
+
+
+DAYS = ["2026-03-02", "2026-03-03", "2026-03-04", "2026-03-05",
+        "2026-03-06", "2026-03-09"]
+SYMS = [f"S{i:02d}" for i in range(12)]
+
+
+@pytest.fixture(scope="module")
+def built(tmp_path_factory):
+    root = tmp_path_factory.mktemp("orbgrid")
+    cache = root / "3d_to_2000"
+    seed = 0
+    survivors, rejects = [], []
+    for s in SYMS:
+        for d in DAYS:
+            seed += 1
+            write_day(cache, s, d, seed)
+            (survivors if int(s[1:]) < 9 else rejects).append(
+                {"symbol": s, "date": d})
+    sp = root / "pairs.json"; sp.write_text(json.dumps(survivors))
+    rp = root / "rejects.json"; rp.write_text(json.dumps(rejects))
+    out = root / "grid.txt"; csvp = root / "cells.csv"
+    rc = G.main(["--pairs", str(sp), str(rp), "--cache", str(cache),
+                 "--window", "3d_to_2000", "--jobs", "1",
+                 "--out", str(out), "--csv", str(csvp)])
+    assert rc == 0
+    return {"text": out.read_text(),
+            "rows": list(csv.DictReader(csvp.open())),
+            "root": root, "cache": cache, "pairs": (sp, rp)}
+
+
+# --------------------------------------------------------------------------
+# the grid itself
+# --------------------------------------------------------------------------
+
+def test_there_are_exactly_ninety_cells_and_opposite_is_not_among_them():
+    """§3. `opposite` is excluded because spec §6 set MAX_R_PCT = 12% BEFORE
+    the pre-flight measured its median R at 9.26% of price. That is a
+    pre-registered filter firing, and it stays a filter only while nothing
+    quietly puts the arm back."""
+    cs = G.cells()
+    assert len(cs) == 90
+    assert {c.stop_mode for c in cs} == {"structure", "rangefrac"}
+    assert "opposite" not in {c.stop_mode for c in cs}
+    assert len({G.key_of(c) for c in cs}) == 90, "a cell key collides"
+
+
+def test_every_cell_is_printed(built):
+    """Nothing ranked, every bucket printed. A grid that showed only the cells
+    worth showing would be a maximum wearing a table."""
+    for key in (G.key_of(c) for c in G.cells()):
+        m, s, rt, e = key
+        assert any(line.strip().startswith(f"{m} {s}")
+                   and rt in line and e in line
+                   for line in built["text"].splitlines()), key
+    assert len(built["rows"]) == 90
+
+
+def test_the_cells_are_printed_in_key_order_and_never_by_performance(built):
+    """§7's first named failure is 'reporting a best-cell table'. Grepping for
+    the words would be the wrong test -- the report SAYS "nothing ranked" and
+    "no best cell table", so a word check fails on its own disclaimers. The
+    property that actually matters is the ORDER: a ranked table is sorted by a
+    metric, and this one must be sorted by the cell key."""
+    seen = []
+    for line in built["text"].splitlines():
+        parts = line.split()
+        if (len(parts) > 8 and parts[0] in {"5", "15", "30"}
+                and parts[1] in G.GRID_STOPS and parts[2] in G.GRID_RETESTS):
+            seen.append((int(parts[0]), parts[1], parts[2], parts[3]))
+    assert len(seen) == 90
+    assert seen == sorted(seen), "the cell table is ordered by something else"
+
+
+def test_a_grid_winner_is_labelled_a_lead_and_not_a_result(built):
+    t = built["text"]
+    assert "LEAD, NOT A" in t and "RESULT. It does not enter" in t
+    assert "holdout.json` is not spent" in t
+
+
+def test_multiplicity_is_counted_by_family(built):
+    """§3.1. Four independent choices, not ninety and not one."""
+    assert G.FAMILIES == ("length", "stop", "retest", "exit")
+    assert "4 families" in built["text"]
+
+
+def test_the_baseline_cell_is_the_registered_one(built):
+    """§2 fixes every value from the sources, and names the 5-minute
+    availability finding as a thing NOT to move the baseline toward."""
+    assert G.BASELINE_KEY == (15, "structure", "none", "r_2")
+    assert "§11's seven criteria are read HERE ONLY" in built["text"]
+
+
+# --------------------------------------------------------------------------
+# the refusals
+# --------------------------------------------------------------------------
+
+def test_a_thin_cell_is_printed_with_its_count_and_no_verdict():
+    """§5. Below 100 trades, drop-top-5 removes 5% of the sample and stops
+    meaning what it says."""
+    cell = G.Cell()
+    cell.by_symbol = {"A": [1.0] * 40}
+    cell.trades = 40
+    cell.by_symbol_day = {("A", "2026-03-02"): 40.0}
+    cell.by_date = {"2026-03-02": 40.0}
+    d = G.read(cell, "2026-03-03")
+    assert d["thin"] is True
+    assert G.MIN_TRADES == 100
+
+
+def test_a_single_cells_two_denominators_can_never_disagree():
+    """THE DEFECT THE FIRST DRAFT OF grid.py HAD, found by trying to write a
+    failing case for it.
+
+    `per_trade` and `per_symbol_day` are the SAME net over two positive
+    divisors, so they always carry the same sign. A per-cell "denominators
+    agree" flag can never fire -- identical in shape to breadth's withdrawn
+    condition (b), which was (a) at a stricter level wearing the clothes of a
+    magnitude check.
+
+    This asserts the impossibility rather than the flag, so nobody can put the
+    flag back."""
+    cell = G.Cell()
+    cell.by_symbol = {"A": [0.5] * 200, "B": [-150.0]}
+    cell.trades = 201
+    cell.by_symbol_day = {("A", f"2026-03-{i:02d}"): 100.0 for i in range(2, 9)}
+    cell.by_symbol_day[("B", "2026-03-02")] = -150.0
+    d = G.read(cell, "2026-03-05")
+    assert (d["per_trade"] > 0) == (d["per_symbol_day"] > 0)
+    assert "denominators_agree" not in d
+
+
+def test_the_refusal_lives_in_the_comparison_where_it_CAN_fail():
+    """§5 item 1, where the disagreement is real: two cells trade different
+    numbers of times on different numbers of symbol-days, so "beats the
+    baseline" can come out one way per trade and the other way per
+    symbol-day."""
+    base, cell = G.Cell(), G.Cell()
+    # Baseline: 10 trades over 10 symbol-days, +$100 -> +10.00 both ways.
+    base.by_symbol = {f"B{i}": [10.0] for i in range(10)}
+    base.trades = 10
+    base.by_symbol_day = {(f"B{i}", "2026-03-02"): 10.0 for i in range(10)}
+    # Cell: 40 trades over 4 symbol-days, +$240 -> +6.00 per trade (WORSE)
+    # but +60.00 per symbol-day (BETTER).
+    cell.by_symbol = {f"C{i}": [6.0] * 10 for i in range(4)}
+    cell.trades = 40
+    cell.by_symbol_day = {(f"C{i}", "2026-03-02"): 60.0 for i in range(4)}
+    dd = G.deltas(cell, base)
+    assert dd["d_per_trade"] < 0 < dd["d_per_symbol_day"]
+    assert dd["denoms_agree"] is False
+
+    assert G.deltas(base, base)["denoms_agree"] is True, (
+        "the baseline compared against itself must never refuse")
+
+
+def test_the_report_says_how_many_cells_it_refused_and_how_many_are_thin(built):
+    t = built["text"]
+    assert "are NOT READ (§5)" in t
+    assert "REFUSED: measured against the" in t
+    assert "could never fire" in t, (
+        "the report must say WHY the refusal is not a per-cell check")
+
+
+# --------------------------------------------------------------------------
+# the boundary rule
+# --------------------------------------------------------------------------
+
+def test_the_boundary_rule_says_where_it_cannot_apply(built):
+    """§4. A criterion that cannot fail is not a criterion, and reporting 'no
+    boundary optimum' over a two-value family is claiming a check that was
+    never performed."""
+    t = built["text"]
+    assert "BOTH ARE BOUNDARIES and the rule" in t
+    assert "CANNOT APPLY" in t
+    assert "unordered, so the rule does not apply" in t
+
+
+def test_a_length_win_on_the_edge_of_the_box_demands_a_push():
+    read_all = {}
+    for m in G.GRID_MINUTES:
+        read_all[(m, "structure", "none", "r_2")] = {
+            "thin": False, "per_trade": {5: 3.0, 15: 1.0, 30: 0.5}[m]}
+    out = "\n".join(G._boundary_block(read_all))
+    assert "ON A BOUNDARY" in out and "pushed (3)" in out
+
+    read_all[(5, "structure", "none", "r_2")]["per_trade"] = 0.2
+    interior = "\n".join(G._boundary_block(read_all))
+    assert "Interior" in interior and "ON A BOUNDARY" not in interior
+
+
+# --------------------------------------------------------------------------
+# the registered prediction
+# --------------------------------------------------------------------------
+
+def test_the_prediction_is_scored_whichever_way_it_goes():
+    """The amendment's §B, written before this runner existed. A prediction
+    the report only mentions when it holds is not a prediction."""
+    def rows(r2, other):
+        return {(15, "structure", "none", e):
+                {"thin": False, "per_trade": (r2 if e == "r_2" else other)}
+                for e in G.GRID_EXITS}
+    held = "\n".join(G._prediction_block(rows(1.0, 2.0)))
+    assert "PREDICTION HELD" in held
+    failed = "\n".join(G._prediction_block(rows(3.0, 1.0)))
+    assert "PREDICTION FAILED" in failed
+    assert "surprise" in failed
+
+
+# --------------------------------------------------------------------------
+# the bootstrap, and the withdrawn condition
+# --------------------------------------------------------------------------
+
+def test_the_bootstrap_is_breadths_own_call_and_not_a_second_one():
+    """§4 of REGISTERED_breadth.md: one call, one set of parameters, both
+    strategies. A grid with its own resampler would judge ORB and MC5 by two
+    instruments while reporting one number."""
+    assert G.cluster_bootstrap is B.cluster_bootstrap
+    assert (G.RESAMPLES, G.SEED) == (B.RESAMPLES, B.SEED)
+
+    # AND THAT THOSE VALUES REACH THE CALL. Asserting the constants match is
+    # one step short of the thing it protects: `read()` could pass its own
+    # resample count and seed while both module constants sat there agreeing.
+    # A mutation that did exactly that survived the first pass of this file.
+    cell = G.Cell()
+    cell.by_symbol = {f"S{i}": [float(i) - 3.0] for i in range(9)}
+    cell.trades = 9
+    cell.by_symbol_day = {(f"S{i}", "2026-03-02"): float(i) - 3.0
+                          for i in range(9)}
+    cell.by_date = {"2026-03-02": sum(float(i) - 3.0 for i in range(9))}
+    d = G.read(cell, "2026-03-03")
+    want = B.cluster_bootstrap(cell.by_symbol, B.RESAMPLES, B.SEED)
+    assert d["boot_p"] == pytest.approx(B.share_above_zero(want["totals"]))
+    assert d["boot_lo"] == pytest.approx(B.pct(want["totals"], 0.025))
+    assert d["boot_hi"] == pytest.approx(B.pct(want["totals"], 0.975))
+
+
+def test_the_per_trade_interval_is_marked_as_not_a_pass_condition(built):
+    """Condition (b) was withdrawn before use because it could not fail
+    independently of (a). A figure printed beside a verdict it cannot change
+    has to say so, or the next reader takes it for one."""
+    assert "CONTEXT ONLY, not a pass condition" in built["text"]
+
+
+def test_the_bootstrap_verdict_is_read_against_breadths_own_bar(built):
+    assert f"{B.BOOT_MIN_P:.2f} bar" in built["text"]
+
+
+# --------------------------------------------------------------------------
+# coverage and the honest limitations
+# --------------------------------------------------------------------------
+
+def test_the_split_point_is_the_median_date_and_is_not_swept(built):
+    assert "median session date, not swept" in built["text"]
+    assert DAYS[len(DAYS) // 2] in built["text"]
+
+
+def test_the_halves_of_a_cell_sum_to_its_net(built):
+    for r in built["rows"]:
+        if int(r["trades"]):
+            assert float(r["early"]) + float(r["late"]) == pytest.approx(
+                float(r["net"]), abs=1e-6), r["exit_mode"]
+
+
+def test_the_report_states_the_screen_is_three_of_its_four_rules(built):
+    """§11 criterion 6 is tested on three rules, and the one that cannot be
+    simulated is the one the outside literature says carries everything."""
+    t = built["text"]
+    assert "three" in t and "relative_volume_10d_calc" in t
+    assert "carries everything" in t
+
+
+def test_both_populations_reach_the_csv(built):
+    """§10.2b. The reject arm is not a footnote -- a strategy that trades the
+    day's range is structurally more exposed to a filter that read the day's
+    range."""
+    cols = set(built["rows"][0])
+    assert any(c.startswith("arm_survivors") for c in cols)
+    assert any(c.startswith("arm_rejected") for c in cols)
+
+
+def test_the_stop_and_target_in_one_bar_count_is_reported(built):
+    assert "stop AND target in one bar" in built["text"]
+    assert "the stop won every one" in built["text"]
+
+
+def test_the_delta_table_is_paired_on_the_same_unit_as_the_level_table():
+    """Drop-top-N on the delta, per symbol, because that is the unit the
+    level's drop-top-N uses and the unit the bootstrap resamples. Two
+    measurements on different units under one heading is the defect."""
+    base, cell = G.Cell(), G.Cell()
+    base.by_symbol = {"A": [10.0], "B": [5.0]}
+    cell.by_symbol = {"A": [14.0], "C": [2.0]}
+    d = G.deltas(cell, base)
+    assert d["delta"] == pytest.approx(4.0 - 5.0 + 2.0)
+    assert d["delta_drop1"] == pytest.approx(-5.0 + 2.0)
+
+
+def test_the_runner_produces_the_same_numbers_on_one_job_and_several(built):
+    """The parallel path merges partial accumulators. A merge that dropped or
+    double-counted a symbol would move every figure in the report and break
+    nothing visible."""
+    out = built["root"] / "grid8.txt"
+    csvp = built["root"] / "cells8.csv"
+    sp, rp = built["pairs"]
+    assert G.main(["--pairs", str(sp), str(rp), "--cache", str(built["cache"]),
+                   "--window", "3d_to_2000", "--jobs", "4",
+                   "--out", str(out), "--csv", str(csvp)]) == 0
+    many = list(csv.DictReader(csvp.open()))
+    one = {(r["orb_minutes"], r["stop_mode"], r["retest_mode"],
+            r["exit_mode"]): r for r in built["rows"]}
+    for r in many:
+        k = (r["orb_minutes"], r["stop_mode"], r["retest_mode"], r["exit_mode"])
+        for col in ("trades", "symbols", "net", "drop5", "early", "late"):
+            assert float(r[col]) == pytest.approx(float(one[k][col]), abs=1e-6), \
+                (k, col)
