@@ -539,6 +539,10 @@ paper_fill = Table(
     # comparison against a fixed-trail backtest is then comparing two things
     # under one label.
     Column("trail_pct", Float),
+    # (mid at order / ref_close - 1) * 100. The companion to slippage_vs_ref,
+    # which on its own scored the worst trade in the book as a favourable
+    # fill -- see trader.FIELDS. Added 2026-09-16.
+    Column("ref_drift_pct", Float),
 
     Column("source_file", String(255)),
     Column("loaded_at", DateTime),
