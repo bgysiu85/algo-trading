@@ -58,11 +58,23 @@ def test_the_entry_price_is_never_the_reference_for_any_exit():
 
 
 def test_a_bar_triggered_exit_is_measured_against_the_bar():
-    for reason in ("window_close", "apex_reversal"):
+    for reason in ("apex_reversal", "gradient_reversal"):
         ref, kind = T.MCLPaperTrader._exit_reference(pos(), reason,
                                                      bar_close=5.90,
                                                      last_price=5.43)
         assert (ref, kind) == (5.90, "bar_close")
+
+
+def test_window_close_is_measured_against_the_quote_from_both_loops():
+    """MEDS, 2026-09-16: from 09:30 every other window_close row carried a
+    bar close minutes stale and the rest carried the quote, because the bar
+    path and the fast loop passed different things. A flatten is triggered by
+    the CLOCK; its reference is the quote, whichever loop sent it."""
+    for bar_close in (5.90, None):
+        ref, kind = T.MCLPaperTrader._exit_reference(pos(), "window_close",
+                                                     bar_close=bar_close,
+                                                     last_price=5.43)
+        assert (ref, kind) == (5.43, "quote")
 
 
 def test_a_bar_exit_retried_from_the_fast_loop_says_it_used_a_quote():

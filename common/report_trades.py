@@ -108,7 +108,10 @@ async def snapshot(ib: IB) -> None:
             pnl = r.realizedPNL if r and r.realizedPNL not in (None, 0.0) else 0.0
             if pnl and abs(pnl) < 1e11:      # IB sends a sentinel for "n/a"
                 realized += pnl
-            print(f"  {e.time:%H:%M:%S}  {e.contract.symbol:8s} {e.side:5s} "
+            # `Execution` carries no contract; the Fill does. `e.contract`
+            # raised AttributeError and hid the MEDS executions exactly when
+            # they were needed.
+            print(f"  {e.time:%H:%M:%S}  {f.contract.symbol:8s} {e.side:5s} "
                   f"{e.shares:>7.0f} {e.price:>10.4f} {comm:>8.2f} "
                   f"{pnl if pnl else 0.0:>10.2f}")
         print(f"\n  {len(fills)} fills, realized P/L {realized:>,.2f}")

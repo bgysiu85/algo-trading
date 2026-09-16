@@ -40,20 +40,27 @@ class Trade:
         self._done_at = fills_after
 
     def isDone(self):
-        return False
+        # Working until IB confirms the cancel -- the normal case. A trade
+        # that never becomes done is the UNKNOWN case, tested separately.
+        return getattr(self, "cancelled", False)
 
 
 class IB:
     def __init__(self):
         self.placed = []
         self.cancelled = []
+        self.trades = []
 
     def placeOrder(self, contract, order):
         self.placed.append(order)
-        return Trade()
+        t = Trade()
+        self.trades.append(t)
+        return t
 
     def cancelOrder(self, order):
         self.cancelled.append(order)
+        for t in self.trades:
+            t.cancelled = True
 
 
 class Log:
@@ -88,6 +95,10 @@ class Book:
 
     def notify_fill(self, *a, **k):
         pass
+
+    # The real settle, so these tests exercise the wait for IB's confirmation
+    # rather than a stand-in for it.
+    _settle = T.MCLPaperTrader._settle
 
     async def run(self, action, qty, ref, closing):
         st = T.SymbolState(symbol="CRBP", feed=None,
