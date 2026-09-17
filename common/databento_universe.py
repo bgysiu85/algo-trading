@@ -222,6 +222,51 @@ def clamp_to_dataset(client, dataset: str, start: str, end: str):
     return start, end, notes
 
 
+DOWNLOAD_ATTEMPTS = 3
+
+
+def discard_partial(tmp: Path, label: str) -> None:
+    """Remove a failed download without letting the removal itself fail the run.
+
+    On Windows the client's streaming response can still hold the file open
+    for a moment after it raises; `unlink` then throws PermissionError and the
+    FIRST failed chunk took the whole pull down with it (2026-03 of the status
+    pull, 2026-09-17). A leftover .partial is harmless -- the skip guard looks
+    for the finished file -- so after a few tries it is left and named.
+    """
+    import time as _time
+    for _ in range(5):
+        try:
+            tmp.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            _time.sleep(1.0)
+    print(f"  {label}  could not remove {tmp.name}; it is ignored by the skip "
+          "guard and can be deleted by hand")
+
+
+def fetch_chunk(client, dataset: str, schema: str, lo: str, hi: str,
+                tmp: Path, label: str) -> bool:
+    """One chunk to `tmp`, retried on a streaming error. False when it failed
+    for good; the run then moves to the next chunk instead of dying, because
+    a pull of 27 chunks that stops at the 21st for a dropped connection has
+    to be run again from a prompt, and nothing here is not resumable."""
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        try:
+            client.timeseries.get_range(
+                dataset=dataset, schema=schema, symbols="ALL_SYMBOLS",
+                stype_in="raw_symbol", start=lo, end=hi, path=str(tmp))
+            return True
+        except Exception as e:  # noqa: BLE001
+            msg = _scrub(e)
+            discard_partial(tmp, label)
+            if attempt < DOWNLOAD_ATTEMPTS:
+                print(f"  {label}  attempt {attempt} failed ({msg}); retrying")
+                continue
+            print(f"  {label}  FAILED after {DOWNLOAD_ATTEMPTS} attempts: {msg}")
+    return False
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Pull the full universe, daily bars")
     ap.add_argument("--dataset", default=DEFAULT_DATASET)
@@ -386,13 +431,7 @@ def main(argv=None) -> int:
             symbology_path(out).unlink(missing_ok=True)
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_suffix(".partial")
-        try:
-            client.timeseries.get_range(
-                dataset=a.dataset, schema=a.schema, symbols="ALL_SYMBOLS",
-                stype_in="raw_symbol", start=lo, end=hi, path=str(tmp))
-        except Exception as e:  # noqa: BLE001
-            print(f"  {label}  FAILED: {_scrub(e)}")
-            tmp.unlink(missing_ok=True)
+        if not fetch_chunk(client, a.dataset, a.schema, lo, hi, tmp, label):
             continue
         tmp.replace(out)
         written += 1
