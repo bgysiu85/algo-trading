@@ -90,3 +90,29 @@ ALL_SYMBOLS XNAS.BASIC `ohlcv-1m`, windows 09:30–16:00 and 16:00–20:00, the 
 550 sessions as the PRE slices (2024-07-01 → 2026-09-09). One-day probe on
 2026-08-04: RTH 136.7 MB billable, POST 11.0 MB, PRE 11.0 MB, all $0.0000.
 Estimated ~81 GB billable, ~24 GB on disk. Priced in full before `--confirm`.
+
+---
+
+## Amendment A — PRE-RUN, 2026-09-17: the tape is XNAS.ITCH
+
+Made before any data for this study was pulled or any code written, after
+`claude/handover_tape_switch_20260917.md` and `REGISTERED_screen_itch.md` moved the
+pre-market tape to XNAS.ITCH. On XNAS.BASIC, TRF prints released at 08:00 carry
+prices from hours earlier. A study that runs through 09:30 on one tape and past it
+on another would have a volume and price discontinuity at 09:30 inside MC5's
+indicators. So:
+
+1. **Every window (PRE, RTH, POST) reads XNAS.ITCH `ohlcv-1m`.** §5's pull is
+   XNAS.ITCH 09:30–16:00 and 16:00–20:00, not XNAS.BASIC. The BASIC size probe stays
+   quoted as the only probe run, and the ITCH pull is priced in full before `--confirm`.
+2. **PRE universe = `var/state/screen_pairs_pit_itch_p50.json`**, not
+   `screen_pairs_pit.json`. §2's reproduction test is against that file.
+3. **Volume thresholds in every block use the chained XNAS.ITCH p50 capture** that
+   `common/tape_capture` produces under `REGISTERED_screen_itch.md`, not 0.552. The
+   p10/p90 sensitivity uses that registration's p10/p90.
+4. **Arm A must reproduce `pit_strategy --strategy mc5 --dataset XNAS.ITCH`** on the p50
+   universe (the new published MC5 baseline), not −$13.50 over 6,883.
+5. **This study does not run until those ITCH baselines exist.** If
+   `REGISTERED_screen_itch.md` §2.1's stop rule fires, this study stops with it.
+
+Nothing in §1, §3 or §4 changes.
