@@ -206,6 +206,76 @@ def price_one(client, root: str, schema: str, start: str, end: str):
     return usd, nbytes
 
 
+# Scopings the diagnostic prices against each other. All metadata lookups, all
+# free. The point is to find WHICH axis is responsible for a large total before
+# anyone decides whether the total is worth paying -- the same question the
+# $1,500 ALL_SYMBOLS quote turned out to be asking.
+DIAGNOSTIC_SCOPES = [
+    ("ohlcv-1d  parent  all history",
+     dict(schema="ohlcv-1d", symbols="{r}.FUT", stype_in="parent", span="full")),
+    ("ohlcv-1d  continuous front, all history",
+     dict(schema="ohlcv-1d", symbols="{r}.c.0", stype_in="continuous", span="full")),
+    ("ohlcv-1d  continuous front+next, all history",
+     dict(schema="ohlcv-1d", symbols="{r}.c.0,{r}.c.1", stype_in="continuous", span="full")),
+    ("definition  parent  all history",
+     dict(schema="definition", symbols="{r}.FUT", stype_in="parent", span="full")),
+    ("definition  parent  ONE day",
+     dict(schema="definition", symbols="{r}.FUT", stype_in="parent", span="day")),
+]
+
+
+def diagnose(client, root: str, ds_start: str, ds_end: str) -> int:
+    """Price one root several ways, so the driver of a large total is visible.
+
+    A total is not a decision. `parent` symbology resolves <ROOT>.FUT to every
+    futures instrument sharing that parent -- which on CME includes the listed
+    CALENDAR SPREADS, not just the outright contract months, and there are
+    orders of magnitude more of those. And `definition` is republished for every
+    listed instrument EVERY session, so it scales with (instruments x days)
+    while the expiry dates it carries are static per contract and need to be
+    read once.
+
+    Either of those turns a megabyte question into a gigabyte one without
+    changing a single number the strategy actually uses. This prints them side
+    by side rather than inviting anyone to pay the first figure that appears.
+    """
+    print(f"DIAGNOSTIC -- one root ({root}), several scopings, all free metadata "
+          f"lookups.\nNothing here downloads anything.\n")
+    print(f"{'scoping':<42}{'billable':>16}{'USD':>10}")
+    rows = []
+    for label, spec in DIAGNOSTIC_SCOPES:
+        start = ds_start if spec["span"] == "full" else ds_end
+        kw = dict(dataset=DATASET, schema=spec["schema"],
+                  symbols=spec["symbols"].format(r=root),
+                  stype_in=spec["stype_in"], start=start, end=ds_end)
+        try:
+            usd = float(client.metadata.get_cost(**kw))
+            nbytes = int(client.metadata.get_billable_size(**kw))
+        except Exception as e:                       # noqa: BLE001
+            print(f"{label:<42}{'FAILED':>16}{'':>10}   {_scrub(e)[:50]}")
+            continue
+        rows.append((label, nbytes, usd))
+        print(f"{label:<42}{nbytes:>16,}{usd:>10.2f}")
+
+    if len(rows) >= 4:
+        print(f"\nRead it this way:")
+        par = next((r for r in rows if r[0].startswith("ohlcv-1d  parent")), None)
+        con = next((r for r in rows if "front+next" in r[0]), None)
+        dfull = next((r for r in rows if r[0].startswith("definition  parent  all")), None)
+        dday = next((r for r in rows if "ONE day" in r[0]), None)
+        if par and con and con[1]:
+            print(f"  parent vs continuous on ohlcv-1d: {par[1] / con[1]:,.0f}x more bytes.")
+            print( "    A ratio in the hundreds means `parent` is resolving spreads,")
+            print( "    not just the ~{n} contract months the signal needs.".format(n="200"))
+        if dfull and dday and dday[1]:
+            print(f"  definition full history vs one day: {dfull[1] / dday[1]:,.0f}x.")
+            print( "    Expiry dates are static per contract. If this ratio is large,")
+            print( "    the roll calendar is being bought once per session per")
+            print( "    instrument for sixteen years to read a fact that never moves.")
+        print(f"\nx{len(ROOTS)} roots for a whole-set figure, roughly.")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Estimate the cost of the TSMOM futures pull. Cannot download.")
@@ -218,6 +288,9 @@ def main(argv=None) -> int:
     ap.add_argument("--end", help="override the end date (default: today)")
     ap.add_argument("--max-cost", type=float, default=5.0,
                     help="abort above this total, in USD (default 5.00)")
+    ap.add_argument("--diagnose", metavar="ROOT", nargs="?", const="ES",
+                    help="price ONE root several ways to find what drives a "
+                         "large total, then exit (default root: ES)")
     a = ap.parse_args(argv)
 
     roots = dict(ROOTS)
@@ -239,6 +312,9 @@ def main(argv=None) -> int:
         raise SystemExit(f"dataset range lookup failed: {_scrub(e)}")
     start = a.start or ds_start
     end = a.end or min(ds_end, date.today().isoformat())
+
+    if a.diagnose:
+        return diagnose(client, a.diagnose, ds_start, ds_end)
 
     print(f"ESTIMATE ONLY -- this module has no download path.\n")
     print(f"dataset   {DATASET}")
