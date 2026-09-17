@@ -152,7 +152,54 @@ def test_missing_sessions_are_caught_as_a_gap(cache):
     ds = f["ts_et"].dt.strftime("%Y-%m-%d")
     _, res = cache(f[~ds.between("2025-06-09", "2025-06-20")])
     assert res["n_gaps"] >= 1
-    assert any(days > SI.GAP_DAYS_FLAG for _, _, days in res["gaps"])
+    assert any(days > SI.GAP_DAYS_FLAG for _, _, days, _ in res["gaps"])
+    # and it must NAME the weekdays it thinks are missing, because that is
+    # what makes the difference between a hole and a closure checkable
+    named = [d for _, _, _, miss in res["gaps"] for d in miss]
+    assert "2025-06-10" in named
+
+
+def test_a_gap_over_an_unscheduled_closure_is_not_flagged(cache):
+    """Hurricane Sandy shut the NYSE for two weekdays. That is not a hole.
+
+    The first version counted calendar days and reported three gaps on the
+    real SPY cache: this one, President Ford's day of mourning, and one
+    genuine hole. Three alarms for one defect is how a real alarm stops being
+    read.
+    """
+    rows = []
+    for i, ds in enumerate(_weekdays(date(2012, 10, 1), date(2012, 12, 1))):
+        if ds in ("2012-10-29", "2012-10-30"):
+            continue                      # the market was closed
+        rows += _rows(ds, GRID, 140.0 + i * 0.02, i)
+    _, res = cache(pd.DataFrame(rows))
+    assert res["n_gaps"] == 0, f"Sandy flagged as a hole: {res['gaps']}"
+    assert res["gaps_explained"], "the gap should still be REPORTED as explained"
+
+
+def test_a_gap_over_a_good_friday_is_not_flagged(cache):
+    """Good Friday closes the NYSE and is not a federal holiday.
+
+    Taking the federal calendar unchanged would flag this one and explain
+    away Columbus Day and Veterans Day, which the exchange trades.
+    """
+    rows = []
+    for i, ds in enumerate(_weekdays(date(2025, 4, 10), date(2025, 5, 1))):
+        if ds == "2025-04-18":            # Good Friday
+            continue
+        rows += _rows(ds, GRID, 140.0 + i * 0.02, i)
+    _, res = cache(pd.DataFrame(rows))
+    assert res["n_gaps"] == 0, f"Good Friday flagged as a hole: {res['gaps']}"
+
+
+def test_the_exchange_calendar_trades_columbus_and_veterans_day():
+    """If these were treated as closures, a real hole on them would be hidden."""
+    closed = SI.market_closed_days(2024, 2024)
+    assert "2024-10-14" not in closed     # Columbus Day
+    assert "2024-11-11" not in closed     # Veterans Day
+    assert "2024-03-29" in closed         # Good Friday
+    assert "2024-07-04" in closed
+    assert "2025-01-09" in closed         # Carter, national day of mourning
 
 
 def test_overlapping_chunks_that_disagree_are_caught(cache):

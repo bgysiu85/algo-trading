@@ -150,6 +150,23 @@ GRID_30_EXT = GRID_30 + ("16:00",)
 SIGMA_WINDOW_END = "10:00"      # exclusive: 09:30..09:55 at 5-minute
 GAP_DAYS_FLAG = 4               # a long weekend is 3; Thanksgiving week is 4
 
+# UNSCHEDULED FULL-MARKET CLOSURES. Weekdays the NYSE was shut for something
+# other than a holiday, so a gap spanning one is EXPLAINED and not a hole.
+#
+# The first version of the gap check counted calendar days and flagged three
+# gaps on this cache. Two were these -- President Ford's national day of
+# mourning and Hurricane Sandy -- and one was a genuine hole. A check that
+# cannot tell a real absence from a day the market was closed produces three
+# alarms where there is one defect, and the cost of that is that the real one
+# stops being read.
+UNSCHEDULED_CLOSURES = {
+    "2004-06-11",               # national day of mourning, Reagan
+    "2007-01-02",               # national day of mourning, Ford
+    "2012-10-29", "2012-10-30",  # Hurricane Sandy
+    "2018-12-05",               # national day of mourning, G.H.W. Bush
+    "2025-01-09",               # national day of mourning, Carter
+}
+
 
 # --------------------------------------------------------------------------
 # loading
@@ -291,6 +308,35 @@ def sigma1(df_fine: pd.DataFrame) -> pd.Series:
 # assertions
 # --------------------------------------------------------------------------
 
+def market_closed_days(y0: int, y1: int) -> set[str]:
+    """Weekdays the NYSE is closed: federal holidays as the exchange keeps
+    them, plus Good Friday, plus the unscheduled closures above.
+
+    The NYSE calendar is NOT the federal one: it trades on Columbus Day and
+    Veterans Day and closes on Good Friday, which is not a federal holiday at
+    all. Taking the federal list unchanged would explain away two absences a
+    year that are real and flag one that is not.
+    """
+    from pandas.tseries.holiday import (GoodFriday, USFederalHolidayCalendar)
+    cal = USFederalHolidayCalendar()
+    hol = cal.holidays(f"{y0}-01-01", f"{y1}-12-31")
+    keep = {pd.Timestamp(d).strftime("%Y-%m-%d") for d in hol
+            if pd.Timestamp(d).strftime("%B %d") not in ("October 14",)}
+    names = cal.rules
+    drop = {r.name for r in names if r.name in ("Columbus Day", "Veterans Day")}
+    if drop:
+        rebuilt = set()
+        for r in names:
+            if r.name in drop:
+                continue
+            for d in r.dates(f"{y0}-01-01", f"{y1}-12-31"):
+                rebuilt.add(pd.Timestamp(d).strftime("%Y-%m-%d"))
+        keep = rebuilt
+    for d in GoodFriday.dates(f"{y0}-01-01", f"{y1}-12-31"):
+        keep.add(pd.Timestamp(d).strftime("%Y-%m-%d"))
+    return keep | UNSCHEDULED_CLOSURES
+
+
 def dst_transitions(years) -> list[date]:
     """US DST boundaries: second Sunday in March, first Sunday in November."""
     out = []
@@ -352,10 +398,20 @@ def check(s: pd.DataFrame, df30: pd.DataFrame) -> dict:
 
     idx = pd.to_datetime(pd.Series(list(s.index)))
     gaps = idx.diff().dt.days
-    big = [(str(s.index[i - 1]), str(s.index[i]), int(gaps.iloc[i]))
-           for i in range(1, len(s)) if gaps.iloc[i] > GAP_DAYS_FLAG]
+    closed = market_closed_days(int(s.index[0][:4]), int(s.index[-1][:4]))
+    big, explained = [], []
+    for i in range(1, len(s)):
+        if gaps.iloc[i] <= GAP_DAYS_FLAG:
+            continue
+        a, b = s.index[i - 1], s.index[i]
+        missing = [d.strftime("%Y-%m-%d")
+                   for d in pd.bdate_range(a, b, inclusive="neither")]
+        unexplained = [d for d in missing if d not in closed]
+        row = (str(a), str(b), int(gaps.iloc[i]), unexplained)
+        (big if unexplained else explained).append(row)
     res["gaps"] = big
     res["n_gaps"] = len(big)
+    res["gaps_explained"] = explained
     res["gap_days_counts"] = (gaps.dropna().astype(int).value_counts()
                               .sort_index().to_dict())
 
@@ -368,14 +424,25 @@ def check(s: pd.DataFrame, df30: pd.DataFrame) -> dict:
 
 
 def cross_cache(s: pd.DataFrame, df5: pd.DataFrame) -> dict:
-    """The 10:00 price, read from two independently pulled caches."""
+    """The 10:00 price, read from two independently pulled caches.
+
+    THE LAST BAR STRICTLY BEFORE 10:00, whatever the fine cache's bar size --
+    09:55 at five minutes, 09:59 at one. The first version hard-coded "09:55",
+    which silently compared the 30-minute 10:00 price against a price FIVE
+    MINUTES EARLIER once the fine cache became 1-minute, and reported a
+    maximum disagreement of $4.96 across 5,476 sessions. That is not a data
+    defect, it is this function asking the wrong question, and it is exactly
+    the shape it exists to catch -- which is the argument for having run it.
+    """
     if df5.empty:
-        return {"status": "5-minute cache absent -- check NOT RUN"}
+        return {"status": "fine cache absent -- check NOT RUN"}
     f = df5.copy()
     f["hhmm"] = hhmm(f.index)
-    f = f[f["hhmm"] == "09:55"]
+    f = f[f["hhmm"] < SIGMA_WINDOW_END]
+    if f.empty:
+        return {"status": "no bars before 10:00 in the fine cache -- NOT RUN"}
     f["sess"] = f.index.strftime("%Y-%m-%d")
-    fine = f.set_index("sess")["close"]
+    fine = f.groupby("sess")["close"].last()
     both = s["p_1000"].dropna().index.intersection(fine.index)
     if len(both) == 0:
         return {"status": "no overlapping sessions -- check NOT RUN"}
@@ -480,12 +547,19 @@ def render(symbol: str, s: pd.DataFrame, res: dict, xc: dict,
             L.append(f"    transition {t}  session {sess}  first bar {got}")
         L.append("")
     if res["gaps"]:
-        L += ["  SESSION GAPS OVER FOUR CALENDAR DAYS. r1 reads the PRIOR",
-              "  session's close, so a hole here is a wrong r1, not a NaN:"]
-        for a, b, n in res["gaps"][:15]:
-            L.append(f"    {a} -> {b}   {n} days")
+        L += ["  UNEXPLAINED SESSION GAPS. r1 reads the PRIOR session's close,",
+              "  so a hole here is a wrong r1, not a NaN -- there is nothing",
+              "  to notice. The weekdays named are absent from the cache and",
+              "  are not holidays or known closures:"]
+        for a, b, n, miss in res["gaps"][:15]:
+            L.append(f"    {a} -> {b}   {n} days   missing: {', '.join(miss)}")
         if len(res["gaps"]) > 15:
             L.append(f"    ... and {len(res['gaps']) - 15} more")
+        L.append("")
+    if res.get("gaps_explained"):
+        L += ["  Gaps over four days that ARE explained, and are not defects:"]
+        for a, b, n, _ in res["gaps_explained"][:10]:
+            L.append(f"    {a} -> {b}   {n} days   (holiday or known closure)")
         L.append("")
 
     L += ["  bars per session: " + ", ".join(
