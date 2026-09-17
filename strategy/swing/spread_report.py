@@ -102,8 +102,20 @@ def fmt(x: float, w: int = 8, d: int = 2) -> str:
     return f"{x:,.{d}f}".rjust(w)
 
 
-def et_bucket(ts_utc: str) -> str:
-    """ET half-hour label. US eastern is UTC-4 in summer, UTC-5 in winter.
+RTH_OPEN_MIN = 9 * 60 + 30      # 09:30 ET
+RTH_CLOSE_MIN = 16 * 60         # 16:00 ET
+EXT_OPEN_MIN = 4 * 60           # 04:00 ET, pre-market
+EXT_CLOSE_MIN = 20 * 60         # 20:00 ET, post-market
+
+SESSIONS = {
+    "rth": (RTH_OPEN_MIN, RTH_CLOSE_MIN, "regular hours, 09:30-16:00 ET"),
+    "ext": (EXT_OPEN_MIN, EXT_CLOSE_MIN, "extended hours, 04:00-20:00 ET"),
+    "all": (0, 24 * 60, "every hour of the clock"),
+}
+
+
+def et_time(ts_utc: str) -> datetime:
+    """The ET wall clock for a UTC stamp. UTC-4 in summer, UTC-5 in winter.
 
     The offset is derived from the date rather than assumed, because a run that
     straddles the DST change would otherwise mislabel half its rows -- and a
@@ -118,7 +130,23 @@ def et_bucket(ts_utc: str) -> str:
     nov = datetime(y, 11, 1, tzinfo=timezone.utc)
     dst_end = nov + timedelta(days=(6 - nov.weekday()) % 7, hours=6)
     offset = -4 if dst_start <= dt < dst_end else -5
-    et = dt + timedelta(hours=offset)
+    return dt + timedelta(hours=offset)
+
+
+def et_minutes(ts_utc: str) -> int:
+    """Minutes past ET midnight."""
+    et = et_time(ts_utc)
+    return et.hour * 60 + et.minute
+
+
+def in_session(ts_utc: str, session: str) -> bool:
+    lo, hi, _ = SESSIONS[session]
+    return lo <= et_minutes(ts_utc) <= hi
+
+
+def et_bucket(ts_utc: str) -> str:
+    """ET half-hour label."""
+    et = et_time(ts_utc)
     half = 0 if et.minute < 30 else 30
     return f"{et.hour:02d}:{half:02d}"
 
@@ -133,20 +161,38 @@ class Rejects:
         self.crossed = 0
         self.nonpositive = 0
         self.wide = 0          # > 10% of mid: a stub quote, not a spread
+        self.out_of_session = 0
+        self.session = "rth"
 
     def total(self) -> int:
         return (self.not_live + self.missing + self.crossed
-                + self.nonpositive + self.wide)
+                + self.nonpositive + self.wide + self.out_of_session)
 
 
-def load(paths: list[str], max_rel: float) -> tuple[list[dict], Rejects, int]:
+def load(paths: list[str], max_rel: float,
+         session: str = "rth") -> tuple[list[dict], Rejects, int]:
+    """Read the sample CSVs, keeping only rows that belong in the answer.
+
+    `session` defaults to "rth" and that default is the point. A sampler left
+    running through the Australian day collects 13 hours of quotes of which
+    under 5% fall inside US regular hours, and the overnight book is four to
+    five times wider. Pooling them produced 34.27 bps against the honest 8.00
+    -- a number that passed the G2 gate and meant nothing. Out-of-session rows
+    are COUNTED and reported, never silently dropped.
+    """
+    if session not in SESSIONS:
+        raise ValueError(f"session must be one of {sorted(SESSIONS)}")
     rows: list[dict] = []
     rej = Rejects()
+    rej.session = session
     total = 0
     for path in paths:
         with open(path, newline="", encoding="utf-8") as fh:
             for r in csv.DictReader(fh):
                 total += 1
+                if not in_session(r["ts_utc"], session):
+                    rej.out_of_session += 1
+                    continue
                 mdt = (r.get("md_type") or "").strip()
                 rej.md_types[mdt or "(blank)"] += 1
                 if mdt != "1":
@@ -206,10 +252,14 @@ def build(rows, rej, total, args) -> str:
     w("-" * 78)
     w("COVERAGE")
     w("-" * 78)
+    sess = getattr(rej, "session", "rth")
+    _, _, sess_label = SESSIONS[sess]
+    w(f"  session filter           {sess:>9}   ({sess_label})")
     w(f"  rows read                {total:>9,}")
     w(f"  rows usable              {len(rows):>9,}"
       f"   ({100.0*len(rows)/total if total else 0:5.1f}%)")
     w(f"  rows rejected            {rej.total():>9,}")
+    w(f"      {'outside the session':<21}{rej.out_of_session:>9,}")
     w(f"      {'not live (md_type)':<21}{rej.not_live:>9,}")
     w(f"      {'bid/ask missing':<21}{rej.missing:>9,}")
     w(f"      {'non-positive':<21}{rej.nonpositive:>9,}")
@@ -223,12 +273,29 @@ def build(rows, rej, total, args) -> str:
     if not rows:
         w()
         w("!! NO USABLE ROWS. Nothing below can be computed.")
+        if rej.out_of_session and not rej.not_live:
+            w(f"!! Every row fell outside {sess_label}. The sampler ran while the US")
+            w("!! market was shut. Re-run it across a real session, or pass")
+            w("!! --session ext / --session all if you deliberately want those hours.")
         if rej.not_live:
             w("!! Every row was rejected for market data type. The subscription is")
             w("!! most likely on the live account and not shared to paper, so IB")
             w("!! served delayed quotes. Fix that and re-run; do not 'work around'")
             w("!! it by accepting md_type 3, which would measure nothing.")
         return "\n".join(L)
+
+    if total and rej.out_of_session / total > 0.20:
+        w()
+        w("  " + "!" * 74)
+        w(f"  !! {100.0*rej.out_of_session/total:.1f}% of the rows collected fall OUTSIDE "
+          f"{sess_label}.")
+        w("  !! They are excluded above. The collector was most likely left running")
+        w("  !! through hours the US market was shut -- the overnight and pre-market")
+        w("  !! book is several times wider, and pooling it produces a precise number")
+        w("  !! that answers a question no strategy asks.")
+        w("  !! Re-run the sampler across a real session before treating the figures")
+        w("  !! below as the universe's cost.")
+        w("  " + "!" * 74)
 
     live_only = set(rej.md_types) - {"1"}
     if live_only:
@@ -387,6 +454,9 @@ def build(rows, rej, total, args) -> str:
     w("    --interval seconds. That is an unbiased sample of the spread over")
     w("    time, but it is NOT the spread at the moments a strategy would trade,")
     w("    and it will under-represent brief dislocations entirely.")
+    w(f"  * ONLY {sess_label.upper()} IS COUNTED. Out-of-hours quotes were")
+    w(f"    excluded ({rej.out_of_session:,} rows). That is correct for a strategy")
+    w("    trading the regular session and wrong for one that does not.")
     w(f"  * {len(dates)} session(s) is a small sample of market conditions. A")
     w("    quiet week understates the cost of a volatile one, and the pre-flight")
     w("    already established that gap sessions are exactly when spreads widen.")
@@ -453,6 +523,7 @@ def self_test() -> int:
             min_obs = 10
             position_usd = 9000.0
             max_rel = 0.10
+            session = "rth"
         rows, rej, total = load([str(tmp)], A.max_rel)
         if total != 83 or len(rows) != 80:
             print(f"  FAIL load counts: total={total} usable={len(rows)}"); ok = False
@@ -494,6 +565,10 @@ def main(argv=None) -> int:
                          "reported for a symbol or bucket (default 30)")
     ap.add_argument("--position-usd", type=float, default=9000.0,
                     help="target position size for the depth check (default 9000)")
+    ap.add_argument("--session", choices=sorted(SESSIONS), default="rth",
+                    help="which hours count. rth (default) is 09:30-16:00 ET, "
+                         "the hours a swing strategy actually trades; ext is "
+                         "04:00-20:00 ET; all is every row.")
     ap.add_argument("--max-rel", type=float, default=0.10,
                     help="reject quotes wider than this fraction of mid as stubs "
                          "(default 0.10)")
@@ -514,7 +589,7 @@ def main(argv=None) -> int:
         sys.exit(f"not found: {missing}")
     a.csv = paths
 
-    rows, rej, total = load(paths, a.max_rel)
+    rows, rej, total = load(paths, a.max_rel, a.session)
     txt = build(rows, rej, total, a)
     print(txt)
     if a.out:

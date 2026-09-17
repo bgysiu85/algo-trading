@@ -93,6 +93,37 @@ written outside `--out`.
 
 ---
 
+## Which hours count, and why it is a default rather than a flag
+
+`spread_report.py` defaults to `--session rth` (09:30-16:00 ET). That default
+was bought with a wasted session.
+
+The first real run was started at 11:02 AEST and left for roughly thirteen
+hours. **Under 5% of its 46,805 rows landed inside US regular hours** -- the
+rest were the overnight and pre-market book, which is several times wider:
+
+| | median quoted spread |
+|---|---:|
+| everything collected | **34.27 bps** |
+| regular hours only | **8.00 bps** |
+
+The pooled figure **passed the 40 bps G2 gate** while measuring hours no swing
+strategy trades. It was precise, it was wrong, and nothing in the output said
+so. That is the exact failure this project's evidence standards are written
+against, so it is now fixed in three places:
+
+1. `load()` filters to the session and **counts** what it excluded.
+2. The report prints a banner of exclamation marks when more than 20% of rows
+   fall outside the session, and a file that is entirely out of session
+   produces a refusal naming the cause rather than an empty table.
+3. `spread_sampler.py` prints, **before collecting**, how many of the planned
+   minutes fall inside regular hours, and warns when it is under half.
+
+`--session ext` (04:00-20:00 ET) and `--session all` exist for when the
+out-of-hours book is genuinely the subject. Neither is the default.
+
+---
+
 ## The failure mode to watch for
 
 **Delayed data looks exactly like live data.** If the market data subscription

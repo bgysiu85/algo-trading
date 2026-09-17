@@ -165,6 +165,135 @@ def test_frozen_data_is_rejected_too(tmp_path):
     assert rej.not_live == 10
 
 
+# ------------------------------------------------ the out-of-hours trap ----
+
+def test_out_of_session_rows_are_counted_and_excluded(tmp_path):
+    """The defect that cost the first real run.
+
+    13:30Z is 09:30 ET (the open). 01:00Z is 21:00 ET the previous evening --
+    the market is shut and the book is several times wider.
+    """
+    rows_in = [quote(hour=13, minute=30) for _ in range(20)]
+    rows_in += [quote(sym="NIGHT", hour=1, minute=0, bid=250.00, ask=252.00)
+                for _ in range(30)]
+    p = write_csv(tmp_path / "s.csv", rows_in)
+
+    rows, rej, total = R.load([str(p)], 0.10)          # default session = rth
+    assert total == 50
+    assert len(rows) == 20
+    assert rej.out_of_session == 30
+    assert {r["sym"] for r in rows} == {"AAPL"}
+    assert rej.total() == 30
+
+
+def test_session_all_includes_what_rth_excludes(tmp_path):
+    rows_in = [quote(hour=13, minute=30) for _ in range(20)]
+    rows_in += [quote(sym="NIGHT", hour=1, minute=0) for _ in range(30)]
+    p = write_csv(tmp_path / "s.csv", rows_in)
+
+    rows, rej, _ = R.load([str(p)], 0.10, "all")
+    assert len(rows) == 50
+    assert rej.out_of_session == 0
+
+
+def test_report_warns_loudly_when_most_rows_are_out_of_session(tmp_path):
+    """A quiet exclusion is how 34.27 bps got reported as if it meant
+    something. The warning has to be impossible to skim past."""
+    rows_in = [quote(hour=13, minute=30) for _ in range(20)]
+    rows_in += [quote(sym="NIGHT", hour=1, minute=0) for _ in range(80)]
+    p = write_csv(tmp_path / "s.csv", rows_in)
+
+    rows, rej, total = R.load([str(p)], 0.10)
+    txt = R.build(rows, rej, total, Args)
+    assert "!!!!" in txt
+    assert "OUTSIDE" in txt
+    assert "80.0% of the rows" in txt
+    assert "Re-run the sampler" in txt
+
+
+def test_a_clean_rth_file_raises_no_out_of_session_alarm(tmp_path):
+    """The control: the warning must not fire on a good file."""
+    p = write_csv(tmp_path / "s.csv",
+                  [quote(hour=13, minute=30) for _ in range(40)])
+    rows, rej, total = R.load([str(p)], 0.10)
+    txt = R.build(rows, rej, total, Args)
+    assert "!!!!" not in txt
+    assert rej.out_of_session == 0
+
+
+def test_a_file_entirely_out_of_session_says_why(tmp_path):
+    p = write_csv(tmp_path / "s.csv",
+                  [quote(hour=1, minute=0) for _ in range(40)])
+    rows, rej, total = R.load([str(p)], 0.10)
+    assert rows == []
+    txt = R.build(rows, rej, total, Args)
+    assert "NO USABLE ROWS" in txt
+    assert "the US" in txt and "market was shut" in txt
+    assert "--session ext" in txt
+
+
+def test_load_refuses_an_unknown_session(tmp_path):
+    p = write_csv(tmp_path / "s.csv", [quote() for _ in range(5)])
+    with pytest.raises(ValueError):
+        R.load([str(p)], 0.10, "lunchtime")
+
+
+def test_session_windows_have_the_right_edges():
+    # 13:30Z = 09:30 ET exactly, the open -- inside
+    assert R.in_session("2026-09-17T13:30:00Z", "rth")
+    # 13:29Z = 09:29 ET -- outside
+    assert not R.in_session("2026-09-17T13:29:00Z", "rth")
+    # 20:00Z = 16:00 ET, the close -- inside
+    assert R.in_session("2026-09-17T20:00:00Z", "rth")
+    # 20:01Z = 16:01 ET -- outside
+    assert not R.in_session("2026-09-17T20:01:00Z", "rth")
+    # pre-market is in ext but not rth
+    assert R.in_session("2026-09-17T09:00:00Z", "ext")
+    assert not R.in_session("2026-09-17T09:00:00Z", "rth")
+    # everything is in all
+    assert R.in_session("2026-09-17T01:00:00Z", "all")
+
+
+# ------------------------------------------- the sampler's session banner ----
+
+def test_session_banner_warns_on_an_overnight_start():
+    """The exact start time of the first real run: 01:02Z on 2026-09-17, which
+    is 21:02 ET the previous evening."""
+    from datetime import datetime, timezone
+    lines, warn = S.session_banner(
+        datetime(2026, 9, 17, 1, 2, tzinfo=timezone.utc), 390)
+    assert warn
+    assert any("0 of 390" in ln for ln in lines)
+    assert any("OUTSIDE US regular hours" in ln for ln in lines)
+
+
+def test_session_banner_is_quiet_for_a_run_at_the_open():
+    from datetime import datetime, timezone
+    lines, warn = S.session_banner(
+        datetime(2026, 9, 17, 13, 30, tzinfo=timezone.utc), 390)
+    assert not warn
+    assert any("390 of 390" in ln for ln in lines)
+
+
+def test_rth_overlap_treats_weekends_as_closed():
+    from datetime import datetime, timezone
+    # 2026-09-19 is a Saturday
+    sat = S.rth_overlap_minutes(
+        datetime(2026, 9, 19, 13, 30, tzinfo=timezone.utc), 390)
+    assert sat == 0
+    thu = S.rth_overlap_minutes(
+        datetime(2026, 9, 17, 13, 30, tzinfo=timezone.utc), 390)
+    assert thu == 390
+
+
+def test_rth_overlap_handles_a_run_that_straddles_the_open():
+    from datetime import datetime, timezone
+    # start 60 min before the open, run 120 min -> 60 min inside
+    got = S.rth_overlap_minutes(
+        datetime(2026, 9, 17, 12, 30, tzinfo=timezone.utc), 120)
+    assert got == 60
+
+
 # ----------------------------------------------------- bad quote handling ----
 
 def test_missing_crossed_and_stub_quotes_are_rejected_separately(tmp_path):

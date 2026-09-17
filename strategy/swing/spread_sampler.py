@@ -93,7 +93,7 @@ import signal
 import sys
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ---------------------------------------------------------------- guards ----
@@ -140,6 +140,76 @@ def _sigint(_sig, _frm):
     global _stop
     _stop = True
     print("\n[stop] finishing the current tick and closing the file cleanly...")
+
+
+# ------------------------------------------------------------- session ----
+
+RTH_OPEN_MIN = 9 * 60 + 30       # 09:30 ET
+RTH_CLOSE_MIN = 16 * 60          # 16:00 ET
+
+
+def _et(dt_utc: datetime) -> datetime:
+    """ET wall clock. UTC-4 in summer, UTC-5 in winter, derived from the date."""
+    y = dt_utc.year
+    mar = datetime(y, 3, 1, tzinfo=timezone.utc)
+    dst_start = mar + timedelta(days=(6 - mar.weekday()) % 7 + 7, hours=7)
+    nov = datetime(y, 11, 1, tzinfo=timezone.utc)
+    dst_end = nov + timedelta(days=(6 - nov.weekday()) % 7, hours=6)
+    return dt_utc + timedelta(hours=-4 if dst_start <= dt_utc < dst_end else -5)
+
+
+def rth_overlap_minutes(start_utc: datetime, minutes: float) -> int:
+    """How many minutes of a planned run land inside US regular hours.
+
+    Weekends count as closed. Holidays do not -- this is a planning aid, not a
+    calendar, and it says so rather than pretending otherwise.
+    """
+    if minutes <= 0:
+        minutes = 24 * 60          # open-ended run: judge the next 24h
+    covered = 0
+    for m in range(int(minutes)):
+        et = _et(start_utc + timedelta(minutes=m))
+        if et.weekday() >= 5:                      # Sat/Sun
+            continue
+        mins = et.hour * 60 + et.minute
+        if RTH_OPEN_MIN <= mins < RTH_CLOSE_MIN:
+            covered += 1
+    return covered
+
+
+def session_banner(start_utc: datetime, minutes: float) -> tuple[list[str], bool]:
+    """Lines to print before collecting, and whether to warn.
+
+    The first real run of this collector was started at 11:02 AEST and left for
+    13 hours. Under 5% of its rows landed inside US regular hours, and the
+    pooled spread came out at 34.27 bps against the honest 8.00 -- a figure
+    that passed the G2 gate and measured the overnight book. Finding that out
+    afterwards costs a session; saying it here costs a line.
+    """
+    et = _et(start_utc)
+    planned = int(minutes) if minutes > 0 else 24 * 60
+    covered = rth_overlap_minutes(start_utc, minutes)
+    pct = 100.0 * covered / planned if planned else 0.0
+
+    lines = [
+        f"[session] ET now {et:%Y-%m-%d %H:%M} ({et:%a}); "
+        f"US regular hours are 09:30-16:00 ET",
+        f"[session] this run covers {covered} of {planned} planned minutes "
+        f"inside regular hours ({pct:.0f}%)",
+    ]
+    warn = pct < 50.0
+    if warn:
+        lines += [
+            "",
+            "  *** WARNING: most of this run falls OUTSIDE US regular hours. ***",
+            "  *** The overnight and pre-market book is several times wider,  ***",
+            "  *** and spread_report defaults to --session rth, so those rows ***",
+            "  *** will be collected and then excluded.                       ***",
+            "  *** Start closer to the open, or pass --minutes to end at it.  ***",
+            "",
+        ]
+    lines.append("[session] holidays are not modelled; weekends are")
+    return lines, warn
 
 
 # ------------------------------------------------------------- universe ----
@@ -238,6 +308,19 @@ def self_test() -> int:
         if got_ok != want_ok:
             print(f"  FAIL account guard on {accts}"); ok = False
     print("[self-test] DU-prefix account guard OK")
+
+    # 2026-09-17 was a Thursday. 01:02Z is 21:02 ET the previous day -- shut.
+    _, warn = session_banner(datetime(2026, 9, 17, 1, 2, tzinfo=timezone.utc), 390)
+    if not warn:
+        print("  FAIL an overnight start did not warn"); ok = False
+    # 13:30Z is 09:30 ET, the open
+    _, warn = session_banner(datetime(2026, 9, 17, 13, 30, tzinfo=timezone.utc), 390)
+    if warn:
+        print("  FAIL a run starting at the open warned anyway"); ok = False
+    cov = rth_overlap_minutes(datetime(2026, 9, 17, 13, 30, tzinfo=timezone.utc), 390)
+    if cov != 390:
+        print(f"  FAIL open-to-close overlap was {cov}, expected 390"); ok = False
+    print("[self-test] session banner OK")
 
     b = batches(list(range(37)), 45)
     if len(b) != 1:
@@ -368,6 +451,8 @@ def run(args) -> int:
 
     writer = Writer(out)
     print(f"[out] {out.resolve()}  (append mode, flushed per row)")
+    for line in session_banner(datetime.now(timezone.utc), args.minutes)[0]:
+        print(line)
     print(f"[run] interval {args.interval}s, duration "
           f"{'until Ctrl-C' if args.minutes <= 0 else str(args.minutes) + ' min'}")
     print("[run] Ctrl-C to stop\n")
