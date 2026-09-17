@@ -427,7 +427,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      target_exit: "TE.TargetExit | None" = None,
                      target_cents: float | None = None,
                      green_hold_bars: int | None = None,
-                     hard_stop: float | None = None) -> list[Trade]:
+                     hard_stop: float | None = None,
+                     skip_entries: int = 0) -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -531,7 +532,29 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     knowable until 06:10, so a `first_seen` of 06:10 could legitimately fill on
     it). Conservative is the correct direction for a control: it can cost
     entries, never manufacture them.
+
+    SKIP_ENTRIES: PASS OVER THE FIRST N ENTRIES OF THE SESSION
+    ----------------------------------------------------------
+    `skip_entries` is the number of entries the engine WOULD OTHERWISE HAVE
+    TAKEN that are passed over before the first position is opened. An entry
+    here means a bar on which the rule fires while flat, at or after the
+    floor, inside the price band, with a size of at least one share -- a
+    band-refused signal is not an entry and is not counted. Registered in
+    docs/research/REGISTERED_first_entry_skip.md (H-B1) from the live record's
+    finding that the first entry in a name-day lost and later ones did not.
+
+    It is the SIGNAL-ORDINAL form, on purpose: with the first position never
+    opened, bars the baseline was in a trade for become live signal bars, so
+    the skipped book's entries are not a subset of the baseline's. That is
+    what a live trader following the rule would experience, and the
+    alternative -- deleting the first trade from a finished book -- is an
+    accounting filter that the study prints beside it and does not read.
+
+    `0` is bit-identical to this function before the parameter existed, for
+    the same reason `not_before=None` is.
     """
+    if skip_entries < 0:
+        raise ValueError(f"skip_entries must be >= 0, got {skip_entries}")
     if use_apex is None:
         use_apex = USE_APEX_EXIT
     # A real parameter, not a module constant read at call time. It used to be
@@ -606,6 +629,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     # High of the PREVIOUS in-session bar -- the buy-back trigger. None on the
     # first bar, which correctly blocks a re-entry before there is a prior bar.
     prev_high = None
+    skipped = 0
 
     for k, i in enumerate(idx):
         row = rows.iloc[i]
@@ -646,6 +670,12 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                 # it builds to. Without that control, extra size always wins.
                 q = size_for(px) if entry_shares is None else entry_shares
                 if q >= 1:
+                    # The entry the engine would have taken. Passed over
+                    # while the skip budget lasts -- after the band and the
+                    # size, so a refused signal does not spend it.
+                    if skipped < skip_entries:
+                        skipped += 1
+                        continue
                     pos = dict(entry_i=i, entry_px=px, qty=q, init_qty=q,
                                ladder_done=0, target_taken=False,
                                # SEEDING THE PEAK. The default takes the entry

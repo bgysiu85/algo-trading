@@ -422,7 +422,8 @@ def backtest_session(df, session_date, tz,
                      entry_shares: int | None = None,
                      use_apex: bool | None = None,
                      not_before: dtime | None = None,
-                     ladder: "PL.LadderConfig | None" = None) -> list[Trade]:
+                     ladder: "PL.LadderConfig | None" = None,
+                     skip_entries: int = 0) -> list[Trade]:
     """Run one pre-market session on 5-minute bars.
 
     Accepts 1-minute OR 5-minute bars and resamples if needed, so this can be
@@ -441,7 +442,15 @@ def backtest_session(df, session_date, tz,
     later than strictly required. A floor that erred the other way would buy a
     name minutes before the screen surfaced it, which is the defect being
     controlled for, so the coarseness is kept rather than tuned away.
+
+    `skip_entries` carries exactly the contract documented on
+    `mcl.backtest_session`: the first N entries the engine would otherwise
+    have taken (fires while flat, at or after the floor, inside the band, size
+    >= 1) are passed over, the engine then runs as the rule says, and `0` is
+    bit-identical to this function before the parameter existed.
     """
+    if skip_entries < 0:
+        raise ValueError(f"skip_entries must be >= 0, got {skip_entries}")
     band = ENFORCE_PRICE_BAND if enforce_price_band is None else enforce_price_band
     # Passed explicitly rather than mutating the module constant, so a 2x2 sweep
     # can evaluate both settings over the same frame with no shared state.
@@ -466,6 +475,7 @@ def backtest_session(df, session_date, tz,
     pos = None
     rows = sig.reset_index()
     tcol = rows.columns[0]
+    skipped = 0
 
     for k, i in enumerate(idx):
         row = rows.iloc[i]
@@ -480,6 +490,11 @@ def backtest_session(df, session_date, tz,
                 # real trading day holds size fixed -- see mcl.backtest_session.
                 q = size_for(px) if entry_shares is None else int(entry_shares)
                 if q >= 1:
+                    # See mcl.backtest_session: the entry the engine would
+                    # have taken, passed over while the skip budget lasts.
+                    if skipped < skip_entries:
+                        skipped += 1
+                        continue
                     pos = dict(entry_i=i, entry_px=px, qty=q, init_qty=q,
                                # Partial-sell accounting, added with the
                                # take-profit ladder. With no ladder `realised`
