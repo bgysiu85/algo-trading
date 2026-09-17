@@ -34,8 +34,9 @@ first poll of every session arms the previous session's names.
 Per session, carry-over set aside (live / sim / found / missed / sim-only):
 09-08 6/10/6/0/4 · 09-09 11/11/10/1/1 · 09-10 6/5/5/1/0 · 09-11 8/9/8/0/1 ·
 09-14 10/11/10/0/1 · 09-15 6/8/6/0/1 · 09-16 4/6/4/0/1 (ITCH). Blocked names
-counted as screened. 2026-09-17 (16 live names) is excluded: the pulls ran at
-09:02 ET on the 17th, before its pre-market had finished; see §6.
+counted as screened. 2026-09-17 (16 live names) is excluded: its slices
+arrived without a symbology sidecar (Databento could not yet resolve the
+day's instrument ids) and the 09-16 close slice was not on disk; see §7.
 
 ## 2. The 04:00 carry-over (§2.2)
 
@@ -120,8 +121,12 @@ live-first name, clause `volume` or `change`: XRTX, `change`).
 
 ## 7. Adding 2026-09-17
 
-The 09-17 pre-market is complete now and it is the largest live session in
-the archive (16 names). Its slice on both tapes was pulled mid-session
-(`--refresh-partial` re-fetches a short chunk), and its prior close needs the
-09-16 15:55–16:05 slice, which is not on disk. The commands are in the
-handover; the result is appended here when it runs.
+09-17 is the largest live session in the archive (16 names). Its pre-market
+slices were pulled after the session on both tapes, but the symbology
+sidecar failed for both (`SYMBOLOGY FAILED` — Databento resolves a day's
+instrument ids with a lag), so every reader refuses the files; and
+`regular_close --emit` stopped on the 09-17 close slice for the same reason,
+which left the 09-16 close unwritten. `databento_universe --resymbolize`
+fills the sidecars once Databento has them; then the emit, the two
+`screen_sim` runs and the two validations. The result is appended here when
+it runs.
