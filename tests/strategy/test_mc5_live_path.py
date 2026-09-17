@@ -161,7 +161,11 @@ def test_the_live_evaluation_agrees_with_backtest_session_on_the_same_bar():
     ref = M.signals(M.to_5m(cut))
     last = ref.loc[et("2026-01-07 08:05").tz_convert("UTC")]
     assert live.long_entry == bool(last["entry"])
-    assert live.exit_signal == bool(last["exit_sig"])
+    # GATED, not raw. This line asserted the raw exit_sig until 2026-09-17 --
+    # which is to say it asserted the defect: the backtest reads USE_APEX_EXIT
+    # and the live path did not, and this test pinned the live path to the
+    # ungated value. See tests/strategy/mc5/test_live_backtest_apex_parity.py.
+    assert live.exit_signal == (bool(last["exit_sig"]) and M.USE_APEX_EXIT)
     assert live.close == pytest.approx(float(last["close"]))
 
 

@@ -347,7 +347,7 @@ def last_closed_bucket(df1m: pd.DataFrame, now) -> "pd.Timestamp | None":
     return None
 
 
-def evaluate_last_bar(df, now) -> "Signals | None":
+def evaluate_last_bar(df, now, use_apex: bool | None = None) -> "Signals | None":
     """Evaluate MC5 on the last COMPLETE 5-minute bar. None if there is none.
 
     `df` may be 1-minute or 5-minute bars. `now` is required rather than
@@ -357,9 +357,23 @@ def evaluate_last_bar(df, now) -> "Signals | None":
     Returns None -- not a no-signal Signals -- whenever the strategy has
     nothing to say: too few bars to warm the indicators, or no complete bucket
     yet. The trader already treats None as "nothing happened this poll".
+
+    USE_APEX_EXIT IS APPLIED HERE, as MCL's evaluate_last_bar has done since
+    2026-09-08 -- and this one did not. When the constant was flipped on
+    2026-09-11, `backtest_session` read it (line ~468) and this function kept
+    returning the ungated `exit_sig`, which trader.py acted on and labelled
+    `gradient_reversal`. Every live MC5 session from 2026-09-10 to the fix
+    ran apex ON while every published MC5 figure was apex OFF: 25
+    gradient_reversal rows in var/fills over 09-11..09-17, ten of them on
+    09-17 alone for (150.74). The same defect, the third module in a row
+    (harness literal, MCL evaluate, MC5 evaluate); found by the research chat
+    from the portal's "Closed today", handover_mc5_apex_live_split_20260917.
+    `use_apex` overrides the constant for this call only, mirroring MCL.
     """
     if df is None or len(df) == 0:
         return None
+    if use_apex is None:
+        use_apex = USE_APEX_EXIT
     if _looks_5m(df):
         df5 = df
     else:
@@ -375,7 +389,7 @@ def evaluate_last_bar(df, now) -> "Signals | None":
     row = sig.iloc[-1]
     return Signals(
         long_entry=bool(row["entry"]),
-        exit_signal=bool(row["exit_sig"]),
+        exit_signal=bool(row["exit_sig"]) and use_apex,
         close=float(row["close"]),
         bar_ts=df5.index[-1],
         detail={
@@ -418,6 +432,7 @@ def size_for(price: float, equity: float = EQUITY) -> int:
 
 
 def backtest_session(df, session_date, tz,
+                     price_min: float | None = None,
                      enforce_price_band: bool | None = None,
                      gap_fills: bool = True,
                      seed_peak_with_bar_high: bool = False,
@@ -463,6 +478,9 @@ def backtest_session(df, session_date, tz,
         raise ValueError(f"skip_entries must be >= 0, got {skip_entries}")
     check_profit_floor(profit_floor)
     band = ENFORCE_PRICE_BAND if enforce_price_band is None else enforce_price_band
+    # The ENTRY floor (REGISTERED_price_floor, H-S5) -- not the profit floor,
+    # which is a different rule with a local of its own further down.
+    entry_floor = PRICE_MIN if price_min is None else float(price_min)
     # Passed explicitly rather than mutating the module constant, so a 2x2 sweep
     # can evaluate both settings over the same frame with no shared state.
     apex = USE_APEX_EXIT if use_apex is None else use_apex
@@ -498,7 +516,7 @@ def backtest_session(df, session_date, tz,
         if pos is None:
             if bool(row["entry"]) and entry_allowed[i]:
                 px = float(row["close"]) + SLIPPAGE_TICKS * TICK
-                if band and not (PRICE_MIN <= px <= PRICE_MAX):
+                if band and not (entry_floor <= px <= PRICE_MAX):
                     continue
                 # entry_shares bypasses size_for() so a comparison against a
                 # real trading day holds size fixed -- see mcl.backtest_session.

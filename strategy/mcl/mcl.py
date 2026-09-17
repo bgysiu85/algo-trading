@@ -428,6 +428,7 @@ def in_session_mask(index, session_date, tz):
 
 
 def backtest_session(df: pd.DataFrame, session_date, tz,
+                     price_min: float | None = None,
                      use_apex: bool | None = None,
                      require_macd_pos: bool | None = None,
                      scale_out_pct: float | None = None,
@@ -675,6 +676,13 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     px_at = (None if entry_px_by_bar is None
              else entry_px_by_bar.reindex(sig.index).tolist())
 
+    # The ENTRY floor (REGISTERED_price_floor, H-S5): raises PRICE_MIN for the
+    # price an entry may be taken at, and nothing else. The universe, the
+    # ceiling, the slippage tick and the delayed-entry price are untouched, and
+    # None is the shipped constant, so it is bit-identical by default. Not the
+    # profit floor, which is a different rule with a local of its own below.
+    entry_floor = PRICE_MIN if price_min is None else float(price_min)
+
     trades: list[Trade] = []
     pos = None
     rows = sig.reset_index()
@@ -715,7 +723,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                 over = None if px_at is None else px_at[i]
                 px = (float(row["close"]) + SLIPPAGE_TICKS * TICK
                       if over is None or over != over else float(over))
-                if ENFORCE_PRICE_BAND and not (PRICE_MIN <= px <= PRICE_MAX):
+                if ENFORCE_PRICE_BAND and not (entry_floor <= px <= PRICE_MAX):
                     continue
                 # entry_shares bypasses size_for() so a study can hold size
                 # fixed while varying something else -- and, crucially, so a

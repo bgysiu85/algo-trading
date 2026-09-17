@@ -46,12 +46,19 @@ class Trade:
 
 
 class IB:
-    def __init__(self):
+    """A cancel the trader sends comes back the way IB really answers it:
+    status `Cancelled` and a 202 with a blank reason on the error event.
+    The fakes used to leave the status at `Submitted`, which is how the
+    self-cancel-as-REJECTED defect of 2026-09-17 got past this file."""
+
+    def __init__(self, book=None):
         self.placed = []
         self.cancelled = []
         self.trades = []
+        self.book = book
 
     def placeOrder(self, contract, order):
+        order.orderId = len(self.placed) + 1
         self.placed.append(order)
         t = Trade()
         self.trades.append(t)
@@ -61,6 +68,9 @@ class IB:
         self.cancelled.append(order)
         for t in self.trades:
             t.cancelled = True
+            t.orderStatus.status = "Cancelled"
+        if self.book is not None:
+            self.book._on_error(order.orderId, 202, "Order Canceled - reason:", None)
 
 
 class Log:
@@ -75,11 +85,15 @@ class Book:
     """The trader, reduced to what marketable_limit touches."""
 
     def __init__(self, quotes):
-        self.ib = IB()
+        self.ib = IB(book=self)
         self.log = Log()
         self.dry_run = False
         self._quotes = list(quotes)      # consumed one per read
         self.reads = 0
+        self._errors = {}
+        self._self_cancelled = set()
+
+    _on_error = T.MCLPaperTrader._on_error
 
     # marketable_limit calls this once up front and then once per poll
     def quote(self, st):

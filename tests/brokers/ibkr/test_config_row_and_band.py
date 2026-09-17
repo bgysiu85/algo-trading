@@ -223,6 +223,8 @@ class Sender:
         self.log = Log()
         self.dry_run = False
         self._q = (bid, ask)
+        self._errors = {}
+        self._self_cancelled = set()
 
     def quote(self, st):
         return self._q
@@ -290,6 +292,7 @@ class Rejecter(Sender):
         super().__init__()
         self.message = message
         self._errors = {}
+        self._self_cancelled = set()      # IB's cancel, not the trader's
         self.blocked = []
 
         class Trade:
