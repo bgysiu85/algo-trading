@@ -78,7 +78,7 @@ import json
 import sys
 import time
 from collections import defaultdict, deque
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import date as _date, time as dtime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -123,7 +123,44 @@ H0_REFERENCE_SOURCE = ("var/reports/pit_h0.txt, 2026-09-14, "
                        "daily=38/repaired=6,132")
 
 
-def h0_late_qualifiers() -> float:
+@dataclass(frozen=True)
+class H0Ref:
+    """The control this run is read against.
+
+    The block above is the PUBLISHED reference -- H0 on the XNAS.BASIC
+    universe -- and stays as it is. A universe built on another tape has its
+    own H0, and `pit_h0` now writes it as JSON beside its report so that it
+    can be passed with `--h0` instead of being pasted over the constants:
+    pasting would make the BASIC baseline and the ITCH baseline share one
+    block, and whichever was pasted last would silently be "the" control.
+    """
+    net: float
+    trades: int
+    offered: int
+    knowable_net: float
+    knowable_trades: int
+    knowable_offered: int
+    source: str
+
+    @classmethod
+    def published(cls) -> "H0Ref":
+        return cls(H0_PIT_NET, H0_PIT_TRADES, H0_PIT_OFFERED, H0_KNOWABLE_NET,
+                   H0_KNOWABLE_TRADES, H0_KNOWABLE_OFFERED, H0_REFERENCE_SOURCE)
+
+    @classmethod
+    def load(cls, path: str | Path) -> "H0Ref":
+        d = json.loads(Path(path).read_text(encoding="utf-8"))
+        return cls(float(d["H0_PIT_NET"]), int(d["H0_PIT_TRADES"]),
+                   int(d["H0_PIT_OFFERED"]), float(d["H0_KNOWABLE_NET"]),
+                   int(d["H0_KNOWABLE_TRADES"]), int(d["H0_KNOWABLE_OFFERED"]),
+                   str(d["H0_REFERENCE_SOURCE"]))
+
+    def late_qualifiers(self) -> float:
+        return (self.net / self.trades
+                - self.knowable_net / self.knowable_trades)
+
+
+def h0_late_qualifiers(ref: H0Ref | None = None) -> float:
     """What H0 says the names the feed surfaces after 04:30 are worth.
 
     AS SCREENED minus KNOWABLE, per trade, at $4.26. DERIVED from the block
@@ -132,8 +169,7 @@ def h0_late_qualifiers() -> float:
     everything the staleness guard can see, and it survived a refresh that
     moved it to $(1.35).
     """
-    return (H0_PIT_NET / H0_PIT_TRADES
-            - H0_KNOWABLE_NET / H0_KNOWABLE_TRADES)
+    return (ref or H0Ref.published()).late_qualifiers()
 
 # The warm-up the published backtests use, imported rather than restated: 2
 # sessions total means the target day plus one prior. If cache_io changes, this
@@ -479,7 +515,9 @@ def tail(name: str, arms: dict, split: str) -> list[str]:
 
 def render(name: str, arms: dict, suppressed: dict, counts: dict,
            with_bars: dict, split: str, n_days: int, warmup_missing: int,
-           elapsed: float, traded_early: int = 0) -> list[str]:
+           elapsed: float, traded_early: int = 0,
+           ref: H0Ref | None = None) -> list[str]:
+    ref = ref or H0Ref.published()
     L = [f"{name.upper()} ON THE POINT-IN-TIME UNIVERSE", "",
          f"  {n_days} sessions, {WARMUP_SESSIONS} session(s) of warm-up, "
          f"{QTY} shares, friction charged per round trip",
@@ -594,33 +632,34 @@ def render(name: str, arms: dict, suppressed: dict, counts: dict,
               "  the comparison lives in the MCL and MC5 reports.", ""]
         return L + tail(name, arms, split)
 
-    h0_trade = H0_PIT_NET / H0_PIT_TRADES
-    h0_day = H0_PIT_NET / H0_PIT_OFFERED
+    h0_trade = ref.net / ref.trades
+    h0_day = ref.net / ref.offered
     L += ["DO THE RULES BEAT THEIR OWN CONTROL", "",
           f"  H0 on this universe, as screened   {acct(h0_trade, 9)}/trade   "
           f"{acct(h0_day, 9)}/symbol-day",
-          f"  ({H0_REFERENCE_SOURCE})"]
-    if counts["pit"] != H0_PIT_OFFERED:
+          f"  ({ref.source})"]
+    if counts["pit"] != ref.offered:
         L += ["",
-              f"  STALE REFERENCE: H0 was scored over {H0_PIT_OFFERED:,} "
+              f"  STALE REFERENCE: H0 was scored over {ref.offered:,} "
               f"symbol-days and this run",
               f"  offered {counts['pit']:,}. The universe file has changed, so "
               "the comparison below",
               "  is between two different universes. Re-run "
-              "`python -m common.pit_h0`",
-              "  and update the H0_* constants before quoting any of it."]
+              "`python -m common.pit_h0` on this",
+              "  universe and pass its JSON with --h0 (or update the H0_* "
+              "constants) before quoting any of it."]
     L.append("")
     if pit["n"] >= MIN_TRADES:
         per_trade, per_day, agree = beats_control(
             pit["net"], pit["n"], counts["pit"],
-            H0_PIT_NET, H0_PIT_TRADES, H0_PIT_OFFERED)
+            ref.net, ref.trades, ref.offered)
         L += [f"  {name.upper()} POINT-IN-TIME      "
               f"{acct(pit['per'], 9)}/trade   "
               f"{acct(pit['net'] / (counts['pit'] or 1), 9)}/symbol-day",
               f"  vs H0                       {acct(per_trade, 9)}        "
               f"{acct(per_day, 9)}",
               f"  ({pit['n'] / (counts['pit'] or 1):.2f} trades per symbol-day "
-              f"against H0's {H0_PIT_TRADES / H0_PIT_OFFERED:.2f})", ""]
+              f"against H0's {ref.trades / ref.offered:.2f})", ""]
         if not agree:
             L += ["  NO VERDICT -- THE TWO DENOMINATORS DISAGREE. Per trade "
                   "and per",
@@ -663,7 +702,7 @@ def render(name: str, arms: dict, suppressed: dict, counts: dict,
               # guard never saw it, and it survived a refresh that moved it to
               # $(1.35). A figure quoted in prose is still a figure.
               f"  H0 found the late qualifiers worth "
-              f"{acct(h0_late_qualifiers(), 7)}. If this differs, the",
+              f"{acct(ref.late_qualifiers(), 7)}. If this differs, the",
               "  strategy is selecting on something the screen's ordering",
               "  already carries.", ""]
 
@@ -682,6 +721,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dataset", default="XNAS.BASIC")
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--out", default=None)
+    p.add_argument("--h0", default=None,
+                   help="pit_h0's JSON for THIS universe (written beside its "
+                        "report). Without it the published XNAS.BASIC "
+                        "reference in the H0_* block is used.")
     return p
 
 
@@ -700,6 +743,7 @@ def main(argv=None) -> int:
     # is how the clobber was noticed at all), but two modules sharing an output
     # path is a data-loss bug waiting on the next unlucky ordering.
     out_path = a.out or f"var/reports/pit_strategy_{name}.txt"
+    ref = H0Ref.load(a.h0) if a.h0 else H0Ref.published()
 
     archive = Path(a.archive) if a.archive else default_archive()
     slices = {date_of(p): p for p in window_slices(archive, a.dataset)}
@@ -773,9 +817,11 @@ def main(argv=None) -> int:
                          or [t["date"] for t in arms["stage2"]])
     emit("\n".join(render(name, arms, suppressed, counts, with_bars, split,
                           len(days), warmup_missing, time.time() - t0,
-                          traded_early=traded_early)),
+                          traded_early=traded_early, ref=ref)),
          out_path,
-         header=f"common.pit_strategy  strategy={name}  pairs={a.pairs}"
+         header=f"common.pit_strategy  strategy={name}  pairs={a.pairs}  "
+                f"dataset={a.dataset}"
+                + (f"  h0={a.h0}" if a.h0 else "")
                 + (f"  LIMIT {a.limit}" if a.limit else ""))
     return 0
 
