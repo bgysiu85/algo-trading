@@ -15,29 +15,47 @@ Financial Economics* 104 (2012) 228–250.
 
 ## 0. Provenance of every paper claim in this document — read this first
 
-**The PDF could not be downloaded into either working environment.** The cloud
-container's egress allowlist and Ben's device bridge both refused
-`w4.stern.nyu.edu:443` (`CONNECT tunnel failed, response 403`). Every quotation
-and page number below was obtained by fetching the PDF through the web-fetch
-tool and asking for verbatim text — that is, **a second model read the PDF and
-reported back**. No line of §1–§3 has been read off the page by the author of
-this document.
-
-That is a weaker provenance than this project normally accepts, and it is
-recorded here rather than buried:
+**The PDF was refused at the proxy from both environments on 2026-09-17
+(`CONNECT tunnel failed, response 403` from the cloud container and from Ben's
+device), so §1–§3 were first written from a fetch tool's reading of it rather
+than from the page. Ben allowlisted `pages.stern.nyu.edu` and
+`w4.stern.nyu.edu` at 22:17 the same evening; the PDF was then downloaded and
+read directly, and every ★ line below has been checked against it.**
 
 | Tag | Meaning |
 |---|---|
-| **[P]** | Quoted from the paper through the fetch tool, with a page number. Believed verbatim; not eyeball-verified. |
-| **[D]** | A **decision made here**, because the paper is silent or the fetch was ambiguous. Registered, not inherited. |
+| **[P]** | **Read off the PDF and verified verbatim**, with a page or section reference. |
+| **[D]** | A **decision made here**, because the paper is silent or the choice is this project's. Registered, not inherited. |
 | **[E]** | External to the paper (CME, Databento, IBKR), sourced inline. |
 | **[M]** | Measured here, from free data, on the date stated. |
 
-**Before the first backtest runs, one of the following must happen:** Ben opens
-the PDF and checks the five [P] lines marked ★, or the paper is obtained some
-other way. Five lines decide the whole construction and a paraphrase is not good
-enough for any of them. **This is a PRE-RUN gate in the registration, not a
-nice-to-have.**
+**Gate G1 of the registration is CLEARED.** All five ★ lines were confirmed:
+equation (1) and its lag sentence, equation (5), the 40% sizing sentence, the
+overlapping-portfolio averaging, and the skip question.
+
+### 0.1 What the fetch tool got wrong, and why it is written down
+
+The first pass **manufactured an ambiguity that does not exist in the paper.**
+It reported that footnote 10 (p. 240) "indicates" the skip-the-most-recent-month
+convention and that the §3.2 wording "suggests" the time-series signal does not
+skip — leaving the single most consequential question in the construction open,
+and §1.1 originally registered a **[D] decision** to resolve it.
+
+Read on the page, footnote 10 says the opposite of ambiguous:
+
+> "Asness, Moskowitz, and Pedersen (2010) exclude the most recent month when
+> computing 12-month **cross-sectional** momentum. For consistency, we follow
+> that convention here, but **our results do not depend on whether the most
+> recent month is excluded or not**." (p. 240, emphasis added)
+
+It is about the cross-sectional comparison factor of §5, not the TSMOM signal,
+and it explicitly disclaims the sensitivity. §1.1 is now **[P]**, not [D].
+
+**This is `PROGRAM_INDEX` §4's "control the tool" arriving on a document rather
+than on a tape** — *measure on a second source before stating a conclusion, not
+after*. A summarising layer does not fail loudly; it hedges, and a hedge reads
+like diligence. Every ★ in this document exists because that layer was not
+trusted, and the one that mattered is the one it got wrong.
 
 ---
 
@@ -57,16 +75,28 @@ no threshold and no neutral band: the position is always on, in one direction or
 the other. **[P]** p. 233: the signal uses "the sign of the past return from time
 t−k−1 to t−1".
 
-**[D] The lookback window ends at the previous month-end, not at the rebalance
-instant.** The two readings of equation (5)'s `r^s_{t-12,t}` differ by one month
-of return and the fetch could not settle which the paper means — footnote 10
-(p. 240) says the *cross-sectional* momentum construction skips the most recent
-month "for consistency" with Asness/Moskowitz/Pedersen (2010), and the p. 233
-wording (`t−k−1` to `t−1`) suggests the time-series signal does **not**. This
-project registers the **no-skip** form — the 12 calendar months ending at the
-month-end being traded on — because that is what equation (5) reads as, and
-carries the one-month-skip variant as a **reported neighbour in the grid**, never
-as a switch to flip after seeing a result. ★ *(the [P] line to verify)*
+**[P] The lookback does NOT skip the most recent month. This is settled, not
+chosen.** ★ Equation (5) signs on `r^s_{t-12,t}` and earns `r^s_{t,t+1}`, and
+§3.2 (p. 234–235) spells the same thing out for general (k, h):
+
+> "Specifically, for each instrument, we compute the time-t return based on the
+> sign of the past return from time **t−k−1 to t−1**. We then compute the time-t
+> return based on the sign of the past return from t−k−2 to t−2, and so on until
+> we compute the time-t return based on the final past return that is still being
+> used from t−k−h to t−h."
+
+The freshest portfolio's signal is the k months ending at **t−1**, the month-end
+immediately before the month whose return is earned. Equation (5) is the same
+statement with the index shifted by one. **No gap, no skip.**
+
+Footnote 10's skip convention belongs to the **cross-sectional** factor of §5,
+and the same footnote adds that "our results do not depend on whether the most
+recent month is excluded or not" (p. 240). §0.1 records why this paragraph
+previously said something weaker.
+
+**[D]** The one-month-skip variant is still carried as a **reported neighbour**
+in the grid — cheap to compute, and the paper's insensitivity claim is a claim
+about *their* sample, not this one.
 
 **[D] "Excess return", for a futures contract, is the contract's own return.**
 A futures position posts margin rather than capital, so its return is already an
@@ -114,9 +144,18 @@ absent instrument and a flat instrument must be distinguishable in the output.)
 annualized volatility of 40%." And: "The choice of 40% is inconsequential, but it
 makes it easier to intuitively compare our portfolios to others." ★
 
+**[P]** p. 236, verbatim, and note which subscript it carries: "the position
+size is chosen to be **40%/σ_{t−1}**, where σ_{t−1} is the estimate of the ex
+ante volatility of the contract as described above." **Equation (5) on the same
+page prints `40%/σ^s_t`.** The two are the paper's own notation for one quantity
+— §1.2's estimator is lagged by construction — but they are not the same symbol,
+and a reader implementing from equation (5) alone could reasonably compute an
+unlagged volatility. **This project uses the lagged estimate**, and a test
+asserts the series is shifted.
+
 **[P]** p. 236: the portfolio is the **equal-weighted average across all
-available instruments**, which delivers roughly **12% annualised portfolio
-volatility**. **[P]** footnote 8, p. 236: this "implies a use of margin capital
+available instruments**, which delivers "an annualized volatility of **12% per
+year** over the sample period 1985–2009". **[P]** footnote 8, p. 236: this "implies a use of margin capital
 of about 5–20%, which is well within what is feasible to implement."
 
 **[D] The dollar formulation used here**, which is equation (5) rewritten for an
@@ -154,9 +193,12 @@ is the registered answer; the grid is the honesty check, not a menu.
 
 ### 1.5 The paper's universe, for reference only
 
-**[P]** 58 futures, 1985–2009, across four asset classes (p. 230): 24 commodities,
-9 developed equity index futures, 13 developed government bond futures, 12
-currency pairs from 9 underlying currencies. **[P]** "We focus on the most liquid
+**[P]** §2.1, p. 230: "futures prices for **24 commodities, 12 cross-currency
+pairs (from nine underlying currencies), nine developed equity indexes, and 13
+developed government bond futures**, from **January 1965** through December
+2009." The headline sample is cut at **1985** "to ensure that a comprehensive
+set of instruments" is available (p. 236); the 1965–1985 data is what the
+out-of-sample check below runs on. **58 instruments in total.** **[P]** "We focus on the most liquid
 instruments to avoid returns being contaminated by illiquidity" (p. 230).
 
 **[P]** Reported results: annual Sharpe "greater than 1.0 … roughly 2.5 times the
@@ -170,7 +212,12 @@ the most liquid futures contract (typically the nearest or next nearest-to-deliv
 contract), and then compound the daily returns to a cumulative return index."
 **[P]** §6.3, p. 247: `futures return = price change + roll return`.
 
-**[P] Transaction costs: the paper does not deduct them.** Neither does Faber's,
+**[P] Transaction costs: the paper does not deduct them, and says so in its own
+figure captions.** Fig. 2 (p. 239) reports "the annualized **gross** Sharpe ratio
+of the 12-month time series momentum or trend strategy for each futures
+contract". A full-text search of the paper finds **no transaction-cost
+treatment anywhere** — the only two occurrences of the phrase are a
+related-literature aside and a title in the bibliography. Neither does Faber's,
 neither does Antonacci's (`diversifier_candidates` §1, §5.3 item 4). Every number
 in the paper is gross. **This project reports nothing gross** (`PROGRAM_INDEX` §1:
 "every P/L figure states whether friction is charged").
@@ -496,7 +543,9 @@ week. **State it; do not assume it is negligible.**
 
 **Open, and registered as open:**
 
-1. **The five ★ [P] lines have not been read off the page.** §0.
+1. ~~The five ★ [P] lines have not been read off the page.~~ **CLOSED
+   2026-09-17**, after Ben allowlisted the host. All five verified; the skip
+   question resolved against the fetch tool's hedge. §0 and §0.1.
 2. **The rates arm** — (a) ZN, (b) MTN, (c) none. §2.3. Ben's call, not the
    backtest's.
 3. **The real friction number**, from an IBKR statement. §6.

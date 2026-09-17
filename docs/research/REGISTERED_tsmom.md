@@ -19,8 +19,8 @@ A gate is not a caveat. If a gate is open, the run does not start.
 
 | # | Gate | Why it blocks |
 |---|---|---|
-| **G1** | **The paper is read off the page**, not through a fetch tool. The five ★ lines of spec §1 are confirmed verbatim: equation (5), equation (1)'s lag sentence, the 40% sizing sentence, the monthly averaging sentence, and whether the 12-month lookback skips the most recent month. | Spec §0. The whole construction rests on five sentences no one here has seen. The skip question in particular is **two different strategies**, not two spellings of one. |
-| **G2** | **Ben has seen the §5 data cost and said yes.** | `PROGRAM_INDEX` §1: a tool that can spend money states the number before it spends it. |
+| **G1** | ~~The paper is read off the page.~~ **CLEARED 2026-09-17.** Ben allowlisted `pages.stern.nyu.edu` and `w4.stern.nyu.edu`; the PDF was downloaded and all five ★ lines verified. | Spec §0. **And the gate earned its place:** the fetch tool had hedged the skip question into an open [D] decision, and the page settles it — footnote 10's skip convention is the *cross-sectional* factor's, and the same footnote disclaims the sensitivity. See spec §0.1. |
+| **G2** | **Ben has seen the spec §5 data cost and said yes.** | `PROGRAM_INDEX` §1: a tool that can spend money states the number before it spends it. |
 | **G3** | **Ben has chosen the rates arm** — (a) ZN, (b) MTN, or (c) none — spec §2.3. | Choosing it from the backtest's ranking is a one-family search dressed as a decision. It is a margin question and a preference, and it is his. |
 | **G4** | **The holdout of §6 is cut and enforced in code before the first run**, with a test that the enforcement cannot be bypassed by a flag. | `PROGRAM_INDEX` §1. The equity `holdout.json` does not cover this and is not relevant here; TSMOM cuts its own. |
 
@@ -65,7 +65,7 @@ search it was meant to anchor.
 | Signal | sign of trailing excess return | MOP eq. (5), p. 236 |
 | **Lookback — the deployed spec** | **equal-weight ensemble over k ∈ {3, 6, 9, 12} months** | `PROGRAM_INDEX` §4: "prefer an ensemble to a chosen parameter" |
 | Lookback — reported neighbour | k = 12 alone | MOP's headline cell |
-| Skip most recent month | **no** | spec §1.1 [D]; the skip variant is a reported neighbour |
+| Skip most recent month | **no** | spec §1.1 **[P]** — MOP §3.2, p. 234–235, signal is `t−k−1` to `t−1`. Settled by the paper, not chosen here. The skip variant remains a reported neighbour |
 | Volatility estimator | EWMA, δ = 60/61 (com = 60), about the EW mean, × 261, lagged one day | MOP eq. (1), p. 233 |
 | Warm-up | 261 daily returns before an instrument enters | spec §1.2 [D] |
 | Position vol target | 40% ex-ante per position | MOP p. 236 |
@@ -113,7 +113,12 @@ Fixed here because the runner is written after this document.
     tranched spec sits in.
 11. **The lookback grid** k ∈ {1, 3, 6, 9, 12, 24}, every cell printed, with the
     ensemble's position in that distribution stated as a percentile, in
-    ReSolve's form: "the ensemble beat N% of single-k specs".
+    ReSolve's form: "the ensemble beat N% of single-k specs". **MOP's Table 2
+    also tests k = 36 and 48; both are excluded here and the reason is a
+    property of this sample, not of the result.** With the dataset starting
+    mid-2010 and the holdout starting 2022, a 48-month lookback spends four of
+    eleven in-sample years on warm-up. Printed in the report as excluded, with
+    that reason.
 12. **Coverage in the same pass as the P/L**: bars loaded per market, first and
     last date, missing intervals, instruments absent for warm-up
     (`PROGRAM_INDEX` §4).
