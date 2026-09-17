@@ -624,9 +624,29 @@ def build_parser() -> argparse.ArgumentParser:
                         "var/state/regular_close.json and falls back to the "
                         "daily close, reporting the mix. `require` drops rows "
                         "the repair does not cover.")
+    p.add_argument("--after", default=None, metavar="YYYY-MM-DD",
+                   help="only sessions on or after this date. For extending the "
+                        "point-in-time universe over newly pulled slices without "
+                        "regenerating the file every result was decided on -- "
+                        "so with --after the default --out is REFUSED; name a "
+                        "separate file.")
     p.add_argument("--out", default="var/state/screen_pairs_pit.json")
     p.add_argument("--report", default="var/reports/screen_sim.txt")
     return p
+
+
+DECIDING_OUT = "var/state/screen_pairs_pit.json"
+
+
+def after_refusal(after: str | None, out: str) -> str | None:
+    """A partial run must not overwrite the deciding universe file."""
+    # Backslashes normalised by hand: on the machine that runs this the path
+    # arrives from PowerShell, and on the machine that tests it, it does not.
+    if after and Path(out.replace("\\", "/")) == Path(DECIDING_OUT):
+        return (f"--after {after} with --out {DECIDING_OUT}: a partial run would "
+                "replace the file every point-in-time result was decided on. "
+                "Name a separate --out (e.g. var/state/screen_pairs_pit_ext.json).")
+    return None
 
 
 def main(argv=None) -> int:
@@ -639,7 +659,12 @@ def main(argv=None) -> int:
     if a.capture is not None:
         cfg = replace(cfg, capture=a.capture)
 
+    refusal = after_refusal(a.after, a.out)
+    if refusal:
+        sys.exit(refusal)
     slices = window_slices(archive, a.dataset)
+    if a.after:
+        slices = [p for p in slices if date_of(p) >= a.after]
     if not slices:
         sys.exit(
             f"no pre-market window slices under {archive}/{a.dataset}/ohlcv-1m.\n"
