@@ -117,3 +117,26 @@ Part A's question, not this one.
   would need (§7 item 15) and that combination is B2/B5, not this.
 - `range_pct` is one of six criteria `universe_lift` fixed; `dollar_vol` and
   `gap_pct` are not run here. Each would be its own registration.
+
+# AMENDMENT A — 2026-09-17, PRE-RUN. Re-based on the ITCH v2 universe.
+
+Run once more on `screen_pairs_pit_itch_v2.json` with XNAS.ITCH bars
+(`--pairs var/state/screen_pairs_pit_itch_v2.json --dataset XNAS.ITCH`,
+output `range_rank_itch.txt` / `range_rank_itch_trades.csv`). The running
+range is read from the ITCH bars, so the ranks can move where BASIC's 08:00
+prints moved a name's high; that is the one mechanism by which this could
+read differently.
+
+- Same rules, same readings, same thresholds, same seed. Nothing in the
+  verdict is re-tuned; the universe file and the bars change and nothing else.
+- The population check compares MCL's count against the number published
+  for THE FILE run (3,908 on v2), never against the BASIC 3,955.
+- Prediction, written before the run: the verdict stands (NOTHING for both,
+  and for H-B1 NOTHING / REFUSED). On the ITCH v2 books every trade still
+  loses $8–9 on average, so a total-based reading rewards abstention exactly
+  as it did on BASIC, and the abstention control is what decides. If a gate
+  clears the control here having not cleared it on BASIC, that is a tape
+  effect on the gated trades and wants the same reading on the hybrid
+  post-change universe before it is believed — it is not a pass.
+- Reported beside the BASIC figures, not in place of them. The BASIC result
+  docs stay as written and are not edited.

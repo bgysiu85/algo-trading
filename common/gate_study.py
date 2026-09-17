@@ -38,8 +38,8 @@ from pathlib import Path
 import numpy as np
 
 from common.breadth import BOOT_MIN_P, RESAMPLES, SEED, cluster_bootstrap, pct, share_above_zero
-from common.entry_shares import MEASURED_FRICTION, PUBLISHED_TRADES, QTY
-from common.first_entry_skip import (DROP, FRICTIONS, TOP, book_block, by_symbol_day,
+from common.entry_shares import MEASURED_FRICTION, QTY
+from common.first_entry_skip import (DROP, FRICTIONS, PAIRS, TOP, book_block, by_symbol_day, population_lines,
                                      delta_by_symbol, deltas_by_symbol_day, drop_top,
                                      drop_top_delta, halves, key, money, net, new_entries,
                                      per_trade, top_absent, trade_row)
@@ -198,7 +198,8 @@ def binding_block(gname: str, could: int, total: int, detail: dict,
 def render(title: str, registered: str, books: dict, pairs, reported, symdays: int, errors: int,
            days: list[str], elapsed: float, jobs: int, refused: dict, binding: dict,
            error_days: list | None = None, preamble: list[str] | None = None,
-           binding_kw: dict | None = None) -> list[str]:
+           binding_kw: dict | None = None, universe: str | None = None,
+           dataset: str = "XNAS.BASIC") -> list[str]:
     """`pairs`: (baseline, gated) read by the verdict; `reported`: (baseline,
     gated) printed as 'reported, not registered'. `refused[gated]` rows;
     `binding[gated] = (could, total, detail)`; `preamble` lines go after the
@@ -206,6 +207,7 @@ def render(title: str, registered: str, books: dict, pairs, reported, symdays: i
     binding_kw = binding_kw or {}
     cut = days[len(days) // 2] if len(days) >= 2 else (days[0] if days else "")
     L = [title, "", f"  registered  {registered}",
+         f"  universe    {universe or PAIRS}   bars {dataset}",
          f"  {len(days):,} sessions   {symdays:,} symbol-days   halves cut at {cut}",
          f"  {QTY} shares   commission in, friction per round trip   "
          f"elapsed {elapsed:.1f}s on {jobs} worker(s)", ""]
@@ -214,11 +216,8 @@ def render(title: str, registered: str, books: dict, pairs, reported, symdays: i
         L += [f"    {e}" for e in (error_days or [])[:20]]
         L += [""]
     mcl = books.get("MCL", [])
-    pub = PUBLISHED_TRADES.get("mcl")
     L += ["POPULATION CHECK", "", f"  MCL trades here     {len(mcl):,}"]
-    if pub is not None:
-        ok = len(mcl) == pub
-        L.append(f"  published count     {pub:,}   " + ("matches" if ok else "*** DOES NOT MATCH ***"))
+    L += population_lines(len(mcl), universe or PAIRS)
     L += [""]
     if preamble:
         L += list(preamble)

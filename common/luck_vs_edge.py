@@ -297,7 +297,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--readings", default=READINGS)
     p.add_argument("--pairs", default=PAIRS)
     p.add_argument("--archive", default=None)
-    p.add_argument("--dataset", default="XNAS.BASIC")
+    p.add_argument("--dataset", default="XNAS.BASIC",
+                   help="the minute slices the trend flag is read from; must be the "
+                        "dataset the trades CSV was written on")
+    p.add_argument("--daily-dataset", default="XNAS.BASIC",
+                   help="the daily archive the market regime is read from. The regime "
+                        "is a property of the whole market, not of the tape the books "
+                        "are read from, so this stays XNAS.BASIC when --dataset is "
+                        "XNAS.ITCH (as screen_sim's prior closes do) and the labels are "
+                        "identical on both runs")
     p.add_argument("--jobs", type=int, default=0)
     p.add_argument("--out", default="var/reports/luck_vs_edge.txt")
     p.add_argument("--labels-csv", default="var/reports/luck_vs_edge_labels.csv")
@@ -314,6 +322,30 @@ def write_labels(path: Path, sessions, same, lag, trend, moves, readings) -> Non
                         "" if m is None else f"{m:.4f}", readings.get(d, "")])
 
 
+def input_refusal(meta: dict, pairs: str, dataset: str, readings: dict[str, str]) -> str | None:
+    """The trades CSV, the universe file and the readings file must be one run's.
+
+    The CSV's meta names the pairs file and the dataset it was written on;
+    the readings file is read by session date. A readings file from another
+    universe carries sessions this one never screened (BASIC has 09-01..03,
+    ITCH v2 has 09-14/15), and a meta from another tape labels every trade
+    with the wrong bars. Either is refused, not warned about, because the
+    report would otherwise print an ordinary-looking table."""
+    def base(x): return str(x).replace("\\", "/").rsplit("/", 1)[-1]
+    if meta.get("dataset") != dataset:
+        return (f"the trades CSV was written on {meta.get('dataset')!r} and --dataset is "
+                f"{dataset!r}; point --trades at the CSV first_entry_skip wrote on that tape")
+    if base(meta.get("pairs", "")) != base(pairs):
+        return (f"the trades CSV was written on universe {base(meta.get('pairs', ''))!r} and "
+                f"--pairs is {base(pairs)!r}; they must be the same file")
+    stray = sorted(set(readings) - set(meta.get("sessions", [])))
+    if stray:
+        return (f"the readings file carries {len(stray)} session(s) the trades CSV never ran "
+                f"(first {stray[0]}); it is another universe's cold_veto output -- point "
+                f"--readings at the one written beside these trades")
+    return None
+
+
 def main(argv=None) -> int:
     from common.databento_fetch import default_archive
     a = build_parser().parse_args(argv)
@@ -322,7 +354,11 @@ def main(argv=None) -> int:
     books = load_books(trades_path)
     meta = load_meta(trades_path)
     readings = load_readings(Path(a.readings))
-    same, lag, med = regime_labels(archive, a.dataset)
+    refusal = input_refusal(meta, a.pairs, a.dataset, readings)
+    if refusal:
+        import sys
+        sys.exit(f"REFUSING TO RUN: {refusal}")
+    same, lag, med = regime_labels(archive, a.daily_dataset)
 
     tasks, _ = G.build_tasks(a.pairs, archive, a.dataset, None)
     jobs = G.jobs_from(a.jobs)
@@ -333,7 +369,8 @@ def main(argv=None) -> int:
     Path(a.labels_csv).parent.mkdir(parents=True, exist_ok=True)
     write_labels(Path(a.labels_csv), meta["sessions"], same, lag, trend, moves, readings)
     emit("\n".join(render(books, meta, same, lag, trend, moves, readings, med, elapsed, jobs)),
-         a.out, header=f"common.luck_vs_edge trades={a.trades} readings={a.readings} dataset={a.dataset} "
+         a.out, header=f"common.luck_vs_edge trades={a.trades} readings={a.readings} pairs={a.pairs} "
+                       f"dataset={a.dataset} daily_dataset={a.daily_dataset} "
                        f"sessions={len(meta['sessions'])} cut={meta['cut']} trend_x={TREND_X}")
     return 0
 
