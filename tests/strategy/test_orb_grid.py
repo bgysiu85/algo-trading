@@ -606,3 +606,65 @@ def test_a_name_surfaced_after_the_earliest_range_end_is_refused():
              "first_seen": "2026-03-02T15:05:00+00:00"}]        # 10:05 EST
     msg = G.first_seen_check(late)
     assert msg and "REFUSING TO RUN" in msg and "B 2026-03-02 10:05" in msg
+
+
+# --------------------------------------------------------------------------
+# amendment D.7 -- a target-day-only fallback cache
+# --------------------------------------------------------------------------
+
+def _fallback_setup(built, tmp_path, tape="XNAS.BASIC"):
+    """A second cache holding bars for names the first one lacks."""
+    fb = tmp_path / "fb" / "3d_to_2000"
+    for s in ("NEW1", "NEW2"):
+        write_day(fb, s, DAYS[0], seed=900 + len(s) + ord(s[-1]))
+    (fb.parent / "SOURCE.txt").write_text(f"databento {tape} ohlcv-1m\n",
+                                          encoding="utf-8")
+    sp, _ = built["pairs"]
+    rows = json.loads(sp.read_text(encoding="utf-8"))
+    rows += [{"symbol": s, "date": DAYS[0]} for s in ("NEW1", "NEW2")]
+    pairs = tmp_path / "with_new.json"
+    pairs.write_text(json.dumps(rows), encoding="utf-8")
+    return fb, pairs, rows
+
+
+def test_the_fallback_fills_only_what_the_cache_lacks_and_is_counted(built, tmp_path):
+    fb, pairs, rows = _fallback_setup(built, tmp_path)
+    base = ["--pairs", str(pairs), "--cache", str(built["cache"]),
+            "--window", "3d_to_2000", "--jobs", "1", "--labels", "pit",
+            "--csv", ""]
+    # 2 of 56 missing (3.6%) without it: refused.
+    with pytest.raises(SystemExit) as e:
+        G.main(base + ["--out", str(tmp_path / "x.txt")])
+    assert "REFUSING TO RUN" in str(e.value)
+    out = tmp_path / "fb.txt"
+    assert G.main(base + ["--fallback-cache", str(fb), "--out", str(out)]) == 0
+    text = out.read_text(encoding="utf-8")
+    assert "no file      0" in text
+    assert "-- 2 symbol-days" in text, "every fallback read is counted"
+    assert "fallback=fb" in text.splitlines()[1]
+
+
+def test_the_primary_cache_wins_where_both_hold_a_file(built, tmp_path):
+    """A fallback holding a DIFFERENT bar for a name the primary has must not
+    be read -- the survivor re-run would otherwise change under D.7."""
+    fb = tmp_path / "fb2" / "3d_to_2000"
+    write_day(fb, "S00", DAYS[0], seed=12345)          # same name, other bars
+    (fb.parent / "SOURCE.txt").write_text("databento XNAS.BASIC ohlcv-1m\n",
+                                          encoding="utf-8")
+    pr = [{"symbol": "S00", "date": DAYS[0], "population": "p"}]
+    cfgs = [O.BASELINE]
+    one = G.run_chunk((str(built["cache"]), pr, cfgs))
+    two = G.run_chunk(((str(built["cache"]), str(fb)), pr, cfgs))
+    k = G.BASELINE_KEY
+    assert one[k].by_symbol == two[k].by_symbol
+    assert two[k].coverage.get("from_fallback", 0) == 0
+
+
+def test_a_fallback_on_another_tape_is_refused_even_with_anyway(built, tmp_path):
+    fb, pairs, _ = _fallback_setup(built, tmp_path, tape="EQUS.MINI")
+    with pytest.raises(SystemExit) as e:
+        G.main(["--pairs", str(pairs), "--cache", str(built["cache"]),
+                "--window", "3d_to_2000", "--jobs", "1", "--anyway",
+                "--fallback-cache", str(fb),
+                "--out", str(tmp_path / "x.txt"), "--csv", ""])
+    assert "One run reads one tape" in str(e.value)

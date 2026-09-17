@@ -194,10 +194,22 @@ def run_chunk(args) -> dict:
     ONE resample per symbol-day, shared by every cell -- see `orb.Bars`.
     """
     cache, pairs, cfgs = args
+    # One path (the survivor run's shape) or a (primary, fallback) pair per
+    # amendment D.7. The primary always wins; the fallback is read only for a
+    # symbol-day the primary has no file for, and each such read is counted.
+    roots = [Path(c) for c in ((cache,) if isinstance(cache, (str, Path))
+                               else cache)]
     out = {key_of(c): Cell() for c in cfgs}
     for pr in pairs:
         sym, day, population = pr["symbol"], pr["date"], pr["population"]
-        df = load_bars(Path(cache), sym, day)
+        df = None
+        for i, root in enumerate(roots):
+            df = load_bars(root, sym, day)
+            if df is not None:
+                if i:
+                    for c in out.values():
+                        c.coverage["from_fallback"] += 1
+                break
         if df is None:
             for c in out.values():
                 c.coverage["no_cache_file"] += 1
@@ -367,7 +379,8 @@ def _row(key, d, dd) -> str:
 
 def provenance(cache: Path, tape: str, a, seen: int, split_date: str,
                coverage: Counter | None = None,
-               requested: int | None = None) -> list[str]:
+               requested: int | None = None,
+               fallback: Path | None = None) -> list[str]:
     """The same block the pre-flight carries, for the same reason: two passes
     over different caches produce different numbers from the same code, and a
     table lifted out of one of them carries no sign of which it was."""
@@ -385,6 +398,12 @@ def provenance(cache: Path, tape: str, a, seen: int, split_date: str,
             f"  no file      {cov.get('no_cache_file', 0):,}   "
             f"(refused above {MAX_MISSING_PCT:.1f}% unless --max-missing-pct)",
             f"  no RTH bars  {cov.get('no_rth_bars', 0):,}"]
+        if fallback is not None:
+            L[-1:-1] = [
+                f"  fallback     {fallback}   (amendment D.7: target-day bars "
+                "only, read",
+                f"               where the cache above has no file) -- "
+                f"{cov.get('from_fallback', 0):,} symbol-days"]
     if tape != EXPECTED_TAPE:
         L += ["  >> NOT THE REGISTERED TAPE. Run with --anyway. Nothing below",
               "  >> is ORB's registered result and none of it enters section 11.",
@@ -707,6 +726,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="refuse when more than this share of requested "
                         "symbol-days has no cache file (default: %(default)s)")
     p.add_argument("--cache", default="bar_cache_db")
+    p.add_argument("--fallback-cache",
+                   help="amendment D.7: a second cache read only for symbol-days "
+                        "the first has no file for (its tape is checked too)")
     p.add_argument("--window", default="3d_to_2000")
     p.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     p.add_argument("--limit", type=int)
@@ -744,7 +766,7 @@ def tape_check(tape: str, expected: str, anyway: bool) -> str | None:
             f"{expected} cache, or --anyway to run regardless.")
 
 
-def coverage_check(cache: Path, pairs: list[dict],
+def coverage_check(cache, pairs: list[dict],
                    max_pct: float) -> str | None:
     """None to proceed, or the refusal text. Checked BEFORE the run.
 
@@ -753,8 +775,11 @@ def coverage_check(cache: Path, pairs: list[dict],
     built for that cost 0.43%. On one it was not built for it silently
     replaces the universe with the intersection -- see MAX_MISSING_PCT.
     """
+    roots = [cache] if isinstance(cache, Path) else list(cache)
     missing = [p for p in pairs
-               if not (cache / f"{p['symbol']}_{p['date']}.csv.gz").exists()]
+               if not any((r / f"{p['symbol']}_{p['date']}.csv.gz").exists()
+                          for r in roots)]
+    cache = " or ".join(str(r) for r in roots)
     pct_missing = 100.0 * len(missing) / len(pairs) if pairs else 0.0
     if pct_missing <= max_pct:
         return None
@@ -781,12 +806,26 @@ def main(argv=None) -> int:
     refusal = tape_check(tape, a.expect_tape, a.anyway)
     if refusal:
         sys.exit(refusal)
+    fallback = None
+    if a.fallback_cache:
+        froot = Path(a.fallback_cache)
+        fallback = froot if froot.name == a.window else froot / a.window
+        if not fallback.is_dir():
+            sys.exit(f"no fallback cache at {fallback}")
+        ftape = cache_tape(fallback)
+        if ftape != tape:
+            # Not overridable with --anyway: a run half on one tape and half on
+            # another has no single tape to name in its header.
+            sys.exit(f"REFUSING TO RUN: the fallback cache is tape "
+                     f"{ftape or 'UNKNOWN'} and the cache is {tape or 'UNKNOWN'}. "
+                     "One run reads one tape.")
+    roots = (cache,) if fallback is None else (cache, fallback)
 
     pairs = load_pairs(a.pairs, a.limit, a.labels)
     if not pairs:
         sys.exit("no symbol-days")
     refusal = (first_seen_check(pairs)
-               or coverage_check(cache, pairs, a.max_missing_pct))
+               or coverage_check(list(roots), pairs, a.max_missing_pct))
     if refusal:
         sys.exit(refusal)
     # THE SPLIT POINT IS DERIVED FROM THE DATA AND NEVER SWEPT (§5 item 3).
@@ -798,7 +837,8 @@ def main(argv=None) -> int:
     merged = {key_of(c): Cell() for c in cfgs}
 
     n = max(1, len(pairs) // (a.jobs * 4)) if a.jobs > 1 else len(pairs)
-    chunks = [(str(cache), pairs[i:i + n], cfgs) for i in range(0, len(pairs), n)]
+    chunks = [(tuple(str(r) for r in roots), pairs[i:i + n], cfgs)
+              for i in range(0, len(pairs), n)]
     print(f"{len(pairs):,} symbol-days, {len(cfgs)} cells, "
           f"{len(chunks)} chunks, {a.jobs} job(s)")
 
@@ -843,12 +883,13 @@ def main(argv=None) -> int:
 
     prov = provenance(cache, tape, a, seen, split_date,
                       coverage=merged[BASELINE_KEY].coverage,
-                      requested=len(pairs))
+                      requested=len(pairs), fallback=fallback)
     emit("\n".join(prov + render(read_all, delta_all, split_date, seen,
                                   elapsed, a, merged)),
          a.out,
          header=(f"strategy.orb.grid  cache={cache.name}  "
-                 f"tape={tape or 'UNKNOWN'}  "
+                 + (f"fallback={fallback.parent.name}  " if fallback else "")
+                 + f"tape={tape or 'UNKNOWN'}  "
                  f"pairs={','.join(Path(x).name for x in a.pairs)}  "
                  f"symbol_days={seen:,}  cells={len(cfgs)}  "
                  f"split={split_date}"))
