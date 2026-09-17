@@ -157,3 +157,17 @@ in its name; the table says "ET" in its header.
 - **Order count is unmodelled**, as everywhere here.
 - The live table's 134 trades are not used for anything but the motivation
   above. Live is for checking the backtest, not fitting.
+
+# AMENDMENT A — 2026-09-17, POST-RUN. Written after `first_entry_skip_RESULT_20260917.md`.
+
+Found by reading a result; changes nothing already read. Items 3 and 4 held
+for both strategies with bootstrap P = 1.000 while the per-trade delta was
++0.03 (MCL) and −1.05 (MC5). On a book whose average trade loses, a delta
+built from totals cannot fail for a rule that removes trades: per-symbol-day,
+drop-top-N on the delta and the bootstrap on the delta all measure *trades
+less*. The verdict here stands (NOTHING and REFUSED), because items 1 and 2
+demanded per trade too. The defect is that +0.03 a trade was able to satisfy
+item 1 at all. The next registrations (H-B3, H-B4) carry a margin of $4.26 on
+Δ per trade and an abstention control — the same number of trades removed at
+random, 2,000 seeded draws, the filter's per-trade delta above the 95th
+percentile. Not applied here retroactively.
