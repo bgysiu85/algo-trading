@@ -114,8 +114,9 @@ def live_lists(archive: Path) -> tuple[dict[date, set[str]], list[dict]]:
         except ValueError:
             skipped.append({"file": p.name, "why": "unparseable date"})
             continue
-        live, automated = read_watchlist(p)
-        live |= read_blocked(p.with_name(f"watchlist_blocked_{stem}{suffix}.txt"))
+        wl = read_watchlist(p)
+        live, automated = set(wl["names"]), wl["automated"]
+        live |= set(read_blocked(p.with_name(f"watchlist_blocked_{stem}{suffix}.txt")))
         if not automated:
             skipped.append({"file": p.name, "n": len(live),
                             "why": "hand-synced under a different screen"})
@@ -273,7 +274,7 @@ def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
     t0 = time.time()
 
-    sim = load_sim(Path(a.pairs))
+    sim = {d: set(v) for d, v in load_sim(Path(a.pairs)).items()}
     sessions = sessions_of(sim)
     live, skipped = live_lists(Path(a.watchlists))
     if not live:
