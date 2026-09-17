@@ -148,7 +148,13 @@ def scenario_books(books: dict, f: float, giveback: float = SS.GIVEBACK) -> dict
     """
     plain = ("MCL", "MC5")
     floored = ("MCL-pf5", "MC5-pf5")
-    out = {"1": {"MCL": books["MCL-pf5"], "MC5": books["MC5-pf5"]}, "caps": {}}
+    # EVERY scenario's books carry their book name, scenario 1 included. The
+    # cap's output is stamped by `tagged()`, and a scenario 1 that was not
+    # would be the one book of the five with a different shape -- which is
+    # how the control ended up reading untagged rows in the first place.
+    out = {"1": {"MCL": [dict(r, book="MCL-pf5") for r in books["MCL-pf5"]],
+                 "MC5": [dict(r, book="MC5-pf5") for r in books["MC5-pf5"]]},
+           "caps": {}}
     for tag, names, scope in (("2", plain, "session"), ("3", plain, "strategy"),
                               ("4", floored, "session"), ("5", floored, "strategy")):
         res = SS.apply_cap(tagged(books, names), giveback, scope=scope, f=f)
@@ -164,7 +170,7 @@ def scenario_books(books: dict, f: float, giveback: float = SS.GIVEBACK) -> dict
 # --- the readings -----------------------------------------------------------
 
 def cap_verdict(base: list[dict], gated: list[dict], cut: str, symdays: int,
-                cap: dict, scope: str, f: float) -> tuple[str, list[str]]:
+                cap: dict, scope: str, f: float, book: str) -> tuple[str, list[str]]:
     """H-S4 §4's six readings, scored exactly as registered.
 
     Reading 1 is the registration's "> 0", with no margin. The project's
@@ -182,8 +188,17 @@ def cap_verdict(base: list[dict], gated: list[dict], cut: str, symdays: int,
     d5 = drop_top_delta(deltas, 5)
     boot = cluster_bootstrap(delta_by_symbol(deltas), RESAMPLES, SEED)
     boot_p = share_above_zero(boot["totals"]) if boot["totals"] else 0.0
-    fired_keys = list(cap["fired"])
-    ctrl = SS.random_cut(base, fired_keys, scope, f, SS.CUT_DRAWS, SEED)
+    # The control cuts THIS book's trades in the sessions the cap fired on, so
+    # `base` has to carry the book name the cap keyed on -- the engines' rows
+    # do not, which is what the 2026-09-17 smoke run died on.
+    #
+    # The fired keys are passed whole rather than filtered to this strategy.
+    # A filter would be unreachable: `random_cut` looks each key up in the
+    # rows it was given, and under strategy scope another strategy's key
+    # cannot be there. A guard that cannot fire is noise that reads like
+    # protection, and this project has removed two of those already.
+    ctrl = SS.random_cut([dict(r, book=book) for r in base], list(cap["fired"]),
+                         scope, f, SS.CUT_DRAWS, SEED)
     removed = len(base) - len(gated)
 
     r1 = d_pt > 0
@@ -288,14 +303,32 @@ def render(books: dict, symdays: int, errors: int, days: list[str], elapsed: flo
             L += cap_block(tag, sc["caps"][tag], symdays)
             for strat in ("MCL", "MC5"):
                 scope = sc["caps"][tag]["scope"]
-                t, lines = cap_verdict(books[strat], sc[tag][strat], cut, symdays,
-                                       sc["caps"][tag], scope, f)
-                L += [f"  {strat} against the baseline (H-S4's six readings)"] + lines + [""]
+                # The book the cap acted on -- the plain one for 2 and 3, the
+                # floored one for 4 and 5. It is also what the control cuts.
+                acted = strat if comp is None else f"{strat}-pf5"
+                src = books[strat] if comp is None else sc[comp][strat]
+                against = "the baseline" if comp is None else f"scenario {comp}"
+                t, lines = cap_verdict(src, sc[tag][strat], cut, symdays,
+                                       sc["caps"][tag], scope, f, acted)
+                L += [f"  {strat} against {against} (H-S4's six readings)"
+                      + ("" if comp is None
+                         else " -- what the cap adds ON TOP OF the floor (A7),"
+                              " and the SCORED reading for this scenario")] + lines + [""]
                 if comp:
-                    t2, lines2 = cap_verdict(sc[comp][strat], sc[tag][strat], cut,
-                                             symdays, sc["caps"][tag], scope, f)
-                    L += [f"  {strat} against scenario {comp} -- what the cap adds "
-                          f"ON TOP OF the floor (A7)"] + lines2 + [""]
+                    # The whole change, floor and cap together. DESCRIPTIVE: the
+                    # delta carries the floor's contribution and the control cuts
+                    # only the floored book, so scoring the six here would credit
+                    # the cap with the floor's effect against a control that never
+                    # saw it. The scored line is the one above.
+                    d_pt = per_trade(sc[tag][strat], f) - per_trade(books[strat], f)
+                    d_sd = ((net(sc[tag][strat], f) - net(books[strat], f)) / symdays
+                            if symdays else 0.0)
+                    L += [f"  {strat} against the baseline -- floor AND cap together."
+                          f" DESCRIPTIVE, NOT SCORED",
+                          f"    per trade {d_pt:+.2f}   per symbol-day {d_sd:+.2f}"
+                          f"   trades {len(books[strat]):,} -> {len(sc[tag][strat]):,}",
+                          "    (the delta carries the floor; the control above does"
+                          " not, so the six are read against scenario 1)", ""]
 
     # SCENARIO 1'S REGISTERED VERDICT, read once at the measured friction.
     L += [f"{'=' * 70}",
