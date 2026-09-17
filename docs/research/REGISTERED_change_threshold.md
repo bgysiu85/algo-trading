@@ -148,3 +148,44 @@ python -m common.change_threshold --dataset XNAS.ITCH \
     --variant var/state/screen_pairs_pit_itch_chg50.json \
     --out var/reports/change_threshold_50.txt
 ```
+
+---
+
+## Amendment A (PRE-RUN, before any strategy result was read)
+
+The §5 stop rule fired on the universe: **9 symbol-days pass at 50% and are
+absent from the published 20% universe**, which a tighter screen cannot do.
+
+The cause is not the threshold. `var/state/screen_pairs_pit_itch_p50.json` was
+written at 05:47 on 2026-09-17; `var/state/regular_close.json` was rewritten at
+07:36 and `XNAS.BASIC/ohlcv-1d/2026-09.dbn.zst` at 06:26, both after it. The
+prior closes the screen measures `premarket_change` against have moved:
+
+```
+published p50 run   daily=474,729  repaired=5,812,430  92.4% of 6,287,159
+inputs at this run  daily=474,635  repaired=5,812,544  92.5% of 6,287,179
+```
+
+Seven of the nine fall on 2026-09-14 and 2026-09-15 — sessions the published
+run skipped for having no prior close and the extended archive now covers. Two
+(BIAF, CHPT on 2026-09-04) sit on a session both runs screened, so their
+computed change moved with the closes.
+
+**The amendment.** The baseline arm is REBUILT at `--change-min 20` from the
+inputs on disk at this run, and that rebuild — not the published file — is what
+the 50% arm is compared against. Both arms then read the same closes, the same
+daily archive and the same sessions, which is the only way the delta is
+attributable to the threshold.
+
+The published file is kept and reported beside the rebuild (`pairs_overlap`),
+because the difference between them is a finding of its own and belongs to
+whoever owns the archive extension: **the published H0 (11.90), MCL (8.81) and
+MC5 (8.49) were measured on inputs that no longer exist on disk.**
+
+**Consequence for §5.** The reproduction check against 3,960 / 6,630 published
+trades can no longer be a stop rule, because the baseline arm is deliberately
+not the published one. It is demoted to a **reported comparison**: the rebuilt
+MCL@20 trade count and per-trade figure are printed against the published pair,
+and a large divergence is a finding about the archive change, not about 50%.
+The other two stop rules stand unchanged, with the added-symbol-days rule now
+read against the rebuilt baseline.
