@@ -442,7 +442,8 @@ def backtest_session(df, session_date, tz,
                      ladder: "PL.LadderConfig | None" = None,
                      skip_entries: int = 0,
                      entry_gate: "pd.Series | None" = None,
-                     profit_floor: "tuple[int, int] | None" = None) -> list[Trade]:
+                     profit_floor: "tuple[int, int] | None" = None,
+                     session_end: "dtime | None" = None) -> list[Trade]:
     """Run one pre-market session on 5-minute bars.
 
     Accepts 1-minute OR 5-minute bars and resamples if needed, so this can be
@@ -477,6 +478,12 @@ def backtest_session(df, session_date, tz,
     if skip_entries < 0:
         raise ValueError(f"skip_entries must be >= 0, got {skip_entries}")
     check_profit_floor(profit_floor)
+    # THE WINDOW. `None` is SESSION_END, bit-identical to this function before
+    # the parameter existed. The full-day study (REGISTERED_mc5_full_day.md)
+    # passes 20:00; nothing else may, because the session mask is also what
+    # decides which bar is `last_of_session` -- i.e. where the forced flatten
+    # lands -- and a caller that changes it changes the EXIT model too.
+    send = SESSION_END if session_end is None else session_end
     band = ENFORCE_PRICE_BAND if enforce_price_band is None else enforce_price_band
     # The ENTRY floor (REGISTERED_price_floor, H-S5) -- not the profit floor,
     # which is a different rule with a local of its own further down.
@@ -489,7 +496,7 @@ def backtest_session(df, session_date, tz,
     local = sig.index.tz_convert(tz)
     in_sess = ((local.date == session_date)
                & (local.time >= SESSION_START)
-               & (local.time < SESSION_END))
+               & (local.time < send))
     idx = [i for i, f in enumerate(in_sess) if f]
     if not idx:
         return []
