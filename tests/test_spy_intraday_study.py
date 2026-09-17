@@ -204,3 +204,48 @@ def test_month_bootstrap_blocks_by_calendar_month():
     assert bt["valid"]
     assert bt["n_months"] == len({x[:7] for x in b.index})
     assert bt["lo"] < bt["hi"]
+
+
+# --------------------------------------------------------------------------
+# the run gate -- relaxed to the scored window, and it must still fire
+# --------------------------------------------------------------------------
+
+def _res(bad=(), gaps=(), dst=(), conflicts=0):
+    return {"bad_first_bar": list(bad), "n_bad_first_bar": len(bad),
+            "gaps": [(a, b, 9, ["x"]) for a, b in gaps], "n_gaps": len(gaps),
+            "dst_bad": list(dst), "dup_conflicts": conflicts}
+
+
+def _sess(days):
+    return pd.DataFrame(index=pd.Index(days, name="sess"))
+
+
+def test_run_gate_ignores_defects_before_the_scored_window():
+    """A 2004 defect cannot reach a 2015+ book, and must not block the run."""
+    s = _sess(["2014-12-31", "2015-01-02", "2015-01-05"])
+    ok, why = ST.assertions_clean(
+        _res(bad=["2008-03-31", "2004-02-10"],
+             gaps=[("2004-01-28", "2004-02-02")]), s)
+    assert ok, why
+
+
+def test_run_gate_still_fires_on_a_defect_inside_the_window():
+    s = _sess(["2014-12-31", "2015-01-02", "2020-06-01"])
+    ok, why = ST.assertions_clean(_res(bad=["2020-06-01"]), s)
+    assert not ok and "scored window" in why[0]
+    ok, why = ST.assertions_clean(_res(gaps=[("2020-05-20", "2020-06-01")]), s)
+    assert not ok and "unexplained session gaps" in why[0]
+
+
+def test_run_gate_checks_the_session_the_first_scored_r1_reads():
+    """r1 of the first scored session reads the session BEFORE the window."""
+    s = _sess(["2014-12-31", "2015-01-02"])
+    ok, why = ST.assertions_clean(_res(bad=["2014-12-31"]), s)
+    assert not ok, "a defect on the boundary session must block the run"
+
+
+def test_run_gate_never_ignores_a_price_disagreement():
+    """Two cache rows disagreeing on a price is not a windowed question."""
+    s = _sess(["2014-12-31", "2015-01-02"])
+    ok, why = ST.assertions_clean(_res(conflicts=3), s)
+    assert not ok and "disagree on price" in why[0]

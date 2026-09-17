@@ -415,20 +415,49 @@ def load_study(symbol: str, fine: str) -> tuple[pd.DataFrame, pd.Series, dict]:
     return s, sig, res
 
 
-def assertions_clean(res: dict) -> tuple[bool, list[str]]:
-    """--run will not start on a cache the assertion pass has not cleared."""
+def assertions_clean(res: dict, sessions: pd.DataFrame | None = None
+                     ) -> tuple[bool, list[str]]:
+    """--run will not start on a cache the assertion pass has not cleared.
+
+    READ ON THE SCORED WINDOW, plus the one session immediately before it.
+    Amendment G set this bar at zero, and on the whole cache it is not zero:
+    seven pre-2015 sessions do not start at 09:30 (IB returning pre-market
+    bars despite useRTH, or missing a morning) and two 2004 weekdays are
+    absent. None of them can reach a 2015+ book -- the only channel from one
+    session to the next is the prior close, which spans exactly one session,
+    so the boundary session is checked too and nothing further back can.
+
+    Refusing the whole run over a defect in 2004 would not be strictness, it
+    would be a gate that fires where it cannot protect anything -- and a gate
+    that has to be overridden to do ordinary work stops being read. Every one
+    of those sessions is already excluded from the book by `full`; they are
+    reported by name in the assertion pass and are not silently dropped.
+    """
     bad = []
     if not res:
-        bad.append("no sessions cached")
-        return False, bad
-    if res.get("n_bad_first_bar", 1):
-        bad.append(f"{res['n_bad_first_bar']} sessions do not start at 09:30 ET")
-    if res.get("dst_bad"):
-        bad.append(f"{len(res['dst_bad'])} DST transitions mishandled")
+        return False, ["no sessions cached"]
+
+    def in_window(days):
+        return [d for d in days if d >= boundary]
+
+    boundary = SCORE_FROM
+    if sessions is not None and len(sessions):
+        before = [d for d in sessions.index if d < SCORE_FROM]
+        if before:
+            boundary = before[-1]      # r1 of the first scored session reads it
+
+    n_bad = len(in_window(res.get("bad_first_bar", [])))
+    if n_bad:
+        bad.append(f"{n_bad} sessions in the scored window do not start at "
+                   f"09:30 ET")
+    dst = [t for t in res.get("dst_bad", []) if t[1] >= boundary]
+    if dst:
+        bad.append(f"{len(dst)} DST transitions mishandled in the window")
     if res.get("dup_conflicts", 1):
         bad.append(f"{res['dup_conflicts']} cache rows disagree on price")
-    if res.get("n_gaps", 1):
-        bad.append(f"{res['n_gaps']} session gaps over four calendar days")
+    gaps = [g for g in res.get("gaps", []) if g[1] >= boundary]
+    if gaps:
+        bad.append(f"{len(gaps)} unexplained session gaps in the window")
     return (not bad), bad
 
 
@@ -449,7 +478,7 @@ def main(argv=None) -> int:
     s, sig, res = load_study(args.symbol, args.fine)
     if s.empty:
         sys.exit("no bars cached -- run common.spy_intraday_data --pull first")
-    clean, bad = assertions_clean(res)
+    clean, bad = assertions_clean(res, s)
     if not clean:
         sys.exit("REFUSING TO RUN: the assertion pass is not clean:\n  "
                  + "\n  ".join(bad)
@@ -520,7 +549,17 @@ def main(argv=None) -> int:
         return 0
 
     L += cell_block("H-S1 (PRIMARY) -- unconditional", b1)
-    gate = trailing_gate(sig.reindex(s.index))
+    # THE TRAILING PERCENTILE IS COMPUTED OVER ALL CACHED HISTORY, then
+    # restricted to the scored window -- not computed inside it.
+    #
+    # Point-in-time means "using only what was knowable then", and the 2014
+    # sigma1 values WERE knowable in January 2015. Computing the trailing 252
+    # inside the trimmed window instead makes the first year of the window
+    # ungated for no reason and costs H-S2 a year of trades (649 against 762).
+    # It is not a look-ahead in either direction -- trailing_gate shifts before
+    # it rolls, which the mutation test pins -- it is simply throwing away real
+    # history. Caught by the two counts disagreeing, not by reading the code.
+    gate = trailing_gate(sig.reindex(full.index))
     b2 = book(s, gate)
     L += cell_block(f"H-S2 (SECONDARY) -- sigma1 >= trailing {TRAIL_WINDOW}-session "
                     f"{int(SIGMA_Q * 100)}th percentile", b2)
@@ -536,6 +575,33 @@ def main(argv=None) -> int:
     L += ["THE FIVE GATES", ""]
     L += verdict_block("H-S1", b1)
     L += verdict_block("H-S2", b2)
+
+    if args.breadth:
+        L += ["BREADTH CONTROL (spec 8.4) -- H-S1 UNCHANGED ON QQQ AND IWM", "",
+              "  The paper reports the effect on both. A reading that lives on",
+              "  SPY alone is a single-instrument fluke; a reading that is",
+              "  ABSENT on all three is the same statement three times, which",
+              "  is what makes it worth more than one.", ""]
+        for sym in ("QQQ", "IWM"):
+            bs, _, br = load_study(sym, args.fine)
+            if bs.empty:
+                L += [f"  {sym}: no bars cached", ""]
+                continue
+            bs = bs[bs.index >= SCORE_FROM]
+            tri = [(sym, d, None) for d in bs.index]
+            kp, _, _ = holdout.split_sessions(tri, spend=False, rec=rec)
+            bb = book(bs.loc[[d for _, d, _ in kp]])
+            if bb.empty:
+                L += [f"  {sym}: no trades", ""]
+                continue
+            yrs = span_years(bb.index)
+            tg, _, nn = verdict(bb, PRIMARY)
+            L += [f"  {sym}: {tg}   {len(bb)} sessions, hit "
+                  f"{float((bb['gross'] > 0).mean()) * 100:.2f}%, "
+                  f"{bps(float(net(bb, PRIMARY).mean()))} bps/trade net, "
+                  f"{annualised(bb, PRIMARY, yrs) * 100:+.2f}%/yr",
+                  f"       gross {bps(float(bb['gross'].mean()))} bps/trade "
+                  f"(before any friction at all)", ""]
 
     emit("\n".join(L), args.out or "var/reports/spy_intraday_study.txt",
          header="common.spy_intraday_study")

@@ -369,7 +369,7 @@ def check(s: pd.DataFrame, df30: pd.DataFrame) -> dict:
         return res
 
     bad_start = s[s["first_bar"] != B_OPEN]
-    res["bad_first_bar"] = list(bad_start.index[:20])
+    res["bad_first_bar"] = list(bad_start.index)
     res["n_bad_first_bar"] = len(bad_start)
 
     half = s[s["half_day"]]
@@ -377,7 +377,7 @@ def check(s: pd.DataFrame, df30: pd.DataFrame) -> dict:
     res["n_half_days"] = len(half)
 
     incomplete = s[(~s["full"]) & (~s["half_day"])]
-    res["incomplete"] = list(incomplete.index[:20])
+    res["incomplete"] = list(incomplete.index)
     res["n_incomplete"] = len(incomplete)
 
     # Sessions that ARE tradeable but whose prior close cannot be trusted,
@@ -548,7 +548,7 @@ def render(symbol: str, s: pd.DataFrame, res: dict, xc: dict,
     if res["n_bad_first_bar"]:
         L += ["  SESSIONS NOT STARTING AT 09:30 -- a timestamp conversion "
               "defect until proven otherwise:",
-              f"    {res['bad_first_bar']}", ""]
+              f"    {res['bad_first_bar'][:20]}", ""]
     if res["dst_bad"]:
         L += ["  DST TRANSITIONS WHERE THE NEXT SESSION DID NOT START 09:30:"]
         for t, sess, got in res["dst_bad"]:
