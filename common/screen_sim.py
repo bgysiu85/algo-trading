@@ -260,7 +260,7 @@ def screen_accumulated(acc: pd.DataFrame, prior_close: pd.Series,
     lo, hi = cfg.price_range
     keep = ((f["premarket_change"] >= cfg.change_min - CHANGE_EPS)
             & (f["premarket_close"] >= lo) & (f["premarket_close"] <= hi)
-            & (f["premarket_volume"] >= cfg.volume_min_on_tape)
+            & (f["premarket_volume"] >= cfg.volume_min_at(t))
             # See screen_at.screen_at: the same clause, from the same single
             # definition, because this function's whole contract is that it
             # reproduces that one exactly.
@@ -369,10 +369,12 @@ def sweep(bars: pd.DataFrame, prior_close: pd.Series, date_et,
     last_close = np.full(n, np.nan)
     cum_vol = np.zeros(n)
     lo, hi = cfg.price_range
-    vmin = cfg.volume_min_on_tape
     i, total = 0, len(vis_sorted)
 
     for t in tick_list:
+        # Per tick, not hoisted: with a ladder the threshold moves through the
+        # morning, and screen_at reads the same function of t.
+        vmin = cfg.volume_min_at(t)
         tv = _utc_ns(pd.DatetimeIndex([t]))[0]
         while i < total and vis_sorted[i] <= tv:
             c = code_sorted[i]
@@ -481,7 +483,7 @@ def date_of(path: Path) -> str:
 
 
 def render(rows, sessions, cfg, cadence_s, agree, elapsed, no_prior,
-           mode=None, mix=None, rep=None, pair_mix=None) -> list[str]:
+           mode=None, mix=None, rep=None, pair_mix=None, ladders=None) -> list[str]:
     per = [len(r["universe"]) for r in rows]
     per_sorted = sorted(per)
     total = sum(per)
@@ -491,8 +493,15 @@ def render(rows, sessions, cfg, cadence_s, agree, elapsed, no_prior,
          f"  clauses imported from tv_screener: change >= {cfg.change_min:.0f}%, "
          f"price in [{cfg.price_range[0]:.2f}, {cfg.price_range[1]:.2f}], "
          f"volume >= {cfg.volume_min:,}",
-         f"  volume threshold scaled to our tape at capture "
-         f"{cfg.capture:.3f}: {cfg.volume_min_on_tape:,}",
+         (f"  volume threshold scaled to our tape at capture "
+          f"{cfg.capture:.3f}: {cfg.volume_min_on_tape:,}"
+          if ladders is None else
+          "  volume threshold scaled by a capture LADDER (per ET half-hour, "
+          "per regime):\n" + "\n".join(
+              f"    {reg:<7} " + "  ".join(
+                  f"{k // 60:02d}:{k % 60:02d} {round(cfg.volume_min * c):,}"
+                  for k, c in lad)
+              for reg, lad in ladders.items())),
          f"  top {cfg.max_symbols} by pre-market change, ties by symbol",
          f"  elapsed {elapsed:.1f}s", ""]
 
@@ -614,6 +623,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--capture", type=float, default=None,
                    help="override the tape capture ratio; the default is the "
                         "measured p50 and the sensitivity is p10/p90")
+    p.add_argument("--capture-ladder", default=None, metavar="ITCH_CAPTURE.json",
+                   help="itch_capture's JSON: a capture per ET half-hour, per "
+                        "regime (before/after --ladder-cut). Overrides --capture.")
+    p.add_argument("--ladder-cut", default="2026-03-30",
+                   help="sessions before this date take the 'before' ladder")
     p.add_argument("--limit", type=int, default=None,
                    help="first N sessions only -- TIME IT before committing "
                         "to the whole archive")
@@ -658,6 +672,14 @@ def main(argv=None) -> int:
     cfg = ScreenConfig()
     if a.capture is not None:
         cfg = replace(cfg, capture=a.capture)
+    ladders = None
+    if a.capture_ladder:
+        from common.screen_at import ladder_from_json
+        ladders = {reg: ladder_from_json(a.capture_ladder, reg)
+                   for reg in ("before", "after")}
+        for reg, lad in ladders.items():
+            print(f"  capture ladder {reg:<7} " + "  ".join(
+                f"{k // 60:02d}:{k % 60:02d}={c:.3f}" for k, c in lad), flush=True)
 
     refusal = after_refusal(a.after, a.out)
     if refusal:
@@ -719,6 +741,9 @@ def main(argv=None) -> int:
         if bars.empty:
             continue
         d_et = datetime.strptime(date_str, "%Y-%m-%d").date()
+        if ladders is not None:
+            cfg = replace(cfg, ladder=ladders["before" if date_str < a.ladder_cut
+                                              else "after"])
         uni = session_universe(bars, prior, d_et, cfg, a.cadence)
         rows.append({"date": date_str,
                      "universe": [
@@ -763,11 +788,13 @@ def main(argv=None) -> int:
     emit("\n".join(render(rows, len(rows), cfg, a.cadence, agree,
                           time.time() - t0, no_prior,
                           mode=a.prior_close, mix=mix, rep=rep,
-                          pair_mix=pair_mix)),
+                          pair_mix=pair_mix, ladders=ladders)),
          a.report,
          header=f"common.screen_sim  archive={archive}/{a.dataset}  "
-                f"cadence={a.cadence}s  capture={cfg.capture:.3f}  "
-                f"prior_close={a.prior_close}"
+                f"cadence={a.cadence}s  "
+                + (f"capture_ladder={a.capture_ladder} cut={a.ladder_cut}  "
+                   if ladders else f"capture={cfg.capture:.3f}  ")
+                + f"prior_close={a.prior_close}"
                 + (f"  LIMIT {a.limit}" if a.limit else ""))
     return 0
 

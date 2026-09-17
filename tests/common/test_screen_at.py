@@ -317,3 +317,37 @@ def test_the_exclusion_has_exactly_one_definition():
         assert "ZVZZT" not in src.split("def ")[0] or True
         assert "TEST_SYMBOLS = " not in src, (
             f"common/{name}.py grew its own copy of the list")
+
+
+# --- the capture ladder ------------------------------------------------------
+
+def test_no_ladder_is_the_constant_capture_at_every_minute():
+    from dataclasses import replace
+    cfg = replace(S.ScreenConfig(), capture=0.4)
+    for hhmm in ("04:01", "07:59", "09:29"):
+        t = pd.Timestamp(f"2025-06-09 {hhmm}", tz=ET)
+        assert cfg.capture_at(t) == 0.4
+        assert cfg.volume_min_at(t) == cfg.volume_min_on_tape == 40_000
+
+
+def test_ladder_is_held_from_the_left_and_the_first_step_covers_the_open():
+    from dataclasses import replace
+    lad = ((5 * 60, 0.50), (8 * 60, 0.20), (9 * 60, 0.12))
+    cfg = replace(S.ScreenConfig(), ladder=lad)
+    at = lambda hhmm: cfg.capture_at(pd.Timestamp(f"2025-06-09 {hhmm}", tz=ET))  # noqa: E731
+    assert at("04:15") == 0.50          # before the first key: the first step
+    assert at("05:00") == 0.50 and at("07:59") == 0.50
+    assert at("08:00") == 0.20 and at("08:59") == 0.20
+    assert at("09:00") == 0.12 and at("09:30") == 0.12
+    assert cfg.volume_min_at(pd.Timestamp("2025-06-09 08:30", tz=ET)) == 20_000
+
+
+def test_ladder_from_json_drops_nulls_and_sorts(tmp_path):
+    import json
+    from common.screen_at import ladder_from_json
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps({"ladder": {"before": {"570": 0.12, "270": None, "300": 0.5},
+                                        "after": {"270": None}}}), encoding="utf-8")
+    assert ladder_from_json(p, "before") == ((300, 0.5), (570, 0.12))
+    with pytest.raises(ValueError):
+        ladder_from_json(p, "after")

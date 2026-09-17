@@ -300,7 +300,7 @@ def test_the_clauses_are_imported_and_not_restated():
     import inspect
     src = inspect.getsource(SS.screen_accumulated)
     assert "cfg.change_min" in src and "cfg.price_range" in src
-    assert "cfg.volume_min_on_tape" in src
+    assert "cfg.volume_min_at(t)" in src
     for literal in ("20.0", "100_000", "100000"):
         assert literal not in src, f"{literal} is restated, not imported"
 
@@ -597,3 +597,42 @@ def test_the_universe_report_breaks_down_the_NAMES_THAT_QUALIFIED():
 def test_the_universe_breakdown_is_omitted_when_there_is_none():
     text = _render(mode="repaired", mix={"repaired": 10})
     assert "NAMES THAT ACTUALLY REACHED" not in text
+
+
+# --- the capture ladder: the threshold moves through the morning --------------
+
+def test_the_fast_path_reproduces_screen_at_under_a_ladder():
+    """The agreement that licenses the fast path must survive a threshold
+    that changes with the clock, or the ladder is simulated by one path only."""
+    from dataclasses import replace
+    b, pc = qualifying_day()
+    lad = ((4 * 60, 0.90), (4 * 60 + 15, 0.30), (4 * 60 + 30, 0.05))
+    cfg = replace(CFG, ladder=lad)
+    acc = SS.accumulate(b, cfg)
+    compared = 0
+    for m in range(1, 41):
+        t = at(m)
+        fast = SS.screen_accumulated(acc, pc, t, cfg)
+        ref = screen_at(b, pc, t, cfg)
+        assert list(fast["symbol"]) == list(ref["symbol"]), f"tick {m}"
+        compared += bool(len(ref))
+    assert compared >= 10
+    checked, bad, _ = SS.sample_agreement(b, pc, D, cfg, every=5)
+    assert checked > 0 and bad == 0
+
+
+def test_a_higher_early_capture_delays_first_seen():
+    """The defect this exists for: one 09:30 capture applied at 05:00 surfaced
+    names by construction. With the early step tighter, the same name is seen
+    later; with no ladder, the constant applies."""
+    from dataclasses import replace
+    need = CFG.volume_min_on_tape                  # at the constant capture
+    spec = {"X": [(i, 4.00, need / 10.0) for i in range(40)]}   # clears at minute 10
+    flat = SS.session_universe(bars(spec), prior(X=3.00), D, CFG)
+    lad = ((4 * 60, CFG.capture * 3.0), (4 * 60 + 30, CFG.capture))
+    stepped = SS.session_universe(bars(spec), prior(X=3.00), D, replace(CFG, ladder=lad))
+    assert len(flat) == 1 and len(stepped) == 1
+    f0 = flat.iloc[0]["first_seen"].tz_convert(ET)
+    f1 = stepped.iloc[0]["first_seen"].tz_convert(ET)
+    assert (f0.hour, f0.minute) == (4, 10)
+    assert (f1.hour, f1.minute) == (4, 30)          # 3x the threshold until 04:30

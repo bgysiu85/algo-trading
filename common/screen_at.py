@@ -102,6 +102,11 @@ class ScreenConfig:
     capture: float = CAPTURE_P50
     session_open: dtime = SESSION_OPEN
     bar_seconds: int = BAR_SECONDS
+    # A capture that depends on the clock: ((et_minute, capture), ...) sorted
+    # by minute, a step function held from the left. None means `capture`
+    # applies at every tick, which is bit-identical to the screen before this
+    # field existed. See `capture_at()` for why the clock is in the threshold.
+    ladder: tuple[tuple[int, float], ...] | None = None
 
     @property
     def volume_min_on_tape(self) -> int:
@@ -118,6 +123,53 @@ class ScreenConfig:
         fractional threshold has no meaning; the float was pure artefact.
         """
         return round(self.volume_min * self.capture)
+
+    def capture_at(self, t) -> float:
+        """The tape's share of the consolidated volume at ET time `t`.
+
+        `itch_capture` measured XNAS.ITCH's share by the clock: before
+        2026-03-30 the TRF's overnight queue reached the SIP from 08:00, so
+        the exchange's share of what the live screen could see was one number
+        at 07:00 and a smaller one at 09:30. One figure applied all morning
+        made the threshold a fifth of what it should have been before 08:00
+        (`screen_itch_RESULT_20260917.md` §4). A tick at minute m takes the
+        step at the largest key <= m; a tick before the first key takes the
+        first step -- conservative, because the earliest measured capture is
+        the highest and a higher capture is a tighter threshold.
+        """
+        if not self.ladder:
+            return self.capture
+        et = pd.Timestamp(t).tz_convert(ET)
+        m = et.hour * 60 + et.minute
+        cap = self.ladder[0][1]
+        for key, c in self.ladder:
+            if key <= m:
+                cap = c
+            else:
+                break
+        return cap
+
+    def volume_min_at(self, t) -> int:
+        """`volume_min_on_tape` at a time. Rounded to a whole share for the
+        same reason as the constant form."""
+        return round(self.volume_min * self.capture_at(t))
+
+
+def ladder_from_json(path, regime: str) -> tuple[tuple[int, float], ...]:
+    """Read `itch_capture.json`'s `ladder[regime]` into ScreenConfig.ladder.
+
+    Cutoffs with no measurement (null) are dropped; a tick before the first
+    surviving step takes that step. Keys are ET minutes of day as strings,
+    which is how the JSON carries them.
+    """
+    import json
+    from pathlib import Path
+    doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    lad = doc["ladder"][regime]
+    steps = sorted((int(k), float(v)) for k, v in lad.items() if v is not None)
+    if not steps:
+        raise ValueError(f"{path}: ladder[{regime!r}] has no measured steps")
+    return tuple(steps)
 
 
 def session_open_utc(t: datetime, cfg: ScreenConfig) -> pd.Timestamp:
@@ -211,7 +263,7 @@ def screen_at(bars: pd.DataFrame, prior_close: pd.Series, t: datetime,
         # in_range is INCLUSIVE at both ends -- confirmed 2026-09-05 against the
         # float filter, which used the same operation.
         & (f["premarket_close"] >= lo) & (f["premarket_close"] <= hi)
-        & (f["premarket_volume"] >= cfg.volume_min_on_tape)
+        & (f["premarket_volume"] >= cfg.volume_min_at(t))
         # EXCHANGE TEST SYMBOLS, which `screen.py` has excluded since it was
         # written and this path never did. They are not securities: venues
         # publish them continuously so members can verify connectivity, and
