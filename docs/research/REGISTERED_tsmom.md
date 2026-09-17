@@ -1,0 +1,303 @@
+# REGISTERED — TSMOM: time-series momentum on CME futures, monthly
+
+**Committed before any backtest code exists and before any futures data is
+bought.** `PROGRAM_INDEX` §1: a hypothesis is registered before it is run, and
+the commit hash is the timestamp.
+
+Spec: `claude/tsmom_spec_20260917.md`. Handover: `claude/handover_tsmom_20260917.md`.
+Evidence context: `claude/diversifier_candidates_20260911.md` §4 and §5.1.
+Source: Moskowitz, Ooi & Pedersen, *JFE* 104 (2012) 228–250.
+
+Amendments are marked **PRE-RUN** or **POST-RUN**. A threshold changed after
+seeing a result is a new hypothesis and spends from the budget in §9.
+
+---
+
+## 0. PRE-RUN GATES — none of this runs until all four are cleared
+
+A gate is not a caveat. If a gate is open, the run does not start.
+
+| # | Gate | Why it blocks |
+|---|---|---|
+| **G1** | **The paper is read off the page**, not through a fetch tool. The five ★ lines of spec §1 are confirmed verbatim: equation (5), equation (1)'s lag sentence, the 40% sizing sentence, the monthly averaging sentence, and whether the 12-month lookback skips the most recent month. | Spec §0. The whole construction rests on five sentences no one here has seen. The skip question in particular is **two different strategies**, not two spellings of one. |
+| **G2** | **Ben has seen the §5 data cost and said yes.** | `PROGRAM_INDEX` §1: a tool that can spend money states the number before it spends it. |
+| **G3** | **Ben has chosen the rates arm** — (a) ZN, (b) MTN, or (c) none — spec §2.3. | Choosing it from the backtest's ranking is a one-family search dressed as a decision. It is a margin question and a preference, and it is his. |
+| **G4** | **The holdout of §6 is cut and enforced in code before the first run**, with a test that the enforcement cannot be bypassed by a flag. | `PROGRAM_INDEX` §1. The equity `holdout.json` does not cover this and is not relevant here; TSMOM cuts its own. |
+
+**G1 is the one most likely to be waved through, so it is stated hardest.**
+Reading the spec's §1 back as "close enough" is how a project ends up having
+measured a strategy adjacent to the one it cited.
+
+---
+
+## 1. The hypothesis, in one sentence
+
+**A monthly, volatility-scaled, long/short time-series momentum book across
+eleven or twelve CME futures markets has a positive expected return after
+measured costs, over the GLBX.MDP3 daily history, on a sample that is entirely
+out of the paper's.**
+
+### 1.1 Why the out-of-sample point is the whole of it
+
+The paper's sample ends **2009**. GLBX.MDP3's daily history begins **mid-2010**
+(the exact date is read from `metadata.get_dataset_range`, never hard-coded).
+**There is therefore no overlap at all between this test and the paper's
+sample.** Every result this registration produces is post-publication, which is
+precisely the window where GEM lost 5.2 points a year against SPY
+(`diversifier_candidates` §2) and where Faber has underperformed buy-and-hold
+since ~2009 (§5.2).
+
+That makes the test unusually clean and unusually unforgiving. **It also means a
+negative result here does not refute the paper** — it refutes the strategy's
+survival into the 2010s, which is the only question this project has any use
+for. The report says so in those words.
+
+---
+
+## 2. The specification, fixed here
+
+Values come from the paper or from spec §2.1's selection rule. **None is chosen
+from a measurement of returns**, because a baseline chosen from the data is the
+search it was meant to anchor.
+
+| Parameter | Registered value | Source |
+|---|---|---|
+| Signal | sign of trailing excess return | MOP eq. (5), p. 236 |
+| **Lookback — the deployed spec** | **equal-weight ensemble over k ∈ {3, 6, 9, 12} months** | `PROGRAM_INDEX` §4: "prefer an ensemble to a chosen parameter" |
+| Lookback — reported neighbour | k = 12 alone | MOP's headline cell |
+| Skip most recent month | **no** | spec §1.1 [D]; the skip variant is a reported neighbour |
+| Volatility estimator | EWMA, δ = 60/61 (com = 60), about the EW mean, × 261, lagged one day | MOP eq. (1), p. 233 |
+| Warm-up | 261 daily returns before an instrument enters | spec §1.2 [D] |
+| Position vol target | 40% ex-ante per position | MOP p. 236 |
+| Portfolio construction | equal weight across instruments with a live signal | MOP p. 236 |
+| Rebalance | monthly, **tranched over five sleeves** on trading days 1, 5, 9, 13, 17 | spec §1.4 [D]; `diversifier_candidates` §4 |
+| Roll | front month, **5 trading days before expiry from the `definition` schema** | spec §4 |
+| Signal series | difference-back-adjusted continuous | spec §4 |
+| P/L series | **the actual held contract**, roll charged | spec §4 |
+| Instruments | the eleven of spec §2.2 + the rates arm from G3 | spec §2.1 |
+| Friction | three levels: $0.50 / $1.25 / $2.50 per contract per side | spec §6 |
+
+**The ensemble is the deployed specification, not an average reported for
+comfort.** ReSolve's equal-weight ensemble of 1,226 GEM variants drew a 13.2%
+drawdown against the median single spec's 17.4% at no cost
+(`diversifier_candidates` §4), and Newfound's 9-month and 10-month lookbacks
+returned 43.1% and 146.1% on the same data — differences that "are not expected
+to mean-revert". **Picking one k is picking one of those.** This project has
+never run an ensemble (`PROGRAM_INDEX` §7 item 14 has wanted one for MCL's trail
+since 2026-09-11); TSMOM runs one from the start.
+
+---
+
+## 3. What every run must emit
+
+Fixed here because the runner is written after this document.
+
+1. **Net, and net per year**, at **all three friction levels**, gross stated
+   separately and never as the headline.
+2. **Both halves of the sample**, split at the median date, **split point not
+   swept**.
+3. **Per-calendar-year table**, every year printed, none omitted.
+4. **drop-top-N by MARKET**, N = 1, 2, 3 — the market analogue of drop-top-N by
+   symbol. Printed as `n/a` rather than `$0` if N ≥ the market count
+   (`PROGRAM_INDEX` §4).
+5. **Cluster bootstrap by market** — markets drawn with replacement, every
+   month of a drawn market travelling with it, 2,000 resamples, seeded.
+6. **Cluster bootstrap by calendar year**, same shape.
+7. **Two benchmarks, side by side:** equal-weight **buy-and-hold** of the same
+   markets at the same volatility scaling, and **cash** (zero). A trend book
+   that cannot beat owning the same things is not a trend book.
+8. **Realised portfolio volatility against the 40%/12% target**, at fractional
+   sizing and at integer sizing, separately.
+9. **Turnover**: contract-sides per year, split into rebalance and roll.
+10. **The rebalance-day grid** — all ~21 trading days — as the distribution the
+    tranched spec sits in.
+11. **The lookback grid** k ∈ {1, 3, 6, 9, 12, 24}, every cell printed, with the
+    ensemble's position in that distribution stated as a percentile, in
+    ReSolve's form: "the ensemble beat N% of single-k specs".
+12. **Coverage in the same pass as the P/L**: bars loaded per market, first and
+    last date, missing intervals, instruments absent for warm-up
+    (`PROGRAM_INDEX` §4).
+13. **The three rates arms of spec §2.3 side by side, unranked.**
+
+**Nothing is ranked. No "best cell" table.** Every bucket printed.
+
+---
+
+## 4. The bar to clear — all of it, or the strategy is not carried forward
+
+Adapted from the seven criteria and `PROGRAM_INDEX` §4, to a monthly book.
+
+1. **Positive after costs at the mid friction level** ($1.25/side), on the
+   ensemble spec, on the non-holdout sample.
+2. **Both halves positive** at mid friction. An empty half is a failure, not a
+   pass (`PROGRAM_INDEX` §4: "an empty half is not a sign flip").
+3. **drop-top-1 and drop-top-2 by market still positive** at mid friction.
+4. **Cluster bootstrap by market: total > 0 in ≥ 95% of 2,000 resamples.**
+5. **Cluster bootstrap by year: total > 0 in ≥ 95% of 2,000 resamples.**
+6. **Beats equal-weight buy-and-hold of the same markets**, at mid friction, on
+   both net and on return-per-unit-of-realised-volatility.
+7. **No single calendar year supplies more than 50% of net**, and **no single
+   market supplies more than 50% of net.** — *See §4.1.*
+8. **The ensemble is not beaten by the median single-k spec.** If it is, the
+   ensemble argument of §2 failed on this data and that is reported as a
+   finding, not fixed by switching to the winning k.
+9. **Still positive at the high friction level** ($2.50/side). A strategy whose
+   sign depends on the cost model is a cost model result.
+
+**Fewer than 60 months of data for a market is not read**; the market is printed
+with its coverage and no verdict.
+
+### 4.1 The one-strong-year rule, and why it is criterion 7
+
+The handover names this as a registered risk and it is the criterion most
+likely to be argued with after the fact. **The QQQ-ORB replication found 76% of
+its P/L in 2022** (`PROGRAM_INDEX` roster, ORB row). Trend-following's
+documented weak stretch after 2012 and its very strong 2022 are the same
+phenomenon: a decade of mediocrity with one enormous year in it.
+
+So: **a result that clears criteria 1–6 while failing criterion 7 is reported as
+FAILED, with the concentration named.** It is not reported as "passed, with a
+note". The whole point of writing it down now is that in eighteen months, with a
+curve on screen showing one glorious 2022, this sentence is already here.
+
+**And how a weak post-publication stretch is read, registered now:** if the
+strategy is flat-to-negative across 2013–2021 and positive overall on the back of
+2022, that is **criterion 7 failing**, and the reading is *"trend-following's
+post-publication weakness reproduces here"* — the same verdict
+`diversifier_candidates` §2 reached for GEM. It is **not** read as "the edge is
+intact and the sample was unlucky." That reading is unavailable because it was
+ruled out before the data was seen.
+
+---
+
+## 5. Capacity is a measurement, not a criterion
+
+Spec §3 already measured, from free data on 2026-09-17, that **the paper's
+sizing is not implementable at $22,129**: eight of thirteen markets cannot reach
+half a micro contract, a forced one-lot book runs at ~173% portfolio volatility
+against the paper's 12%, and all thirteen markets become feasible at roughly
+**$532,000** of equity.
+
+That finding is **not** a pass/fail criterion, because failing it would end the
+measurement, and the measurement is worth making regardless — the account may
+not stay at $22k, and a strategy that needs half a million dollars to hold
+properly is worth knowing about *before* the data is bought rather than after.
+
+**So the run reports, and does not score:**
+
+- the book at **fractional** sizing — what the strategy is worth, unconstrained;
+- the book at **integer** sizing at **$22k, $100k and $500k** equity — what Ben
+  could actually have held;
+- the **gap between them**, per market, which is the price of granularity;
+- the **largest subset** of markets that fits a 10% and a 15% portfolio
+  volatility cap at $22k, and what that subset's result is on its own.
+
+**Integer rounding may move the sign.** `PROGRAM_INDEX` §5: "capital-based sizing
+can flip a strategy's sign." If it does here, that is the headline, and the
+fractional number is the one that must not be quoted alone.
+
+---
+
+## 6. The holdout — cut before the first run, enforced in code
+
+**The last four calendar years, 2022-01-01 onward, are locked.** Everything in
+§3 and §4 is measured on the sample from the dataset's start to 2021-12-31.
+
+- The holdout is **spent once, by one candidate**, and the module refuses a
+  second (`PROGRAM_INDEX` §1; the pattern is `common/holdout.py`'s
+  `split_sessions`, which is the one implementation every equity study calls).
+- **It refuses `--limit` and every other flag that could quietly narrow it.**
+- **A test asserts the refusal fires**, and the test is mutation-checked: break
+  the enforcement and the test must fail.
+- `var/state/holdout.json` covers the equity universe and is **not** reused. TSMOM
+  writes its own cut file and the loader refuses the equity one by name.
+
+**2022 sits inside the holdout deliberately.** It is trend-following's best year
+of the decade and the single most likely source of a criterion-7 failure. Having
+it locked means the in-sample verdict cannot be carried by it, and that spending
+the holdout later is a real test rather than a victory lap.
+
+---
+
+## 7. What is registered as NOT to be done
+
+- **Substituting a grid winner into the deployed spec.** §2 is the spec. The
+  grid is the distribution it sits in, per `PROGRAM_INDEX` §4, and nothing more.
+- **Switching the lookback after seeing the grid.** Criterion 8 exists so that
+  the ensemble losing is a *finding*.
+- **Choosing the rates arm from its result.** G3.
+- **Adding a market because it would help**, or dropping one because it hurts.
+  The §2.1 selection rule is closed; changing it is a PRE-RUN amendment with a
+  reason that does not mention a return.
+- **Substituting a yield-quoted contract for a price-quoted one.** Spec §2.3.
+  Long ZN is **short** 10Y, and a book that gets this wrong prints an entirely
+  ordinary-looking curve while trading the opposite of its own signal in one
+  market.
+- **Inferring the roll from volume or open interest.** Both are outcomes. The
+  `definition` schema carries the expiration date; the roll is read.
+- **Quoting a gross figure as a result.** `PROGRAM_INDEX` §1.
+- **Reporting the continuous series' P/L.** It is for the signal and the
+  volatility estimate and nothing else. Spec §4 rule 3, and spec §3.1 for what
+  happens when that line is crossed: a free data pull whose only job was to size
+  a table put a −46.3% roll break into natural gas and a 15-point error into the
+  divisor of its position size.
+- **Spending the holdout on anything from the grid.** §6.
+
+---
+
+## 8. What would make this run wrong, in the specific ways this project's runs
+have gone wrong before
+
+- **A continuous series that looks right while booking the wrong contract**
+  (`PROGRAM_INDEX` §3, named there as the project's signature failure). Guarded
+  by spec §4 rule 4's synthetic two-contract test, which must be mutation-checked.
+- **A volatility estimator that is right in `pandas` and wrong by hand**, or the
+  reverse. `ewm(...).var(bias=True)` versus `bias=False` is a one-flag
+  difference that produces a plausible number. Guarded by an equality test
+  against a hand-built weighted sum.
+- **An instrument absent for warm-up counted as flat.** §2's warm-up rule and
+  §3 item 12's coverage output exist so the two are distinguishable.
+- **A report that asserts its data source instead of reading it.** `PROGRAM_INDEX`
+  §5: the ORB pre-flight printed an EQUS.MINI caveat over XNAS.BASIC numbers and
+  two tests pinned the bug. Every TSMOM report **reads** the dataset, schema and
+  roll rule out of the archive manifest and **refuses** a dataset it was not
+  registered on.
+- **A bare text-mode open.** `tests/test_encoding_guard.py` refuses one.
+- **A guard that cannot fail.** Every check written for this strategy is
+  mutation-tested before it is committed, and one that survives every mutation is
+  removed (`PROGRAM_INDEX` §1).
+
+---
+
+## 9. Multiplicity budget
+
+Counted by **family**, not by column (`PROGRAM_INDEX` §4).
+
+Families searched: **lookback k** (one), **rebalance day** (one), **rates arm**
+(one, and settled by G3 rather than by search), **friction level** (not a search
+— all three are always reported). **Three families**, and the deployed spec is
+fixed in §2 before any of them is read.
+
+**Budget: three further registered hypotheses on TSMOM before the line is
+closed**, matching how the B-series was budgeted. A fourth requires a reason
+written down that does not begin with a result.
+
+---
+
+## 10. A prediction, written down now
+
+Recorded so that it can be wrong. `REGISTERED_orb_grid` §"why write it down"
+did the same and the prediction held for the wrong reason, which was worth more
+than being right.
+
+**I predict the strategy is positive gross and roughly flat after mid friction
+on the 2010–2021 sample, and that criterion 7 fails on market concentration
+rather than on year concentration** — that gold and crude carry most of the net,
+because they had the decade's clearest sustained trends, while the four
+currencies contribute close to nothing and are half the book by count.
+
+**If that is what happens, the honest reading is that this is a 2–3 market
+strategy wearing a 12-market coat**, and the diversification argument that
+ranked TSMOM top of `diversifier_candidates` was doing less work than it
+appeared to. Writing it here means that reading is available on the day rather
+than assembled afterwards.
