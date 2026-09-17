@@ -128,3 +128,22 @@ entries, and the trade count moves only through the cascade, which is printed.
 - Interaction with H-C1 (re-arm) and with the full-day extension: each is measured
   alone first.
 - `holdout.json` stays shut.
+
+---
+
+## Amendment A — PRE-RUN, 2026-09-17: two readings stated as the code runs them
+
+Written while building `common/profit_floor_study.py`, before any session has run.
+
+1. **Halves.** §3 item 2 named `holdout.split_sessions`. That function separates
+   training from the locked slice; it does not cut halves. The published point-in-time
+   baselines that §2 requires this run to reproduce were scored over every session in the
+   pairs file. Halves are therefore cut **once, at the median session of the sessions
+   run**, exactly as `first_entry_skip`, `range_rank` and `cold_veto` cut them. The
+   locked slice is not spent by this run any more than it was by those.
+2. **Drop-top-3.** Item 3 is the delta after removing the **3 symbols** (every
+   symbol-day of each) that helped the floored book most, as written. It is not the 3
+   best symbol-days, which is `first_entry_skip`'s weaker reading. The "level" printed
+   beside it is each book after dropping its 3 best trades, and is not scored.
+
+Nothing else in §1–§6 changes.

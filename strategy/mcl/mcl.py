@@ -308,6 +308,40 @@ def evaluate_last_bar(df: pd.DataFrame,
     )
 
 
+def check_profit_floor(profit_floor) -> None:
+    """(arm_ticks, floor_ticks), both whole ticks, arm strictly above floor.
+
+    A floor at or above its own arming level would sit above the price that
+    armed it and exit on the next bar by construction -- a rule that only
+    ever measures its own trigger. Refused rather than run.
+    """
+    if profit_floor is None:
+        return
+    try:
+        arm, floor = profit_floor
+    except (TypeError, ValueError):
+        raise ValueError(f"profit_floor must be (arm_ticks, floor_ticks), "
+                         f"got {profit_floor!r}") from None
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (arm, floor)):
+        raise ValueError(f"profit_floor ticks must be ints, got {profit_floor!r}")
+    if floor < 0 or arm <= floor:
+        raise ValueError(f"profit_floor needs arm_ticks > floor_ticks >= 0, "
+                         f"got {profit_floor!r}")
+
+
+def reaches_arm(entry_px: float, high: float, profit_floor) -> bool:
+    """Has `high` reached entry + arm ticks? Compared in TICKS with a tolerance,
+    because 2.69 + 0.15 is 2.8400000000000003 in binary and a bar whose high is
+    exactly 2.84 must arm -- the float-boundary trap screen_at_build.md §4
+    recorded twice."""
+    return (high - entry_px) / TICK >= profit_floor[0] - 1e-6
+
+
+def floor_level(entry_px: float, profit_floor) -> float:
+    """entry + floor ticks, rounded to kill binary residue."""
+    return round(entry_px + profit_floor[1] * TICK, 6)
+
+
 def stop_level(peak: float, trail_pct: float,
                trail_cents: float | None = None) -> float:
     """Where the trailing stop sits, given the peak so far.
@@ -429,7 +463,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      green_hold_bars: int | None = None,
                      hard_stop: float | None = None,
                      skip_entries: int = 0,
-                     entry_gate: "pd.Series | None" = None) -> list[Trade]:
+                     entry_gate: "pd.Series | None" = None,
+                     profit_floor: "tuple[int, int] | None" = None) -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -569,6 +604,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     """
     if skip_entries < 0:
         raise ValueError(f"skip_entries must be >= 0, got {skip_entries}")
+    check_profit_floor(profit_floor)
     if use_apex is None:
         use_apex = USE_APEX_EXIT
     # A real parameter, not a module constant read at call time. It used to be
@@ -722,6 +758,10 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                                up_ref=px, scaled_up=False, up_peak=0.0,
                                up_sold_qty=0, up_sell_px=0.0,
                                breached_at=None, breach_level=0.0,
+                               # H-C2's profit floor: set at the CLOSE of the
+                               # first managed bar that reaches entry + arm
+                               # ticks, so it protects from the next bar on.
+                               floor_armed=False,
                                # Accumulated per ORDER, not derived at the end,
                                # because the per-order minimum makes cost
                                # non-linear in quantity.
@@ -776,6 +816,15 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         stop_label = "trailing_stop"
         if hard_stop is not None and hard_stop > trail:
             trail, stop_label = hard_stop, "structure_stop"
+        # PROFIT FLOOR (H-C2, docs/research/REGISTERED_profit_floor.md): once
+        # armed, entry + floor ticks replaces the stop level while it is the
+        # HIGHER of the two -- exactly the hard stop's shape, so it can only
+        # tighten the exit, never widen it. Same gap-through, same tick.
+        # Labelled by the level that did the work. None is bit-identical.
+        if profit_floor is not None and pos["floor_armed"]:
+            floor_px = floor_level(pos["entry_px"], profit_floor)
+            if floor_px > trail:
+                trail, stop_label = floor_px, "profit_floor"
         exit_px = exit_reason = None
 
         # HOW THE TRAIL IS TESTED, which is a separate question from how wide
@@ -886,6 +935,14 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
             # trail_cents, where a zero that fell back to the default would have
             # made the tightest cell of a sweep secretly the loosest.
             exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "hold_cap"
+
+        # Arming reads THIS bar's high AFTER this bar's exits were decided, so
+        # the floor can first act on the next bar -- the trail's own
+        # previous-bar convention. The entry bar never gets here.
+        if profit_floor is not None and reaches_arm(pos["entry_px"],
+                                                    float(row["high"]),
+                                                    profit_floor):
+            pos["floor_armed"] = True
 
         if exit_px is not None:
             q = pos["qty"]

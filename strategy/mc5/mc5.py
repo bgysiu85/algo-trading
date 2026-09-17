@@ -173,6 +173,8 @@ MIN_WARMUP_BARS = MACD_SLOW + MACD_SIGNAL
 # that constant for why an unfloored percentage of RSI is meaningless.
 
 from common import profit_ladder as PL
+# One implementation of the profit floor's arithmetic for both engines (H-C2).
+from strategy.mcl.mcl import check_profit_floor, floor_level, reaches_arm  # noqa: E402
 from common.commissions import order_cost
 from common.indicators import (  # noqa: E402
     ema, rma,
@@ -424,7 +426,8 @@ def backtest_session(df, session_date, tz,
                      not_before: dtime | None = None,
                      ladder: "PL.LadderConfig | None" = None,
                      skip_entries: int = 0,
-                     entry_gate: "pd.Series | None" = None) -> list[Trade]:
+                     entry_gate: "pd.Series | None" = None,
+                     profit_floor: "tuple[int, int] | None" = None) -> list[Trade]:
     """Run one pre-market session on 5-minute bars.
 
     Accepts 1-minute OR 5-minute bars and resamples if needed, so this can be
@@ -458,6 +461,7 @@ def backtest_session(df, session_date, tz,
     """
     if skip_entries < 0:
         raise ValueError(f"skip_entries must be >= 0, got {skip_entries}")
+    check_profit_floor(profit_floor)
     band = ENFORCE_PRICE_BAND if enforce_price_band is None else enforce_price_band
     # Passed explicitly rather than mutating the module constant, so a 2x2 sweep
     # can evaluate both settings over the same frame with no shared state.
@@ -513,6 +517,7 @@ def backtest_session(df, session_date, tz,
                                # bit-identical to what it was -- pinned by a
                                # test rather than asserted here.
                                realised=0.0, ladder_done=0,
+                               floor_armed=False,      # H-C2, see below
                                comm_paid=order_cost(q, px, False, COMMISSION_PLAN),
                                # See strategy/mcl/mcl.py: the entry bar's high
                                # happened BEFORE the close we bought at, so
@@ -527,6 +532,13 @@ def backtest_session(df, session_date, tz,
 
         trail = pos["peak"] * (1.0 - TRAIL_PCT / 100.0)
         exit_px = exit_reason = None
+        # PROFIT FLOOR (H-C2): the same rule and helpers as mcl.py -- once
+        # armed, entry + floor ticks is the stop while it is the higher level.
+        stop_label = "trailing_stop"
+        if profit_floor is not None and pos["floor_armed"]:
+            floor_px = floor_level(pos["entry_px"], profit_floor)
+            if floor_px > trail:
+                trail, stop_label = floor_px, "profit_floor"
 
         if float(row["low"]) <= trail:
             # GAP-THROUGH. Selling AT the trail assumes the market offered that
@@ -543,12 +555,19 @@ def backtest_session(df, session_date, tz,
             # gap_fills=False restores the optimistic model, purely so old
             # results stay reproducible.
             fill = (min(trail, float(row["open"])) if gap_fills else trail)
-            exit_px, exit_reason = fill - SLIPPAGE_TICKS * TICK, "trailing_stop"
+            exit_px, exit_reason = fill - SLIPPAGE_TICKS * TICK, stop_label
         elif last_of_session:
             exit_px, exit_reason = float(row["close"]) - SLIPPAGE_TICKS * TICK, "window_close"
         elif apex and bool(row["exit_sig"]):
             exit_px, exit_reason = (float(row["close"]) - SLIPPAGE_TICKS * TICK,
                                     EXIT_SIGNAL_REASON)
+
+        # Armed on this bar's high after this bar's exits were decided: the
+        # floor first acts on the NEXT bar. The entry bar never reaches here.
+        if profit_floor is not None and reaches_arm(pos["entry_px"],
+                                                    float(row["high"]),
+                                                    profit_floor):
+            pos["floor_armed"] = True
 
         if exit_px is not None:
             q = pos["qty"]
