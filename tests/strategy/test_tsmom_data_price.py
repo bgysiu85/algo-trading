@@ -271,3 +271,118 @@ def test_scrub_removes_the_resolved_key_not_the_environment_variable(monkeypatch
     m._key()
     assert "SECRETVALUE1234567890" not in m._scrub("failed for SECRETVALUE1234567890")
     m._RESOLVED = ""
+
+
+class _FakeMeta:
+    """Records the kwargs every metadata lookup was called with."""
+
+    def __init__(self):
+        self.calls = []
+
+    def get_cost(self, **kw):
+        self.calls.append(kw)
+        return 0.01
+
+    def get_billable_size(self, **kw):
+        return 1000
+
+
+class _FakeClient:
+    def __init__(self):
+        self.metadata = _FakeMeta()
+
+
+def test_lean_asks_for_the_front_and_next_contract_only():
+    import common.tsmom_data_price as m
+
+    c = _FakeClient()
+    m.price_one(c, "CL", "ohlcv-1d", "2010-06-06", "2026-09-17", scope="lean")
+    kw = c.metadata.calls[-1]
+    assert kw["stype_in"] == "continuous"
+    assert kw["symbols"] == "CL.c.0,CL.c.1", (
+        "the roll holds the front contract and, for the five sessions before "
+        "its expiry, the next one. c.2 and beyond are the deferred months out "
+        "to 2035 that made the first estimate $21 of bars.")
+
+
+def test_full_still_asks_for_every_contract_month():
+    import common.tsmom_data_price as m
+
+    c = _FakeClient()
+    m.price_one(c, "CL", "ohlcv-1d", "2010-06-06", "2026-09-17", scope="full")
+    kw = c.metadata.calls[-1]
+    assert kw["stype_in"] == "parent" and kw["symbols"] == "CL.FUT"
+
+
+def test_lean_definition_prices_one_session_and_says_by_how_much_it_scaled():
+    """$50 of the first estimate was sixteen years of daily definition snapshots.
+
+    The expiration dates they carry are static per contract, so the roll
+    calendar is sampled rather than streamed. The estimate must price a single
+    session and scale by the sample count -- not price the full range.
+    """
+    import common.tsmom_data_price as m
+
+    c = _FakeClient()
+    usd, nbytes = m.price_one(c, "CL", "definition", "2010-06-06", "2026-09-17",
+                              scope="lean")
+    kw = c.metadata.calls[-1]
+    assert kw["start"] == "2026-09-16" and kw["end"] == "2026-09-17", (
+        "a lean definition estimate prices ONE session; a Databento range is "
+        "[start, end) so start == end is empty and returns 422")
+    assert usd == 0.01 * m.DEFINITION_SAMPLES
+    assert nbytes == 1000 * m.DEFINITION_SAMPLES
+
+
+def test_a_one_day_range_is_never_empty():
+    """start == end is an EMPTY range, not a one-day range.
+
+    The first --diagnose probe passed start=end and got back
+    422 data_time_range_start_on_or_after_end -- it asked for no days and the
+    vendor said so, which read like a scoping failure and was a date-arithmetic
+    bug.
+    """
+    import common.tsmom_data_price as m
+
+    c = _FakeClient()
+    m.price_one(c, "ES", "definition", "2010-06-06", "2026-09-17", scope="lean")
+    kw = c.metadata.calls[-1]
+    assert kw["start"] < kw["end"]
+
+
+def test_lean_is_the_default():
+    import common.tsmom_data_price as m
+
+    flags = {}
+    for node in ast.walk(ast.parse(MODULE.read_text(encoding="utf-8"))):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "add_argument" and node.args
+                and isinstance(node.args[0], ast.Constant)):
+            for kw in node.keywords:
+                if kw.arg == "default" and isinstance(kw.value, ast.Constant):
+                    flags[node.args[0].value] = kw.value.value
+    assert flags.get("--scope") == "lean", (
+        "full scope is $71.62 for data the strategy does not read; it stays "
+        "available and does not stay the default")
+
+
+def test_every_diagnostic_probe_asks_for_a_non_empty_range():
+    """The 422 came from `diagnose`, and the first test for it covered `price_one`.
+
+    Mutation-testing caught that: reverting the fix inside `diagnose` left the
+    suite green. A check one step short of the thing it protects is
+    PROGRAM_INDEX section 4's own entry -- "a clock inside the session is not a
+    bar inside the session". This asserts the probes themselves.
+    """
+    import common.tsmom_data_price as m
+
+    c = _FakeClient()
+    m.diagnose(c, "ES", "2010-06-06", "2026-09-17")
+    assert c.metadata.calls, "diagnose issued no lookups -- it is matching nothing"
+    empty = [kw for kw in c.metadata.calls if kw["start"] >= kw["end"]]
+    assert empty == [], (
+        f"{len(empty)} probe(s) ask for an empty range and return "
+        "422 data_time_range_start_on_or_after_end, which reads as a scoping "
+        "failure and is date arithmetic")
+    assert any(kw["schema"] == "definition" and kw["start"] == "2026-09-16"
+               for kw in c.metadata.calls), "the ONE-day definition probe is gone"

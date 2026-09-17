@@ -63,7 +63,7 @@ import argparse
 import os
 import re
 import sys
-from datetime import date
+from datetime import date, timedelta
 
 DATASET = "GLBX.MDP3"
 
@@ -94,6 +94,14 @@ ROOTS: dict[str, str] = {
 TN_ROOT = {"TN": "Ultra 10-year            -> MTN (arm (b) only)"}
 
 SCHEMAS = ("ohlcv-1d", "definition")
+
+# How many sessions the roll calendar is sampled on, under --scope lean.
+# A contract is listed months to years before it expires and stays listed, so a
+# monthly grid catches every contract with its expiration date long before the
+# roll needs it. Sixteen years is about 190 monthly samples out of ~4,000
+# sessions.
+DEFINITION_SAMPLES = 190
+SESSIONS_PER_YEAR = 252
 
 
 _RESOLVED: str = ""      # the resolved key, kept only so _scrub can remove it
@@ -191,16 +199,49 @@ def available_range(client) -> tuple[str, str]:
     return str(start)[:10], str(end)[:10]
 
 
-def price_one(client, root: str, schema: str, start: str, end: str):
-    """Cost and billable size for one root, all contract months, one schema.
+def price_one(client, root: str, schema: str, start: str, end: str,
+              scope: str = "lean"):
+    """Cost and billable size for one root and one schema, at the given scope.
 
-    `parent` symbology: "ES.FUT" resolves to every ES futures contract month,
-    which is what a back-adjusted continuous series and a definition-driven roll
-    calendar both need. An explicit expiry list would have to be maintained and
-    would silently miss months.
+    WHY `lean` IS THE DEFAULT, 2026-09-17. The first whole-set estimate under
+    `parent` for both schemas came back 29.030 GiB / $71.62. Diagnosed:
+
+      * ohlcv-1d is $21 of it, and `parent` is only ~3x `continuous` -- so it is
+        resolving contract months, not spreads. It is buying the deferred
+        months out to 2035 that a front-month strategy never holds.
+      * definition is $50 of it, at 28.9 GiB, because it is republished for
+        every listed instrument EVERY session. The expiration dates it carries
+        are STATIC PER CONTRACT. Sixteen years of daily snapshots to read when
+        ESH14 expired is the same fact bought four thousand times.
+
+    `lean` asks for what the strategy reads:
+
+      * bars from `continuous` c.0 and c.1 -- the front and next contract, which
+        is what a 5-days-before-expiry roll ever holds. These resolve to real
+        instruments, so P/L is still booked on the contract actually held
+        (registration section 7) rather than on a synthetic series.
+      * the roll calendar from `definition` on a monthly grid.
+
+    Neither changes a number the strategy computes. Both are PRE-RUN amendment
+    A of docs/research/REGISTERED_tsmom.md.
     """
-    kw = dict(dataset=DATASET, schema=schema, symbols=f"{root}.FUT",
-              stype_in="parent", start=start, end=end)
+    if scope == "full" or schema == "definition":
+        kw = dict(dataset=DATASET, schema=schema, symbols=f"{root}.FUT",
+                  stype_in="parent", start=start, end=end)
+    else:
+        kw = dict(dataset=DATASET, schema=schema,
+                  symbols=f"{root}.c.0,{root}.c.1", stype_in="continuous",
+                  start=start, end=end)
+
+    if scope == "lean" and schema == "definition":
+        # Price ONE session and scale, rather than the whole range: the pull
+        # will issue DEFINITION_SAMPLES separate single-day requests. Stated as
+        # an estimate with its assumption, not passed off as a quote.
+        kw["start"] = (date.fromisoformat(end) - timedelta(days=1)).isoformat()
+        usd = float(client.metadata.get_cost(**kw)) * DEFINITION_SAMPLES
+        nbytes = int(client.metadata.get_billable_size(**kw)) * DEFINITION_SAMPLES
+        return usd, nbytes
+
     usd = float(client.metadata.get_cost(**kw))
     nbytes = int(client.metadata.get_billable_size(**kw))
     return usd, nbytes
@@ -244,10 +285,18 @@ def diagnose(client, root: str, ds_start: str, ds_end: str) -> int:
     print(f"{'scoping':<42}{'billable':>16}{'USD':>10}")
     rows = []
     for label, spec in DIAGNOSTIC_SCOPES:
-        start = ds_start if spec["span"] == "full" else ds_end
+        if spec["span"] == "full":
+            start, end = ds_start, ds_end
+        else:
+            # A Databento range is [start, end). start == end is EMPTY and
+            # returns 422 data_time_range_start_on_or_after_end, which is what
+            # the first version of this probe did -- it asked for no days and
+            # the vendor said so. One session means [end-1d, end).
+            start = (date.fromisoformat(ds_end) - timedelta(days=1)).isoformat()
+            end = ds_end
         kw = dict(dataset=DATASET, schema=spec["schema"],
                   symbols=spec["symbols"].format(r=root),
-                  stype_in=spec["stype_in"], start=start, end=ds_end)
+                  stype_in=spec["stype_in"], start=start, end=end)
         try:
             usd = float(client.metadata.get_cost(**kw))
             nbytes = int(client.metadata.get_billable_size(**kw))
@@ -264,9 +313,16 @@ def diagnose(client, root: str, ds_start: str, ds_end: str) -> int:
         dfull = next((r for r in rows if r[0].startswith("definition  parent  all")), None)
         dday = next((r for r in rows if "ONE day" in r[0]), None)
         if par and con and con[1]:
-            print(f"  parent vs continuous on ohlcv-1d: {par[1] / con[1]:,.0f}x more bytes.")
-            print( "    A ratio in the hundreds means `parent` is resolving spreads,")
-            print( "    not just the ~{n} contract months the signal needs.".format(n="200"))
+            ratio = par[1] / con[1]
+            print(f"  parent vs continuous on ohlcv-1d: {ratio:,.1f}x more bytes.")
+            if ratio > 50:
+                print( "    A ratio this large means `parent` is resolving the listed")
+                print( "    CALENDAR SPREADS, not just contract months. Scope it down.")
+            else:
+                print( "    Single digits: `parent` is resolving contract months, which")
+                print(f"    is what it should. {ratio:,.1f}x is roughly the deferred months")
+                print( "    the strategy never holds -- worth dropping, but not the driver")
+                print( "    of a large total. Look at the definition rows instead.")
         if dfull and dday and dday[1]:
             print(f"  definition full history vs one day: {dfull[1] / dday[1]:,.0f}x.")
             print( "    Expiry dates are static per contract. If this ratio is large,")
@@ -288,6 +344,11 @@ def main(argv=None) -> int:
     ap.add_argument("--end", help="override the end date (default: today)")
     ap.add_argument("--max-cost", type=float, default=5.0,
                     help="abort above this total, in USD (default 5.00)")
+    ap.add_argument("--scope", choices=("lean", "full"), default="lean",
+                    help="lean (default): front+next contract bars via continuous "
+                         "symbology, and the roll calendar sampled monthly -- what "
+                         "the strategy reads. full: every contract month, every "
+                         "session, via parent symbology.")
     ap.add_argument("--diagnose", metavar="ROOT", nargs="?", const="ES",
                     help="price ONE root several ways to find what drives a "
                          "large total, then exit (default root: ES)")
@@ -323,25 +384,47 @@ def main(argv=None) -> int:
     print(f"schemas   {' '.join(a.schemas)}")
     print(f"roots     {len(roots)}   symbology: parent (<ROOT>.FUT = all contract months)\n")
 
+    print(f"scope     {a.scope}" + ("   (front+next contract bars; roll calendar "
+          f"sampled on {DEFINITION_SAMPLES} sessions)" if a.scope == "lean"
+          else "   (every contract month, every session)") + "\n")
     width = max(len(s) for s in a.schemas)
     print(f"{'root':<6}{'schema':<{width + 2}}{'billable':>14}{'USD':>10}   note")
     total_usd, total_bytes = 0.0, 0
+    by_schema: dict[str, list] = {sc: [0.0, 0] for sc in a.schemas}
+    by_root: dict[str, float] = {}
     failures = []
     for root, note in roots.items():
         for schema in a.schemas:
             try:
-                usd, nbytes = price_one(client, root, schema, start, end)
+                usd, nbytes = price_one(client, root, schema, start, end, a.scope)
             except Exception as e:               # noqa: BLE001
                 failures.append((root, schema, _scrub(e)))
                 print(f"{root:<6}{schema:<{width + 2}}{'FAILED':>14}{'':>10}   {_scrub(e)[:60]}")
                 continue
             total_usd += usd
             total_bytes += nbytes
+            by_schema[schema][0] += usd
+            by_schema[schema][1] += nbytes
+            by_root[root] = by_root.get(root, 0.0) + usd
             shown = note if schema == a.schemas[0] else ""
             print(f"{root:<6}{schema:<{width + 2}}{nbytes:>14,}{usd:>10.2f}   {shown}")
 
-    print(f"\n{'TOTAL':<6}{'':<{width + 2}}{total_bytes:>14,}{total_usd:>10.2f}"
+    print()
+    for schema, (usd, nbytes) in by_schema.items():
+        # A per-schema subtotal is the line that would have shown, on the first
+        # run, that definition was 70% of the bill. The first version printed
+        # only per-root rows and one TOTAL, and the driver was invisible.
+        print(f"{'  sub':<6}{schema:<{width + 2}}{nbytes:>14,}{usd:>10.2f}"
+              f"   {nbytes / 2**30:.3f} GiB")
+    print(f"{'TOTAL':<6}{'':<{width + 2}}{total_bytes:>14,}{total_usd:>10.2f}"
           f"   ({total_bytes / 2**30:.3f} GiB uncompressed)")
+    if by_root:
+        top = sorted(by_root.items(), key=lambda kv: -kv[1])[:5]
+        print("\nbiggest roots: " + "  ".join(f"{r} ${u:.2f}" for r, u in top))
+    if a.scope == "lean":
+        print(f"\nThe definition figure is ONE session priced and multiplied by "
+              f"{DEFINITION_SAMPLES}.\nThe pull issues that many single-day requests; "
+              "the per-day cost is exact,\nthe sample count is the assumption.")
 
     if failures:
         print(f"\n{len(failures)} lookup(s) FAILED -- the total above is a LOWER BOUND,")

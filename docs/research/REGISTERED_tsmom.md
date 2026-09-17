@@ -30,6 +30,63 @@ measured a strategy adjacent to the one it cited.
 
 ---
 
+## 0.1 Amendment A — PRE-RUN, 2026-09-17: how the registered data is fetched
+
+**Registered before any data was bought and before any backtest code exists.
+It changes no rule, no threshold and no number the strategy computes** — only
+the scope of the request that fetches the same inputs.
+
+**What happened.** The first whole-set estimate came back **29.030 GiB /
+$71.62** and `--max-cost` aborted. Ben offered to pay it. The diagnostic
+(`--diagnose`, free metadata lookups) attributed it:
+
+| | GiB | USD | implied rate |
+|---|---:|---:|---|
+| `ohlcv-1d`, `parent` | 0.111 | **21.10** | ~$191/GiB |
+| `definition`, `parent` | 28.919 | **50.52** | ~$1.75/GiB |
+
+- **The bars were not buying spreads.** `parent` vs `continuous` on ES is
+  **3.0×**, not the hundreds that would indicate spread resolution. It was
+  buying the **deferred contract months** — CL and NG list out ~9 years — that a
+  front-month strategy never holds.
+- **`definition` is 70% of the bill** because it is republished for **every
+  listed instrument every session**, while the expiration dates it carries are
+  **static per contract**. Sixteen years of daily snapshots to learn when ESH14
+  expired is the same fact bought four thousand times.
+
+**The amendment.** `--scope lean` becomes the default and is what gets bought:
+
+1. **Bars from `continuous` `<ROOT>.c.0` and `.c.1`** — the front contract and,
+   for the five sessions before its expiry, the next one. That is the complete
+   set the registered roll rule ever holds. These resolve to **real
+   instruments**, so §7's "P/L on the actual held contract" is unaffected; a
+   synthetic series is still used for the signal only.
+2. **The roll calendar from `definition` on a monthly grid** (~190 sessions).
+   A contract is listed months to years before expiry and stays listed, so a
+   monthly grid catches every contract with its expiration date long before the
+   roll needs it.
+
+**Estimated at ~$4 against $71.62**, for the same inputs.
+
+**And the sampling gains a control rather than costing one.** Databento's
+`c.0` changes instrument at expiry, so the **symbol-change dates in the bars are
+a second, independent reading of the roll calendar**. The run asserts the two
+agree and **refuses to proceed on disagreement** — `PROGRAM_INDEX` §4, "measure
+on a second source before stating a conclusion, not after". The full-history
+`parent` pull would have had one source.
+
+**What is NOT amended:** the roll rule (front month, 5 trading days before
+expiry, read from `definition` and never inferred from volume or open
+interest), the instrument set, the friction levels, the holdout, and every pass
+criterion of §4.
+
+**`--scope full` remains available** and is what a later question about
+deferred months or the term structure would use. It is not the default, because
+$71.62 of data the strategy does not read is a slower pull, a larger archive and
+a worse re-read forever.
+
+---
+
 ## 1. The hypothesis, in one sentence
 
 **A monthly, volatility-scaled, long/short time-series momentum book across
@@ -71,7 +128,7 @@ search it was meant to anchor.
 | Position vol target | 40% ex-ante per position | MOP p. 236 |
 | Portfolio construction | equal weight across instruments with a live signal | MOP p. 236 |
 | Rebalance | monthly, **tranched over five sleeves** on trading days 1, 5, 9, 13, 17 | spec §1.4 [D]; `diversifier_candidates` §4 |
-| Roll | front month, **5 trading days before expiry from the `definition` schema** | spec §4 |
+| Roll | front month, **5 trading days before expiry from the `definition` schema**, cross-checked against the `c.0` symbol-change dates | spec §4; §0.1 amendment A |
 | Signal series | difference-back-adjusted continuous | spec §4 |
 | P/L series | **the actual held contract**, roll charged | spec §4 |
 | Instruments | the eleven of spec §2.2 + the rates arm from G3 | spec §2.1 |
