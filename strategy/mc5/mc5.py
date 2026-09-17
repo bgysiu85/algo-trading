@@ -432,6 +432,7 @@ def size_for(price: float, equity: float = EQUITY) -> int:
 
 
 def backtest_session(df, session_date, tz,
+                     price_min: float | None = None,
                      enforce_price_band: bool | None = None,
                      gap_fills: bool = True,
                      seed_peak_with_bar_high: bool = False,
@@ -477,6 +478,9 @@ def backtest_session(df, session_date, tz,
         raise ValueError(f"skip_entries must be >= 0, got {skip_entries}")
     check_profit_floor(profit_floor)
     band = ENFORCE_PRICE_BAND if enforce_price_band is None else enforce_price_band
+    # The ENTRY floor (REGISTERED_price_floor, H-S5) -- not the profit floor,
+    # which is a different rule with a local of its own further down.
+    entry_floor = PRICE_MIN if price_min is None else float(price_min)
     # Passed explicitly rather than mutating the module constant, so a 2x2 sweep
     # can evaluate both settings over the same frame with no shared state.
     apex = USE_APEX_EXIT if use_apex is None else use_apex
@@ -512,7 +516,7 @@ def backtest_session(df, session_date, tz,
         if pos is None:
             if bool(row["entry"]) and entry_allowed[i]:
                 px = float(row["close"]) + SLIPPAGE_TICKS * TICK
-                if band and not (PRICE_MIN <= px <= PRICE_MAX):
+                if band and not (entry_floor <= px <= PRICE_MAX):
                     continue
                 # entry_shares bypasses size_for() so a comparison against a
                 # real trading day holds size fixed -- see mcl.backtest_session.
