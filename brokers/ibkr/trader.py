@@ -162,6 +162,39 @@ EXIT_RETRY_BACKOFF_S = 30.0
 # it would mean clamping a later order to a price the market has left.
 BAND_RE = re.compile(r"more aggressive than\s*([0-9]*\.?[0-9]+)")
 
+# A CANCEL THE TRADER SENDS COMES BACK AS A 202 TOO, 2026-09-17.
+#
+#   Error 202: Order Canceled - reason:
+#
+# with nothing after the colon. Once `_settle` waited for the terminal status
+# (the ghost fix), a self-sent cancel returned `Cancelled` plus that echo and
+# fell into the "IB never worked it" branch: six REJECTED rows on 09-17 that
+# were four abandoned exits and two timed-out entries, and NO_FILL_ABANDONED /
+# NO_FILL_CANCELLED stopped appearing at all. The trader now remembers the
+# order ids it cancelled itself; an echo with a blank reason on one of those
+# is the no-fill it always was. An echo that CARRIES a reason ("We cannot
+# accept an order at a limit price...") is IB refusing, whoever sent the
+# cancel, and stays a rejection.
+CANCEL_ECHO_RE = re.compile(r"Order Cancel(?:l)?ed\s*-\s*reason:\s*$")
+
+# A BUY IS NOT SENT INTO A QUOTE THAT HAS LEFT ITS REFERENCE, 2026-09-17.
+#
+# The engine buys the signal bar at its close plus a tick. CRBP (09-14) was
+# bought 6.6% BELOW its reference into a collapse; RETO (09-17) 34.5% ABOVE
+# it, minutes after the bar closed. Neither is a worse fill of the modelled
+# trade -- each is a trade the backtest does not contain. The threshold is the
+# one the 09-14/15 review wrote down before the 09-17 trades existed, and it
+# is registered in docs/research/REGISTERED_drift_guard.md; changing it is a
+# new registration. Measured on the ASK, the side a marketable BUY crosses,
+# absolute, either direction. Exits are never guarded.
+DRIFT_GUARD_PCT = 6.0
+
+
+def is_cancel_echo(why: str, status: str) -> bool:
+    """True when `why` says nothing beyond 'the order was cancelled'."""
+    w = (why or "").strip()
+    return not w or w == status or bool(CANCEL_ECHO_RE.search(w))
+
 # Commission for the round-trip P/L recorded in the fill log. This is a
 # REPORTING figure only -- it is not consulted when deciding or pricing an
 # order -- but it is not cosmetic either: common/friction.py derives measured
@@ -406,6 +439,10 @@ class SymbolState:
     # state may be wrong in either direction until the next exit reconciles
     # against IB's own position -- and nothing is sent until it has.
     unknown_order: bool = False
+    # When this strategy last released a position on this symbol, ET. An
+    # entry signal is taken only from a bar that OPENED at or after this --
+    # see bar_after_exit.
+    last_exit_et: datetime | None = None
 
     def __post_init__(self):
         if self.feed is None:
@@ -568,10 +605,10 @@ FIELDS = [
     # THE DETAIL BEHIND THE STATUS, not evidence of a rejection. This comment
     # used to say "populated only when IB refused the order outright" and that
     # stopped being true the moment SKIPPED_PAUSED, SKIPPED_CONCURRENCY_CAP,
-    # SKIPPED_PRICE_BAND and SKIPPED_STALE_BAR started writing their own
-    # reasons here. A reader that treats a non-empty reject_reason as "this was
-    # rejected" is wrong on four row shapes already; `status` is the field that
-    # says what happened.
+    # SKIPPED_PRICE_BAND, SKIPPED_STALE_BAR, SKIPPED_BAR_BEFORE_EXIT and
+    # SKIPPED_DRIFT started writing their own reasons here. A reader that
+    # treats a non-empty reject_reason as "this was rejected" is wrong on six
+    # row shapes already; `status` is the field that says what happened.
     "reject_reason",
     "macd", "macd_sig", "mfi", "rsi", "vol", "prev_vol", "trail_avg",
     # -- the trail this trade is running, in percent -------------------------
@@ -628,6 +665,71 @@ def clamp_to_band(limit: float, action: str, edge: float,
     if action == "SELL" and limit <= edge:
         return round_to_tick(edge + tick, action, min_tick)
     return limit
+
+
+def bar_after_exit(signal_ts, last_exit_et) -> tuple[bool, str]:
+    """Whether the signal bar OPENED after this strategy's last exit on the name.
+
+    THE DEFECT THIS EXISTS FOR, found live 2026-09-17.
+
+    While a position is open the entry path is not reached, so the bars that
+    close during it are never marked evaluated. The moment the position is
+    released, the next poll evaluates the last closed bar -- which closed
+    while the old position was still on -- and buys it at the CURRENT quote.
+    Seven re-entries within five seconds of the same strategy's own exit on
+    09-17, (82.62); the worst was MC5 RETO, sold 3.30 at 08:24:24 and bought
+    3.29 at 08:24:25 on a five-minute bar that had closed at 2.45.
+
+    The engine cannot do that. `backtest_session` reads each bar once, in
+    order: a signal on a bar it holds a position through is consumed, the
+    bar the exit is booked on is never an entry bar, and the earliest
+    re-entry is the NEXT bar's own signal at that bar's close. Live, the exit
+    fires on a quote INSIDE a bar; that bar is the engine's exit bar. So the
+    rule that matches the engine is on the bar's OPEN, not its close: an
+    entry signal is taken only from a bar that opened at or after the exit.
+    Bars are left-labelled, so the open is the stamp itself. (A first
+    version compared the bar's close; the engine parity test in
+    tests/brokers/ibkr/test_bar_after_exit.py is what caught it.)
+
+    No exit on record means no constraint.
+    """
+    if last_exit_et is None:
+        return True, ""
+    ts = pd.Timestamp(signal_ts)
+    if ts.tz is None:
+        return False, "signal bar carries a naive timestamp"
+    ex = pd.Timestamp(last_exit_et)
+    if ts >= ex:
+        return True, ""
+    return False, (f"bar {ts.tz_convert(ET):%H:%M} opened before this strategy's "
+                   f"exit at {ex.tz_convert(ET):%H:%M:%S}")
+
+
+def ask_drift_pct(ask: float, ref_close: float) -> float:
+    """(ask / ref_close - 1) * 100, NaN when either side is missing.
+
+    The guard's own reading. It is NOT `ref_drift`, which is on the mid and
+    is the fill-log column; a BUY pays the ask, so the guard reads the ask.
+    NaN means "no quote", which is marketable_limit's NO_QUOTE case and not a
+    drift -- the guard admits it rather than refusing it under the wrong name.
+    """
+    if ask != ask or ask <= 0 or not ref_close or ref_close != ref_close:
+        return float("nan")
+    return (ask / ref_close - 1.0) * 100.0
+
+
+def drift_guard_ok(ask: float, ref_close: float,
+                   limit_pct: float = DRIFT_GUARD_PCT) -> tuple[bool, str]:
+    """Whether a BUY may be placed: |drift| <= limit_pct, or no quote at all."""
+    d = ask_drift_pct(ask, ref_close)
+    if d != d:
+        return True, ""
+    # Rounded before the compare: 5.30 / 5.00 is 6.000000000000005 in float,
+    # and "at the threshold" is admitted by the registration.
+    if round(abs(d), 6) <= limit_pct:
+        return True, ""
+    return False, (f"ask {ask:.4f} is {d:+.1f}% from the signal close "
+                   f"{ref_close:.4f}; guard {limit_pct:.1f}%")
 
 
 def ref_drift(bid: float, ask: float, ref_close: float) -> float:
@@ -748,6 +850,9 @@ class MCLPaperTrader:
         # trade.log — without this we only ever see "Inactive".
         self._errors: dict[int, str] = {}
         self.ib.errorEvent += self._on_error
+        # Order ids whose cancel THIS trader sent (see CANCEL_ECHO_RE). Read
+        # and cleared by marketable_limit once the outcome is known.
+        self._self_cancelled: set[int] = set()
 
     def _on_error(self, reqId, errorCode, errorString, contract):  # noqa: ANN001
 
@@ -1316,6 +1421,7 @@ class MCLPaperTrader:
             LOG.error("cancelOrder raised (%s: %s) -- outcome treated as "
                       "unknown", type(e).__name__, e)
             return False
+        self._self_cancelled.add(order.orderId)
         t0 = asyncio.get_event_loop().time()
         while asyncio.get_event_loop().time() - t0 < CANCEL_CONFIRM_S:
             if trade.isDone():
@@ -1464,16 +1570,26 @@ class MCLPaperTrader:
 
         filled = int(sum(f.execution.shares for f in trade.fills))
         status = trade.orderStatus.status
+        ours = order.orderId in self._self_cancelled
+        self._self_cancelled.discard(order.orderId)
 
         # An order IB never worked (Read-Only API on, outside-RTH refused, no
         # permissions) reports as Inactive/ApiCancelled with no fill. That is a
         # configuration failure, not thin liquidity, and must not be recorded as
         # a no-fill — it would poison the fill-rate measurement.
+        #
+        # An order THIS trader cancelled reports the same way -- `Cancelled`
+        # and a 202 whose reason is blank -- and is the opposite fact: a
+        # working order nobody filled. See CANCEL_ECHO_RE. Only a cancel we
+        # did not send, or one IB attached a reason to, is a rejection.
+        rejected, why = False, status
         if not filled and status in ("Inactive", "ApiCancelled", "Cancelled"):
             # The real reason arrives on the error event; trade.log is often empty.
             why = (self._errors.pop(order.orderId, "")
                    or "; ".join(e.message for e in trade.log if e.message)
                    or status)
+            rejected = not (ours and is_cancel_echo(why, status))
+        if rejected:
             LOG.error("%s %s REJECTED by IB — %s", action, st.symbol, why)
             low = why.lower()
             if any(k in low for k in INELIGIBLE_MARKERS):
@@ -1713,7 +1829,7 @@ class MCLPaperTrader:
         return notional / shares, shares
 
     def _reconcile_flat(self, st: SymbolState, pos: "Position", reason: str,
-                        detail: dict) -> None:
+                        detail: dict, now_et: datetime | None = None) -> None:
         """IB says flat; the trader thought it held `pos`. Close the position
         LOCALLY, from IB's own executions where they can be seen.
 
@@ -1759,6 +1875,7 @@ class MCLPaperTrader:
                            **base)
         st.position = None
         st.unknown_order = False
+        st.last_exit_et = now_et or datetime.now(ET)
 
     @staticmethod
     def _exit_reference(pos: "Position", reason: str,
@@ -1879,7 +1996,7 @@ class MCLPaperTrader:
                           "it cannot verify", st.symbol)
                 return
             if held <= 0:
-                self._reconcile_flat(st, pos, reason, detail)
+                self._reconcile_flat(st, pos, reason, detail, now_et)
                 return
             if held < pos.qty:
                 LOG.error("%s IB holds %d, trader thought %d -- sizing the "
@@ -1941,6 +2058,7 @@ class MCLPaperTrader:
                         st.symbol, pos.qty)
         else:
             st.position = None
+            st.last_exit_et = now_et
 
     # -- per-symbol logic -------------------------------------------------
 
@@ -2043,6 +2161,23 @@ class MCLPaperTrader:
                            **detail)
             return
 
+        # A BAR THAT CLOSED DURING THE PREVIOUS POSITION. Second, and before
+        # the account-level gates for the same reason the stale gate is first:
+        # this is about whether the signal is about NOW. The bar is already
+        # marked evaluated above, so it is declined once, not once a second.
+        ok, why = bar_after_exit(signal_ts, st.last_exit_et)
+        if not ok:
+            LOG.info("%s %s entry signal declined — %s",
+                     st.strategy.name, st.symbol, why)
+            self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                           strategy=self._name_of(st),
+                           symbol=st.symbol, action="BUY",
+                           reason="entry_signal", ref_close=round(sig.close, 4),
+                           ref_kind="signal_close",
+                           status="SKIPPED_BAR_BEFORE_EXIT", reject_reason=why,
+                           **detail)
+            return
+
         # Stopped from the portal. Recorded in the fill log like every other
         # declined entry, so a later reader can see the signal fired and why it
         # was not taken -- an absence would look like the strategy never fired.
@@ -2120,6 +2255,26 @@ class MCLPaperTrader:
         if qty < 1:
             LOG.info("%s signal but size 0 (equity %.2f, price %.2f)",
                      st.symbol, self.equity, sig.close)
+            return
+
+        # THE DRIFT GUARD -- last, on a fresh quote, immediately before the
+        # order. Everything above decided the signal is one to take; this
+        # decides whether the market is still where the signal was priced.
+        # A refusal is recorded like every other declined entry, once per
+        # bar (the bar is already marked evaluated).
+        _b, ask_now = self.quote(st)
+        ok, why = drift_guard_ok(ask_now, sig.close, DRIFT_GUARD_PCT)
+        if not ok:
+            LOG.warning("%s %s entry signal declined — %s",
+                        st.strategy.name, st.symbol, why)
+            self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                           strategy=self._name_of(st),
+                           symbol=st.symbol, action="BUY",
+                           reason="entry_signal", ref_close=round(sig.close, 4),
+                           ref_kind="signal_close", bid=_b, ask=ask_now,
+                           ref_drift_pct=ref_drift(_b, ask_now, sig.close),
+                           status="SKIPPED_DRIFT", reject_reason=why,
+                           **detail)
             return
 
         res = await self.marketable_limit(st, "BUY", qty, sig.close,

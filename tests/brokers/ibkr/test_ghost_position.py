@@ -85,6 +85,9 @@ class Trade:
             self.fills.append(Fill(sh, px))
             self.orderStatus.status = "Filled"
             self.orderStatus.avgFillPrice = px
+        elif not self.never_done:
+            # what IB really reports for a cancel the trader sent
+            self.orderStatus.status = "Cancelled"
 
 
 class IB:
@@ -95,8 +98,10 @@ class IB:
         self.ib_fills = []                   # what ib.fills() reports
         self.errorEvent = FakeEvent()
         self.positions_raise = False
+        self.on_error = None                 # the trader's _on_error, once built
 
     def placeOrder(self, contract, order):
+        order.orderId = len(self.placed) + 1
         self.placed.append(order)
         t = self.outcomes.pop(0) if self.outcomes else Trade()
         self.trades.append(t)
@@ -105,6 +110,9 @@ class IB:
     def cancelOrder(self, order):
         for t in self.trades:
             t.on_cancel()
+        # IB's echo of the cancel: a 202 with nothing after the colon
+        if self.on_error is not None:
+            self.on_error(order.orderId, 202, "Order Canceled - reason:", None)
 
     def positions(self):
         if self.positions_raise:
@@ -131,6 +139,7 @@ def build(tag, outcomes, max_positions=3):
                           dry_run=False, max_positions=max_positions)
     tr.equity = 22290.96
     tr.tg = TG()
+    ib.on_error = tr._on_error
     st = M.SymbolState(symbol="TEST", strategy=SA.mcl_adapter())
     st.contract = object()
     st.ticker = FakeTicker()
