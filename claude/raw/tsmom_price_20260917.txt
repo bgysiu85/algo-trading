@@ -1,0 +1,49 @@
+ESTIMATE ONLY -- this module has no download path.
+
+dataset   GLBX.MDP3
+history   2010-06-06 .. 2026-09-17   (vendor's stated range)
+pricing   2010-06-06 .. 2026-09-17
+schemas   ohlcv-1d definition
+roots     12   symbology: parent (<ROOT>.FUT = all contract months)
+
+scope     lean   (front+next contract bars; roll calendar sampled on 190 sessions)
+
+root  schema            billable       USD   note
+ES    ohlcv-1d           565,320      0.10   US large-cap equity      -> MES
+ES    definition       6,916,000      0.01   
+RTY   ohlcv-1d           307,496      0.05   US small-cap equity      -> M2K
+RTY   definition      12,053,600      0.02   
+GC    ohlcv-1d           529,760      0.09   precious metal           -> MGC
+GC    definition     120,832,400      0.19   
+SI    ohlcv-1d           483,056      0.09   second precious metal    -> SIL
+SI    definition     107,395,600      0.17   
+HG    ohlcv-1d           522,200      0.09   base metal               -> MHG
+HG    definition     240,380,400      0.38   
+CL    ohlcv-1d           566,160      0.10   crude                    -> MCL
+CL    definition     434,226,000      0.69   
+NG    ohlcv-1d           566,048      0.10   natural gas              -> MNG
+NG    definition     607,521,200      0.96   
+6E    ohlcv-1d           552,440      0.10   EUR                      -> M6E
+6E    definition      18,475,600      0.03   
+6A    ohlcv-1d           540,176      0.10   AUD                      -> M6A
+6A    definition      18,475,600      0.03   
+6B    ohlcv-1d           535,472      0.09   GBP                      -> M6B
+6B    definition      18,475,600      0.03   
+6J    ohlcv-1d           545,328      0.10   JPY                      -> MJY
+6J    definition      18,475,600      0.03   
+ZN    ohlcv-1d           540,960      0.10   10-year rates            -> ZN full size (no price-quoted micro)
+ZN    definition       1,976,000      0.00   
+
+  sub ohlcv-1d         6,254,416      1.11   0.006 GiB
+  sub definition   1,605,203,600      2.54   1.495 GiB
+TOTAL              1,611,458,016      3.65   (1.501 GiB uncompressed)
+
+biggest roots: NG $1.06  CL $0.79  HG $0.47  GC $0.29  SI $0.26
+
+The definition figure is ONE session priced and multiplied by 190.
+The pull issues that many single-day requests; the per-day cost is exact,
+the sample count is the assumption.
+
+Nothing has been downloaded and nothing has been charged.
+Send this total to the TSMOM chat. The pull is written as its own
+module, under its own registration, only after Ben confirms it.

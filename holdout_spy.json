@@ -1,0 +1,18 @@
+{
+  "lock_from": "2024-05-09",
+  "train_first": "2015-01-02",
+  "train_last": "2024-05-08",
+  "both_halves_split": "2019-09-06",
+  "n_sessions": 2920,
+  "n_train": 2336,
+  "n_locked": 584,
+  "n_early": 1168,
+  "n_late": 1168,
+  "cut_at": "2026-09-17T23:28:11Z",
+  "lock_fraction": 0.2,
+  "sources": [
+    "bar_cache_spy/30min/SPY"
+  ],
+  "universe_fingerprint": "36597f01d0691b98cbdd5da66030d66f929388cae8e5948d4123b8154aee9a48",
+  "note": "SPY intraday momentum (H-S1/H-S2) ONLY. holdout.json governs the small-cap universe and does not apply to this study, and this file does not apply to that one. Opened exactly ONCE, and only after a cell has cleared all five gates on the training window; the result of opening it is final."
+}

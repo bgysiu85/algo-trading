@@ -20,9 +20,9 @@ A gate is not a caveat. If a gate is open, the run does not start.
 | # | Gate | Why it blocks |
 |---|---|---|
 | **G1** | ~~The paper is read off the page.~~ **CLEARED 2026-09-17.** Ben allowlisted `pages.stern.nyu.edu` and `w4.stern.nyu.edu`; the PDF was downloaded and all five ★ lines verified. | Spec §0. **And the gate earned its place:** the fetch tool had hedged the skip question into an open [D] decision, and the page settles it — footnote 10's skip convention is the *cross-sectional* factor's, and the same footnote disclaims the sensitivity. See spec §0.1. |
-| **G2** | **Ben has seen the spec §5 data cost and said yes.** | `PROGRAM_INDEX` §1: a tool that can spend money states the number before it spends it. |
+| **G2** | ~~Ben has seen the data cost and said yes.~~ **CLEARED 2026-09-18**, at the measured **$3.65** (§0.1). | `PROGRAM_INDEX` §1: a tool that can spend money states the number before it spends it. The pull is registered separately at `docs/research/REGISTERED_tsmom_fetch.md`. |
 | **G3** | **Ben has chosen the rates arm** — (a) ZN, (b) MTN, or (c) none — spec §2.3. | Choosing it from the backtest's ranking is a one-family search dressed as a decision. It is a margin question and a preference, and it is his. |
-| **G4** | **The holdout of §6 is cut and enforced in code before the first run**, with a test that the enforcement cannot be bypassed by a flag. | `PROGRAM_INDEX` §1. The equity `holdout.json` does not cover this and is not relevant here; TSMOM cuts its own. |
+| **G4** | ~~The holdout is cut and enforced in code before the first run.~~ **CLEARED 2026-09-18.** `common/tsmom_holdout.py`, `tests/strategy/test_tsmom_holdout.py`, ten mutations run and ten caught. | `PROGRAM_INDEX` §1. The equity `holdout.json` does not cover this and is refused **by name**; TSMOM cuts its own. See §6.1 for the defect its own test found. |
 
 **G1 is the one most likely to be waved through, so it is stated hardest.**
 Reading the spec's §1 back as "close enough" is how a project ends up having
@@ -67,6 +67,36 @@ $71.62** and `--max-cost` aborted. Ben offered to pay it. The diagnostic
    roll needs it.
 
 **Estimated at ~$4 against $71.62**, for the same inputs.
+
+### The measured figure, 2026-09-17
+
+`common/tsmom_data_price.py --scope lean`, run on Ben's machine.
+Raw output: `claude/raw/tsmom_price_20260917.txt`.
+
+| | billable | USD |
+|---|---:|---:|
+| `ohlcv-1d` | 6,254,416 | **1.11** |
+| `definition` | 1,605,203,600 | **2.54** |
+| **TOTAL** | **1,611,458,016** (1.501 GiB) | **3.65** |
+
+**$3.65 against $71.62 — a 95% reduction, for the identical inputs.** The
+estimate of ~$4 was made before the run and is recorded above unedited.
+
+- **Dataset range confirmed: 2010-06-06 .. 2026-09-17.** §1.1's "mid-2010" is
+  right, and §6's holdout leaves **11.6 years in-sample** (2010-06 .. 2021-12).
+- **The definition figure is a per-session cost multiplied by 190.** The per-day
+  cost is exact; the sample count is the assumption, and the report says so.
+- **NG and CL are 51% of the bill** ($1.06 and $0.79) and 65% of the bytes.
+  Their `definition` is ~3.2 MB and ~2.3 MB *per session*, against ES's 36 kB —
+  roughly a hundredfold, which is the deferred-month and spread listing depth
+  of the two energy roots. That is why 13 roots did not cost 13× ES.
+- **ZN's definition rounds to $0.00.**
+
+**G2 is answered but not self-cleared.** Ben's "I'm ok to pay it" was said of
+$71.62 and conditioned on the data being genuinely useful, which at that scope
+it was not. $3.65 is 5% of that figure, so his standing consent covers it a
+fortiori — but the gate says *he* says yes, and a gate that clears itself on a
+technicality is not a gate.
 
 **And the sampling gains a control rather than costing one.** Databento's
 `c.0` changes instrument at expiry, so the **symbol-change dates in the bars are
@@ -273,6 +303,24 @@ fractional number is the one that must not be quoted alone.
   the enforcement and the test must fail.
 - `var/state/holdout.json` covers the equity universe and is **not** reused. TSMOM
   writes its own cut file and the loader refuses the equity one by name.
+
+### 6.1 A defect the enforcement found in itself, 2026-09-18
+
+`is_locked` originally compared `str(day)[:10] >= "2022-01-01"`. For a bare
+`YYYY-MM` — the form a monthly runner passes — that is wrong at exactly one
+place, the boundary:
+
+```
+"2022-01" >= "2022-01-01"   ->   False      (the shorter string sorts first)
+```
+
+**January 2022, the first month of the holdout, was classified as training**,
+and `split_months` would have returned it under the label
+`"training, before 2022-01-01"`. The docstring had *claimed* this case was
+handled — "the correct side of a January 1st boundary either way" — which is
+`PROGRAM_INDEX` §5's own entry: a report must read its own inputs, not assert
+them. A bare month is now padded to its first day, and a test pins the boundary
+in both forms.
 
 **2022 sits inside the holdout deliberately.** It is trend-following's best year
 of the decade and the single most likely source of a criterion-7 failure. Having
