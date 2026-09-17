@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """The ORB grid runner, end to end on a synthetic cache.
 
-`docs/research/REGISTERED_orb_grid.md` decides how ninety cells are read. This
+`docs/research/REGISTERED_orb_grid.md` decides how the cells are read. This
 file asserts the runner obeys it, because a registration that nothing checks is
 a paragraph.
 
-WHAT IS ACTUALLY AT RISK HERE, and it is not arithmetic. A grid produces ninety
+WHAT IS ACTUALLY AT RISK HERE, and it is not arithmetic. A grid produces 120
 plausible tables whether or not it is measuring what it claims. The failures
 worth catching are the ones that still print a clean report: a "best cell" line
 appearing, a thin cell being read, the multiplicity family count drifting from
@@ -88,16 +88,17 @@ def built(tmp_path_factory):
 # the grid itself
 # --------------------------------------------------------------------------
 
-def test_there_are_exactly_ninety_cells_and_opposite_is_not_among_them():
+def test_there_are_exactly_120_cells_and_opposite_is_not_among_them():
     """§3. `opposite` is excluded because spec §6 set MAX_R_PCT = 12% BEFORE
     the pre-flight measured its median R at 9.26% of price. That is a
     pre-registered filter firing, and it stays a filter only while nothing
     quietly puts the arm back."""
     cs = G.cells()
-    assert len(cs) == 90
+    assert len(cs) == 120
+    assert G.GRID_MINUTES == (5, 15, 30, 45), "amendment C.2: 45 added, 3 cannot be"
     assert {c.stop_mode for c in cs} == {"structure", "rangefrac"}
     assert "opposite" not in {c.stop_mode for c in cs}
-    assert len({G.key_of(c) for c in cs}) == 90, "a cell key collides"
+    assert len({G.key_of(c) for c in cs}) == 120, "a cell key collides"
 
 
 def test_every_cell_is_printed(built):
@@ -108,7 +109,7 @@ def test_every_cell_is_printed(built):
         assert any(line.strip().startswith(f"{m} {s}")
                    and rt in line and e in line
                    for line in built["text"].splitlines()), key
-    assert len(built["rows"]) == 90
+    assert len(built["rows"]) == 120
 
 
 def test_the_cells_are_printed_in_key_order_and_never_by_performance(built):
@@ -120,10 +121,10 @@ def test_the_cells_are_printed_in_key_order_and_never_by_performance(built):
     seen = []
     for line in built["text"].splitlines():
         parts = line.split()
-        if (len(parts) > 8 and parts[0] in {"5", "15", "30"}
+        if (len(parts) > 8 and parts[0] in {"5", "15", "30", "45"}
                 and parts[1] in G.GRID_STOPS and parts[2] in G.GRID_RETESTS):
             seen.append((int(parts[0]), parts[1], parts[2], parts[3]))
-    assert len(seen) == 90
+    assert len(seen) == 120
     assert seen == sorted(seen), "the cell table is ordered by something else"
 
 
@@ -230,17 +231,49 @@ def test_the_boundary_rule_says_where_it_cannot_apply(built):
     assert "unordered, so the rule does not apply" in t
 
 
-def test_a_length_win_on_the_edge_of_the_box_demands_a_push():
-    read_all = {}
-    for m in G.GRID_MINUTES:
-        read_all[(m, "structure", "none", "r_2")] = {
-            "thin": False, "per_trade": {5: 3.0, 15: 1.0, 30: 0.5}[m]}
-    out = "\n".join(G._boundary_block(read_all))
-    assert "ON A BOUNDARY" in out and "pushed (3)" in out
+def _flat(per_trade: dict, stop="structure", retest="none", exit_="r_2"):
+    return {(m, stop, retest, exit_): {"thin": False, "per_trade": v}
+            for m, v in per_trade.items()}
 
-    read_all[(5, "structure", "none", "r_2")]["per_trade"] = 0.2
-    interior = "\n".join(G._boundary_block(read_all))
+
+def test_a_win_on_the_upper_edge_is_not_an_optimum():
+    ra = _flat({5: 0.5, 15: 1.0, 30: 2.0, 45: 3.0})
+    out = "\n".join(G._boundary_block(ra))
+    assert "ON A BOUNDARY: the upper edge, 45" in out
+    assert "Criterion 7 is NOT MET" in out
+    ra[(45, "structure", "none", "r_2")]["per_trade"] = 0.1
+    interior = "\n".join(G._boundary_block(ra))
+    assert "WINS: 30 minutes" in interior
     assert "Interior" in interior and "ON A BOUNDARY" not in interior
+
+
+def test_the_lower_edge_is_reported_as_unpushable_and_not_as_a_push_to_3():
+    """C.2. A 3-minute box does not end on a 5-minute trigger bar; asking for
+    a push the design refuses would be a rule that cannot be followed."""
+    out = "\n".join(G._boundary_block(_flat({5: 3.0, 15: 1.0, 30: 0.5, 45: 0.1})))
+    assert "the lower edge, 5, WHICH CANNOT BE PUSHED" in out
+    assert "pushed (3)" not in out
+    with pytest.raises(Exception):
+        O.Config(orb_minutes=3)
+
+
+def test_wins_is_read_jointly_on_length_and_stop_within_the_none_arm_only():
+    """C.1. On the first XNAS run the baseline row said 5 wins and the joint
+    `none` reading said 30. A retest arm, however good, must not decide it,
+    and neither may the baseline stop alone."""
+    ra = _flat({5: 2.0, 15: 1.0, 30: 0.5, 45: 0.2})                 # structure
+    ra.update(_flat({5: 1.0, 15: 1.5, 30: 6.6, 45: 0.3}, stop="rangefrac"))
+    ra.update(_flat({5: 0.1, 15: 99.0, 30: 0.1, 45: 99.0}, retest="required"))
+    out = "\n".join(G._boundary_block(ra))
+    assert "WINS: 30 minutes (rangefrac / none / r_2" in out, out
+    assert "ON A BOUNDARY" not in out
+
+
+def test_a_thin_none_cell_cannot_win_the_boundary_read():
+    ra = _flat({5: 0.5, 15: 1.0, 30: 2.0, 45: 0.1})
+    ra[(45, "structure", "none", "trail_pct")] = {"thin": True, "per_trade": 50.0}
+    out = "\n".join(G._boundary_block(ra))
+    assert "WINS: 30 minutes" in out
 
 
 # --------------------------------------------------------------------------
@@ -432,3 +465,144 @@ def test_the_entry_time_histogram_and_exit_reasons_are_printed(built):
     assert "WHEN THE BASELINE ENTERS" in t
     assert "09:30" in t or "10:00" in t
     assert "exit reasons" in t
+
+
+# --------------------------------------------------------------------------
+# amendment C.3 -- a leg is not a trade
+# --------------------------------------------------------------------------
+
+def _trade(net, leg=0, entry="2026-03-02 09:50", px=5.0, reason="target"):
+    t = pd.Timestamp(entry, tz=ET)
+    return O.Trade(symbol="A", date="2026-03-02", entry_time=t, entry_px=px,
+                   shares=50, exit_time=t, exit_px=px, exit_reason=reason,
+                   r=0.1, orb_width=0.2, gross=net, commission=0.0, net=net,
+                   bars_held=3, leg=leg)
+
+
+def test_a_two_leg_position_is_one_round_trip_with_two_legs():
+    """`r_3_trim` books two `Trade` legs per position. Counted as two trades,
+    its per-trade figure was per-leg: 6,722 'trades' on 4,875 symbol-days in
+    the first XNAS run."""
+    res = O.SessionResult(symbol="A", date="2026-03-02", status="OK")
+    res.trades = [_trade(+30.0, leg=1), _trade(-10.0, leg=2, reason="be_stop")]
+    c = G.Cell()
+    c.add(res, "survivors")
+    assert (c.trades, c.legs) == (1, 2)
+    assert c.by_symbol == {"A": [20.0]}, "the bootstrap must draw the position"
+    assert c.wins == 1, "a win is the position's net, not either leg's"
+    assert sum(c.entry_hhmm.values()) == 1
+    assert sum(c.exit_reason.values()) == 2, "exit reasons stay per leg"
+    d = G.read(c, "2026-03-03")
+    assert d["per_trade"] == pytest.approx(20.0)
+    assert d["legs"] == 2
+
+
+def test_round_trips_survive_the_parallel_merge():
+    a, b = G.Cell(), G.Cell()
+    r1 = O.SessionResult(symbol="A", date="2026-03-02", status="OK")
+    r1.trades = [_trade(1.0, 1), _trade(2.0, 2)]
+    r2 = O.SessionResult(symbol="A", date="2026-03-03", status="OK")
+    r2.trades = [_trade(3.0, entry="2026-03-03 10:00")]
+    a.add(r1, "survivors"); b.add(r2, "survivors")
+    a.merge(b)
+    assert (a.trades, a.legs) == (2, 3)
+
+
+def test_the_r_3_trim_trades_column_in_the_real_run_counts_positions(built):
+    rows = {(r["orb_minutes"], r["stop_mode"], r["retest_mode"],
+             r["exit_mode"]): r for r in built["rows"]}
+    trim = rows[("15", "structure", "none", "r_3_trim")]
+    assert int(trim["trades"]) <= int(trim["symbol_days"]), (
+        "one entry per session: round trips cannot exceed symbol-days")
+    assert int(trim["legs"]) >= int(trim["trades"])
+
+
+# --------------------------------------------------------------------------
+# coverage -- a missing cache file is counted, and a large gap is refused
+# --------------------------------------------------------------------------
+
+def test_a_universe_the_cache_does_not_cover_is_refused(built, tmp_path):
+    """2026-09-17: 2,537 of the 6,170 point-in-time symbol-days had no file,
+    and the ones that did were there because they were also stage-2
+    survivors. A bare `continue` would have run the leak under the PIT name."""
+    sp, _ = built["pairs"]
+    rows = json.loads(sp.read_text(encoding="utf-8"))
+    rows += [{"symbol": "NOPE", "date": d} for d in DAYS]
+    bad = tmp_path / "gappy.json"; bad.write_text(json.dumps(rows), encoding="utf-8")
+    with pytest.raises(SystemExit) as e:
+        G.main(["--pairs", str(bad), "--cache", str(built["cache"]),
+                "--window", "3d_to_2000", "--jobs", "1",
+                "--out", str(tmp_path / "x.txt"), "--csv", ""])
+    assert "REFUSING TO RUN" in str(e.value) and "no file" in str(e.value)
+
+    out = tmp_path / "allowed.txt"
+    assert G.main(["--pairs", str(bad), "--cache", str(built["cache"]),
+                   "--window", "3d_to_2000", "--jobs", "1",
+                   "--max-missing-pct", "20", "--labels", "pit",
+                   "--out", str(out), "--csv", ""]) == 0
+    text = out.read_text(encoding="utf-8")
+    assert f"requested    {len(rows):,}" in text
+    assert f"no file      {len(DAYS):,}" in text, "the skip must be COUNTED"
+
+
+def test_the_coverage_limit_passes_a_fully_covered_universe(built):
+    sp, rp = built["pairs"]
+    pairs = G.load_pairs([str(sp), str(rp)], None)
+    assert G.coverage_check(built["cache"], pairs, G.MAX_MISSING_PCT) is None
+    assert "no file      0" in built["text"]
+
+
+def test_population_labels_name_the_universe_and_must_match_the_files(built, tmp_path):
+    sp, rp = built["pairs"]
+    got = G.load_pairs([str(sp)], None, ["pit"])
+    assert {r["population"] for r in got} == {"pit"}
+    with pytest.raises(SystemExit):
+        G.load_pairs([str(sp), str(rp)], None, ["pit"])
+    assert {r["population"] for r in G.load_pairs([str(sp), str(rp)], None)} == {
+        "survivors", "rejected"}
+
+
+# --------------------------------------------------------------------------
+# amendment D.2 -- the §10.2 screen may not read the day's close
+# --------------------------------------------------------------------------
+
+def _session(closes_after: float, at_945: float = 5.30, day="2026-03-02"):
+    idx = pd.date_range(f"{day} 09:30", f"{day} 15:59", freq="1min", tz=ET)
+    px = [5.0] * len(idx)
+    for i, t in enumerate(idx):
+        if t.hour == 9 and t.minute < 45:
+            px[i] = 5.0 + (at_945 - 5.0) * (i + 1) / 15
+        else:
+            px[i] = closes_after
+    return pd.DataFrame({"open": [5.0] + px[:-1], "high": px, "low": px,
+                         "close": px, "volume": [1000.0] * len(idx)}, index=idx)
+
+
+def test_the_screen_is_decided_at_range_end_and_cannot_see_the_close():
+    """The first runner read `sess['close'].iloc[-1]`, the 15:59 close, so
+    'passes' meant 'closed up more than 5%' -- a split on the outcome."""
+    up_early = _session(closes_after=4.0, at_945=5.30)     # +6% at 09:45, dies
+    flat_early = _session(closes_after=9.0, at_945=5.05)   # +1% at 09:45, runs
+    assert G._rth_screen(up_early) is True
+    assert G._rth_screen(flat_early) is False
+
+
+def test_the_screen_gives_the_same_answer_through_rth_session():
+    """Same answer through the loader's own ET conversion, on UTC input."""
+    from strategy.orb.preflight import rth_session
+    df = _session(closes_after=4.0, at_945=5.30)
+    df.index = df.index.tz_convert("UTC")
+    assert G._rth_screen(rth_session(df, "2026-03-02")) is True
+
+
+def test_a_name_surfaced_after_the_earliest_range_end_is_refused():
+    """The grid does not floor entries at first_seen; that is only honest
+    while nothing surfaces after 09:35 ET."""
+    ok = [{"symbol": "A", "date": "2026-03-02",
+           "first_seen": "2026-03-02T14:30:00+00:00"}]          # 09:30 EST
+    assert G.first_seen_check(ok) is None
+    assert G.first_seen_check([{"symbol": "A", "date": "2026-03-02"}]) is None
+    late = [{"symbol": "B", "date": "2026-03-02",
+             "first_seen": "2026-03-02T15:05:00+00:00"}]        # 10:05 EST
+    msg = G.first_seen_check(late)
+    assert msg and "REFUSING TO RUN" in msg and "B 2026-03-02 10:05" in msg

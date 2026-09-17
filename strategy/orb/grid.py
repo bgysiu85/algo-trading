@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ORB's grid — ninety cells, every bucket printed, nothing ranked.
+"""ORB's grid — every cell printed, every bucket printed, nothing ranked.
 
     python -m strategy.orb.grid --pairs var/state/screened_pairs.json \
         var/state/screened_rejects.json --jobs 8
@@ -40,6 +40,8 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pandas as pd
+
 from common.breadth import (BOOT_MIN_P, RESAMPLES, SEED, cluster_bootstrap,
                             pct, share_above_zero)
 from common.report_io import emit
@@ -52,12 +54,27 @@ from strategy.orb.preflight import (ORB_MIN_MOVE_PCT, cache_tape, load_bars,
 # MAX_R_PCT of 12% written in spec §6 before the measurement was made. A value
 # eliminated by a threshold set in advance costs no multiplicity; a value
 # chosen because it scored best costs all of it.
-GRID_MINUTES = (5, 15, 30)
+# 45 added by amendment C.2 (POST-RUN, 2026-09-16): the first XNAS run's joint
+# length x stop winner sat on 30, the upper edge, so §4 requires the box pushed.
+# 3 is NOT added and cannot be: a 3-minute range does not end on a 5-minute
+# trigger bar and `orb.Config` refuses it. 5 is a hard edge of this design and
+# `_boundary_block` reports it as one rather than asking for a push it cannot
+# perform.
+GRID_MINUTES = (5, 15, 30, 45)
 GRID_STOPS = ("structure", "rangefrac")
 GRID_RETESTS = O.RETEST_MODES
 GRID_EXITS = O.EXIT_MODES
 
 MIN_TRADES = 100          # §5 -- below this a cell is printed and not read
+
+# Share of requested symbol-days with no cache file above which the run is
+# REFUSED rather than reported. The survivor run lost 0.43% (119 of 27,877).
+# The point-in-time universe, checked 2026-09-17, was missing 41% -- and the
+# 59% present were almost all present BECAUSE they were also stage-2
+# survivors, so a run on them would measure the leak it exists to remove,
+# under a heading saying point-in-time. A universe the cache does not cover is
+# a different universe, and a counted skip that large is not a skip.
+MAX_MISSING_PCT = 1.0
 
 # THE TAPE THE REGISTRATION WAS WRITTEN AGAINST. Every number in
 # REGISTERED_orb_grid.md §3.2 -- the R medians that eliminated `opposite`, the
@@ -110,12 +127,20 @@ class Cell:
     entry_hhmm: Counter = field(default_factory=Counter)
     exit_reason: Counter = field(default_factory=Counter)
     wins: int = 0
+    # ROUND TRIPS, not legs (amendment C.3). `r_3_trim` books two `Trade`
+    # legs per position; counting legs made its per-trade figure per-leg and
+    # incomparable to every other cell. `legs` is kept beside it.
     trades: int = 0
+    legs: int = 0
     both_in_bar: int = 0
     open_at_close: int = 0
     # §10.2 population split and §10.2b reject arm, carried per cell so the
     # split is computed from the same trades as the headline.
     net_by_arm: dict = field(default_factory=dict)     # (population, passes) -> [net]
+    # Requested symbol-days that never reached the strategy, by reason. Every
+    # cell carries the same counts; they live here so the parallel merge sums
+    # them with everything else rather than through a second channel.
+    coverage: Counter = field(default_factory=Counter)
 
     def add(self, res: "O.SessionResult", population: str) -> None:
         self.status[res.status] += 1
@@ -124,13 +149,21 @@ class Cell:
         if not res.trades:
             return
         day_net = 0.0
+        # Legs of one position share its entry fill; group on it. Under
+        # MAX_ENTRIES_PER_SESSION = 1 that is one round trip per symbol-day,
+        # but the grouping does not assume it.
+        trips: dict = {}
         for t in res.trades:
-            self.by_symbol.setdefault(t.symbol, []).append(t.net)
+            trips.setdefault((t.entry_time, t.entry_px), []).append(t)
             self.exit_reason[t.exit_reason] += 1
-            self.entry_hhmm[f"{t.entry_time:%H:%M}"] += 1
-            self.wins += int(t.net > 0)
-            self.trades += 1
+            self.legs += 1
             day_net += t.net
+        for (entry_time, _), legs in trips.items():
+            net = sum(t.net for t in legs)
+            self.by_symbol.setdefault(res.symbol, []).append(net)
+            self.entry_hhmm[f"{entry_time:%H:%M}"] += 1
+            self.wins += int(net > 0)
+            self.trades += 1
         self.by_symbol_day[(res.symbol, res.date)] = day_net
         self.by_date[res.date] = self.by_date.get(res.date, 0.0) + day_net
         arm = (population, bool(res.passes_rth_screen))
@@ -147,6 +180,8 @@ class Cell:
         self.exit_reason += other.exit_reason
         self.wins += other.wins
         self.trades += other.trades
+        self.legs += other.legs
+        self.coverage += other.coverage
         self.both_in_bar += other.both_in_bar
         self.open_at_close += other.open_at_close
         for k, v in other.net_by_arm.items():
@@ -164,9 +199,13 @@ def run_chunk(args) -> dict:
         sym, day, population = pr["symbol"], pr["date"], pr["population"]
         df = load_bars(Path(cache), sym, day)
         if df is None:
+            for c in out.values():
+                c.coverage["no_cache_file"] += 1
             continue
         sess = rth_session(df, day)
         if sess.empty:
+            for c in out.values():
+                c.coverage["no_rth_bars"] += 1
             continue
         view = O.trigger_bars(sess, O.BASELINE.trigger_bar_minutes)
         passes = _rth_screen(sess)          # per symbol-day, not per cell
@@ -177,16 +216,37 @@ def run_chunk(args) -> dict:
     return out
 
 
-def _rth_screen(sess) -> bool:
+def _rth_screen(sess, minutes: int | None = None) -> bool:
     """§10.2, as far as the cache allows -- and it says so.
+
+    KNOWN AT RANGE END, AND NOTHING LATER. `change_from_open` and the price
+    band are read off the close of the last minute bar inside the opening
+    range (baseline 15 minutes: the 09:44 bar, which closes at 09:45), exactly
+    as `preflight.measure_day` computes them.
+
+    THE FIRST VERSION OF THIS FUNCTION READ `sess["close"].iloc[-1]` -- the
+    15:59 bar, the day's own RTH close. The screen was therefore "closed more
+    than 5% above its open", which a long breakout that worked satisfies by
+    construction, and the +$31,103 / -$13,281 split quoted for criterion 6 in
+    `orb_first_results.md` §1.1 was a split on the outcome. Found 2026-09-17
+    reading the runner against that document's claim that "everything in it
+    is known at 09:45". Recorded as amendment D.2.
 
     `relative_volume_10d_calc` is NOT COMPUTABLE from this cache: only 2 of
     27,777 symbol-days carry all ten prior sessions. So this is the screen on
     THREE of its four rules, and the report says that beside every number
     derived from it rather than letting `passes` read as the real screen.
     """
-    o = float(sess["open"].iloc[0])
-    last = float(sess["close"].iloc[-1])
+    minutes = O.BASELINE.orb_minutes if minutes is None else minutes
+    if sess.empty:
+        return False
+    first = sess.index[0]
+    start = first.normalize() + pd.Timedelta(hours=9, minutes=30)
+    opening = sess[sess.index < start + pd.Timedelta(minutes=minutes)]
+    if opening.empty:
+        return False
+    o = float(opening["open"].iloc[0])
+    last = float(opening["close"].iloc[-1])
     if o <= 0:
         return False
     return ((last - o) / o * 100.0 > ORB_MIN_MOVE_PCT
@@ -207,7 +267,7 @@ def read(cell: Cell, split_date: str) -> dict:
     net = sum(tot.values())
     n_t, n_sd = cell.trades, len(cell.by_symbol_day)
     d = {
-        "trades": n_t, "symbols": len(tot), "symbol_days": n_sd, "net": net,
+        "trades": n_t, "legs": cell.legs, "symbols": len(tot), "symbol_days": n_sd, "net": net,
         "per_trade": net / n_t if n_t else 0.0,
         "per_symbol_day": net / n_sd if n_sd else 0.0,
         "win_rate": cell.wins / n_t if n_t else 0.0,
@@ -305,7 +365,9 @@ def _row(key, d, dd) -> str:
             f"{d['boot_p']:>6.3f} {dd['delta_drop5']:>10,.0f}{flag}")
 
 
-def provenance(cache: Path, tape: str, a, seen: int, split_date: str) -> list[str]:
+def provenance(cache: Path, tape: str, a, seen: int, split_date: str,
+               coverage: Counter | None = None,
+               requested: int | None = None) -> list[str]:
     """The same block the pre-flight carries, for the same reason: two passes
     over different caches produce different numbers from the same code, and a
     table lifted out of one of them carries no sign of which it was."""
@@ -316,6 +378,13 @@ def provenance(cache: Path, tape: str, a, seen: int, split_date: str) -> list[st
          f"  pairs        {', '.join(a.pairs)}",
          f"  symbol-days  {seen:,} with bars",
          f"  split        {split_date}", ""]
+    if requested is not None:
+        cov = coverage or Counter()
+        L[-1:-1] = [
+            f"  requested    {requested:,}",
+            f"  no file      {cov.get('no_cache_file', 0):,}   "
+            f"(refused above {MAX_MISSING_PCT:.1f}% unless --max-missing-pct)",
+            f"  no RTH bars  {cov.get('no_rth_bars', 0):,}"]
     if tape != EXPECTED_TAPE:
         L += ["  >> NOT THE REGISTERED TAPE. Run with --anyway. Nothing below",
               "  >> is ORB's registered result and none of it enters section 11.",
@@ -328,7 +397,7 @@ def provenance(cache: Path, tape: str, a, seen: int, split_date: str) -> list[st
 def render(read_all: dict, delta_all: dict, split_date: str,
            seen: int, elapsed: float, args, merged: dict | None = None) -> list[str]:
     L = [
-        "ORB GRID — ninety cells, every one printed, nothing ranked", "",
+        f"ORB GRID — {len(read_all)} cells, every one printed, nothing ranked", "",
         f"  symbol-days read   {seen:,}",
         f"  cells              {len(read_all)}  "
         f"({len(GRID_MINUTES)} lengths x {len(GRID_STOPS)} stops x "
@@ -346,7 +415,7 @@ def render(read_all: dict, delta_all: dict, split_date: str,
         f"  MULTIPLICITY IS COUNTED BY FAMILY, NOT COLUMN: {len(FAMILIES)} "
         f"families ({', '.join(FAMILIES)}).",
         "  Any claim made FROM the grid rather than from the baseline carries",
-        "  four, not ninety and not one.",
+        f"  four, not {len(read_all)} and not one.",
         "",
         "  `opposite` is absent because spec §6 set MAX_R_PCT = 12% BEFORE the",
         "  pre-flight measured its median R at 9.26% of price with p90 17.72%.",
@@ -431,8 +500,8 @@ def _timing_block(merged: dict) -> list[str]:
 def _cell_detail(d: dict) -> list[str]:
     pt = f"{d['per_trade']:+,.2f}"
     return [
-        f"  trades            {d['trades']:,}   symbols {d['symbols']:,}   "
-        f"symbol-days {d['symbol_days']:,}",
+        f"  trades            {d['trades']:,} round trips ({d['legs']:,} legs)"
+        f"   symbols {d['symbols']:,}   symbol-days {d['symbol_days']:,}",
         f"  net               ${d['net']:+,.0f}",
         f"  per trade         ${pt}        per symbol-day  "
         f"${d['per_symbol_day']:+,.2f}",
@@ -457,24 +526,53 @@ def _boundary_block(read_all: dict) -> list[str]:
     """§11 criterion 7, made checkable — and honest about where it cannot be
     checked at all. A criterion that cannot fail is not a criterion, and one
     that quietly reports 'no boundary optimum' over a two-value family is
-    claiming a check it did not perform."""
-    L = ["THE BOUNDARY RULE (§11 criterion 7)", ""]
-    per_len = {}
-    for (m, s, rt, e), d in read_all.items():
-        if not d["thin"]:
-            per_len.setdefault(m, []).append(d["per_trade"])
-    if per_len:
-        best = max(per_len, key=lambda m: max(per_len[m]))
-        L.append(f"  ORB_MINUTES: best readable per-trade sits at {best} "
-                 f"minutes.")
-        if best in (min(GRID_MINUTES), max(GRID_MINUTES)):
-            L.append(f"  >> ON A BOUNDARY. The box must be pushed "
-                     f"({'3' if best == 5 else '45'}) and the grid re-run "
-                     "before this is read as an optimum.")
+    claiming a check it did not perform.
+
+    "WINS" IS AMENDMENT C.1's DEFINITION AND NO OTHER: the best readable
+    per-trade cell over the JOINT length x stop search, inside the `none`
+    retest arm only. The first version read every readable cell including the
+    retest arms, which change the trade population, and read it as a best
+    per length rather than a best cell. On the first XNAS run the baseline row
+    said 5 wins and the joint `none` reading said 30 -- opposite edges.
+    """
+    L = ["THE BOUNDARY RULE (§11 criterion 7)", "",
+         "  'Wins' per amendment C.1: best readable per-trade cell over the",
+         "  joint ORB_MINUTES x STOP_MODE search, `none` retest arm only.",
+         "  Retest arms are excluded: they change the trade population.", ""]
+    arm = {k: d for k, d in read_all.items()
+           if k[2] == "none" and not d["thin"]}
+    lo, hi = min(GRID_MINUTES), max(GRID_MINUTES)
+    if arm:
+        for m in GRID_MINUTES:
+            here = {k: d for k, d in arm.items() if k[0] == m}
+            if here:
+                k = max(here, key=lambda k: here[k]["per_trade"])
+                L.append(f"    {m:>2} min  best {k[1]:<10} {k[3]:<9} "
+                         f"{here[k]['per_trade']:>8.2f} per trade")
+            else:
+                L.append(f"    {m:>2} min  no readable `none` cell")
+        best = max(arm, key=lambda k: arm[k]["per_trade"])
+        m, st, _, ex = best
+        L += ["",
+              f"  WINS: {m} minutes ({st} / none / {ex}, "
+              f"{arm[best]['per_trade']:+.2f} per trade)."]
+        if m == hi:
+            L.append(f"  >> ON A BOUNDARY: the upper edge, {hi}. Criterion 7 is "
+                     "NOT MET. Pushing past")
+            L.append(f"  >> {hi} needs a registration of its own; amendment "
+                     "C.2 added 45 and nothing beyond.")
+        elif m == lo:
+            L.append(f"  >> ON A BOUNDARY: the lower edge, {lo}, WHICH CANNOT "
+                     "BE PUSHED (C.2 — a")
+            L.append("  >> 3-minute box does not end on a 5-minute trigger "
+                     "bar). Criterion 7 is NOT MET,")
+            L.append("  >> and this design cannot make it met.")
         else:
-            L.append("  Interior. No push required.")
+            L.append("  Interior. No push required. Criterion 7 is met on "
+                     "ORB_MINUTES.")
     else:
-        L.append("  ORB_MINUTES: no readable cell at any length.")
+        L.append("  ORB_MINUTES: no readable `none` cell at any length. "
+                 "Criterion 7 NOT READ.")
     L += [
         "",
         "  STOP_MODE: two values remain, so BOTH ARE BOUNDARIES and the rule",
@@ -524,6 +622,9 @@ def _screen_block(read_all: dict) -> list[str]:
         "  because §5 says every bucket is printed and a summary of a split is",
         "  the one place a reader stops checking.",
         "",
+        "  The screen is decided at the BASELINE range end (09:45) and reads",
+        "  no later bar (amendment D.2: the first runner read the 15:59 close).",
+        "",
         "  AND THE SCREEN IS THREE OF ITS FOUR RULES. "
         "`relative_volume_10d_calc`",
         "  is not computable from this cache — 2 of 27,777 symbol-days carry",
@@ -540,23 +641,71 @@ def _screen_block(read_all: dict) -> list[str]:
 # CLI
 # --------------------------------------------------------------------------
 
-def load_pairs(paths: list[str], limit: int | None) -> list[dict]:
+def load_pairs(paths: list[str], limit: int | None,
+               labels: list[str] | None = None) -> list[dict]:
+    """Population label per file. The default is the survivor run's shape
+    (survivors, then rejects); a point-in-time run names its own, or its one
+    file would be labelled `survivors` in the CSV's arm columns -- the very
+    universe it is not."""
+    if labels and len(labels) != len(paths):
+        sys.exit(f"--labels gave {len(labels)} name(s) for {len(paths)} "
+                 "--pairs file(s)")
     out = []
     for i, p in enumerate(paths):
-        label = "survivors" if i == 0 else "rejected"
+        label = (labels[i] if labels else
+                 "survivors" if i == 0 else "rejected")
         rows = json.loads(Path(p).read_text(encoding="utf-8"))
         if limit:
             rows = rows[:limit]
         for r in rows:
             out.append({"symbol": r["symbol"], "date": r["date"],
-                        "population": label})
+                        "population": label,
+                        "first_seen": r.get("first_seen")})
     return out
+
+
+def first_seen_check(pairs: list[dict]) -> str | None:
+    """None to proceed, or the refusal text.
+
+    A point-in-time pair carries the moment the screen first surfaced it. The
+    grid does not floor entries at that moment, which is only honest while no
+    name surfaces after the EARLIEST range end the grid builds (09:30 plus the
+    shortest box): until then no cell can act on it. Verified 2026-09-17 --
+    the latest `first_seen` in screen_pairs_pit.json is 09:30 ET -- and made a
+    refusal here so a rebuilt universe cannot quietly break it.
+    """
+    limit = 9 * 60 + 30 + min(GRID_MINUTES)
+    late = []
+    for p in pairs:
+        fs = p.get("first_seen")
+        if not fs:
+            continue
+        t = pd.Timestamp(fs)
+        t = (t.tz_localize("UTC") if t.tzinfo is None else t).tz_convert(
+            "America/New_York")
+        if t.hour * 60 + t.minute > limit:
+            late.append((p["symbol"], p["date"], f"{t:%H:%M}"))
+    if not late:
+        return None
+    eg = ", ".join(f"{s} {d} {hm}" for s, d, hm in late[:5])
+    return (f"REFUSING TO RUN: {len(late):,} symbol-day(s) were first surfaced "
+            f"after {limit // 60:02d}:{limit % 60:02d} ET, the earliest range "
+            "end in this grid.\n"
+            f"e.g. {eg}\n"
+            "The grid does not floor entries at first_seen, so a cell could "
+            "trade a name before it was known.")
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--pairs", nargs="+", required=True,
                    help="survivors first, then rejects")
+    p.add_argument("--labels", nargs="+",
+                   help="population name per --pairs file (default: "
+                        "survivors, rejected)")
+    p.add_argument("--max-missing-pct", type=float, default=MAX_MISSING_PCT,
+                   help="refuse when more than this share of requested "
+                        "symbol-days has no cache file (default: %(default)s)")
     p.add_argument("--cache", default="bar_cache_db")
     p.add_argument("--window", default="3d_to_2000")
     p.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 1))
@@ -595,6 +744,33 @@ def tape_check(tape: str, expected: str, anyway: bool) -> str | None:
             f"{expected} cache, or --anyway to run regardless.")
 
 
+def coverage_check(cache: Path, pairs: list[dict],
+                   max_pct: float) -> str | None:
+    """None to proceed, or the refusal text. Checked BEFORE the run.
+
+    A missing file used to be a bare `continue`: the symbol-day vanished from
+    every denominator and nothing counted it. On a universe the cache was
+    built for that cost 0.43%. On one it was not built for it silently
+    replaces the universe with the intersection -- see MAX_MISSING_PCT.
+    """
+    missing = [p for p in pairs
+               if not (cache / f"{p['symbol']}_{p['date']}.csv.gz").exists()]
+    pct_missing = 100.0 * len(missing) / len(pairs) if pairs else 0.0
+    if pct_missing <= max_pct:
+        return None
+    eg = ", ".join(f"{p['symbol']} {p['date']}" for p in missing[:5])
+    return (f"REFUSING TO RUN: {len(missing):,} of {len(pairs):,} requested "
+            f"symbol-days ({pct_missing:.1f}%) have no file in {cache}, "
+            f"against a limit of {max_pct:.1f}%.\n"
+            f"e.g. {eg}\n"
+            "The run would measure the intersection of this universe with "
+            "whatever the cache was built for,\n"
+            "and report it under this universe's name. Build the missing bars "
+            "first:\n"
+            "  python -m common.bar_cache_build --pairs <these pairs> "
+            "--dataset XNAS.BASIC --out bar_cache_xnas --confirm")
+
+
 def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
     root = Path(a.cache)
@@ -606,9 +782,13 @@ def main(argv=None) -> int:
     if refusal:
         sys.exit(refusal)
 
-    pairs = load_pairs(a.pairs, a.limit)
+    pairs = load_pairs(a.pairs, a.limit, a.labels)
     if not pairs:
         sys.exit("no symbol-days")
+    refusal = (first_seen_check(pairs)
+               or coverage_check(cache, pairs, a.max_missing_pct))
+    if refusal:
+        sys.exit(refusal)
     # THE SPLIT POINT IS DERIVED FROM THE DATA AND NEVER SWEPT (§5 item 3).
     dates = sorted({p["date"] for p in pairs})
     split_date = dates[len(dates) // 2]
@@ -661,7 +841,9 @@ def main(argv=None) -> int:
                 w.writerow(r)
         print(f"wrote {a.csv}")
 
-    prov = provenance(cache, tape, a, seen, split_date)
+    prov = provenance(cache, tape, a, seen, split_date,
+                      coverage=merged[BASELINE_KEY].coverage,
+                      requested=len(pairs))
     emit("\n".join(prov + render(read_all, delta_all, split_date, seen,
                                   elapsed, a, merged)),
          a.out,
