@@ -180,24 +180,30 @@ def refused_block(bname: str, gname: str, refused_rows) -> list[str]:
             f"    winners lost    {len(winners):>6,}   {money(net(winners, f)):>12}", ""]
 
 
-def binding_block(gname: str, could: int, total: int, visible: dict) -> list[str]:
+def binding_block(gname: str, could: int, total: int, detail: dict,
+                  what: str = "visible point-in-time names at the baseline's entry minutes",
+                  detail_label: str = "visible names at signal") -> list[str]:
     """A gate that never fires is indistinguishable from its absence. How
-    many baseline entries had enough visible names for the gate to bind at
-    all, and the distribution of visible-name counts at signal time."""
+    many baseline entries the gate could have refused at all, and a
+    distribution behind that count (for a rank gate, the visible-name counts
+    at signal time; for a clock gate, where the entries fell)."""
     share = 100.0 * could / total if total else 0.0
-    L = [f"COULD {gname} HAVE BOUND? (visible point-in-time names at the baseline's entry minutes)", "",
-         f"  baseline entries {total:,}   with enough names for the gate to bind {could:,} ({share:.1f}%)"
+    L = [f"COULD {gname} HAVE BOUND? ({what})", "",
+         f"  baseline entries {total:,}   where the gate could refuse {could:,} ({share:.1f}%)"
          + ("   *** NEVER -- THE GATE DID NOT RUN ***" if total and could == 0 else ""),
-         "  visible names at signal:  " + "  ".join(f"{k}:{v:,}" for k, v in sorted(visible.items())[:15]), ""]
+         f"  {detail_label}:  " + "  ".join(f"{k}:{v:,}" for k, v in sorted(detail.items(), key=lambda kv: str(kv[0]))[:15]), ""]
     return L
 
 
 def render(title: str, registered: str, books: dict, pairs, reported, symdays: int, errors: int,
            days: list[str], elapsed: float, jobs: int, refused: dict, binding: dict,
-           error_days: list | None = None) -> list[str]:
+           error_days: list | None = None, preamble: list[str] | None = None,
+           binding_kw: dict | None = None) -> list[str]:
     """`pairs`: (baseline, gated) read by the verdict; `reported`: (baseline,
     gated) printed as 'reported, not registered'. `refused[gated]` rows;
-    `binding[gated] = (could, total, visible_counter)`."""
+    `binding[gated] = (could, total, detail)`; `preamble` lines go after the
+    population check (a study's own block, e.g. the sessions a veto read)."""
+    binding_kw = binding_kw or {}
     cut = days[len(days) // 2] if len(days) >= 2 else (days[0] if days else "")
     L = [title, "", f"  registered  {registered}",
          f"  {len(days):,} sessions   {symdays:,} symbol-days   halves cut at {cut}",
@@ -214,15 +220,17 @@ def render(title: str, registered: str, books: dict, pairs, reported, symdays: i
         ok = len(mcl) == pub
         L.append(f"  published count     {pub:,}   " + ("matches" if ok else "*** DOES NOT MATCH ***"))
     L += [""]
+    if preamble:
+        L += list(preamble)
     L += ["THE BOOKS", ""]
     for name, rows in books.items():
         L += book_block(name, rows, cut, symdays)
     for bname, gname in pairs:
-        L += binding_block(gname, *binding[gname])
+        L += binding_block(gname, *binding[gname], **binding_kw)
         L += verdict_block(bname, gname, books[bname], books[gname], cut, symdays)
         L += refused_block(bname, gname, refused[gname])
     for bname, gname in reported:
-        L += binding_block(gname, *binding[gname])
+        L += binding_block(gname, *binding[gname], **binding_kw)
         tag, why, n = verdict(books[bname], books[gname], cut, symdays)
         a = n["abst"]
         L += [f"REPORTED, NOT REGISTERED: {gname} against {bname}", "",
