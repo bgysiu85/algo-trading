@@ -115,3 +115,30 @@ def test_a_later_floor_makes_the_variant_not_a_subset():
     squash = re.sub(r"[ \t]+", " ", "\n".join(
         C.survivor_block("MCL@20", "MCL@50", base_rows, var_rows)))
     assert "shared 0 of 1" in squash
+
+
+# --- the decomposition --------------------------------------------------------------
+
+def test_decomposition_partitions_the_baseline_and_lands_on_the_variant():
+    """Every baseline trade is in exactly one of the two subtracted rows, and
+    the arithmetic closes on the variant's book."""
+    base = [trade("AAA", 10.0, entry="04:30"),      # kept name, kept by the floor
+            trade("AAA", 50.0, entry="04:05", ordinal=2),   # kept name, lost to the floor
+            trade("BBB", -30.0)]                    # dropped symbol-day
+    var = [trade("AAA", 10.0, entry="04:30"),
+           trade("AAA", -8.0, entry="07:50", ordinal=3)]    # new after the floor
+    out = "\n".join(C.decomposition_block("MCL@20", "MCL@50", base, var, [rec("AAA")]))
+    squash = re.sub(r"[ \t]+", " ", out)
+    assert "MCL@20 whole book 3" in squash
+    assert "- symbol-days dropped 1" in squash
+    assert "= names the screen keeps 2" in squash
+    assert "- lost to the floor 1" in squash
+    assert "+ new after the floor 1" in squash
+    assert "= MCL@50 whole book 2" in squash
+    assert "NOT A TRADEABLE ARM" in out
+
+
+def test_decomposition_names_the_look_ahead_it_prices():
+    base = [trade("AAA", 1.0)]
+    out = "\n".join(C.decomposition_block("MCL@20", "MCL@50", base, base, [rec("AAA")]))
+    assert "SELECTION" in out and "COST OF WAITING" in out

@@ -192,6 +192,58 @@ def survivor_block(bname: str, vname: str, base_rows, var_rows) -> list[str]:
             "  universe study and not a gate study.", ""]
 
 
+def decomposition_block(bname: str, vname: str, base_rows, var_rows, vrows) -> list[str]:
+    """Why the variant lands where it does: SELECTION against the CLOCK.
+
+    Partition the baseline's book by the variant's universe, then by whether
+    the variant's later entry floor still admits the trade:
+
+        @baseline               the whole book
+      - symbol-days dropped     names the tighter screen never surfaces
+      = names the screen keeps  SELECTION, and it is look-ahead: knowing at
+                                04:10 that a name will reach the threshold
+                                later is not knowable at 04:10
+      - lost to the floor       trades on those names that happen before the
+                                name clears the tighter clause -- THE COST OF
+                                WAITING
+      + new after the floor     entries the later floor creates, because bars
+                                the baseline was mid-position on become
+                                signals
+      = @variant                the book that could actually be traded
+
+    The middle row is NOT TRADEABLE and is printed for attribution only.
+    """
+    f = MEASURED_FRICTION
+    kept_days = {(r["symbol"], r["date"]) for r in vrows}
+    on_kept = [r for r in base_rows if (r["symbol"], r["date"]) in kept_days]
+    gone = [r for r in base_rows if (r["symbol"], r["date"]) not in kept_days]
+    vk = {key(r) for r in var_rows}
+    bk = {key(r) for r in base_rows}
+    floor_out = [r for r in on_kept if key(r) not in vk]
+    fresh = [r for r in var_rows if key(r) not in bk]
+
+    def row(label, rows, note=""):
+        return (f"  {label:<26} {len(rows):>6,} {money(net(rows, f)):>13}"
+                f" {money(per_trade(rows, f)):>10}   {note}")
+
+    return [f"SELECTION AGAINST THE CLOCK: {vname} decomposed out of {bname}", "",
+            f"  {'':26} {'trades':>6} {'net':>13} {'per trade':>10}",
+            row(f"{bname} whole book", base_rows),
+            row("- symbol-days dropped", gone),
+            row("= names the screen keeps", on_kept,
+                f"SELECTION {per_trade(on_kept, f) - per_trade(base_rows, f):+.2f}/trade"),
+            row("- lost to the floor", floor_out, "THE COST OF WAITING"),
+            row("+ new after the floor", fresh),
+            row(f"= {vname} whole book", var_rows,
+                f"NET {per_trade(var_rows, f) - per_trade(base_rows, f):+.2f}/trade"),
+            "",
+            "  'names the screen keeps' is NOT A TRADEABLE ARM. It prices the",
+            "  name list alone, at the baseline's entry floor, which requires",
+            "  knowing before the fact that a name will clear the tighter",
+            "  clause later in the morning. It is printed to attribute the",
+            "  result, never as a candidate.", ""]
+
+
 # --- the report -------------------------------------------------------------------
 
 def render(books: dict, uni: dict, labels: dict, symdays: dict, errors: int,
@@ -221,6 +273,7 @@ def render(books: dict, uni: dict, labels: dict, symdays: dict, errors: int,
         L += book_block(name, rows, cut, own)
     for label, _ in ENGINES:
         bn, vn = f"{label}@{b}", f"{label}@{v}"
+        L += decomposition_block(bn, vn, books[bn], books[vn], uni["var"])
         L += survivor_block(bn, vn, books[bn], books[vn])
         L += dropped_block(bn, vn, books[bn], uni["base"], uni["var"])
         L += verdict_block(bn, vn, books[bn], books[vn], cut, symdays["base"])
@@ -246,14 +299,75 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dataset", default="XNAS.ITCH")
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--jobs", type=int, default=0)
+    p.add_argument("--cache", default=None, metavar="JSONL",
+                   help="append-only per-session cache; a run that does not "
+                        "finish is resumed by repeating the same command")
+    p.add_argument("--budget", type=float, default=None,
+                   help="seconds of session work per call, with --cache")
     p.add_argument("--out", default="var/reports/change_threshold.txt")
     p.add_argument("--csv", default="var/reports/change_threshold_trades.csv")
     return p
 
 
-def collect(pairs_path: str, archive, dataset: str, limit, jobs: int, label: str):
+def cache_load(path: str | None, arm: str) -> dict:
+    """Sessions already run for this arm, keyed by day.
+
+    The runner this is driven from cannot hold a process open for longer than
+    a couple of minutes, so a full pass is made out of several. The cache is
+    append-only JSONL, one line per session per arm, and a resumed run is
+    bit-identical to an unbroken one because `run_day` reads one session and
+    the day order is restored by `sorted()` before anything is summed.
+    """
+    if not path or not Path(path).exists():
+        return {}
+    got: dict[str, dict] = {}
+    with open(path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            if rec["arm"] == arm:
+                got[rec["day"]] = rec["res"]
+    return got
+
+
+def cache_append(path: str, arm: str, day: str, res: dict) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"arm": arm, "day": day, "res": res}) + "\n")
+
+
+def collect(pairs_path: str, archive, dataset: str, limit, jobs: int, label: str,
+            cache: str | None = None, arm: str = "", budget: float | None = None):
     tasks, _ = build_tasks(pairs_path, archive, dataset, limit)
-    got, elapsed = run_sessions(run_day, tasks, jobs, label)
+    done = cache_load(cache, arm)
+    todo = [t for t in tasks if t[1] not in done]
+    if cache and todo:
+        if budget is not None:
+            t0 = time.time()
+            kept = []
+            for t in todo:
+                if time.time() - t0 > budget:
+                    break
+                day, res, err = run_day(t)
+                if err:
+                    print(f"  ! {day}: {err}", flush=True)
+                if res is not None:
+                    cache_append(cache, arm, day, res)
+                    done[day] = res
+                kept.append(t)
+            left = len(todo) - len(kept)
+            print(f"{label}: {len(kept):,} run this call, {left:,} left", flush=True)
+            if left:
+                raise SystemExit(f"INCOMPLETE: {left:,} session(s) of {label} remain. "
+                                 f"Run the same command again.")
+        else:
+            got, _ = run_sessions(run_day, todo, jobs, label)
+            for day, res in got.items():
+                cache_append(cache, arm, day, res)
+                done[day] = res
+    got, elapsed = (done, 0.0) if cache else run_sessions(run_day, tasks, jobs, label)
     books = {name: [] for name, _ in ENGINES}
     symdays = errors = 0
     error_days: list[str] = []
@@ -274,10 +388,12 @@ def main(argv=None) -> int:
     jobs = jobs_from(a.jobs)
     t0 = time.time()
 
-    bb, bsd, berr, bed, bdays, _ = collect(a.baseline, archive, a.dataset, a.limit,
-                                           jobs, f"baseline chg>={a.base_label}%")
     vb, vsd, verr, ved, _, _ = collect(a.variant, archive, a.dataset, a.limit,
-                                       jobs, f"variant chg>={a.var_label}%")
+                                       jobs, f"variant chg>={a.var_label}%",
+                                       a.cache, f"var{a.var_label}", a.budget)
+    bb, bsd, berr, bed, bdays, _ = collect(a.baseline, archive, a.dataset, a.limit,
+                                           jobs, f"baseline chg>={a.base_label}%",
+                                           a.cache, f"base{a.base_label}", a.budget)
     elapsed = time.time() - t0
 
     books = {}
