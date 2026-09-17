@@ -281,3 +281,52 @@ def test_the_degraded_day_list_was_not_renamed_out_from_under_itself():
     src = Path("common/databento_universe.py").read_text(encoding="utf-8")
     assert '"degraded_days": bad,' in src
     assert "unpriced.append" in src
+
+
+# --- a failed chunk does not take the pull down -------------------------------
+
+def test_fetch_chunk_retries_and_then_gives_up_without_raising(tmp_path, capsys):
+    from common import databento_universe as U
+
+    class Flaky:
+        def __init__(self, fail_times):
+            self.calls, self.fail_times = 0, fail_times
+
+        class timeseries:  # noqa: N801
+            pass
+
+    f = Flaky(2)
+
+    def get_range(**kw):
+        f.calls += 1
+        if f.calls <= f.fail_times:
+            raise RuntimeError("Error streaming response: Response ended prematurely")
+        open(kw["path"], "wb").write(b"ok")
+    f.timeseries.get_range = staticmethod(get_range)
+    tmp = tmp_path / "x.partial"
+    assert U.fetch_chunk(f, "XNAS.ITCH", "status", "2026-03-01", "2026-04-01", tmp, "2026-03")
+    assert f.calls == 3 and tmp.read_bytes() == b"ok"
+
+    g = Flaky(99)
+    g.timeseries.get_range = staticmethod(get_range.__wrapped__ if hasattr(get_range, "__wrapped__") else
+                                          (lambda **kw: (_ for _ in ()).throw(RuntimeError("down"))))
+    assert not U.fetch_chunk(g, "XNAS.ITCH", "status", "2026-03-01", "2026-04-01", tmp_path / "y.partial", "2026-03")
+    assert "FAILED after 3 attempts" in capsys.readouterr().out
+
+
+def test_discard_partial_survives_a_locked_file(tmp_path, monkeypatch, capsys):
+    from common import databento_universe as U
+    p = tmp_path / "z.partial"
+    p.write_bytes(b"x")
+    calls = {"n": 0}
+    real_unlink = type(p).unlink
+
+    def locked(self, missing_ok=False):
+        calls["n"] += 1
+        raise PermissionError("in use")
+    monkeypatch.setattr(type(p), "unlink", locked)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    U.discard_partial(p, "2026-03")          # must not raise
+    assert calls["n"] == 5
+    assert "could not remove z.partial" in capsys.readouterr().out
+    monkeypatch.setattr(type(p), "unlink", real_unlink)
