@@ -119,3 +119,34 @@ figures: H0 (11.90) over 5,909 / knowable (11.58) over 1,611; MCL (8.81) over
   market.
 - Does not decide anything about a strategy variant; closed studies stay
   closed; `holdout.json` stays shut.
+
+---
+
+## Amendment A — PRE-RUN (after `itch_capture`, before `screen_sim`), 2026-09-17
+
+**§2.1 as written measured the wrong thing.** It read the age of the
+cleared-volume row used at each cutoff and asked for p90 under 15 minutes.
+The measured p90 is 23–80 minutes at 04:30–08:00 and 4–12 minutes from
+08:30. But the statistic is republished on *change*: a name with no trades
+for an hour carries an hour-old row that is still exactly right. Checked on
+the run's own CSV — rows where the row is more than 30 minutes old **and**
+XNAS.ITCH printed volume inside those 30 minutes: **0.00% at every cutoff**
+(17,929 symbol-days). The number is never stale while it could have moved;
+the "age" is time since the last trade. §2.1 is restated as: *stale while
+trading* must be under 1% at every cutoff. It is 0.00%. The 30-minute ladder
+proceeds unchanged.
+
+**§2.2 stop condition passes; one prediction in it misses.** Before the cut
+the band median falls across 08:00 — 0.239 at 08:00, 0.138 at 08:30 — as
+required. After the cut it is **not flat**: 0.020 at 04:30 rising to 0.111
+at 09:30. Nasdaq's book sees 2% of the consolidated pre-market volume in the
+first half hour once the TRF reports from 04:00, and its share grows through
+the morning. That is a finding about where early pre-market volume prints,
+not a defect in the diagnosis; it is recorded here as a missed prediction and
+the ladder is used as measured.
+
+**Step 0 ran at $0.00** (528 dates inside the free window; 24 already on
+disk). PIT coverage is complete: the PIT population's n at 09:30 is 6,170.
+
+Nothing else in this registration changes. Predictions in §3 stand as
+written and are scored against the result.
