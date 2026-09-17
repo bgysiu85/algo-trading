@@ -37,9 +37,16 @@ someone to run the pull anyway.
 
 THE KEY IS NEVER AN ARGUMENT AND IS NEVER PRINTED
 --------------------------------------------------
-Read from DATABENTO_API_KEY only. A --key flag would put it in PowerShell
-history. Client exceptions are scrubbed before they are shown, because a
-Telegram token once leaked out of an exception handler in common/notify.py.
+Resolved through `common.secrets_util.resolve` -- the ONE resolver in this repo,
+which follows an op:// 1Password reference if that is what the environment
+variable holds. It usually is: the README tells you to `setx` a reference, and
+`setx` is persistent. A module that reads the variable directly sends that
+reference to the vendor and gets back a 401 that reads like a revoked key. This
+module did exactly that in its first draft; see `_key`.
+
+A --key flag would put the secret in PowerShell history, so there is none.
+Client exceptions are scrubbed before they are shown, because a Telegram token
+once leaked out of an exception handler in common/notify.py.
 
 WHAT THE ANSWER IS EXPECTED TO BE, AND WHY IT IS STILL RUN
 -----------------------------------------------------------
@@ -89,24 +96,70 @@ TN_ROOT = {"TN": "Ultra 10-year            -> MTN (arm (b) only)"}
 SCHEMAS = ("ohlcv-1d", "definition")
 
 
+_RESOLVED: str = ""      # the resolved key, kept only so _scrub can remove it
+
+
 def _scrub(text: str) -> str:
-    """Remove anything that looks like a key from text before it is printed."""
-    key = os.environ.get("DATABENTO_API_KEY") or ""
+    """Remove anything that looks like a key from text before it is printed.
+
+    Scrubs the RESOLVED key, not the environment variable's contents. Those are
+    different strings on Ben's machine -- the variable holds an op:// reference
+    and the key comes out of 1Password -- and scrubbing the reference while
+    printing the secret is the wrong way round.
+    """
     out = str(text)
-    if key:
-        out = out.replace(key, "<DATABENTO_API_KEY>")
+    if _RESOLVED:
+        out = out.replace(_RESOLVED, "<DATABENTO_API_KEY>")
     return re.sub(r"\bdb-[A-Za-z0-9]{20,}\b", "<DATABENTO_API_KEY>", out)
 
 
 def _key() -> str:
-    key = os.environ.get("DATABENTO_API_KEY")
+    """Resolve the Databento key through the ONE resolver this repo has.
+
+    THE DEFECT THIS REPLACES, 2026-09-17. The first draft read
+    os.environ["DATABENTO_API_KEY"] and handed whatever it found to the client.
+    On Ben's machine that variable holds an op:// 1PASSWORD REFERENCE, set
+    persistently with setx, and the vendor answered
+
+        401 auth_authentication_failed
+
+    which reads as an expired subscription or a revoked key and is neither.
+
+    `common.databento_fetch._key` had already hit this, already fixed it, and
+    already written the explanation into its own docstring -- and
+    `secrets_util.resolve`'s docstring names databento_fetch's environment-only
+    reader as the thing its existence is meant to prevent. This module grew the
+    same reader anyway, four days later, and produced the same 401.
+
+    That is the shape PROGRAM_INDEX section 1 fixes by fiat elsewhere:
+    `holdout.split_sessions` is THE one implementation and a test asserts every
+    study calls it, because two studies were written without it. Credential
+    resolution now gets the same treatment --
+    `tests/strategy/test_tsmom_data_price.py::test_the_key_is_resolved_through_
+    secrets_util` refuses a second reader in this module.
+    """
+    global _RESOLVED
+    from common import secrets_util as S
+
+    key = S.resolve("DATABENTO_API_KEY", "Databento API key")
     if not key:
         raise SystemExit(
-            "DATABENTO_API_KEY is not set.\n"
-            "  PowerShell:  $env:DATABENTO_API_KEY=\"db-...\"\n"
-            "The key is read from the environment only -- never a command-line\n"
-            "flag, which would put it in shell history (PROGRAM_INDEX section 1)."
+            "DATABENTO_API_KEY is not set. In PowerShell, either\n"
+            '  $env:DATABENTO_API_KEY = "db-..."              (this shell only)\n'
+            '  setx DATABENTO_API_KEY "op://Trading/<item>/<field>"'
+            "   (persistent, resolved via 1Password)\n"
+            "Never a command-line flag -- that puts it in shell history\n"
+            "(PROGRAM_INDEX section 1)."
         )
+    _RESOLVED = key
+    if not key.startswith("db-"):
+        # Warn, do not block: the shape of a vendor's key is theirs to change.
+        # But a wrong-shaped key produces the same opaque 401 as an unresolved
+        # op:// reference, so say the likely reason BEFORE the server does.
+        # No part of the value is printed.
+        print(f"WARNING: DATABENTO_API_KEY resolved to {len(key)} characters "
+              "not beginning 'db-'. If the next call returns 401, that is why.",
+              file=sys.stderr)
     return key
 
 

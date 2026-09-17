@@ -117,11 +117,20 @@ def test_the_key_is_never_a_command_line_flag():
         "boom <DATABENTO_API_KEY> boom")
 
 
-def test_scrub_removes_the_live_key_even_when_it_does_not_match_the_pattern(monkeypatch):
+def test_scrub_removes_the_resolved_key_even_when_it_does_not_match_the_pattern(monkeypatch):
+    """A key that does not look like one is still a key.
+
+    The regex only catches `db-`-prefixed values. A vendor is free to change
+    that shape, and a 1Password field can hold anything, so the literal
+    resolved value is removed too.
+    """
     import common.tsmom_data_price as m
 
-    monkeypatch.setenv("DATABENTO_API_KEY", "not-a-db-prefixed-key")
+    monkeypatch.setattr("common.secrets_util.resolve", lambda *a, **k: "not-a-db-prefixed-key")
+    m._RESOLVED = ""
+    m._key()
     assert "not-a-db-prefixed-key" not in m._scrub("failed for not-a-db-prefixed-key")
+    m._RESOLVED = ""
 
 
 def test_the_root_set_is_the_one_the_spec_registered():
@@ -164,7 +173,101 @@ def test_unknown_roots_are_refused_rather_than_silently_dropped(capsys):
 def test_it_refuses_to_run_without_a_key(monkeypatch):
     import common.tsmom_data_price as m
 
-    monkeypatch.delenv("DATABENTO_API_KEY", raising=False)
+    monkeypatch.setattr("common.secrets_util.resolve", lambda *a, **k: "")
     with pytest.raises(SystemExit) as e:
         m._key()
     assert "DATABENTO_API_KEY" in str(e.value)
+
+
+def _reads_env_directly(source: str, var: str) -> list[str]:
+    """os.environ / os.getenv reads of `var` anywhere in `source`.
+
+    `os.environ.get(var)`, `os.environ[var]` and `os.getenv(var)` all count.
+    """
+    hits = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Subscript):          # os.environ["X"]
+            sl = node.slice
+            if (isinstance(node.value, ast.Attribute) and node.value.attr == "environ"
+                    and isinstance(sl, ast.Constant) and sl.value == var):
+                hits.append(f"os.environ[{var!r}] at line {node.lineno}")
+        if isinstance(node, ast.Call):               # .get(...) / os.getenv(...)
+            fn = node.func
+            name = fn.attr if isinstance(fn, ast.Attribute) else None
+            envish = (name == "getenv") or (
+                name == "get" and isinstance(fn, ast.Attribute)
+                and isinstance(fn.value, ast.Attribute) and fn.value.attr == "environ")
+            if envish and node.args and isinstance(node.args[0], ast.Constant) \
+                    and node.args[0].value == var:
+                hits.append(f"{name}({var!r}) at line {node.lineno}")
+    return hits
+
+
+def test_the_key_is_resolved_through_secrets_util():
+    """One resolver, not two. This module shipped with the second one.
+
+    The first draft read os.environ["DATABENTO_API_KEY"] directly. On Ben's
+    machine that variable holds an op:// 1Password reference set with `setx`,
+    so the reference went to the vendor and came back 401 -- the exact failure
+    `common/databento_fetch.py::_key` had already found, fixed and documented,
+    and the one `secrets_util.resolve`'s docstring names as the reason it
+    exists. Writing a second reader four days later reproduced it verbatim.
+
+    PROGRAM_INDEX section 1 settles this class by fiat for the holdout:
+    `holdout.split_sessions` is THE one implementation and a test asserts every
+    study calls it. Same treatment here.
+    """
+    source = MODULE.read_text(encoding="utf-8")
+    direct = _reads_env_directly(source, "DATABENTO_API_KEY")
+    assert direct == [], (
+        f"{direct} reads the environment variable directly. On a machine where "
+        "it holds an op:// reference that sends the REFERENCE to Databento and "
+        "returns a 401 that reads like a revoked key. Use "
+        "common.secrets_util.resolve -- the repo has one resolver."
+    )
+    assert "secrets_util" in source, (
+        "the module resolves its key some third way -- there is one resolver")
+
+
+def test_the_one_resolver_guard_can_fail():
+    """The scan must reject a module that DOES read the variable directly."""
+    import textwrap
+
+    bad = textwrap.dedent("""
+        import os
+        def key():
+            return os.environ.get("DATABENTO_API_KEY")
+    """)
+    worse = textwrap.dedent("""
+        import os
+        def key():
+            return os.environ["DATABENTO_API_KEY"]
+    """)
+    getenv = textwrap.dedent("""
+        import os
+        def key():
+            return os.getenv("DATABENTO_API_KEY")
+    """)
+    for src, label in ((bad, "environ.get"), (worse, "environ[]"), (getenv, "getenv")):
+        assert _reads_env_directly(src, "DATABENTO_API_KEY"), (
+            f"the scan missed {label} -- it would pass the real module for the "
+            "same reason, which is no reason at all")
+    # and it must not fire on an unrelated variable
+    other = "import os\nx = os.environ.get('DATABENTO_ARCHIVE')\n"
+    assert _reads_env_directly(other, "DATABENTO_API_KEY") == []
+
+
+def test_scrub_removes_the_resolved_key_not_the_environment_variable(monkeypatch):
+    """The two are different strings when the variable holds an op:// reference.
+
+    Scrubbing the reference while printing the secret is the wrong way round,
+    and it is what the first draft did.
+    """
+    import common.tsmom_data_price as m
+
+    monkeypatch.setenv("DATABENTO_API_KEY", "op://Trading/databento/credential")
+    monkeypatch.setattr("common.secrets_util.resolve", lambda *a, **k: "SECRETVALUE1234567890")
+    m._RESOLVED = ""
+    m._key()
+    assert "SECRETVALUE1234567890" not in m._scrub("failed for SECRETVALUE1234567890")
+    m._RESOLVED = ""
