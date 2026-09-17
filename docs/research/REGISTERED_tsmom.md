@@ -68,6 +68,36 @@ $71.62** and `--max-cost` aborted. Ben offered to pay it. The diagnostic
 
 **Estimated at ~$4 against $71.62**, for the same inputs.
 
+### The measured figure, 2026-09-17
+
+`common/tsmom_data_price.py --scope lean`, run on Ben's machine.
+Raw output: `claude/raw/tsmom_price_20260917.txt`.
+
+| | billable | USD |
+|---|---:|---:|
+| `ohlcv-1d` | 6,254,416 | **1.11** |
+| `definition` | 1,605,203,600 | **2.54** |
+| **TOTAL** | **1,611,458,016** (1.501 GiB) | **3.65** |
+
+**$3.65 against $71.62 — a 95% reduction, for the identical inputs.** The
+estimate of ~$4 was made before the run and is recorded above unedited.
+
+- **Dataset range confirmed: 2010-06-06 .. 2026-09-17.** §1.1's "mid-2010" is
+  right, and §6's holdout leaves **11.6 years in-sample** (2010-06 .. 2021-12).
+- **The definition figure is a per-session cost multiplied by 190.** The per-day
+  cost is exact; the sample count is the assumption, and the report says so.
+- **NG and CL are 51% of the bill** ($1.06 and $0.79) and 65% of the bytes.
+  Their `definition` is ~3.2 MB and ~2.3 MB *per session*, against ES's 36 kB —
+  roughly a hundredfold, which is the deferred-month and spread listing depth
+  of the two energy roots. That is why 13 roots did not cost 13× ES.
+- **ZN's definition rounds to $0.00.**
+
+**G2 is answered but not self-cleared.** Ben's "I'm ok to pay it" was said of
+$71.62 and conditioned on the data being genuinely useful, which at that scope
+it was not. $3.65 is 5% of that figure, so his standing consent covers it a
+fortiori — but the gate says *he* says yes, and a gate that clears itself on a
+technicality is not a gate.
+
 **And the sampling gains a control rather than costing one.** Databento's
 `c.0` changes instrument at expiry, so the **symbol-change dates in the bars are
 a second, independent reading of the roll calendar**. The run asserts the two
