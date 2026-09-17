@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import date, datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
+import json
 import pandas as pd
 import pytest
 
@@ -352,3 +353,28 @@ def test_a_run_that_did_not_compute_knowable_offered_says_so(monkeypatch):
     out = "\n".join(P.render(result(1.0), 100, 500, "2026-05-01", 8.0, 1.0,
                              mix={"repaired": 500}))
     assert "H0_KNOWABLE_OFFERED = ?" in out and "not computed" in out
+
+
+# --- the constants as data ---------------------------------------------------
+
+def test_constants_json_matches_the_rendered_block(tmp_path):
+    """One measurement, two renderings. The JSON is what pit_strategy --h0
+    reads; the text is what a person reads. They must not be able to differ."""
+    res = result(1.0)
+    c = P.constants(res, 500, 120, "2026-05-01", {"repaired": 500},
+                    "var/reports/pit_h0_itch.txt", "x.json", "XNAS.ITCH")
+    out = "\n".join(P.render(res, 100, 500, "2026-05-01", 8.0, 1.0,
+                             mix={"repaired": 500}, n_knowable=120))
+    assert f"H0_PIT_NET = {c['H0_PIT_NET']:_.1f}" in out
+    assert f"H0_PIT_TRADES = {c['H0_PIT_TRADES']:_}" in out
+    assert c["H0_PIT_OFFERED"] == 500 and c["H0_KNOWABLE_OFFERED"] == 120
+    assert c["dataset"] == "XNAS.ITCH"
+    assert "repaired=500" in c["H0_REFERENCE_SOURCE"]
+    assert P.constants_path("var/reports/pit_h0_itch.txt").name == "pit_h0_itch.json"
+
+    from common.pit_strategy import H0Ref
+    p = tmp_path / "h0.json"
+    p.write_text(json.dumps(c), encoding="utf-8")
+    ref = H0Ref.load(p)
+    assert ref.offered == 500 and ref.trades == c["H0_PIT_TRADES"]
+    assert ref.net == c["H0_PIT_NET"]

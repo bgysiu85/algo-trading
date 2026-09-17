@@ -566,3 +566,31 @@ def test_the_hold_table_is_the_point_in_time_arm_only():
     # one table, and it sits with the closing sections rather than beside any
     # single arm's own block
     assert o.index("HOW LONG THE TRADES RUN") < o.index("SIGN STABILITY")
+
+
+# --- the control can come from a file ----------------------------------------
+
+def test_published_reference_is_the_constant_block():
+    r = P.H0Ref.published()
+    assert (r.net, r.trades, r.offered) == (P.H0_PIT_NET, P.H0_PIT_TRADES, P.H0_PIT_OFFERED)
+    assert P.h0_late_qualifiers() == r.late_qualifiers()
+
+
+def test_a_loaded_reference_replaces_the_control_and_its_staleness_guard():
+    """A universe on another tape is scored against ITS H0, not the BASIC one,
+    and the guard compares against the loaded OFFERED count."""
+    ref = P.H0Ref(net=-1000.0, trades=400, offered=450, knowable_net=-100.0,
+                  knowable_trades=50, knowable_offered=60,
+                  source="var/reports/pit_h0_itch.txt, test")
+    counts = {"stage2": 500, "pit": 450, "early": 100}
+    o = "\n".join(P.render("mcl", arms(1.0, 400), {"pit": 7, "early": None},
+                           counts, dict(counts), "2026-05-01", 500, 0, 1.0,
+                           traded_early=60, ref=ref))
+    assert "pit_h0_itch.txt, test" in o
+    assert "STALE REFERENCE" not in o
+    assert "(2.50)/trade" in o                 # -1000/400, the loaded control
+    stale = "\n".join(P.render("mcl", arms(1.0, 400), {"pit": 7, "early": None},
+                               {"stage2": 500, "pit": 451, "early": 100},
+                               {"stage2": 500, "pit": 451, "early": 100},
+                               "2026-05-01", 500, 0, 1.0, traded_early=60, ref=ref))
+    assert "STALE REFERENCE: H0 was scored over 450" in stale

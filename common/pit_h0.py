@@ -392,6 +392,27 @@ def render(res: dict, n_sessions: int, n_universe: int, split: str,
     return L
 
 
+def constants_path(out: str | Path) -> Path:
+    """`var/reports/pit_h0.txt` -> `var/reports/pit_h0.json`."""
+    return Path(out).with_suffix(".json")
+
+
+def constants(res: dict, n_universe: int, n_knowable, split: str, mix: dict,
+              out: str, pairs: str, dataset: str) -> dict:
+    """The H0_* block as data. The report renders the same figures as text;
+    this is what `pit_strategy.H0Ref.load` reads."""
+    ks = score(res["knowable"], split, 4.26)
+    as_ = score(res["as_screened"], split, 4.26)
+    return {"H0_PIT_NET": round(as_["net"], 1), "H0_PIT_TRADES": as_["n"],
+            "H0_PIT_OFFERED": n_universe,
+            "H0_KNOWABLE_NET": round(ks["net"], 1), "H0_KNOWABLE_TRADES": ks["n"],
+            "H0_KNOWABLE_OFFERED": n_knowable if n_knowable is not None else 0,
+            "H0_REFERENCE_SOURCE": f"{out}, {datetime.now().date().isoformat()}, "
+                                   + (("/".join(f"{k}={v:,}" for k, v in sorted(mix.items())))
+                                      if mix else "provenance unknown"),
+            "pairs": pairs, "dataset": dataset}
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--pairs", default="var/state/screen_pairs_pit.json")
@@ -406,6 +427,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "can change is completion ORDER, and the merge below "
                         "removes that.")
     p.add_argument("--out", default="var/reports/pit_h0.txt")
+    p.add_argument("--json", default=None,
+                   help="where the H0_* constants go as JSON; default is --out "
+                        "with a .json suffix")
     return p
 
 
@@ -458,11 +482,23 @@ def main(argv=None) -> int:
     res, universe, n_universe = merge(got, by_date)
 
     split = halves_split([t["date"] for t in res["as_screened"]])
+    mix = source_mix(universe)
+    n_knowable = knowable_offered(universe)
     emit("\n".join(render(res, len(days), n_universe, split, a.trail,
-                          time.time() - t0, mix=source_mix(universe),
-                          jobs=jobs, n_knowable=knowable_offered(universe))),
-         a.out, header=f"common.pit_h0  pairs={a.pairs}  trail={a.trail:g}"
+                          time.time() - t0, mix=mix,
+                          jobs=jobs, n_knowable=n_knowable)),
+         a.out, header=f"common.pit_h0  pairs={a.pairs}  dataset={a.dataset}  "
+                       f"trail={a.trail:g}"
                        + (f"  LIMIT {a.limit}" if a.limit else ""))
+    # THE SAME CONSTANTS, MACHINE-READABLE, beside the report. `pit_strategy
+    # --h0 <this file>` reads them, so a universe on another tape gets its own
+    # control without anyone pasting over the published XNAS.BASIC block.
+    jpath = constants_path(a.out) if a.json is None else Path(a.json)
+    jpath.parent.mkdir(parents=True, exist_ok=True)
+    jpath.write_text(json.dumps(constants(res, n_universe, n_knowable, split,
+                                          mix, a.out, a.pairs, a.dataset),
+                                indent=1), encoding="utf-8")
+    print(f"constants -> {jpath}")
     return 0
 
 
