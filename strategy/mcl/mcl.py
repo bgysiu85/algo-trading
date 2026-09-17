@@ -428,7 +428,8 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      target_cents: float | None = None,
                      green_hold_bars: int | None = None,
                      hard_stop: float | None = None,
-                     skip_entries: int = 0) -> list[Trade]:
+                     skip_entries: int = 0,
+                     entry_gate: "pd.Series | None" = None) -> list[Trade]:
     """Run one pre-market session.
 
     df must be 1-minute bars in chronological order, tz-aware, and should
@@ -552,6 +553,19 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
 
     `0` is bit-identical to this function before the parameter existed, for
     the same reason `not_before=None` is.
+
+    ENTRY_GATE: A MASK OVER ENTRIES, AND-ED WITH THE RULE
+    -----------------------------------------------------
+    `entry_gate` is a boolean Series on the bar index. An entry can be taken on
+    a bar only if the rule fires there AND the gate is True there. Unlike
+    `entry_bars`, which REPLACES the rule's signal so a refused bar can be
+    priced, the gate can only remove entries -- it is the shape of every
+    "take the signal only if ..." hypothesis (docs/research/REGISTERED_range_rank.md
+    is the first). A bar absent from the gate's index is False: a gate that
+    does not know about a bar does not admit it. Signal-ordinal, as
+    `skip_entries`: a gated-off entry leaves the engine flat and later bars
+    fire as the rule says. `None` is bit-identical to this function before
+    the parameter existed.
     """
     if skip_entries < 0:
         raise ValueError(f"skip_entries must be >= 0, got {skip_entries}")
@@ -599,6 +613,9 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
     else:
         aligned = entry_bars.reindex(sig.index, fill_value=False)
         take = [bool(x) for x in aligned]
+    if entry_gate is not None:
+        gate = entry_gate.reindex(sig.index, fill_value=False)
+        entry_allowed = [a and bool(g) for a, g in zip(entry_allowed, gate)]
 
     # `entry_px_by_bar` REPLACES THE FILL PRICE on the bar entry happens, and
     # nothing else. It exists for one legitimate case: a LIMIT order whose
