@@ -98,6 +98,12 @@ from pathlib import Path
 
 # ---------------------------------------------------------------- guards ----
 
+# Same allowlist the live trader enforces (brokers/ibkr/trader.py PAPER_PORTS /
+# LIVE_PORTS). The DEFAULT is 4002 to match trader.py and run_paper.ps1, which
+# is what actually runs here -- the first version of this module defaulted to
+# 7497 because it is first in this dict, and the run died on
+# ConnectionRefusedError with nothing listening. A default that disagrees with
+# the rest of the repo is a paper cut every single time.
 PORTS_ALLOWED = {7497: "TWS paper", 4002: "IB Gateway paper"}
 PORTS_REFUSED = {
     7496: "TWS LIVE",
@@ -463,9 +469,9 @@ def main(argv=None) -> int:
                     help="seconds to wait after subscribing before reading "
                          "(default 3)")
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=7497,
-                    help="7497 TWS paper or 4002 Gateway paper. Live ports are "
-                         "refused by name.")
+    ap.add_argument("--port", type=int, default=4002,
+                    help="4002 IB Gateway paper (default) or 7497 TWS paper. "
+                         "Live ports are refused by name.")
     ap.add_argument("--client-id", type=int, default=71)
     ap.add_argument("--self-test", action="store_true",
                     help="run the offline checks and exit; no IB connection")

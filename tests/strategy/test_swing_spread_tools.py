@@ -40,6 +40,7 @@ they must run with no repo imports.
 from __future__ import annotations
 
 import csv
+import re
 from pathlib import Path
 
 import pytest
@@ -326,6 +327,50 @@ def test_du_prefix_account_guard(accounts, ok):
     else:
         with pytest.raises(SystemExit):
             S.check_accounts(accounts)
+
+
+def _port_default(path: Path) -> str:
+    """The argparse default for --port, read out of a module's source."""
+    m = re.search(r'"--port",\s*type=int,\s*default=(\d+)',
+                  path.read_text(encoding="utf-8", errors="replace"))
+    assert m, f"no --port default found in {path}"
+    return m.group(1)
+
+
+def test_the_default_port_matches_the_live_trader():
+    """Parity across the repo, per PROGRAM_INDEX section 4.
+
+    This module's first version defaulted to 7497 (TWS paper) because it is
+    first in PORTS_ALLOWED, while trader.py and run_paper.ps1 both default to
+    4002 (IB Gateway paper) -- which is what actually runs here. The result was
+    a ConnectionRefusedError with nothing listening, on a night the sampler was
+    meant to be collecting. Two defaults for one thing is a defect even when
+    both values sit on the allowlist.
+    """
+    ours = Path(S.__file__)
+    trader = ours.resolve().parents[2] / "brokers" / "ibkr" / "trader.py"
+    assert trader.exists(), f"expected the live trader at {trader}"
+
+    mine, theirs = _port_default(ours), _port_default(trader)
+    assert mine == theirs, (
+        f"the collector defaults to port {mine} and the live trader to "
+        f"{theirs}. Bring them back into agreement rather than passing --port "
+        "every time.")
+    assert int(mine) in S.PORTS_ALLOWED, f"default port {mine} is not allowlisted"
+
+
+def test_the_parity_check_would_notice_a_disagreement(tmp_path):
+    """A checker that passes everything proves nothing."""
+    a = tmp_path / "a.py"
+    a.write_text('p.add_argument("--port", type=int, default=4002)\n', encoding="utf-8")
+    b = tmp_path / "b.py"
+    b.write_text('p.add_argument("--port", type=int, default=7497)\n', encoding="utf-8")
+    assert _port_default(a) == "4002"
+    assert _port_default(b) == "7497"
+    empty = tmp_path / "empty.py"
+    empty.write_text("nothing to see here\n", encoding="utf-8")
+    with pytest.raises(AssertionError):
+        _port_default(empty)
 
 
 def test_the_sampler_places_no_orders():
