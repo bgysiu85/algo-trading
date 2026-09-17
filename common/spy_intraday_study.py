@@ -81,9 +81,24 @@ from common.report_io import emit
 from common.spy_intraday import (SPY_HOLDOUT_PATH, build_sessions, check,
                                  load_bars, sigma1)
 
-# Spec section 5. Return-space, charged once per round trip.
-FRICTION_BPS = {"optimistic": 0.55, "realistic": 1.15, "pessimistic": 2.50}
+# Spec section 5, plus the venue column from
+# claude/spy_intraday_AMENDMENT_A_20260917.md. Return-space, charged once per
+# round trip.
+#
+# The Alpaca row is REPORTED AND NOT SCORED, and that is the amendment's own
+# rule, not a hedge: "a cell that passes only at Alpaca's friction is a
+# NOTHING", for the same reason the optimistic level has never been allowed to
+# carry a verdict. It is here so the venue's contribution is visible rather
+# than baked in. Every gate below reads PRIMARY and nothing else.
+FRICTION_BPS = {"optimistic": 0.55, "realistic": 1.15, "pessimistic": 2.50,
+                "alpaca (reported)": 0.42}
 PRIMARY = "realistic"
+REPORTED_ONLY = ("alpaca (reported)", "optimistic")
+
+# The scored window, and the replication control's window (amendment K).
+SCORE_FROM = "2015-01-01"
+REPLICATION = ("2005-01-01", "2013-12-31")
+REPLICATION_BAND = (3.0, 12.0)   # annualised %, the band H-R must land inside
 
 H0_DRAWS = 10_000
 BOOT_DRAWS = 10_000
@@ -303,6 +318,32 @@ def bps(x: float) -> str:
     return f"{x * 10_000:+.3f}"
 
 
+def replication(sessions: pd.DataFrame) -> tuple[str, dict]:
+    """H-R: H-S1 unchanged over the paper's own 2005-2013 sample.
+
+    A CONTROL ON THE HARNESS, not evidence about the market. It sits INSIDE
+    the paper's sample, so a positive reading is replication and not
+    out-of-sample support, and it cannot be promoted or cited as an edge.
+
+    H0 proves the harness cannot manufacture an edge. H-R proves it can find
+    one that is known to be there. A harness carrying only the first control
+    can pass it by measuring nothing at all, which is the failure this is for.
+    """
+    a, z = REPLICATION
+    w = sessions[(sessions.index >= a) & (sessions.index <= z)]
+    b = book(w)
+    if b.empty:
+        return "NOT RUN", {"reason": "no sessions in the replication window"}
+    years = span_years(b.index)
+    ann = annualised(b, PRIMARY, years) * 100.0
+    lo, hi = REPLICATION_BAND
+    n = {"n": len(b), "annual_pct": ann, "per_trade": float(net(b, PRIMARY).mean()),
+         "hit": float((b["gross"] > 0).mean()) * 100.0, "band": REPLICATION_BAND}
+    if ann < lo or ann > hi:
+        return "OUTSIDE THE BAND", n
+    return "AS PUBLISHED", n
+
+
 def cell_block(name: str, b: pd.DataFrame) -> list[str]:
     L = [f"{name}", ""]
     if b.empty:
@@ -322,7 +363,8 @@ def cell_block(name: str, b: pd.DataFrame) -> list[str]:
         nn = net(b, lvl)
         ann = annualised(b, lvl, years) * 100.0
         dollars = annualised(b, lvl, years) * NOTIONAL
-        star = "  <- PRIMARY" if lvl == PRIMARY else ""
+        star = ("  <- PRIMARY" if lvl == PRIMARY
+                else "  (reported, not scored)" if lvl in REPORTED_ONLY else "")
         L.append(f"    {lvl:<14} {f:>4.2f}  {bps(float(nn.mean())):>8}    "
                  f"{acct(ann, 9, 2)}    {acct(dollars, 11, 0)}{star}")
     L.append("")
@@ -418,6 +460,11 @@ def main(argv=None) -> int:
     if rec is None:
         sys.exit("REFUSING TO RUN: holdout_spy.json does not exist. Cut it "
                  "first with common.spy_intraday --make-holdout.")
+    full = s                                  # kept whole for H-R
+    # THE SCORED WINDOW IS APPLIED BEFORE THE HOLDOUT, not after. Applied the
+    # other way round the 20% would be measured against 2004-2026 and would
+    # lock five years of what is supposed to be the training window.
+    s = s[s.index >= SCORE_FROM]
     triples = [(args.symbol, d, None) for d in s.index]
     keep, set_aside, label = holdout.split_sessions(
         triples, spend=args.spend_holdout, rec=rec)
@@ -425,6 +472,7 @@ def main(argv=None) -> int:
 
     L = [f"SPY INTRADAY MOMENTUM -- {args.symbol}", "",
          f"  run at      {datetime.now():%Y-%m-%d %H:%M:%S}",
+         f"  window      scored from {SCORE_FROM} (spec section 4, unchanged)",
          f"  sessions    {label}, {set_aside} set aside",
          f"  friction    charged at all three levels; gates read at "
          f"{PRIMARY} ({FRICTION_BPS[PRIMARY]} bps)",
@@ -445,6 +493,26 @@ def main(argv=None) -> int:
         emit("\n".join(L), args.out or "var/reports/spy_intraday_study.txt",
              header="common.spy_intraday_study")
         return 1
+
+    tag, rn = replication(full)
+    L += ["H-R -- REPLICATION CONTROL, REPORTED AND NOT SCORED", "",
+          f"    {REPLICATION[0]} -> {REPLICATION[1]}, the paper's own sample.",
+          "    H0 shows the harness cannot manufacture an edge. This shows it",
+          "    can find one that is known to be there. A harness with only the",
+          "    first control can pass it by measuring nothing."]
+    if "reason" in rn:
+        L += [f"    {tag}: {rn['reason']}", ""]
+    else:
+        L += [f"    {tag}   {rn['annual_pct']:+.2f}%/yr annualised against a "
+              f"registered band of {rn['band'][0]}-{rn['band'][1]}%",
+              f"    {rn['n']} sessions, {bps(rn['per_trade'])} bps/trade, "
+              f"directional hit {rn['hit']:.2f}% (published: 54.37%)", ""]
+        if tag == "OUTSIDE THE BAND":
+            L += ["    The 2015+ reading below is therefore UNINTERPRETABLE:",
+                  "    a pipeline that cannot find a documented effect in the",
+                  "    era it was documented has not been shown able to detect",
+                  "    it at all. Investigate the pipeline before the result.",
+                  ""]
 
     if args.h0 and not (args.run or args.breadth):
         emit("\n".join(L), args.out or "var/reports/spy_intraday_h0.txt",

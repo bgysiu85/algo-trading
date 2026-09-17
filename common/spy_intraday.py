@@ -115,6 +115,14 @@ ET = ZoneInfo("America/New_York")
 SPY_HOLDOUT_PATH = Path(__file__).resolve().parents[1] / "holdout_spy.json"
 LOCK_FRACTION = 0.20            # spec section 9: the most recent 20% of sessions
 
+# THE SCORED WINDOW. The cache reaches 2004 because IB turned out to serve it
+# (amendment D), but the window the spec registered -- and chose deliberately,
+# as the era Ben would actually trade, containing the 0DTE regime section 2
+# names as the threat -- is unchanged. Depth being available is not a reason to
+# move a window that was picked for a reason. 2005-2013 is the H-R replication
+# control (amendment K) and is reported, never scored.
+SCORE_FROM = "2015-01-01"
+
 # Bar labels, by interval START, on the RTH 30-minute grid.
 B_OPEN = "09:30"                # its CLOSE is the 10:00 price
 B_1430 = "14:30"
@@ -634,7 +642,13 @@ def main(argv=None) -> int:
         blocks += render(sym, s, res, xc, sig, r13y, datetime.now(ET)) + ["", ""]
 
         if args.make_holdout and sym == "SPY":
+            # Cut on the SCORED window only. Cutting on the whole cache would
+            # lock the most recent 20% of 2004-2026 -- about 1,130 sessions
+            # back to 2021 -- which is not what spec section 9 registered
+            # (roughly 2024-10 onward, about 580 sessions) and would quietly
+            # take five years of the training window with it.
             usable = s[s["full"]].dropna(subset=["r1", "r13"])
+            usable = usable[usable.index >= SCORE_FROM]
             days = list(usable.index)
             if len(days) < 20:
                 blocks += [f"HOLDOUT NOT CUT: only {len(days)} usable sessions."]

@@ -421,3 +421,94 @@ Two independent defences, both registered:
 QQQ and IWM are the breadth control (§8.4), which runs **H-S1 unchanged** and
 therefore needs only the four 30-minute prices. Pulling 1-minute for them
 would buy nothing that is registered to be looked at.
+
+---
+
+# M (PRE-RUN) — the re-registration amendment H demanded
+
+Amendment H fired. This is the re-registration it requires, written and
+committed **before H0 runs and before any directional statistic exists**.
+
+## M.1 What was measured, and what it did to the arithmetic
+
+| | registered | measured |
+|---|---|---|
+| mean `\|r13\|`, scored window 2015+ | 0.20–0.30% assumed | **0.1765%** (n = 2,920) |
+| mean `\|r13\|`, 2005–2013 | — | 0.2340% (n = 2,241) |
+| mean `\|r13\|`, H-S2 gated sessions | 0.50% assumed | 0.2728% (n = 971, 84/yr) |
+| friction as a share of gross, at 1.15 bps | 43% | **74.6%** |
+| break-even hit rate | ~52.2% implied | **53.26%** |
+| annualised, IBKR realistic | 3.81% | **0.99%** |
+| $/yr on $9,803 | $373 | **$97** |
+
+The replication era lands inside the band the spec assumed; the traded era does
+not. **The last half hour has shrunk by about a quarter between the two.** That
+is a fact about volatility, not about the predictor — no directional statistic
+has been computed.
+
+§6's table is superseded by the one above. The hit rate in it is the **paper's**
+54.37%, used as the spec used it.
+
+## M.2 The decision: proceed, with the cell structure unchanged
+
+**H-S1 stays PRIMARY. H-S2 stays SECONDARY.** The rule (§3), the cells (§7), the
+gates (§8), the holdout (§9) and the registered prediction (§10) are all
+**unchanged**.
+
+**Why not promote H-S2, which the measurement favours.** On this arithmetic
+H-S2 is the better-conditioned cell by some distance: friction 48.2% of gross
+against 74.6%, a break-even of 52.11% against 53.26%, twice the headroom. Both
+the paper's own R² table and the skeptical out-of-sample reading point at it.
+
+It is still not promoted, for one reason: **it would be a promotion made after
+seeing a measurement that favours it.** What was looked at is volatility and not
+direction, which is the weakest possible form of the objection — and it is still
+the objection. A year from now the distinction between "we promoted the
+conditional cell because the literature said so" and "we promoted it after the
+data made it look better" is not recoverable from the record. The five gates can
+answer the margin question; a pre-emptive promotion cannot be un-rung.
+
+**Why not stop the line.** A 1.11 pp margin is thin, and stopping here would be
+defensible. But the gates exist precisely to decide thin cases, the data is
+already pulled and clean, and §10's answer — *if both cells return NOTHING that
+is a complete and useful answer* — is worth more from a run than from an
+assumption. Reaching NOTHING by not looking is not the same result as reaching
+it by measuring.
+
+## M.3 The registered prediction is NOT revised
+
+§10 stands exactly as written: H-S1 → NOTHING at moderate confidence; H-S2 →
+genuinely uncertain, +2 to +5 bps/trade, 80–90 trades/year, low confidence; H0
+flat.
+
+A note, marked as what it is — **an observation made after M.1 and not a new
+prediction**: the measured arithmetic makes the H-S1 limb of that prediction
+more likely than it was when written, and M.1 independently confirms the
+trade-count limb of the H-S2 one (84/yr against a predicted 80–90). Revising a
+prediction after seeing data that bears on it would destroy the only thing a
+registered prediction is for.
+
+## M.4 What changes in the code, and why each change is here
+
+1. **The Alpaca column is wired in** as a fourth friction level from
+   `spy_intraday_AMENDMENT_A_20260917.md`, at 0.42 bps, **reported and never
+   scored** — that amendment's own rule, for the same reason the optimistic
+   level has never carried a verdict. Every gate reads the realistic level and
+   nothing else.
+2. **H-R is implemented** (amendment K) and runs before the cells.
+3. **The scored window is applied BEFORE the holdout split, not after.**
+   Applied the other way round, the most recent 20% would be measured against
+   2004–2026 — about 1,130 sessions reaching back to 2021 — and would lock five
+   years of what is supposed to be the *training* window while printing an
+   entirely ordinary-looking "20%". `--make-holdout` cuts on the scored window
+   for the same reason.
+
+## M.5 Run order, fixed now
+
+1. `--make-holdout`, on the scored window. Once.
+2. **H-R.** Outside the 3–12% band, the 2015+ reading is reported as
+   **uninterpretable** and the pipeline is investigated before the result.
+3. **H0.** Not flat → stop.
+4. H-S1, then H-S2. Five gates, every friction level.
+5. Boundary surface (§8.5), mechanism test (§8.3), breadth control (§8.4).
+6. The holdout, only after a cell has cleared all five gates.
