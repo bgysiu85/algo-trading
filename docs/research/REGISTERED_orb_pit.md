@@ -243,3 +243,65 @@ above 1.0 is still void.**
 - Adding any indicator to `orb.py` that reads before 09:30 on the target day. A
   one-session file would then be a short file after all, and this amendment would
   need to be withdrawn.
+
+---
+
+# AMENDMENT E — 2026-09-17, PRE-RUN on the XNAS.ITCH universe. POST-RUN on the XNAS.BASIC one.
+
+The D.1–D.7 run is done (`claude/orb_pit_RESULT_20260917.md`): baseline
+**−$4.58/trade**, criteria 1, 2, 3, 5 and 6 failed, 0 of 110 readable cells
+positive, D.4 row 1, ORB closed. While it ran, the PIT universe was rebuilt on
+XNAS.ITCH (`REGISTERED_screen_itch`; `PROGRAM_INDEX` §1 rule added
+2026-09-17), and `PROGRAM_INDEX` §7 item 2 now names
+`var/state/screen_pairs_pit_itch_p50.json` as ORB's universe. The universe this
+run read, `screen_pairs_pit.json`, was selected on pre-market bars that are
+TRF-contaminated from 08:00 before 2026-03-30. No ORB result exists on the ITCH
+universe. This amendment registers that run so the close rests on the named
+universe and not on a superseded one.
+
+## E.1 What changes, and what does not
+
+- **Universe:** `screen_pairs_pit_itch_p50.json`: 6,564 symbol-days, 551
+  sessions, 2024-07-02 → 2026-09-11. It shares 5,922 with the BASIC PIT file;
+  642 are new to it. Latest `first_seen` is 08:23 ET, inside the 09:35 limit.
+  Label `pit_itch`.
+- **Bars stay XNAS.BASIC, RTH only.** ORB reads 09:30–16:00. The TRF defect is
+  the overnight release at 08:00, which is before the session ORB reads. Measured
+  before registering, not assumed: `common.tape_spikes.spike_mask` over every RTH
+  bar of the 6,120 ITCH symbol-days already in the cache finds **90 spike bars in
+  2,233,659 (0.40 per 10,000)**. No 15-minute bucket is above 1.4 per 10,000, and
+  the 09:45 bucket is 12 of 87,789. Pre-cut 0.48 per 10,000, post-cut 0.16. The
+  pre-market 08:00 hour on BASIC was the defect because it held 89.5% of 16,787
+  spikes. The RTH window carries no such concentration. The grid keeps refusing
+  any tape but XNAS.BASIC.
+- **Code, criteria, D.7 fallback and the 1.0% coverage limit: unchanged.** The
+  missing bars (443 symbol-days at registration) come in by the D.7 route:
+  `pit_bars` plan → fetch → verify → `bar_cache_build` (3 sessions), then the
+  1-session fallback for whatever is left.
+- **Split date derived by the runner:** 2025-08-07 on the file as registered.
+- **No survivor re-run.** The control is the one already run
+  (`orb_grid_survivor_v2.txt`), with identical code and bars. The survivor
+  universe does not depend on the pre-market tape in the way the PIT one does.
+
+## E.2 How it is read
+
+All seven §11 criteria, baseline cell, exactly as D.3. **D.4 applies unchanged,
+and the ORB close is overturned only by D.4 row 2 or 3 on this run** (passing
+1–6). A pass of 1 and 3 alone does not reopen ORB: under D.4 it is still "not an
+edge by this project's bar", and the write-up says so. The BASIC-universe result
+is reported beside this run, not averaged with it, and not replaced by it if they
+disagree.
+
+## E.3 Prediction
+
+**The baseline fails criterion 3 again, below $0.00/trade.** 90% of the
+symbol-days are shared, and on the BASIC run the shared-with-survivors group was
+already negative (−$2.35/trade). The 642 new names were surfaced by a
+threshold that is looser before 08:00 (PROGRAM_INDEX §7 item 1b). If anything,
+that adds early, thin names.
+
+## E.4 What would make it wrong
+
+Everything in D.6 and D.7, plus: reading this run on any tape but XNAS.BASIC RTH;
+quoting whichever of the two PIT runs reads better; re-opening grid leads from
+either run.
