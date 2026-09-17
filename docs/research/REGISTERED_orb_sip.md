@@ -239,3 +239,41 @@ uncapturable effect at retail friction, and the next question is execution
 
 Expect rejection. §11.1's base rate for clearing this bar in full is zero of
 five.
+
+---
+
+# AMENDMENT A — 2026-09-18, PRE-RUN. No trade has been simulated.
+
+Building the engine exposed one rule the paper does not state and §3.2 did not
+cover. It is decided here, before the runner has read a single archive file.
+
+## A.1 Can the protective stop be hit on the ENTRY bar?
+
+The entry is a stop order filled inside a minute bar; the protective stop sits
+10% of ATR away, which on this universe is $0.05–$0.30 — often inside the same
+bar's range. A minute bar does not record whether its low came before or after
+the entry print, so either answer is an assumption and the choice is worth real
+money on a stop this tight.
+
+**Registered primary: the stop is live on the entry bar** (`STOP_ON_ENTRY_BAR =
+True`). It assumes the unfavourable ordering, which is the direction this
+project's fill model already takes everywhere else: stops gap through, a bar
+holding both stop and target is the stop's, and the entry bar's own high does
+not raise a trail.
+
+**Reported beside it, never as the result:** the same run with the stop live
+only from the next bar. The gap between them prices the assumption. If the
+strategy passes on one and fails on the other, the write-up says the result is
+undecided on a rule the paper never specified, and that is a failure to pass,
+not a choice of arm.
+
+## A.2 Two counts that come with it
+
+- symbol-days whose stop was hit on the entry bar (both the share and their P/L);
+- symbol-days where the entry bar gapped past the trigger, since a gapped entry
+  starts the trade further from the range and closer to nothing.
+
+## A.3 What A does not do
+
+It does not touch the universe, the ranking, the friction levels, the criteria,
+the controls or the holdout. The primary cell is unchanged.
