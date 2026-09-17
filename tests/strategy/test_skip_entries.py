@@ -165,3 +165,76 @@ def test_mc5_a_band_refused_signal_does_not_spend_the_budget(monkeypatch):
 def test_mc5_negative_is_refused(monkeypatch):
     with pytest.raises(ValueError):
         mc5_run([F, STOP], [0], monkeypatch, skip_entries=-1)
+
+
+# --- entry_gate: an AND-mask over entries, on both engines ---------------------
+
+def gate_for(n_bars, minutes, allow, start=dtime(7, 0)):
+    t0 = datetime.combine(DAY, start, tzinfo=ET)
+    idx = pd.DatetimeIndex([t0 + timedelta(minutes=minutes * i) for i in range(n_bars)])
+    return pd.Series([i in allow for i in range(n_bars)], index=idx)
+
+
+def test_mcl_gate_none_is_bit_identical():
+    bars = [F, STOP, F, F, STOP, F]
+    a = [t.__dict__ for t in mcl_run(bars, [0, 3])]
+    b = [t.__dict__ for t in mcl_run(bars, [0, 3], entry_gate=None)]
+    assert a == b and len(a) == 2
+
+
+def test_mcl_gate_removes_the_entries_it_refuses_and_nothing_else():
+    bars = [F, STOP, F, F, STOP, F]
+    g = gate_for(6, 1, allow={3})
+    assert entries(mcl_run(bars, [0, 3], entry_gate=g)) == ["07:03"]
+    g = gate_for(6, 1, allow={0})
+    assert entries(mcl_run(bars, [0, 3], entry_gate=g)) == ["07:00"]
+
+
+def test_mcl_gate_is_signal_ordinal():
+    """Gate off bar 0; the baseline was in a position on bar 1 and never
+    entered there; the gated book does."""
+    bars = [F, F, STOP, F]
+    g = gate_for(4, 1, allow={1, 2, 3})
+    assert entries(mcl_run(bars, [0, 1], entry_gate=g)) == ["07:01"]
+
+
+def test_mcl_a_bar_absent_from_the_gate_is_refused():
+    bars = [F, STOP, F, F, STOP, F]
+    g = gate_for(3, 1, allow={0, 1, 2})          # bars 3..5 unknown to the gate
+    assert entries(mcl_run(bars, [0, 3], entry_gate=g)) == ["07:00"]
+
+
+def test_mcl_gate_cannot_admit_a_bar_the_rule_did_not_fire_on():
+    bars = [F, STOP, F, F, STOP, F]
+    g = gate_for(6, 1, allow=set(range(6)))
+    assert entries(mcl_run(bars, [3], entry_gate=g)) == ["07:03"]
+
+
+def test_mcl_gate_and_skip_compose():
+    bars = [F, STOP, F, STOP, F, STOP, F]
+    g = gate_for(7, 1, allow={2, 4})
+    # gate admits bars 2 and 4; skip passes over the first admitted (2)
+    assert entries(mcl_run(bars, [0, 2, 4], entry_gate=g, skip_entries=1)) == ["07:04"]
+
+
+def test_mc5_gate_none_is_bit_identical(monkeypatch):
+    bars = [F, STOP, F, F, STOP, F]
+    a = [t.__dict__ for t in mc5_run(bars, [0, 3], monkeypatch)]
+    b = [t.__dict__ for t in mc5_run(bars, [0, 3], monkeypatch, entry_gate=None)]
+    assert a == b and len(a) == 2
+
+
+def test_mc5_gate_on_the_five_minute_index(monkeypatch):
+    bars = [F, STOP, F, F, STOP, F]
+    g = gate_for(6, 5, allow={3})
+    assert entries(mc5_run(bars, [0, 3], monkeypatch, entry_gate=g)) == ["07:15"]
+
+
+def test_mc5_gate_stamped_on_one_minute_bars_admits_nothing(monkeypatch):
+    """The contract says stamp it on the bars the engine trades. A gate
+    stamped on minutes that are not bar labels (07:01, 07:02, ...) reindexes
+    onto the 5-minute index as all-False and admits nothing -- loudly, not
+    by taking the nearest stamp."""
+    bars = [F, STOP, F, F, STOP, F]
+    g = gate_for(4, 1, allow={0, 1, 2, 3}, start=dtime(7, 1))   # 07:01..07:04
+    assert entries(mc5_run(bars, [0, 3], monkeypatch, entry_gate=g)) == []

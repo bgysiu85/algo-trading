@@ -423,7 +423,8 @@ def backtest_session(df, session_date, tz,
                      use_apex: bool | None = None,
                      not_before: dtime | None = None,
                      ladder: "PL.LadderConfig | None" = None,
-                     skip_entries: int = 0) -> list[Trade]:
+                     skip_entries: int = 0,
+                     entry_gate: "pd.Series | None" = None) -> list[Trade]:
     """Run one pre-market session on 5-minute bars.
 
     Accepts 1-minute OR 5-minute bars and resamples if needed, so this can be
@@ -448,6 +449,12 @@ def backtest_session(df, session_date, tz,
     have taken (fires while flat, at or after the floor, inside the band, size
     >= 1) are passed over, the engine then runs as the rule says, and `0` is
     bit-identical to this function before the parameter existed.
+
+    `entry_gate` likewise: a boolean Series on the 5-minute bar index, AND-ed
+    with the rule's entry signal; a bar absent from it is False; `None` is
+    bit-identical. Hand it 1-minute-stamped bars and it is reindexed onto the
+    5-minute index, so the caller must stamp it on the bars this engine
+    trades (`to_5m` of the frame), not on the 1-minute tape.
     """
     if skip_entries < 0:
         raise ValueError(f"skip_entries must be >= 0, got {skip_entries}")
@@ -470,6 +477,9 @@ def backtest_session(df, session_date, tz,
     # change which bar counts as the last of the session.
     entry_allowed = ([True] * len(sig) if not_before is None
                      else [t >= not_before for t in local.time])
+    if entry_gate is not None:
+        gate = entry_gate.reindex(sig.index, fill_value=False)
+        entry_allowed = [a and bool(g) for a, g in zip(entry_allowed, gate)]
 
     trades: list[Trade] = []
     pos = None
