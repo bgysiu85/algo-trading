@@ -171,3 +171,75 @@ say.
   the runner commit.
 
 Expect rejection.
+
+---
+
+# AMENDMENT D.7 — 2026-09-17, PRE-RUN. Still no ORB P/L on the PIT universe.
+
+The bar fetch landed (`strategy.orb.pit_bars verify`: 536 dates, nothing lost)
+and `common.bar_cache_build` wrote 2,404 more files. **133 of 6,170 PIT
+symbol-days (2.2%) still have no cache file**, so the runner refuses, as D.1
+says it must. This amendment is about why those 133 are missing, and it changes
+what the cache has to hold for ORB. It does not change the 1.0% limit.
+
+## Why they are missing
+
+| reason | n | what it is |
+|---|---:|---|
+| **window short of warm-up** | 99 | the day's bars exist; one or both of the two PRIOR sessions do not |
+| no window in calendar | 22 | 6 are 2024-07-02 (archive start); 16 are 2026-09-01..04 (below) |
+| no source file | 12 | 2024-07-03 and -05, before the archive can supply a 5-day lookback |
+
+**The 99.** Checked on the archive itself: 81 of the 82 outside September 2026
+have a full target-day RTH session (e.g. MKDW 2024-08-02, QNTM 2024-08-16: 390
+of 390 minutes) and are missing only prior sessions. They are a name's first or
+second day on the tape: IPOs, uplistings, new tickers. The other 17 are
+September dates hit by the calendar gap.
+
+**The 3-session file is not an ORB requirement.** `bar_cache_build` refuses a
+short window because MCL needs two sessions of warm-up, and a short file there
+would be silently dropped. ORB reads `rth_session(df, day)`: 09:30–16:00 on the
+target day and nothing else. No indicator in `orb.py` looks back past 09:30.
+
+**And excluding them is not neutral.** A name's first days on the tape are among
+the largest RTH movers in any small-cap universe. Dropping them for a warm-up the
+strategy never uses would take out a group chosen by something tied to how it
+trades, and call what is left point-in-time.
+
+**The 16 September dates** have a separate cause. `E:\Databento\XNAS.BASIC\
+ohlcv-1d\2026-09.dbn.zst` was re-pulled today for 2026-09-05 → 09-17 and now
+holds 09-08 to 09-16 only. The bars for 09-01 to 09-04 are gone, so those
+sessions dropped out of the trading calendar every cache build reads.
+`databento_universe` takes a month chunk's start from `--start`, not from the
+month. That is an archive defect in `common/` and is reported to its owner. It
+is not fixed here.
+
+## What changes
+
+1. The PIT pass reads a **second cache**, `bar_cache_xnas_1s`, built by the same
+   `common.bar_cache_build` from the same archive and tape with `--sessions 1`,
+   for the PIT pairs only. `grid --fallback-cache` reads it **only for a
+   symbol-day the primary cache has no file for**. The primary wins wherever
+   both hold a file (tested). Every fallback read is counted in the provenance
+   block and the header. A fallback on another tape is refused, even with
+   `--anyway`.
+2. The September calendar is repaired before either build, by re-pulling the
+   full month's daily bars. If it cannot be repaired, the 16 remain skips.
+3. **The survivor re-run does not use the fallback.** It is the control, and it
+   runs exactly as D.1 registered it.
+
+## What remains a skip, stated before the run
+
+With the calendar repaired: the 6 symbol-days on 2024-07-02, the 12 on
+2024-07-03 and -05, and 1 with no target-day bars. That is **19 (0.31%)**, under
+the 1.0% limit, which is unchanged. Without the repair, 35 (0.57%). Either way
+the provenance block prints the count. **A run needing `--max-missing-pct`
+above 1.0 is still void.**
+
+## What would make this amendment wrong
+
+- Using the fallback for anything but a pair the primary lacks.
+- Using it on the survivor re-run.
+- Adding any indicator to `orb.py` that reads before 09:30 on the target day. A
+  one-session file would then be a short file after all, and this amendment would
+  need to be withdrawn.
