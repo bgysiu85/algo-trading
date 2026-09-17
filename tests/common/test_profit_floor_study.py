@@ -184,3 +184,75 @@ def test_render_prints_both_verdicts_and_the_provenance(tmp_path):
     L = "\n".join(P.render(bk, symdays(40), 0, [EARLY, LATE], 1.0, 1, a, [], exp))
     assert L.count("PASSES:") == 2
     assert "sha256" in L and "THE MECHANISM: MC5-floor" in L
+
+
+# --- H-C3: the second cell --------------------------------------------------------
+
+@pytest.fixture
+def cell():
+    """Select a cell for one test and always restore (15, 10)."""
+    def use(pf):
+        P.configure(pf)
+    yield use
+    P.configure((15, 10))
+
+
+def test_only_registered_cells_run(cell):
+    with pytest.raises(SystemExit) as e:
+        cell((15, 7))
+    assert "REFUSED" in str(e.value)
+    with pytest.raises(SystemExit):
+        P.main(["--floor", "20,15"])
+
+
+def test_the_second_cell_sets_books_paths_and_registration(cell):
+    cell((15, 5))
+    assert P.PF == (15, 5)
+    assert all(pf in (None, (15, 5)) for _, _, pf in P.BOOKS)
+    assert P.REGISTERED.endswith("REGISTERED_profit_floor_v2.md")
+    assert P.CELLS[(15, 5)]["out"] != P.CELLS[(15, 10)]["out"]
+    assert P.CELLS[(15, 5)]["csv"] != P.CELLS[(15, 10)]["csv"]
+
+
+def test_the_family_bar_is_975_for_the_second_cell_only(cell):
+    assert P.boot_bar() == P.BOOT_MIN_P == 0.95
+    cell((15, 5))
+    assert P.boot_bar() == 0.975
+    base, flo = books(40, [-10, -10], [2, -10])
+    tag, _, n = P.verdict(base, flo, CUT, symdays(40), True)
+    assert tag == "PASSES" and n["boot_p"] >= 0.975        # a clean pass clears either bar
+
+
+def test_a_bootstrap_between_the_two_bars_passes_the_first_cell_and_not_the_second(cell, monkeypatch):
+    base, flo = books(40, [-10, -10], [2, -10])
+    monkeypatch.setattr(P, "cluster_bootstrap", lambda d: {"totals": [1.0] * 96 + [-1.0] * 4,
+                                                           "n_syms": 40})
+    assert P.verdict(base, flo, CUT, symdays(40), True)[0] == "PASSES"      # P = 0.96
+    cell((15, 5))
+    tag, why, _ = P.verdict(base, flo, CUT, symdays(40), True)
+    assert tag == "NOTHING" and "0.975" in why
+
+
+def test_the_cross_cell_line_is_reported_for_the_second_cell(cell, tmp_path):
+    import csv
+    other = tmp_path / "other.csv"
+    with open(other, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=["book", "net"])
+        w.writeheader()
+        for b in ("MCL-floor", "MC5-floor"):
+            for _ in range(10):
+                w.writerow({"book": b, "net": -10 + F})
+    bk = {"MCL-floor": [{"net": -8 + F}] * 10, "MC5-floor": [{"net": -12 + F}] * 10}
+    assert P.cross_cell_block(bk, 10, str(other)) == []          # first cell: nothing
+    cell((15, 5))
+    L = "\n".join(P.cross_cell_block(bk, 10, str(other)))
+    assert "reported, not scored" in L
+    assert "MCL-floor  per trade +2.00" in L and "MC5-floor  per trade -2.00" in L
+
+
+def test_workers_are_told_the_cell(cell):
+    """A pickled worker re-imports the module at (15, 10); the task carries the
+    pair so it cannot silently run the first cell."""
+    import inspect
+    src = inspect.getsource(P.run_day)
+    assert "paths, day, universe, pf = args" in src and "configure(pf)" in src

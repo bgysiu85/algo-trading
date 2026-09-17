@@ -48,6 +48,16 @@ from common.report_io import emit
 
 ET = ZoneInfo("America/New_York")
 REGISTERED = "docs/research/REGISTERED_profit_floor.md"
+# The registered cells of the family. A pair not listed here is refused: each
+# one is its own registration, and the list is the multiplicity count.
+CELLS = {(15, 10): {"registered": "docs/research/REGISTERED_profit_floor.md",
+                    "out": "var/reports/profit_floor.txt",
+                    "csv": "var/reports/profit_floor_trades.csv"},
+         (15, 5): {"registered": "docs/research/REGISTERED_profit_floor_v2.md",
+                   "out": "var/reports/profit_floor_15_5.txt",
+                   "csv": "var/reports/profit_floor_15_5_trades.csv"}}
+# H-C3 §3 item 6: with two cells the bootstrap bar is halved across the family.
+FAMILY_BOOT_MIN_P = {1: None, 2: 0.975}
 PAIRS = "var/state/screen_pairs_pit_itch_p50.json"
 DATASET = "XNAS.ITCH"
 PF = (15, 10)                    # §1: arm at +15 ticks, floor at +10 ticks
@@ -86,6 +96,25 @@ def excursion(bars, entry_time, exit_time, entry_px: float) -> tuple[float, floa
             float(before.max()) if len(before) else entry_px)
 
 
+def configure(pf: tuple[int, int]) -> None:
+    """Select a registered cell. Sets PF and the BOOKS that carry it, module-wide,
+    so pickled workers (which re-import and are handed `pf` in their task) and
+    the report read the same pair."""
+    global PF, BOOKS, REGISTERED
+    if pf not in CELLS:
+        raise SystemExit(f"REFUSED: {pf} is not a registered cell {sorted(CELLS)}")
+    PF = pf
+    REGISTERED = CELLS[pf]["registered"]
+    BOOKS = (("MCL", "mcl", None), ("MCL-floor", "mcl", PF),
+             ("MC5", "mc5", None), ("MC5-floor", "mc5", PF))
+
+
+def boot_bar() -> float:
+    """The cluster-bootstrap bar for the current cell: 0.95 for the first cell of
+    the family (H-C2 as registered), 0.975 for any later one (H-C3 §3 item 6)."""
+    return BOOT_MIN_P if PF == (15, 10) else FAMILY_BOOT_MIN_P[len(CELLS)]
+
+
 def row_for(t, symbol: str, day: str, ordinal: int, bars) -> dict:
     from strategy.mcl.mcl import reaches_arm
     r = trade_row(t, symbol, day, ordinal)
@@ -101,7 +130,8 @@ def run_day(args: tuple) -> tuple:
     from common.pit_h0 import first_seen_time
     from common.pit_strategy import build_frame, engine
 
-    paths, day, universe = args
+    paths, day, universe, pf = args
+    configure(pf)
     engines = {name: engine(name) for name in ("mcl", "mc5")}
     parts = []
     for pth in paths:
@@ -212,8 +242,9 @@ def verdict(base, flo, cut: str, symdays: int, baseline_ok: bool) -> tuple[str, 
         failed.append("2 (both halves, both denominators)")
     if not n["drop_delta"] > 0:
         failed.append(f"3 (drop-top-{DROP} symbols on the delta)")
-    if not n["boot_p"] >= BOOT_MIN_P:
-        failed.append(f"4 (cluster bootstrap on the delta, P={n['boot_p']:.3f} < {BOOT_MIN_P})")
+    bar = boot_bar()
+    if not n["boot_p"] >= bar:
+        failed.append(f"4 (cluster bootstrap on the delta, P={n['boot_p']:.3f} < {bar})")
     if not n["floor_share"] >= MIN_FLOOR_SHARE:
         failed.append(f"5 (floor exits {n['floor_share']:.1f}% < {MIN_FLOOR_SHARE:.0f}%)")
     if failed:
@@ -315,7 +346,7 @@ def verdict_block(bname: str, sname: str, base, flo, cut: str, symdays: int,
          f"     late half  per trade {n['late'][0]:+.2f}  per symbol-day {n['late'][1]:+.2f}",
          f"  3. drop-top-{DROP}-symbols delta {money(n['drop_delta'])}     (level, top-{DROP} trades: {sname} "
          f"{money(n['drop_level'][0])}, {bname} {money(n['drop_level'][1])})",
-         f"  4. cluster bootstrap on the delta  P(total > 0) = {n['boot_p']:.3f}  "
+         f"  4. cluster bootstrap on the delta  P(total > 0) = {n['boot_p']:.3f} (needs >= {boot_bar()})  "
          f"[{money(n['boot_lo'])}, {money(n['boot_hi'])}]  over {n['n_syms']:,} symbols  "
          f"(RESAMPLES {RESAMPLES}, SEED {SEED})",
          f"  5. floor exits {n['floor_share']:.1f}% of {sname}'s trades (needs >= "
@@ -324,6 +355,28 @@ def verdict_block(bname: str, sname: str, base, flo, cut: str, symdays: int,
          f"  {gone} of {bname}'s top-{TOP} trades at $4.26 are absent or changed in {sname}:"]
     for r in gone_rows:
         L.append(f"    {r['symbol']:<6} {r['date']}  {r['entry_et']} ET  {money(r['net'] - f):>10}")
+    return L + [""]
+
+
+def cross_cell_block(books: dict, symdays: int, other_csv: str | None) -> list[str]:
+    """H-C3 §3: this cell against (15, 10), per strategy, REPORTED NOT SCORED."""
+    if PF == (15, 10) or not other_csv or not Path(other_csv).exists():
+        return []
+    import csv
+    other: dict[str, list[dict]] = {}
+    with open(other_csv, encoding="utf-8", newline="") as fh:
+        for r in csv.DictReader(fh):
+            other.setdefault(r["book"], []).append({"net": float(r["net"])})
+    f = MEASURED_FRICTION
+    L = [f"THIS CELL {PF} AGAINST (15, 10) -- reported, not scored (H-C3 §3)", ""]
+    for name in ("MCL-floor", "MC5-floor"):
+        mine, theirs = books[name], other.get(name, [])
+        if not theirs:
+            L.append(f"  {name}: (15, 10) book not found in {other_csv}")
+            continue
+        L.append(f"  {name}  per trade {per_trade(mine, f) - per_trade(theirs, f):+.2f}"
+                 f"   per symbol-day {(net(mine, f) - net(theirs, f)) / symdays if symdays else 0:+.2f}"
+                 f"   ({len(mine):,} trades against {len(theirs):,})")
     return L + [""]
 
 
@@ -362,13 +415,15 @@ def render(books: dict, symdays: int, errors: int, days: list[str], elapsed: flo
         bcheck = baseline_check(bname, books[bname], expect.get(eng))
         L += verdict_block(bname, sname, books[bname], books[sname], cut, symdays, bcheck)
         L += mechanism_block(bname, sname, books[bname], books[sname])
+    L += cross_cell_block(books, symdays, CELLS[(15, 10)]["csv"] if PF != (15, 10) else None)
     L += ["WHAT THIS IS NOT", "",
           "  NOT OUT OF SAMPLE. holdout.json has not been spent; the published PIT",
           "  baselines this reproduces are scored over the same sessions.",
           "  NOT LIVE FILLS. One tick on a floor exit; friction is carried by the",
           "  $4.26 / $8.92 levels, not by the fill model (§6).",
           "  NOT A CAP MODEL. Each symbol-day runs alone.",
-          "  NOT A SEARCH. One tick pair, (15, 10), as registered.", ""]
+          f"  NOT A SEARCH. One registered tick pair, {PF}; the family has "
+          f"{len(CELLS)} cell(s).", ""]
     return L
 
 
@@ -394,10 +449,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--expect", default=None,
                    help='published baselines for a universe not in PUBLISHED, '
                         'e.g. "mcl=3960:-8.81,mc5=6630:-8.49"')
+    p.add_argument("--floor", default="15,10",
+                   help="a registered (arm,floor) cell: " + " or ".join(
+                       f"{a},{b}" for a, b in sorted(CELLS)))
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--jobs", type=int, default=0)
-    p.add_argument("--out", default="var/reports/profit_floor.txt")
-    p.add_argument("--csv", default="var/reports/profit_floor_trades.csv")
+    p.add_argument("--out", default=None, help="default: the cell's own report path")
+    p.add_argument("--csv", default=None, help="default: the cell's own trades path")
     return p
 
 
@@ -423,6 +481,13 @@ def main(argv=None) -> int:
     from common.screen_sim import date_of, window_slices
 
     a = build_parser().parse_args(argv)
+    try:
+        pf = tuple(int(x) for x in a.floor.split(","))
+    except ValueError:
+        raise SystemExit(f"REFUSED: --floor must be arm,floor; got {a.floor!r}") from None
+    configure(pf)
+    a.out = a.out or CELLS[PF]["out"]
+    a.csv = a.csv or CELLS[PF]["csv"]
     if a.dataset != DATASET:
         raise SystemExit(f"REFUSED: registered on {DATASET} (§2, §5); got {a.dataset}")
     expect = parse_expect(a.expect) or PUBLISHED.get(Path(a.pairs).as_posix(), {})
@@ -438,7 +503,7 @@ def main(argv=None) -> int:
     tasks = []
     for k, day in enumerate(have):
         first = max(0, k - WARMUP_SESSIONS)
-        tasks.append(([str(slices[d]) for d in have[first:k + 1]], day, by_date[day]))
+        tasks.append(([str(slices[d]) for d in have[first:k + 1]], day, by_date[day], PF))
 
     jobs = (os.cpu_count() or 1) if a.jobs == 0 else max(1, a.jobs)
     print(f"profit_floor_study: {len(tasks):,} session(s) on {jobs} worker(s)", flush=True)
