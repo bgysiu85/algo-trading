@@ -77,6 +77,7 @@ import pandas as pd
 
 from common.screen import is_test_symbol
 from common.screen_at import (CHANGE_EPS, ScreenConfig, session_open_utc)
+from common.tv_screener import PREMARKET_CHANGE_MIN
 from common.report_io import emit
 
 ET = ZoneInfo("America/New_York")
@@ -490,9 +491,12 @@ def render(rows, sessions, cfg, cadence_s, agree, elapsed, no_prior,
     L = ["THE LIVE SCREEN, SIMULATED FORWARD", "",
          f"  {sessions} sessions, cadence {cadence_s}s, "
          f"{SCREEN_START}-{SCREEN_END} ET",
-         f"  clauses imported from tv_screener: change >= {cfg.change_min:.0f}%, "
-         f"price in [{cfg.price_range[0]:.2f}, {cfg.price_range[1]:.2f}], "
-         f"volume >= {cfg.volume_min:,}",
+         (f"  clauses imported from tv_screener: change >= {cfg.change_min:.0f}%, "
+          if cfg.change_min == PREMARKET_CHANGE_MIN else
+          f"  *** NOT THE SHIPPED SCREEN: change >= {cfg.change_min:.0f}%, "
+          f"against the shipped {PREMARKET_CHANGE_MIN:.0f}% *** ")
+         + (f"price in [{cfg.price_range[0]:.2f}, {cfg.price_range[1]:.2f}], "
+            f"volume >= {cfg.volume_min:,}"),
          (f"  volume threshold scaled to our tape at capture "
           f"{cfg.capture:.3f}: {cfg.volume_min_on_tape:,}"
           if ladders is None else
@@ -623,6 +627,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--capture", type=float, default=None,
                    help="override the tape capture ratio; the default is the "
                         "measured p50 and the sensitivity is p10/p90")
+    p.add_argument("--change-min", type=float, default=None,
+                   help="override the pre-market change clause, in percent. "
+                        "The default is the shipped screen's, imported from "
+                        "tv_screener. This exists to MEASURE a different "
+                        "threshold on the point-in-time universe; it does not "
+                        "and must not change what the live screen sends.")
     p.add_argument("--capture-ladder", default=None, metavar="ITCH_CAPTURE.json",
                    help="itch_capture's JSON: a capture per ET half-hour, per "
                         "regime (before/after --ladder-cut). Overrides --capture.")
@@ -663,6 +673,24 @@ def after_refusal(after: str | None, out: str) -> str | None:
     return None
 
 
+def change_min_refusal(change_min: float | None, out: str) -> str | None:
+    """A variant threshold must not overwrite the deciding universe file.
+
+    The same property `after_refusal` protects, for the same reason: every
+    published point-in-time figure was decided on the file at DECIDING_OUT,
+    screened at the shipped threshold, and a file sitting at that path
+    screened at some other threshold is indistinguishable from it.
+    """
+    if change_min is None or change_min == PREMARKET_CHANGE_MIN:
+        return None
+    if Path(out.replace("\\", "/")) != Path(DECIDING_OUT):
+        return None
+    return (f"--change-min {change_min:g} with --out {DECIDING_OUT}: that file is the "
+            f"universe every published point-in-time figure was decided on, screened "
+            f"at {PREMARKET_CHANGE_MIN:g}%. Name a separate --out, e.g. "
+            f"var/state/screen_pairs_pit_chg{change_min:g}.json")
+
+
 def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
     from common.databento_fetch import default_archive
@@ -672,6 +700,8 @@ def main(argv=None) -> int:
     cfg = ScreenConfig()
     if a.capture is not None:
         cfg = replace(cfg, capture=a.capture)
+    if a.change_min is not None:
+        cfg = replace(cfg, change_min=a.change_min)
     ladders = None
     if a.capture_ladder:
         from common.screen_at import ladder_from_json
@@ -681,7 +711,7 @@ def main(argv=None) -> int:
             print(f"  capture ladder {reg:<7} " + "  ".join(
                 f"{k // 60:02d}:{k % 60:02d}={c:.3f}" for k, c in lad), flush=True)
 
-    refusal = after_refusal(a.after, a.out)
+    refusal = after_refusal(a.after, a.out) or change_min_refusal(a.change_min, a.out)
     if refusal:
         sys.exit(refusal)
     slices = window_slices(archive, a.dataset)
