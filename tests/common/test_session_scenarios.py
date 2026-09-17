@@ -19,7 +19,10 @@ DAY = "2026-09-11"
 
 
 def r(book, entry, exit_, net, px=6.0):
-    return {"book": book, "symbol": f"S{entry[:2]}", "date": DAY, "ordinal": 1,
+    """A row shaped as `first_entry_skip.trade_row` makes it -- which carries
+    NO `book` key. `session_scenarios.tagged()` is what stamps one, and the
+    2026-09-17 smoke run died because the control was handed these instead."""
+    return {"symbol": f"S{entry[:2]}", "date": DAY, "ordinal": 1,
             "entry_et": f"{DAY} {entry}", "exit_et": f"{DAY} {exit_}",
             "entry_px": px, "exit_px": px, "reason": "t", "bars_held": 1,
             "net": float(net)}
@@ -37,10 +40,23 @@ def four_books():
     }
 
 
+def untag(rows):
+    return [{k: v for k, v in r.items() if k != "book"} for r in rows]
+
+
 def test_scenario_1_is_the_floored_books_untouched():
     sc = M.scenario_books(four_books(), F)
-    assert sc["1"]["MCL"] == four_books()["MCL-pf5"]
-    assert sc["1"]["MC5"] == four_books()["MC5-pf5"]
+    assert untag(sc["1"]["MCL"]) == four_books()["MCL-pf5"]
+    assert untag(sc["1"]["MC5"]) == four_books()["MC5-pf5"]
+
+
+def test_every_scenario_book_carries_its_book_name():
+    """One shape for all five. Scenario 1 skipping the stamp is what let an
+    untagged row reach the control on the first real session."""
+    sc = M.scenario_books(four_books(), F)
+    for tag in ("1", "2", "3", "4", "5"):
+        for strat in ("MCL", "MC5"):
+            assert all("book" in r for r in sc[tag][strat]), (tag, strat)
 
 
 def test_scenario_2_stops_every_strategy_and_3_stops_only_the_one():
@@ -103,12 +119,48 @@ def test_render_names_both_registrations_and_every_scenario():
     assert "not scored: the project's $4.26 margin" in text
     # A7: the composition is read against scenario 1 as well as the baseline
     assert "ON TOP OF the floor" in text
+    # scenarios 4 and 5 against the plain baseline are descriptive: the delta
+    # carries the floor and the control does not
+    assert "DESCRIPTIVE, NOT SCORED" in text
     assert "NOT A CAP MODEL" in text and "holdout.json has not been touched" in text
     # scenario 1's registered verdict is read ONCE, at the measured friction,
     # because gate_study.verdict is defined at $4.26 -- printing it under all
     # three friction headings would be one verdict shown over three books.
     assert text.count("THE REGISTERED VERDICT") == 1
     assert text.count("SCENARIO 2:") == 3, "the cap's verdict IS friction-dependent (A5)"
+
+
+def test_cap_verdict_runs_under_strategy_scope_on_untagged_engine_rows():
+    """THE SMOKE-RUN FAILURE, 2026-09-17. The engines' rows carry no `book`;
+    only `tagged()` stamps one. cap_verdict handed the raw baseline book to
+    the control, and strategy scope keys on (date, book), so the first real
+    session died with a bare KeyError three frames down. The control now
+    stamps the book it was told to read."""
+    books = {"MCL": [r("MCL", "05:00", "05:10", 100), r("MCL", "05:30", "06:10", -60),
+                     r("MCL", "07:00", "07:10", -25)],
+             "MCL-pf5": [], "MC5": [], "MC5-pf5": []}
+    assert all("book" not in row for row in books["MCL"]), "the fixture is not engine-shaped"
+    sc = M.scenario_books(books, F)
+    tag, lines = M.cap_verdict(books["MCL"], sc["3"]["MCL"], DAY, 10,
+                               sc["caps"]["3"], "strategy", F, "MCL")
+    assert tag in ("PASSES", "NOTHING")
+    assert any("random cut" in ln for ln in lines)
+
+
+def test_a_strategy_that_never_fired_gets_no_control_rather_than_another_ones():
+    """Under strategy scope the cap's keys carry the book. A strategy that
+    never gave back has no session to cut, and its control says so instead of
+    borrowing the strategy that did."""
+    books = {"MCL": [r("MCL", "05:00", "05:10", 100), r("MCL", "05:30", "06:10", -60),
+                     r("MCL", "07:00", "07:10", -25)],
+             "MCL-pf5": [], "MC5": [r("MC5", "07:00", "07:10", -40)], "MC5-pf5": []}
+    sc = M.scenario_books(books, F)
+    assert list(sc["caps"]["3"]["fired"]) == [(DAY, "MCL")]
+    # MC5 never fired, so its control has no session to cut and says so rather
+    # than borrowing MCL's.
+    tag, lines = M.cap_verdict(books["MC5"], sc["3"]["MC5"], DAY, 10,
+                               sc["caps"]["3"], "strategy", F, "MC5")
+    assert any("NOT COMPUTABLE" in ln for ln in lines)
 
 
 def test_cap_verdict_reports_which_way_the_control_biases_the_test():
@@ -118,7 +170,7 @@ def test_cap_verdict_reports_which_way_the_control_biases_the_test():
              "MCL-pf5": [], "MC5": [], "MC5-pf5": []}
     sc = M.scenario_books(books, F)
     tag, lines = M.cap_verdict(books["MCL"], sc["2"]["MCL"], DAY, 10,
-                               sc["caps"]["2"], "session", F)
+                               sc["caps"]["2"], "session", F, "MCL")
     text = "\n".join(lines)
     assert "trades removed: the cap" in text
     assert ("conservative" in text)

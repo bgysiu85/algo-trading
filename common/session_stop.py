@@ -67,6 +67,13 @@ def _key(row: dict, scope: str) -> tuple:
     if scope == "session":
         return (row["date"],)
     if scope == "strategy":
+        if "book" not in row:
+            # The rows the engines produce carry no book name -- `tagged()` in
+            # session_scenarios is what stamps it. Under strategy scope an
+            # untagged row cannot be attributed, and a KeyError three frames
+            # down says nothing about why.
+            raise KeyError("strategy scope needs a 'book' on every row; these "
+                           "are untagged engine rows (see session_scenarios.tagged)")
         return (row["date"], row["book"])
     raise ValueError(f"scope must be one of {SCOPES}, not {scope!r}")
 

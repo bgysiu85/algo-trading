@@ -14,6 +14,7 @@ import pytest
 from common import session_stop as S
 
 F = 0.0                      # most cases read cleaner with friction off
+DAY_ = "2026-09-11"
 
 
 def t(book, date, entry, exit_, net):
@@ -170,6 +171,16 @@ def test_one_strategys_profit_can_mask_anothers_giveback_under_session_scope():
             t("MCL", "2026-09-11", "07:00", "07:10", -15)]
     assert S.apply_cap(rows, 0.50, scope="session", f=F)["removed"] == []
     assert removed_nets(S.apply_cap(rows, 0.50, scope="strategy", f=F)) == [-15.0]
+
+
+def test_strategy_scope_says_what_is_wrong_when_a_row_has_no_book():
+    """The engines' rows carry no `book`; `session_scenarios.tagged()` stamps
+    one. A bare KeyError three frames down says nothing about why."""
+    row = {"date": DAY_, "entry_et": "x", "exit_et": "y", "net": 1.0}
+    with pytest.raises(KeyError, match="strategy scope needs a 'book'"):
+        S.apply_cap([row], 0.5, scope="strategy")
+    # session scope does not need it, and must keep working without one
+    assert S.apply_cap([row], 0.5, scope="session")["kept"] == [row]
 
 
 def test_an_unknown_scope_is_refused_rather_than_defaulted():
