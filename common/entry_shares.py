@@ -102,6 +102,26 @@ PAIRS = "var/state/screen_pairs_pit.json"
 # defect entry_excursion shipped with and had to be corrected for.
 PUBLISHED_TRADES = {"mcl": 3_955}
 
+# The same count per UNIVERSE FILE, for the studies that take --pairs. Keyed
+# by the file's basename because the universe is what fixes the trade list:
+# the BASIC file from pit_strategy_result_20260914.md, the ITCH ones from
+# screen_itch_RESULT / screen_itch_v2_RESULT (2026-09-17). A universe not
+# listed here has no published count and the check says so rather than
+# comparing against the BASIC number.
+PUBLISHED_MCL_BY_UNIVERSE = {
+    "screen_pairs_pit.json": 3_955,
+    "screen_pairs_pit_itch_p50.json": 3_960,
+    "screen_pairs_pit_itch_v2.json": 3_908,
+}
+
+
+def published_mcl_trades(pairs_path: str | None) -> int | None:
+    """MCL's published point-in-time trade count for a universe file, or None."""
+    if not pairs_path:
+        return None
+    name = str(pairs_path).replace("\\", "/").rsplit("/", 1)[-1]
+    return PUBLISHED_MCL_BY_UNIVERSE.get(name)
+
 
 # --- the tape ---------------------------------------------------------------
 

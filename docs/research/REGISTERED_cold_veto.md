@@ -117,3 +117,28 @@ to ship.
 - The size response — what Cameron actually changes on a cold day — is not
   a veto and is not here.
 - The concurrency cap is not modelled.
+
+# AMENDMENT A — 2026-09-17, PRE-RUN. Re-based on the ITCH v2 universe.
+
+Run once more on `screen_pairs_pit_itch_v2.json` with XNAS.ITCH bars
+(`--pairs var/state/screen_pairs_pit_itch_v2.json --dataset XNAS.ITCH`,
+output `cold_veto_itch.txt`, `cold_veto_itch_trades.csv`,
+`cold_veto_readings_itch.csv`). The 07:00 reading is taken before 08:00, where
+the two tapes were identical until 2026-03-30, so the readings should be
+close to the BASIC ones on the shared sessions; the veto rate (66% on BASIC)
+is expected within a few points of that. The v2 universe has 550 sessions
+(09-01..03 dropped, 09-14/15 added), so the readings file differs on those.
+
+- Same rules, same readings, same thresholds, same seed. Nothing in the
+  verdict is re-tuned; the universe file and the bars change and nothing else.
+- The population check compares MCL's count against the number published
+  for THE FILE run (3,908 on v2), never against the BASIC 3,955.
+- Prediction, written before the run: the verdict stands (NOTHING for both,
+  and for H-B1 NOTHING / REFUSED). On the ITCH v2 books every trade still
+  loses $8–9 on average, so a total-based reading rewards abstention exactly
+  as it did on BASIC, and the abstention control is what decides. If a gate
+  clears the control here having not cleared it on BASIC, that is a tape
+  effect on the gated trades and wants the same reading on the hybrid
+  post-change universe before it is believed — it is not a pass.
+- Reported beside the BASIC figures, not in place of them. The BASIC result
+  docs stay as written and are not edited.

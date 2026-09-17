@@ -307,7 +307,8 @@ def main(argv=None) -> int:
                             t1 + t2, jobs, refused, binding_t, error_days,
                             preamble=sessions_block(labels, run_days),
                             binding_kw={"what": "entries at or after 07:00 are the only ones a clock veto can refuse",
-                                        "detail_label": "baseline entries by clock and session"})),
+                                        "detail_label": "baseline entries by clock and session"},
+                            universe=a.pairs, dataset=a.dataset)),
          a.out, header=f"common.cold_veto pairs={a.pairs} dataset={a.dataset} sessions={len(run_days)} "
                        f"symbol_days={symdays} cut={cut} qty={QTY} veto_from={VETO_FROM:%H:%M}")
     G.write_csv(a.csv, books)

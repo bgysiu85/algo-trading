@@ -38,7 +38,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from common.breadth import BOOT_MIN_P, RESAMPLES, SEED, cluster_bootstrap, pct, share_above_zero
-from common.entry_shares import MEASURED_FRICTION, PUBLISHED_TRADES, QTY
+from common.entry_shares import MEASURED_FRICTION, QTY, published_mcl_trades
 from common.report_io import emit
 
 ET = ZoneInfo("America/New_York")
@@ -321,11 +321,30 @@ def accounting_block(bname: str, base, cut: str, symdays: int) -> list[str]:
     return L
 
 
+def population_lines(n_mcl: int, universe: str) -> list[str]:
+    """The published-count line for THIS universe file. A universe with no
+    published count says so; it is never compared against another file's
+    number, which is how the seven-session extension would otherwise have
+    printed *** DOES NOT MATCH *** against the BASIC 3,955."""
+    pub = published_mcl_trades(universe)
+    if pub is None:
+        return [f"  published count     none for this universe file -- not the published book"]
+    ok = n_mcl == pub
+    L = [f"  published count     {pub:,}   " + ("matches" if ok else "*** DOES NOT MATCH ***")]
+    if not ok:
+        L += ["", "  A DIFFERENT BOOK FROM THE PUBLISHED ONE. The comparisons below are",
+              "  still like-for-like (same run), but do not quote MCL's line as the",
+              "  published figure until this reconciles."]
+    return L
+
+
 def render(books: dict, symdays: int, errors: int, days: list[str], elapsed: float,
-           jobs: int, error_days: list | None = None) -> list[str]:
+           jobs: int, error_days: list | None = None, universe: str | None = None,
+           dataset: str = "XNAS.BASIC") -> list[str]:
     cut = days[len(days) // 2] if len(days) >= 2 else (days[0] if days else "")
     L = ["H-B1: SKIP THE FIRST ENTRY OF EACH SYMBOL-DAY", "",
          f"  registered  {REGISTERED}",
+         f"  universe    {universe or PAIRS}   bars {dataset}",
          f"  {len(days):,} sessions   {symdays:,} symbol-days   halves cut at {cut}",
          f"  {QTY} shares   commission in, friction per round trip   "
          f"elapsed {elapsed:.1f}s on {jobs} worker(s)", ""]
@@ -335,15 +354,8 @@ def render(books: dict, symdays: int, errors: int, days: list[str], elapsed: flo
         L += [""]
 
     mcl = books["MCL"]
-    pub = PUBLISHED_TRADES.get("mcl")
     L += ["POPULATION CHECK", "", f"  MCL trades here     {len(mcl):,}"]
-    if pub is not None:
-        ok = len(mcl) == pub
-        L.append(f"  published count     {pub:,}   " + ("matches" if ok else "*** DOES NOT MATCH ***"))
-        if not ok:
-            L += ["", "  A DIFFERENT BOOK FROM THE PUBLISHED ONE. The comparisons below are",
-                  "  still like-for-like (same run), but do not quote MCL's line as the",
-                  "  published figure until this reconciles."]
+    L += population_lines(len(mcl), universe or PAIRS)
     L += [""]
 
     L += ["THE BOOKS", ""]
@@ -462,7 +474,8 @@ def main(argv=None) -> int:
         error_days += r["error_days"]
 
     cut = run_days[len(run_days) // 2] if len(run_days) >= 2 else (run_days[0] if run_days else "")
-    emit("\n".join(render(books, symdays, errors, run_days, time.time() - t0, jobs, error_days)),
+    emit("\n".join(render(books, symdays, errors, run_days, time.time() - t0, jobs, error_days,
+                          universe=a.pairs, dataset=a.dataset)),
          a.out, header=f"common.first_entry_skip pairs={a.pairs} dataset={a.dataset} "
                        f"sessions={len(run_days)} symbol_days={symdays} cut={cut} qty={QTY}")
     write_csv(a.csv, books)

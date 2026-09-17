@@ -266,7 +266,8 @@ def main(argv=None) -> int:
     binding_t = {k: (v[0], v[1], dict(v[2])) for k, v in binding.items()}
     emit("\n".join(G.render("H-B3: TAKE A SIGNAL ONLY IF THE NAME RANKS TOP-N BY SESSION RANGE AT THAT MINUTE",
                             REGISTERED, books, PAIRED, REPORTED, symdays, errors, run_days,
-                            elapsed, jobs, refused, binding_t, error_days)),
+                            elapsed, jobs, refused, binding_t, error_days,
+                            universe=a.pairs, dataset=a.dataset)),
          a.out, header=f"common.range_rank pairs={a.pairs} dataset={a.dataset} sessions={len(run_days)} "
                        f"symbol_days={symdays} cut={cut} qty={QTY} N={N_REGISTERED}")
     G.write_csv(a.csv, books)

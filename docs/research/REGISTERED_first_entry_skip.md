@@ -171,3 +171,30 @@ item 1 at all. The next registrations (H-B3, H-B4) carry a margin of $4.26 on
 Δ per trade and an abstention control — the same number of trades removed at
 random, 2,000 seeded draws, the filter's per-trade delta above the 95th
 percentile. Not applied here retroactively.
+
+# AMENDMENT B — 2026-09-17, PRE-RUN. Re-based on the ITCH v2 universe.
+
+The published point-in-time baselines moved to `screen_pairs_pit_itch_v2.json`
+(6,411 symbol-days, 550 sessions, XNAS.ITCH bars) on 2026-09-17
+(`REGISTERED_screen_itch_v2.md`). This registration was run on the BASIC
+universe (6,170 symbol-days) and its verdict is a BASIC result. It is re-run
+once on the v2 file with `--pairs var/state/screen_pairs_pit_itch_v2.json
+--dataset XNAS.ITCH`, writing to `first_entry_skip_itch.txt` and
+`first_entry_skip_itch_trades.csv` (the BASIC files are not overwritten).
+
+- Same rules, same readings, same thresholds, same seed. Nothing in the
+  verdict is re-tuned; the universe file and the bars change and nothing else.
+- The population check compares MCL's count against the number published
+  for THE FILE run (3,908 on v2), never against the BASIC 3,955.
+- Prediction, written before the run: the verdict stands (NOTHING for both,
+  and for H-B1 NOTHING / REFUSED). On the ITCH v2 books every trade still
+  loses $8–9 on average, so a total-based reading rewards abstention exactly
+  as it did on BASIC, and the abstention control is what decides. If a gate
+  clears the control here having not cleared it on BASIC, that is a tape
+  effect on the gated trades and wants the same reading on the hybrid
+  post-change universe before it is believed — it is not a pass.
+- Reported beside the BASIC figures, not in place of them. The BASIC result
+  docs stay as written and are not edited.
+- The time-of-day block table off the ITCH trades CSV is reported (it was
+  withdrawn with the tape, not with the books); its named 07:45 cell is read
+  under the four pre-stated checks of §3 exactly as before.

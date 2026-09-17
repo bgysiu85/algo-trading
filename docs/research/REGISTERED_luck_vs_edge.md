@@ -112,3 +112,31 @@ H < 0 on both.
 - Whether a *size* response on hot days (rather than a gate) would carry the
   book: not a veto, not here, and the natural next registration if reading 1
   passes on the trend bucket.
+
+# AMENDMENT A — 2026-09-17, PRE-RUN. Re-based on the ITCH v2 universe.
+
+Run once more from the ITCH v2 trades CSV and readings file (the H-B1 and H-B4
+re-runs above), with `--pairs var/state/screen_pairs_pit_itch_v2.json
+--dataset XNAS.ITCH` for the trend flag and `--daily-dataset XNAS.BASIC` for
+the regime: the regime is a property of the whole market, not of the tape a
+strategy's bars are read from, and `screen_sim` reads its prior closes from
+the BASIC daily archive for the same reason. Keeping the daily archive fixed
+makes the same-day and lagged labels identical on both runs, so the only
+thing that moves between the BASIC and ITCH readings is the books. (An ITCH
+daily archive now exists on disk; it is exchange-only volume and is not the
+market.) The module refuses a trades CSV, universe file or readings file
+from different runs.
+
+- Same rules, same readings, same thresholds, same seed. Nothing in the
+  verdict is re-tuned; the universe file and the bars change and nothing else.
+- The population check compares MCL's count against the number published
+  for THE FILE run (3,908 on v2), never against the BASIC 3,955.
+- Prediction, written before the run: the verdict stands (NOTHING for both,
+  and for H-B1 NOTHING / REFUSED). On the ITCH v2 books every trade still
+  loses $8–9 on average, so a total-based reading rewards abstention exactly
+  as it did on BASIC, and the abstention control is what decides. If a gate
+  clears the control here having not cleared it on BASIC, that is a tape
+  effect on the gated trades and wants the same reading on the hybrid
+  post-change universe before it is believed — it is not a pass.
+- Reported beside the BASIC figures, not in place of them. The BASIC result
+  docs stay as written and are not edited.
