@@ -169,6 +169,22 @@ def scenario_books(books: dict, f: float, giveback: float = SS.GIVEBACK) -> dict
 
 # --- the readings -----------------------------------------------------------
 
+def delta_by_session(d: dict[tuple, float]) -> dict[str, list[float]]:
+    """Per SESSION, the list of its symbol-day deltas. The give-back cap
+    decides once a session, so the session is the cluster §4 asks for."""
+    out: dict[str, list[float]] = {}
+    for (_sym, day), v in d.items():
+        out.setdefault(day, []).append(v)
+    return out
+
+
+def share_one_bar(rows: list[dict]) -> float:
+    n = sum(1 for r in rows if "bars_held" in r)
+    if not n:
+        return float("nan")
+    return sum(1 for r in rows if int(r.get("bars_held", 99)) <= 1) / n
+
+
 def cap_verdict(base: list[dict], gated: list[dict], cut: str, symdays: int,
                 cap: dict, scope: str, f: float, book: str) -> tuple[str, list[str]]:
     """H-S4 §4's six readings, scored exactly as registered.
@@ -186,8 +202,20 @@ def cap_verdict(base: list[dict], gated: list[dict], cut: str, symdays: int,
     deltas = deltas_by_symbol_day(base, gated, f)
     d3 = drop_top_delta(deltas, 3)
     d5 = drop_top_delta(deltas, 5)
-    boot = cluster_bootstrap(delta_by_symbol(deltas), RESAMPLES, SEED)
+    # BY SESSION, not by symbol. §4 reading 5 says "cluster bootstrap by
+    # session (the unit the rule acts on)" and means it: the cap decides once
+    # per session, so the session is the independent draw. Clustering by
+    # symbol -- which is what every B-series GATE does, because a gate decides
+    # per trade -- would treat 1,447 symbols as independent when the rule
+    # fired on 108 days, and understate the interval accordingly.
+    boot = cluster_bootstrap(delta_by_session(deltas), RESAMPLES, SEED)
     boot_p = share_above_zero(boot["totals"]) if boot["totals"] else 0.0
+    # The matched-COUNT control amendment A4 promised as reported-not-scored.
+    # The random cut matches the shape and not the count, and it has removed
+    # fewer trades than the cap in every reading so far -- which flatters the
+    # cap, because the per-trade delta scales with the share removed. This one
+    # matches the count exactly and is the check on that.
+    abst = G.abstention(base, len(base) - len(gated), symdays, f)
     # The control cuts THIS book's trades in the sessions the cap fired on, so
     # `base` has to carry the book name the cap keyed on -- the engines' rows
     # do not, which is what the 2026-09-17 smoke run died on.
@@ -214,12 +242,18 @@ def cap_verdict(base: list[dict], gated: list[dict], cut: str, symdays: int,
          f"  2. denominators agree: {'yes' if r2 else 'NO'}",
          f"  3. early half {h_e:+.2f}   late half {h_l:+.2f}",
          f"  4. drop-top-3 delta {money(d3)}   drop-top-5 delta {money(d5)}",
-         f"  5. cluster bootstrap on the delta  P(total > 0) = {boot_p:.3f}"
-         f"  over {boot['n_syms']:,} symbols",
+         f"  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = {boot_p:.3f}"
+         f"  over {boot['n_syms']:,} sessions",
          f"  6. random cut, same sessions: {SS.CUT_DRAWS:,} draws  "
          f"p05 {ctrl['per_trade']['p05']:+.2f}  p50 {ctrl['per_trade']['p50']:+.2f}  "
          f"p95 {ctrl['per_trade']['p95']:+.2f}   the cap {d_pt:+.2f}"
          if ctrl.get("valid") else "  6. random cut: NOT COMPUTABLE (no session with two trades fired)"]
+    if abst.get("valid"):
+        a = abst["per_trade"]
+        L.append(f"     [not scored, amendment A4] matched-COUNT random removal, "
+                 f"{len(base) - len(gated):,} trades, 2,000 draws: "
+                 f"p05 {a['p05']:+.2f}  p50 {a['p50']:+.2f}  p95 {a['p95']:+.2f}"
+                 f"   the cap {d_pt:+.2f}")
     if ctrl.get("valid"):
         # A4: which way the count mismatch biases the test has to be stated,
         # not left for the reader to work out.
@@ -245,6 +279,17 @@ def cap_block(tag: str, cap: dict, symdays: int) -> list[str]:
     if removed:
         L.append(f"  removed per trade {money(per_trade(removed, f))}   "
                  f"kept per trade {money(per_trade(cap['kept'], f))}")
+        # THE LEADING ALTERNATIVE EXPLANATION, printed so it is visible rather
+        # than argued. MC5's 2,412 one-bar trades at (31.95) are 139% of its
+        # net, and a give-back fires after losses accumulate -- which on MC5
+        # is when it has been re-arming into a falling name. If the cap is
+        # mostly removing one-bar trades it is a proxy for the re-arm rule
+        # (REGISTERED_mc5_rearm), not a session-state rule.
+        rb = share_one_bar(removed)
+        kb = share_one_bar(cap["kept"])
+        L.append(f"  one-bar trades: {rb:.1%} of removed, {kb:.1%} of kept"
+                 + ("   <- the cap is largely a one-bar filter; see REGISTERED_mc5_rearm"
+                    if rb > kb + 0.10 else ""))
     clock = SS.fire_clock(cap)
     if clock:
         L.append("  fire time (ET hour): " + "  ".join(f"{k} {v}" for k, v in clock.items()))

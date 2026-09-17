@@ -175,3 +175,67 @@ def test_cap_verdict_reports_which_way_the_control_biases_the_test():
     assert "trades removed: the cap" in text
     assert ("conservative" in text)
     assert tag in ("PASSES", "NOTHING")
+
+
+# --- the three readings the first run got wrong -----------------------------
+
+def test_reading_five_clusters_by_session_not_by_symbol():
+    """REGISTERED_giveback_cap §4 reading 5: "cluster bootstrap by session
+    (the unit the rule acts on)". The first implementation reused the
+    B-series' symbol clustering, which is right for a gate that decides per
+    trade and wrong for a cap that decides once a day -- it would treat 1,447
+    symbols as independent draws of a rule that fired on 108 sessions."""
+    deltas = {("AAA", "2026-09-11"): 1.0, ("BBB", "2026-09-11"): 2.0,
+              ("AAA", "2026-09-12"): 3.0}
+    assert M.delta_by_session(deltas) == {"2026-09-11": [1.0, 2.0], "2026-09-12": [3.0]}
+    # Two sessions, four symbols: the printed cluster count has to be 2, not
+    # 4. Asserting only on the word "sessions" would pass with symbol
+    # clustering and a renamed label.
+    rows = []
+    for day in (DAY, "2026-09-12"):
+        for sym, e, x, n in (("A", "05:00", "05:10", 100), ("B", "05:30", "06:10", -60),
+                             ("C", "07:00", "07:10", -25), ("D", "07:30", "07:40", -25)):
+            rows.append({"symbol": sym, "date": day, "ordinal": 1, "bars_held": 3,
+                         "entry_et": f"{day} {e}", "exit_et": f"{day} {x}",
+                         "entry_px": 6.0, "exit_px": 6.0, "reason": "t", "net": float(n)})
+    books = {"MCL": rows, "MCL-pf5": [], "MC5": [], "MC5-pf5": []}
+    sc = M.scenario_books(books, F)
+    _t, lines = M.cap_verdict(books["MCL"], sc["2"]["MCL"], DAY, 24,
+                              sc["caps"]["2"], "session", F, "MCL")
+    five = [ln for ln in lines if ln.strip().startswith("5.")][0]
+    assert "BY SESSION" in five, five
+    assert "over 2 sessions" in five, f"clustered on something other than the session: {five}"
+
+
+def test_the_matched_count_control_is_reported_beside_the_random_cut():
+    """Amendment A4 promised it and the first implementation omitted it. The
+    random cut matches the tail shape, not the count, and has removed fewer
+    trades than the cap in every reading -- which flatters the cap, because
+    the per-trade delta scales with the share removed."""
+    books = {"MCL": [r("MCL", f"0{5+i}:00", f"0{5+i}:30", 60 if i == 0 else -20)
+                     for i in range(6)],
+             "MCL-pf5": [], "MC5": [], "MC5-pf5": []}
+    sc = M.scenario_books(books, F)
+    _tag, lines = M.cap_verdict(books["MCL"], sc["2"]["MCL"], DAY, 10,
+                                sc["caps"]["2"], "session", F, "MCL")
+    text = "\n".join(lines)
+    assert "matched-COUNT random removal" in text
+    assert "not scored, amendment A4" in text
+
+
+def test_the_one_bar_share_is_printed_for_removed_and_kept():
+    """MC5's 2,412 one-bar trades are 139% of its net. A cap that mostly
+    removes those is a proxy for the re-arm rule, not a session-state rule,
+    and the row says so rather than leaving it to be argued."""
+    def bars(n, held):
+        return dict(r("MCL", f"0{n}:00", f"0{n}:30", -20), bars_held=held)
+    assert M.share_one_bar([bars(5, 1), bars(6, 9)]) == 0.5
+    assert M.share_one_bar([bars(5, 1)]) == 1.0
+    rows = [dict(r("MCL", "05:00", "05:10", 100), bars_held=9),
+            dict(r("MCL", "05:30", "06:10", -60), bars_held=9),
+            dict(r("MCL", "07:00", "07:10", -25), bars_held=1)]
+    cap = SS.apply_cap([dict(x, book="MCL") for x in rows], 0.50, f=F)
+    text = "\n".join(M.cap_block("2", cap, 10))
+    assert "one-bar trades:" in text
+    assert "100.0% of removed" in text
+    assert "REGISTERED_mc5_rearm" in text, "a cap that removes only one-bar trades must say so"
