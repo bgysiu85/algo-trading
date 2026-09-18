@@ -27,9 +27,11 @@ def frame(symbol="AAA", n=20, *, or5=100_000.0, day_vol=5e6, open_=10.0,
     })
 
 
-def build(df):
+def build(df, vol=None):
+    """One tape unless a test supplies a second (amendment B)."""
     dvol = df[["symbol", "date", "day_volume"]]
-    return U.build_universe(df.drop(columns=["day_volume"]), dvol)
+    price = df.drop(columns=["day_volume"])
+    return U.build_universe(price, vol if vol is not None else price, dvol)
 
 
 def test_todays_value_never_enters_its_own_average():
@@ -144,3 +146,56 @@ def test_counts_report_what_was_excluded_and_why():
     assert c["sessions"] == 20 and c["no_0930_bar"] == 20
     assert c["qualify"] == 12 and c["eligible5"] == 12
     assert c["sessions_short_of_top_n"] == 6
+
+
+# --------------------------------------------------------------------------
+# amendment B -- prices from one tape, opening-range volume from another
+# --------------------------------------------------------------------------
+
+def test_the_ranking_reads_the_volume_tape_and_the_filters_read_the_price_tape():
+    """XNAS.BASIC carries off-exchange prints that put AAPL's low 4.8% below
+    the real session low; XNAS.ITCH matches the consolidated daily high and
+    low. So prices come from ITCH and the opening-range volume, where BASIC
+    sees 56% of the market against ITCH's 12%, comes from BASIC."""
+    price = frame(n=20)                      # clean tape, or5_volume flat
+    vol = frame(n=20)
+    vol.loc[vol.index[-1], "or5_volume"] = 400_000.0        # 4x on the volume tape
+    out = U.build_universe(price.drop(columns=["day_volume"]), vol,
+                           price[["symbol", "date", "day_volume"]])
+    last = out.iloc[-1]
+    assert last.rvol5 == pytest.approx(4.0), "the ranking must read the volume tape"
+    assert last.open == 10.0 and last.qualifies
+
+    # And a corrupt low on the volume tape must not reach ATR or the filters.
+    vol.loc[vol.index[-1], "rth_low"] = 1.0
+    out2 = U.build_universe(price.drop(columns=["day_volume"]), vol,
+                            price[["symbol", "date", "day_volume"]])
+    assert out2.iloc[-1].atr14 == pytest.approx(out.iloc[-1].atr14)
+
+
+def test_a_symbol_day_missing_from_the_volume_tape_cannot_be_ranked():
+    price = frame(n=20)
+    vol = frame(n=20).iloc[:-1]              # today's OR volume absent
+    out = U.build_universe(price.drop(columns=["day_volume"]), vol,
+                           price[["symbol", "date", "day_volume"]])
+    last = out.iloc[-1]
+    assert pd.isna(last.rvol5) and not last.eligible5
+    assert last.qualifies, "the universe filters do not depend on the volume tape"
+
+
+def test_the_daily_volume_date_is_the_sessions_own_date(tmp_path, monkeypatch):
+    """A daily bar is stamped 00:00 UTC on its session date. Converted to ET
+    it becomes the previous evening, and every session's volume then merges
+    onto the day before -- silently, because most rows still match."""
+    idx = pd.to_datetime(["2025-03-03", "2025-03-04"]).tz_localize("UTC")
+    df = pd.DataFrame({"symbol": ["AAA", "AAA"], "volume": [1.0, 2.0],
+                       "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0}, index=idx)
+    monkeypatch.setattr(U, "load_daily_volume", U.load_daily_volume)
+    import common.dbn_io as dbn
+    monkeypatch.setattr(dbn, "read_dbn", lambda *a, **k: df)
+    monkeypatch.setattr("common.dbn_io.read_dbn", lambda *a, **k: df)
+    arch = tmp_path / "A" / "EQUS.SUMMARY" / "ohlcv-1d"
+    arch.mkdir(parents=True)
+    (arch / "2025-03.dbn.zst").write_bytes(b"x")
+    out = U.load_daily_volume(tmp_path / "A", "EQUS.SUMMARY", tmp_path / "c.csv.gz")
+    assert sorted(out["date"]) == ["2025-03-03", "2025-03-04"]

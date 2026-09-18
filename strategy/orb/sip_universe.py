@@ -42,7 +42,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-SUMMARY_DEFAULT = Path("var/cache/orb_sip/summary")
+SUMMARY_DEFAULT = Path("var/cache/orb_sip/summary_itch")      # prices
+VOL_SUMMARY_DEFAULT = Path("var/cache/orb_sip/summary")       # volume
 DVOL_CACHE = Path("var/cache/orb_sip/daily_volume.csv.gz")
 OUT_DEFAULT = Path("var/state/orb_sip_universe.csv.gz")
 
@@ -89,7 +90,12 @@ def load_daily_volume(archive: Path, dataset: str, cache: Path,
             continue
         rows.append(pd.DataFrame({
             "symbol": df["symbol"].to_numpy(),
-            "date": df.index.tz_convert("America/New_York").strftime("%Y-%m-%d"),
+            # A daily bar is stamped 00:00 UTC ON its session date. Converting
+            # that to ET moves it to 19:00 or 20:00 the PREVIOUS day, which
+            # merges every session's volume onto the day before -- a one-row
+            # shift that still merges, still fills 78% of rows, and is wrong
+            # everywhere. Read the UTC date.
+            "date": df.index.strftime("%Y-%m-%d"),
             "day_volume": df["volume"].to_numpy(float)}))
     out = pd.concat(rows, ignore_index=True).drop_duplicates(["symbol", "date"])
     cache.parent.mkdir(parents=True, exist_ok=True)
@@ -118,9 +124,24 @@ def true_range(df: pd.DataFrame) -> pd.Series:
     return pd.concat([a, b, c], axis=1).max(axis=1)
 
 
-def build_universe(summ: pd.DataFrame, dvol: pd.DataFrame) -> pd.DataFrame:
-    """One row per symbol-day with every filter and both rankings."""
-    df = summ.merge(dvol, on=["symbol", "date"], how="left")
+VOL_COLS = ["symbol", "date", "or5_volume", "or15_volume"]
+
+
+def build_universe(price: pd.DataFrame, vol: pd.DataFrame,
+                   dvol: pd.DataFrame) -> pd.DataFrame:
+    """One row per symbol-day with every filter and both rankings.
+
+    TWO TAPES, AND WHICH COLUMN COMES FROM WHICH IS AMENDMENT B.
+    `price` carries the bars the strategy trades (XNAS.ITCH: exchange only,
+    no TRF prints); `vol` carries the opening-range volume the ranking is
+    built from (XNAS.BASIC: 56% of consolidated against ITCH's 12%). Passing
+    the same frame twice is the single-tape behaviour and is what the tests
+    do where the tape is not what is under test.
+    """
+    price = price.drop(columns=[c for c in ("or5_volume", "or15_volume")
+                                if c in price.columns])
+    df = price.merge(vol[VOL_COLS], on=["symbol", "date"], how="left")
+    df = df.merge(dvol, on=["symbol", "date"], how="left")
     df = df.sort_values(["symbol", "date"], kind="stable").reset_index(drop=True)
 
     df["tr"] = true_range(df)
@@ -174,10 +195,12 @@ def counts(df: pd.DataFrame) -> dict:
     }
 
 
-def render(c: dict, summary_dir: Path, dataset: str, first: str, last: str) -> list[str]:
+def render(c: dict, summary_dir: Path, vol_dir: Path, dataset: str,
+           first: str, last: str) -> list[str]:
     return [
         "ORB STOCKS IN PLAY -- THE QUALIFYING SET AND THE RVOL RANKING", "",
-        f"  summaries        {summary_dir}",
+        f"  price bars       {summary_dir}   (amendment B: the traded tape)",
+        f"  OR volume        {vol_dir}",
         f"  daily volume     {dataset} ohlcv-1d (CONSOLIDATED)",
         f"  sessions         {c['sessions']:,}  {first} -> {last}",
         f"  symbol-days read {c['symbol_days']:,}", "",
@@ -201,7 +224,11 @@ def render(c: dict, summary_dir: Path, dataset: str, first: str, last: str) -> l
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    p.add_argument("--summaries", default=str(SUMMARY_DEFAULT))
+    p.add_argument("--summaries", default=str(SUMMARY_DEFAULT),
+                   help="PRICE summaries (amendment B: XNAS.ITCH)")
+    p.add_argument("--volume-summaries", default=str(VOL_SUMMARY_DEFAULT),
+                   help="summaries the OPENING-RANGE VOLUME is read from "
+                        "(amendment B: XNAS.BASIC)")
     p.add_argument("--archive", default=None)
     p.add_argument("--daily-dataset", default="EQUS.SUMMARY")
     p.add_argument("--dvol-cache", default=str(DVOL_CACHE))
@@ -218,10 +245,11 @@ def main(argv=None) -> int:
         from common.databento_fetch import default_archive
         archive = default_archive()
 
-    summ = load_summaries(Path(a.summaries), a.start, a.end)
+    price = load_summaries(Path(a.summaries), a.start, a.end)
+    vol = load_summaries(Path(a.volume_summaries), a.start, a.end)
     dvol = load_daily_volume(archive, a.daily_dataset, Path(a.dvol_cache),
                              a.refresh_dvol)
-    df = build_universe(summ, dvol)
+    df = build_universe(price, vol, dvol)
     keep = ["symbol", "date", "open", "prior_close", "atr14", "advol14",
             "or5_volume", "avg_or5", "rvol5", "rank5", "eligible5",
             "or15_volume", "avg_or15", "rvol15", "rank15", "eligible15",
@@ -232,8 +260,8 @@ def main(argv=None) -> int:
 
     from common.report_io import emit
     c = counts(df)
-    emit("\n".join(render(c, Path(a.summaries), a.daily_dataset,
-                          df["date"].min(), df["date"].max())),
+    emit("\n".join(render(c, Path(a.summaries), Path(a.volume_summaries),
+                          a.daily_dataset, df["date"].min(), df["date"].max())),
          a.report,
          header=f"strategy.orb.sip_universe  rows={len(df):,}  out={out}")
     print(f"wrote {out}")
