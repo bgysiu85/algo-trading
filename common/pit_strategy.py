@@ -182,19 +182,27 @@ WARMUP_SESSIONS = max(0, BACKTEST_SESSIONS - 1)
 MIN_TRADES = 30
 
 
-def engine(name: str):
+def engine(name: str, use_apex: bool | None = None):
     """The strategy module and the kwargs its published configuration uses.
 
     MCL's `LIVE` (use_apex=False, require_macd_pos=True) is imported from
     common.analysis, which is where every other study reads it from. MC5 takes
     its own defaults.
+
+    `use_apex` overrides the apex (gradient-reversal) exit for a REGISTERED
+    two-arm comparison -- docs/research/REGISTERED_apex_counterfactual.md. None
+    leaves the published configuration exactly as it was, which is what every
+    existing caller gets.
     """
     if name == "mcl":
         from strategy.mcl import mcl as M
-        return M, dict(LIVE)
+        extra = dict(LIVE)
+        if use_apex is not None:
+            extra["use_apex"] = use_apex
+        return M, extra
     if name == "mc5":
         from strategy.mc5 import mc5 as M
-        return M, {}
+        return M, ({} if use_apex is None else {"use_apex": use_apex})
     if name == "h0":
         # The CONTROL, run through the same machinery as the rules it controls.
         # `pit_h0` has no stage-2 arm and no unfloored arm, so it could never
@@ -721,6 +729,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dataset", default="XNAS.BASIC")
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--out", default=None)
+    p.add_argument("--use-apex", dest="use_apex", default=None,
+                   type=lambda v: {"on": True, "off": False}[v],
+                   choices=[True, False],
+                   help="override the apex (gradient-reversal) exit: on|off. "
+                        "Omit for the published configuration. Registered in "
+                        "docs/research/REGISTERED_apex_counterfactual.md; the "
+                        "two arms must differ or the comparison measured "
+                        "nothing.")
     p.add_argument("--h0", default=None,
                    help="pit_h0's JSON for THIS universe (written beside its "
                         "report). Without it the published XNAS.BASIC "
@@ -735,7 +751,7 @@ def main(argv=None) -> int:
     from common.screen_sim import window_slices, date_of
 
     name = a.strategy.strip().lower()
-    mod, extra = engine(name)
+    mod, extra = engine(name, a.use_apex)
     # NAMED FOR THE MODULE, NOT JUST THE STRATEGY. `pit_{name}` put the h0 run
     # at var/reports/pit_h0.txt -- the exact path `common.pit_h0` writes -- and
     # the first h0 run silently overwrote it. Nothing was lost (this report's

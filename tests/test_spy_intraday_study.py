@@ -249,3 +249,24 @@ def test_run_gate_never_ignores_a_price_disagreement():
     s = _sess(["2014-12-31", "2015-01-02"])
     ok, why = ST.assertions_clean(_res(conflicts=3), s)
     assert not ok and "disagree on price" in why[0]
+
+
+# --------------------------------------------------------------------------
+# pit_strategy --use-apex: the flag must REACH the engine
+# --------------------------------------------------------------------------
+
+def test_use_apex_flag_reaches_the_engine_kwargs():
+    """An inert flag would make both arms of the registered comparison
+    identical and print a 0.00 delta as a finding.
+    REGISTERED_apex_counterfactual.md section 5."""
+    from common import pit_strategy as PS
+    _, off = PS.engine("mc5", use_apex=False)
+    _, on = PS.engine("mc5", use_apex=True)
+    _, default = PS.engine("mc5")
+    assert off == {"use_apex": False}
+    assert on == {"use_apex": True}
+    assert default == {}, "omitting the flag must not change the published run"
+    _, mcl_default = PS.engine("mcl")
+    _, mcl_on = PS.engine("mcl", use_apex=True)
+    assert mcl_on["use_apex"] is True
+    assert mcl_default.get("use_apex") is False   # MCL's LIVE, untouched
