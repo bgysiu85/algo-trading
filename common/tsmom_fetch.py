@@ -123,25 +123,59 @@ def def_path(root_dir: Path, root: str, day: str) -> Path:
 def definition_days(start: str, end: str, samples: int = DEFINITION_SAMPLES) -> list[str]:
     """The monthly grid the roll calendar is sampled on.
 
-    One session per calendar month, taken as the 15th (or the nearest earlier
-    day the vendor has), which avoids month-end and month-start holidays
-    clustering. A contract is listed months to years before it expires and stays
-    listed, so any day in the month carries the same expiration dates.
+    One session per calendar month, the 15th, stepped BACK to the Friday when
+    the 15th is a Saturday or Sunday. A contract is listed months to years
+    before it expires and stays listed, so any session in the month carries the
+    same expiration dates -- which day it is does not matter, only that it IS a
+    session.
+
+    THE BUG THIS EXISTS FOR, 2026-09-18. The first version took the 15th
+    unconditionally. **55 of the 190 samples land on a weekend**, the third one
+    being 2010-08-15, a Sunday. A one-day window over a non-session day has
+    nothing to resolve, and the vendor answered
+
+        422 symbology_invalid_request -- None of the symbols could be resolved
+
+    on the first live run, which reads like a wrong symbol or a wrong scope and
+    is neither. Both this docstring and REGISTERED_tsmom_fetch section 1 already
+    SAID the grid stepped off non-sessions. Neither the code nor a test did.
+    That is the second time in two days a property was asserted in prose and not
+    implemented (see common/tsmom_holdout._normalise) and it is
+    PROGRAM_INDEX section 5: a report must read its own inputs, not assert them.
+
+    Weekends are handled here because they are known in advance. HOLIDAYS are
+    not -- the exchange calendar is not in hand -- so `plan` retries a
+    still-unresolvable day forward and reports any month it cannot place.
 
     Deterministic and derived from the range, NOT a count chosen to hit a cost.
-    `samples` caps it so the estimate and the pull cannot disagree about how
-    many requests there are.
     """
     s, e = date.fromisoformat(start), date.fromisoformat(end)
     days, y, m = [], s.year, s.month
     while (y, m) <= (e.year, e.month) and len(days) < samples:
         d = date(y, m, 15)
+        while d.weekday() >= 5:              # Sat=5, Sun=6 -> step back to Friday
+            d -= timedelta(days=1)
         if s <= d <= e:
             days.append(d.isoformat())
         m += 1
         if m == 13:
             y, m = y + 1, 1
     return days
+
+
+def _is_symbology_miss(e: Exception) -> bool:
+    """A day with no session, as opposed to a request that is actually wrong.
+
+    Narrow on purpose. Every other failure still aborts the run: a blanket
+    retry would turn a mis-scoped request into a slow one instead of a loud one.
+    """
+    t = str(e)
+    return "symbology_invalid_request" in t or "could not be resolved" in t.lower()
+
+
+def _price(client, kw: dict):
+    return (float(client.metadata.get_cost(**kw)),
+            int(client.metadata.get_billable_size(**kw)))
 
 
 def plan(client, roots: dict, root_dir: Path, start: str, end: str):
@@ -159,24 +193,66 @@ def plan(client, roots: dict, root_dir: Path, start: str, end: str):
             continue
         jobs.append((root, BAR_SCHEMA, out, kw))
 
+    usd, nbytes = 0.0, 0
+    for root, schema, out, kw in jobs:               # the bar jobs, priced
+        try:
+            u, n = _price(client, kw)
+        except Exception as e:                       # noqa: BLE001
+            raise SystemExit(
+                f"pricing failed on {root} {schema} "
+                f"{kw['start']}..{kw['end']} ({kw['symbols']}, "
+                f"stype_in={kw['stype_in']}) -- nothing downloaded: {_scrub(e)}")
+        usd += u
+        nbytes += n
+
+    # Definition jobs price as they are planned, because an unresolvable day is
+    # moved rather than fatal.
+    unplaced: list[tuple[str, str]] = []
     for root in roots:
         for day in definition_days(start, end):
             out = def_path(root_dir, root, day)
-            nxt = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
-            kw = dict(dataset=DATASET, schema=DEF_SCHEMA, symbols=f"{root}.FUT",
-                      stype_in="parent", start=day, end=nxt)
             if out.exists():
                 have += 1
                 continue
-            jobs.append((root, DEF_SCHEMA, out, kw))
+            placed = False
+            for shift in range(4):                   # the 15th, then forward
+                d = (date.fromisoformat(day) + timedelta(days=shift)).isoformat()
+                nxt = (date.fromisoformat(d) + timedelta(days=1)).isoformat()
+                kw = dict(dataset=DATASET, schema=DEF_SCHEMA,
+                          symbols=f"{root}.FUT", stype_in="parent",
+                          start=d, end=nxt)
+                try:
+                    u, n = _price(client, kw)
+                except Exception as e:               # noqa: BLE001
+                    if _is_symbology_miss(e):
+                        continue                     # a holiday; try the next day
+                    raise SystemExit(
+                        f"pricing failed on {root} {DEF_SCHEMA} {d} "
+                        f"-- nothing downloaded: {_scrub(e)}")
+                jobs.append((root, DEF_SCHEMA, def_path(root_dir, root, d), kw))
+                usd += u
+                nbytes += n
+                placed = True
+                break
+            if not placed:
+                unplaced.append((root, day[:7]))
 
-    usd, nbytes = 0.0, 0
-    for _, _, _, kw in jobs:
-        try:
-            usd += float(client.metadata.get_cost(**kw))
-            nbytes += int(client.metadata.get_billable_size(**kw))
-        except Exception as e:                       # noqa: BLE001
-            raise SystemExit(f"pricing failed, nothing downloaded: {_scrub(e)}")
+    if unplaced:
+        # Reported, never silent. A month with no roll-calendar sample is a hole
+        # in the thing the roll rule reads, and a run that quietly drops a few
+        # is indistinguishable from one that drops a year.
+        print(f"WARNING: {len(unplaced)} month(s) had no resolvable session "
+              f"within 4 days of the 15th and were skipped:")
+        for root, mon in unplaced[:12]:
+            print(f"  {root} {mon}")
+        if len(unplaced) > 12:
+            print(f"  ... and {len(unplaced) - 12} more")
+        share = len(unplaced) / max(1, len(roots) * len(definition_days(start, end)))
+        if share > 0.02:
+            raise SystemExit(
+                f"ABORT: {share:.1%} of monthly samples unplaceable, above the "
+                "2% the registration allows. That is a calendar problem, not a "
+                "few holidays -- nothing downloaded.")
     return jobs, usd, nbytes, have
 
 
