@@ -550,3 +550,102 @@ is the fallback if the whole-day figure blocks it.
 It does not touch the universe, the ranking, the filters, the friction levels,
 the criteria, the controls, the holdout, or the verdict. It does not re-trade
 anything: the ledger is re-read, not rebuilt.
+
+---
+
+# AMENDMENT F — 2026-09-18, PRE-MEASUREMENT. Is the stop the problem?
+
+The run is closed and its verdict stands (`claude/orb_sip_RESOLVED_20260918.md`):
++$480 net across 7,239 trades and 446 sessions, 1 of 7 criteria. F does **not**
+reopen it and does **not** propose a strategy variant. It registers one
+DESCRIPTIVE measurement and, in advance, the rule that decides whether anything
+follows it.
+
+## F.0 Why this is not "promising, worth another sweep"
+
+`orb_strategy_spec.md` §11 forbids that phrase by name. The distinction claimed
+here, stated so it can be judged rather than assumed:
+
+- **Not a re-sweep.** Stop *width* was never a swept dimension of this study.
+  Section 2 fixed it at 10% of ATR because the paper fixed it there. This is a
+  parameter the study never varied, not a re-reading of one it did.
+- **Mechanism first, measurement second.** Friction is 0.350R against a gross
+  of 0.351R, and it is 0.350R *because* R is about 9c while a round trip costs
+  about 3c. That ratio is measured, not conjectured.
+- **No P/L is produced by this amendment.** F measures excursions. It does not
+  simulate a wider stop, does not report a net figure at any width, and
+  therefore offers nothing to select on.
+
+If F's reading is negative, ORB closes for good and nothing further is spent.
+
+## F.1 The arithmetic that makes the question real, and cuts both ways
+
+At constant dollar risk, a wider stop buys proportionally fewer shares, so
+gross and friction both scale down together. Widening the stop can only help
+through one channel: **trades that are stopped out and would otherwise have
+gone on to work.** If the losers were genuinely moving against the position, a
+wider stop loses more slowly on the way to the same place and the concentration
+problem (criterion 1) gets worse, not better.
+
+Amendment E already produced evidence against: of 1,602 trades that the
+one-second bars freed from an entry-minute stop, **1,301 (81.2%) re-reached the
+same stop within a minute or two anyway.** F exists because that reading is
+suggestive and not decisive, and because the question is answerable from bars
+already on disk for $0.00.
+
+## F.2 What is measured
+
+Scope: the primary cell only — range 5, rank <= 20, outside the holdout — on
+the resolved ledger. XNAS.ITCH `ohlcv-1m`, already on disk. No data is bought.
+
+For each trade, from the **entry bar onward** (bars before the entry cannot act
+on a position that does not exist — amendment D, same principle) to the last
+RTH bar of that session, holding the entry fixed and ignoring the registered
+stop:
+
+- **MAE** — maximum adverse excursion, the furthest the price went against the
+  entry, in multiples of the trade's registered risk `r`.
+- **MFE** — maximum favourable excursion, likewise.
+- **`end_r`** — the session-end close relative to entry, in multiples of `r`.
+- **`mae_before_mfe`** — whether the adverse extreme preceded the favourable
+  one. A trade that ran first and gave it back is not a trade a wider stop
+  would have rescued, and must not be counted as one.
+
+Reported as distributions and shares. **No net P/L at any stop width appears in
+F's output.** Minute bars carry no intra-bar order, so a bar holding both
+extremes is counted against the favourable case (the conservative side, as
+throughout this registration).
+
+## F.3 The rule that decides what follows, fixed before the numbers
+
+Among **losing** trades in the primary cell, define a trade as **rescuable** if
+all three hold: `MAE < 2r`, `end_r > 0`, and the adverse extreme preceded the
+favourable one.
+
+- **If rescuable < 25% of losers:** the stop is doing its job, a wider one
+  loses more slowly, and **ORB closes permanently.** No variant is registered,
+  no further data is bought, the holdout stays locked.
+- **If rescuable >= 25%:** one — and only one — stop width is registered and
+  tested. **The width is chosen by the rule below, not by which width performs
+  best.**
+
+### F.3.1 How the width would be chosen, stated now
+
+The smallest multiple `k` in (1.5, 2.0, 2.5, 3.0) such that at least 60% of
+rescuable losers have `MAE < k*r`. If no `k` reaches 60%, ORB closes. The
+chosen `k` is registered with its own predictions and pass criteria before it
+is run, and the seven criteria are unchanged — in particular **criterion 1 is
+not relaxed**, because concentration is the deeper failure here and a wider
+stop is expected to worsen it.
+
+## F.4 Prediction, scored either way
+
+Written before the measurement: **rescuable lands below 25% and ORB closes.**
+The basis is E's 81.2%. If it lands above, the prediction is wrong and is
+recorded as wrong.
+
+## F.5 What F does not do
+
+It does not touch the universe, the ranking, the filters, the friction levels,
+the criteria, the controls, the holdout, the resolved figure of record, or the
+verdict already recorded. It buys no data. It produces no P/L.
