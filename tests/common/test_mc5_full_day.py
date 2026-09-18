@@ -110,6 +110,18 @@ def test_drop_top_symbols_removes_names_not_trades():
     assert F.drop_top_symbols(rows, FR, n=1) == pytest.approx(6.0)
 
 
+def test_extra_premarket_entries_are_counted_not_credited_to_the_extension():
+    """The long-window arm books a pre-market entry the 09:30 arm drops because
+    it landed on the last bar. It must be named, or it reads as the extension
+    adding pre-market trades."""
+    base = [tr(EARLY, "07:00", 5, "A")]
+    ext = [tr(EARLY, "07:00", 5, "A"), tr(EARLY, "09:25", -3, "B"),
+           tr(EARLY, "10:00", 2, "C")]
+    extra = F.extra_pre_entries(base, ext)
+    assert [r["symbol"] for r in extra] == ["B"]          # not C: that one is added
+    assert [r["symbol"] for r in F.added(ext)] == ["C"]
+
+
 # --- amendment C: the two controls -------------------------------------------------
 
 def frame(rows, start="03:00"):
@@ -207,4 +219,5 @@ def test_render_prints_both_controls_the_verdict_and_the_carried_line():
     L = "\n".join(F.render(books, 100, 120, CUT, 2, 1.0, 1, a, (10, -8.57), 0, []))
     assert "PASSES" in L and "WARM-UP, PRICED" in L
     assert "CARRIED TRADES: C against A'" in L
+    assert "PRE-MARKET ENTRIES ONLY C HAS" in L
     assert "P/L change" in L

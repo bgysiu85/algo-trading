@@ -180,6 +180,19 @@ def carried(base, ext) -> list[tuple[dict, dict]]:
     return [(b[key(r)], r) for r in ext if r["entry_et"] < "09:30" and key(r) in b]
 
 
+def extra_pre_entries(base, ext) -> list[dict]:
+    """Pre-market entries the EXTENDED book has and the 09:30 book does not.
+
+    These are not an extension effect, they are the engine's last-bar rule: an
+    entry on the final in-session bar has no bar left to be managed on, so the
+    short-window arm books no trade for it at all while the long-window arm
+    books an ordinary one. Counted and printed rather than left to look like
+    the extension producing pre-market trades out of nothing.
+    """
+    have = {key(r) for r in base}
+    return [r for r in ext if r["entry_et"] < "09:30" and key(r) not in have]
+
+
 def by_block(rows) -> dict[str, list[dict]]:
     out: dict[str, list[dict]] = {}
     for r in rows:
@@ -334,6 +347,13 @@ def render(books, symdays, c_symdays, cut, sessions, elapsed, jobs, a, expect,
               "", f"  {tag if arm == 'C' else 'REPORTED'}: {why2}", ""]
 
     for arm in ("B", "C"):
+        extra = extra_pre_entries(books["A2"], books[arm])
+        L += [f"PRE-MARKET ENTRIES ONLY {arm} HAS -- the engine's last-bar rule, not the rule "
+              "under test", "",
+              f"  {len(extra):,} entries before 09:30 that A' does not book, worth "
+              f"{money(net(extra, f))} at $4.26",
+              "  (an entry on the final in-session bar has no bar left to manage on, so the",
+              "   09:30 arm books nothing for it; extending the window gives it one)", ""]
         pairs = carried(books["A2"], books[arm])
         delta = sum((x["net"] - f) - (b["net"] - f) for b, x in pairs)
         moved = sum(1 for b, x in pairs if x["exit_et"] != b["exit_et"])
