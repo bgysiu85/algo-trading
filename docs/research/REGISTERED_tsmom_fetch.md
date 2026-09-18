@@ -188,6 +188,36 @@ identically. `PROGRAM_INDEX` §4: a second condition that cannot fail
 independently of the first is not a second condition. The three were collapsed
 into one `_probe`.)*
 
+### 1.5 The estimate is a BRACKET, not a point — 2026-09-18
+
+The fourth run priced cleanly at **$3.01 / 1.127 GiB**. The registered figure is
+**$3.65 / 1.501 GiB**. **Neither is wrong and the scope did not change.**
+
+Both are sampled estimates, and **they sample different ends of the range**:
+
+| | samples | figure |
+|---|---|---|
+| `tsmom_data_price --scope lean` | the **last** session, ×190 | **$3.65** |
+| `tsmom_fetch` | the **first resolvable** session, ×remaining | **$3.01** |
+
+CME lists far more contracts in 2026 than in 2010, so a `definition` snapshot
+grows over the sample. The early sample **understates**, the late one
+**overstates**, and the true cost sits between. Part of the gap is also real:
+RTY's jobs now start in 2017 (§1.4), so there are fewer of them.
+
+**A sampled estimate that does not say which end it sampled is half a quote.**
+Recorded rather than silently reconciled, because the two numbers will otherwise
+look like a price change to whoever reads them next.
+
+**No decision turns on it.** The upper bound, $3.65, is already under the $5.00
+ceiling, so the gate behaves identically at either figure. **The pull settles
+it:** the manifest records the estimate against what actually ran, and the
+ACTUAL is what gets registered afterwards — a measurement, not a third estimate.
+
+*(If a point estimate is ever wanted, the fix is to sample first, middle and
+last and average — 36 calls instead of 24, still free. Not done now, because it
+would be refining a number the pull is about to replace with a fact.)*
+
 ## 2. The guards, and what each is for
 
 1. **Estimate first, always.** The total prints before anything transfers.
