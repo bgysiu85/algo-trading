@@ -25,10 +25,75 @@ Measured price: `claude/raw/tsmom_price_20260917.txt`.
 
 **The monthly grid is the 15th of each month, derived from the range**, not a
 sample count chosen to hit a price. A contract is listed months to years before
-expiry and stays listed, so any day in the month carries the same expiration
-dates; the 15th avoids month-end and month-start holiday clustering. A test
-pins the grid at 180–190 samples, because if it drifts the **$3.65 recorded in
-amendment A stops describing the pull**.
+expiry and stays listed, so any *session* in the month carries the same
+expiration dates; the 15th avoids month-end and month-start holiday clustering.
+A test pins the grid at 180–190 samples, because if it drifts the **$3.65
+recorded in amendment A stops describing the pull**.
+
+### 1.1 Non-sessions — the defect the first live run found, 2026-09-18
+
+The first `--confirm`-less run stopped at:
+
+```
+pricing failed, nothing downloaded: 422 symbology_invalid_request
+None of the symbols could be resolved
+```
+
+**55 of the 190 samples landed on a Saturday or Sunday** — the third, 2010-08-15,
+being a Sunday. A one-day window over a non-session day resolves nothing.
+
+**This section and the module docstring both already said the grid stepped off
+non-sessions. Neither the code nor a test did.** That is the second property in
+two days asserted in prose and not implemented (the other:
+`common/tsmom_holdout._normalise`, `REGISTERED_tsmom` §6.1), and it is
+`PROGRAM_INDEX` §5 — *a report must read its own inputs, not assert them.*
+
+Now implemented, and registered:
+
+- **Weekends are known in advance** and the sample steps **back** to the Friday,
+  which keeps it inside its own month. A test asserts zero weekend samples and
+  that every sample's day-of-month is ≤ 15.
+- **Holidays are not known** — the exchange calendar is not in hand — so an
+  unresolvable day is **retried forward up to three days**. The retry is narrow:
+  only a symbology miss. Any other failure still aborts, because a blanket retry
+  turns a mis-scoped request into a slow one instead of a loud one.
+- **A month that still cannot be placed is reported by root and month**, never
+  skipped silently, and **more than 2% of samples unplaceable aborts the run** —
+  that is a calendar problem, not a few holidays.
+
+And the error now **names the failing job** (root, schema, dates, symbols,
+symbology). The first version's did not, which is why a 422 whose cause was a
+Sunday could not be diagnosed from its own output.
+
+### 1.2 A defect in the METHOD, not the code, 2026-09-18
+
+Worth recording separately because it makes every mutation result in this line
+provisional until re-run.
+
+The sweeps here rewrite the module in rapid succession — mutate, run pytest,
+restore, mutate again. **Python invalidates a `__pycache__` entry on the
+source's mtime and size, and successive writes inside one clock second defeat
+that.** After a sweep restored the original file, the next run was still
+executing the bytecode of the last mutant (`share > 0.50`). The symptom was a
+test failing identically alone and in the suite, against source that was
+correct when read — and a commit that went in with it failing, because the
+`echo EXIT=$?` after the redirect did not gate the commit. `PROGRAM_INDEX` §5
+already has that one: *a test that pipes through `| tail -1 &&` masks its exit
+code.*
+
+**Every mutation sweep in this line was re-run with `python3 -B` and
+`-p no:cacheprovider`, after clearing `__pycache__`.** All verdicts held —
+**12/12 on `tsmom_data_price`, 10/10 on `tsmom_holdout`, 14/14 on
+`tsmom_fetch`** — but they were not trustworthy until they had been.
+
+The general form, for `PROGRAM_INDEX` §5: **"the source says X" is not evidence
+that X ran.** It is §5's "a report must read its own inputs, not assert them"
+one layer down — the interpreter was not reading its inputs either.
+
+*(No test enforces this: a check that the sweep used `-B` can only inspect its
+own file and cannot fail for the right reason. `common/holdout.py` set the
+precedent — a promised counter that nothing incremented was removed rather than
+shipped as decoration.)*
 
 ## 2. The guards, and what each is for
 
@@ -52,7 +117,7 @@ amendment A stops describing the pull**.
 7. **Exceptions are scrubbed** before printing. A Telegram token once leaked
    out of `common/notify.py`'s exception handler.
 
-**Eleven mutations run against these, eleven caught.**
+**Fourteen mutations run against these, fourteen caught** — under §1.2's re-run conditions, not the first pass's.
 
 ## 3. The manifest, and why the pull writes one
 

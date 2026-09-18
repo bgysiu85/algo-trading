@@ -149,6 +149,133 @@ def test_the_key_is_resolved_through_secrets_util():
     assert 'os.environ["DATABENTO_API_KEY"]' not in text
 
 
+def test_no_monthly_sample_lands_on_a_weekend():
+    """The defect that stopped the first live run.
+
+    55 of 190 samples took the 15th unconditionally and landed on a Saturday or
+    Sunday. A one-day window over a non-session day resolves nothing, and the
+    vendor answers 422 symbology_invalid_request -- which reads like a wrong
+    symbol or a wrong scope and is neither. The docstring and the registration
+    both already claimed the grid stepped off non-sessions; nothing did.
+    """
+    from datetime import date as _d
+
+    days = F.definition_days("2010-06-06", "2026-09-17")
+    weekend = [x for x in days if _d.fromisoformat(x).weekday() >= 5]
+    assert weekend == [], f"{len(weekend)} samples on a weekend, e.g. {weekend[:3]}"
+    # stepped BACK, so the sample stays in its own month
+    for x in days:
+        assert _d.fromisoformat(x).day <= 15, x
+        assert x[:7] == (x[:8] + "15")[:7]
+
+
+def test_a_holiday_is_retried_forward_and_a_run_of_them_is_reported():
+    """Weekends are known in advance; holidays are not.
+
+    An unresolvable day moves rather than aborting -- but it is reported, because
+    a run that quietly drops a few months is indistinguishable from one that
+    drops a year.
+    """
+    class _HolidayMeta(_FakeMeta):
+        def __init__(self, dead):
+            super().__init__()
+            self.dead = dead
+
+        def get_cost(self, **kw):
+            if kw.get("start") in self.dead:
+                raise RuntimeError("422 symbology_invalid_request: None of the "
+                                   "symbols could be resolved")
+            return super().get_cost(**kw)
+
+    client = _FakeClient()
+    client.metadata = _HolidayMeta({"2011-07-15"})       # one holiday
+    jobs, usd, _, _ = F.plan(client, {"ES": ""}, F.Path("/nonexistent"),
+                             "2010-06-06", "2026-09-17")
+    got = {kw["start"] for _, sc, _, kw in jobs if sc == F.DEF_SCHEMA}
+    assert "2011-07-15" not in got
+    assert "2011-07-16" in got, "the holiday was not retried forward"
+    assert len(got) == len(F.definition_days("2010-06-06", "2026-09-17"))
+
+
+def test_a_non_symbology_failure_still_aborts_and_names_the_job():
+    """A blanket retry would turn a mis-scoped request into a slow one instead
+    of a loud one. And the first version's error named no job at all, which is
+    why the live 422 could not be diagnosed from its own output."""
+    class _BrokenMeta(_FakeMeta):
+        def get_cost(self, **kw):
+            raise RuntimeError("500 internal error")
+
+    client = _FakeClient()
+    client.metadata = _BrokenMeta()
+    with pytest.raises(SystemExit) as e:
+        F.plan(client, {"ES": ""}, F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
+    msg = str(e.value)
+    assert "nothing downloaded" in msg
+    assert "ES" in msg and F.BAR_SCHEMA in msg, (
+        "the error does not name the failing job -- which is exactly why the "
+        "live 422 on 2026-09-18 could not be diagnosed from its own output")
+    assert "continuous" in msg
+
+
+def test_a_non_symbology_failure_on_a_DEFINITION_job_aborts(capsys):
+    """The retry must be narrow, and this is the test that proves it is.
+
+    Mutation-testing caught the gap: the earlier version of this check failed
+    every call including the BAR jobs, which abort unconditionally -- so
+    widening _is_symbology_miss to `return True` changed nothing observable and
+    the mutation survived. Bars must succeed here so the definition path is the
+    one under test.
+    """
+    class _DefBreaks(_FakeMeta):
+        def get_cost(self, **kw):
+            if kw.get("schema") == F.DEF_SCHEMA:
+                raise RuntimeError("500 internal server error")
+            return super().get_cost(**kw)
+
+    client = _FakeClient()
+    client.metadata = _DefBreaks()
+    with pytest.raises(SystemExit) as e:
+        F.plan(client, {"ES": ""}, F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
+    msg = str(e.value)
+    assert "nothing downloaded" in msg and F.DEF_SCHEMA in msg, (
+        "a 500 on a definition job was retried away as though it were a "
+        "holiday -- a blanket retry turns a mis-scoped request into a slow one "
+        "instead of a loud one")
+
+
+def test_unplaced_months_are_reported_and_a_run_of_them_aborts(capsys):
+    """A run that quietly drops a few months is indistinguishable from one that
+    drops a year, so the count is printed and 2% stops the run."""
+    class _DeadRange(_FakeMeta):
+        def __init__(self, dead_from, dead_to):
+            super().__init__()
+            self.lo, self.hi = dead_from, dead_to
+
+        def get_cost(self, **kw):
+            if kw.get("schema") == F.DEF_SCHEMA and self.lo <= kw["start"] <= self.hi:
+                raise RuntimeError("422 symbology_invalid_request: None of the "
+                                   "symbols could be resolved")
+            return super().get_cost(**kw)
+
+    # One month unplaceable: reported, run continues.
+    client = _FakeClient()
+    client.metadata = _DeadRange("2011-07-01", "2011-07-31")
+    jobs, _, _, _ = F.plan(client, {"ES": ""}, F.Path("/nonexistent"),
+                           "2010-06-06", "2026-09-17")
+    out = capsys.readouterr().out
+    assert "WARNING" in out and "1 month(s)" in out and "2011-07" in out, (
+        "an unplaceable month was skipped silently")
+    assert jobs
+
+    # A year of them: above the registered 2%, so the run stops.
+    client2 = _FakeClient()
+    client2.metadata = _DeadRange("2013-01-01", "2014-12-31")
+    with pytest.raises(SystemExit) as e:
+        F.plan(client2, {"ES": ""}, F.Path("/nonexistent"),
+               "2010-06-06", "2026-09-17")
+    assert "ABORT" in str(e.value) and "nothing downloaded" in str(e.value)
+
+
 def test_the_definition_grid_is_monthly_deterministic_and_capped():
     days = F.definition_days("2010-06-06", "2026-09-17")
     assert days == F.definition_days("2010-06-06", "2026-09-17"), "not deterministic"
