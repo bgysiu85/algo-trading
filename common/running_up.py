@@ -175,6 +175,68 @@ def ret_at(df: pd.DataFrame, ts, back: int = 5) -> float:
     return _ret(session_slice(df, ts), back)
 
 
+def ret_series(df: pd.DataFrame, back: int = 5) -> pd.Series:
+    """`ret_at` for every bar, at once, on the same session rules.
+
+    H-P1's gate needs the five-minute return at EVERY bar of every symbol-day,
+    and calling `ret_at` per bar re-slices the frame each time -- minutes
+    against seconds over 6,411 symbol-days.
+
+    TWO IMPLEMENTATIONS, ON PURPOSE, WITH A TEST THAT PINS THEM TOGETHER.
+    `tests/common/test_ret_series.py` asserts this agrees with `ret_at` bar for
+    bar, including the NaN positions. That is the cheapest control this project
+    has: the SPY caches caught a data-path defect the same way, by pulling the
+    same number down two independent routes and requiring them to agree.
+
+    Grouped by session date, because `back` is POSITIONAL within a session --
+    `build_frame` prepends warm-up days, and a shift across the whole frame
+    would compute the 04:00 bar's return against yesterday's last bars, which
+    is the three-day-frame trap (§5) with a different mask.
+    """
+    if df.empty:
+        return pd.Series(dtype=float, index=df.index)
+    local = df.index.tz_convert(ET)
+    inside = local.time >= SESSION_START
+    out = pd.Series(np.nan, index=df.index, dtype=float)
+    close = df["close"].astype(float)
+    for day in pd.unique(local.date):
+        m = (local.date == day) & inside
+        if not m.any():
+            continue
+        c = close[m]
+        prev = c.shift(back)
+        # prev == 0 is NaN in `_ret`, not an infinite return.
+        out.loc[c.index] = (c / prev.where(prev != 0) - 1.0).values
+    return out
+
+
+def dist_series(df: pd.DataFrame) -> pd.Series:
+    """`features()['dist_from_high']` for every bar, on the same session rules.
+
+    close / (the session's running high so far) - 1, so it is <= 0 and reads 0
+    at a new session high. Point-in-time by construction: the running maximum
+    uses only bars at or before each one.
+
+    Same two-implementations-with-an-agreement-test arrangement as
+    `ret_series`, and the same reason for grouping by session date: the frame
+    carries warm-up days, and a cummax across the whole of it would measure
+    today's price against yesterday's high.
+    """
+    if df.empty:
+        return pd.Series(dtype=float, index=df.index)
+    local = df.index.tz_convert(ET)
+    inside = local.time >= SESSION_START
+    out = pd.Series(np.nan, index=df.index, dtype=float)
+    for day in pd.unique(local.date):
+        m = (local.date == day) & inside
+        if not m.any():
+            continue
+        hi = df.loc[m, "high"].astype(float).cummax()
+        px = df.loc[m, "close"].astype(float)
+        out.loc[px.index] = (px / hi.where(hi > 0) - 1.0).values
+    return out
+
+
 # --- separation, computed the same way for every feature --------------------
 
 def auc(pos: np.ndarray, neg: np.ndarray) -> float:

@@ -60,6 +60,7 @@ except ImportError:
     sys.exit("ib_async not installed.  Run:  pip install ib_async")
 
 from common import session_lock
+from common.report_io import emit
 
 ET = ZoneInfo("America/New_York")
 
@@ -257,10 +258,28 @@ async def main_async(args) -> int:
 
             text = render(selected, pinned, args.top)
             if args.preview:
-                print("\n" + "-" * 60)
-                print(text.rstrip())
-                print("-" * 60)
-                print("(preview -- nothing written)")
+                # WRITTEN FROM PYTHON, NEVER REDIRECTED. Ben's rule is that
+                # every result is a file and nothing is copy-pasted out of a
+                # terminal -- and PowerShell's own `>` and Tee-Object write
+                # UTF-16, which is the encoding trap this repo already has a
+                # guard for. report_io.emit prints painted and writes plain
+                # UTF-8, so --preview-out is the only safe way to keep this.
+                body = ["THE IB SCANNER, PREVIEWED -- NOTHING WRITTEN", "",
+                        f"  scan code   {SCAN_CODE}",
+                        f"  top         {args.top}   max symbols {args.max_symbols}",
+                        f"  returned    {len(found)} name(s) from the scan",
+                        f"  would write {len(selected)} symbol(s) to {args.watchlist}",
+                        "",
+                        "  THE OPEN QUESTION THIS SETTLES: whether IB's "
+                        "percent-gain scans",
+                        "  compute BEFORE 09:30. A scan returning nothing "
+                        "pre-market is the",
+                        "  answer 'no', not a failure -- and it is the whole "
+                        "reason to run this.",
+                        "", "-" * 60, text.rstrip(), "-" * 60,
+                        "(preview -- nothing written to the watchlist)"]
+                emit("\n".join(body), args.preview_out,
+                     header=f"scanner --preview scan={SCAN_CODE} top={args.top}")
                 break
             if not wl.exists() or wl.read_text(encoding="utf-8") != text:
                 wl.write_text(text, encoding="utf-8")
@@ -288,6 +307,9 @@ def main(argv: list[str] | None = None) -> int:
                         "requests hit IB's pacing limit beyond ~6 symbols.")
     p.add_argument("--preview", action="store_true",
                    help="scan once, print what would be written, write nothing")
+    p.add_argument("--preview-out", default="var/reports/scan_preview.txt",
+                   help="where --preview writes its report (default: "
+                        "%(default)s). It never touches the watchlist.")
     p.add_argument("--no-sticky", dest="sticky", action="store_false",
                    help="let names drop off when they leave the top N "
                         "(default is to keep them for the session)")

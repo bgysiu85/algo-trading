@@ -60,6 +60,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import time
 import urllib.error
@@ -70,8 +71,8 @@ from zoneinfo import ZoneInfo
 
 from common import notify, session_lock
 from common.tv_screener import (CHANGE_COLUMN, COLUMNS, FILTERS, MARKET,
-                                PRICE_MAX, PRICE_MIN, check_response,
-                                failing_clauses)
+                                PRICE_MAX, PRICE_MIN, VOLUME_COLUMN,
+                                check_response, failing_clauses)
 
 LOG = logging.getLogger("tv_feed")
 ET = ZoneInfo("America/New_York")
@@ -97,6 +98,59 @@ REQUEST_TIMEOUT = 8.0
 # useless traffic for five hours, which is how an IP gets blocked.
 BACKOFF_START = 15.0
 BACKOFF_MAX = 300.0
+
+# --- the login, and the column that says whether it worked --------------------
+#
+# The scanner endpoint is posted to with no cookie, so Ben's TradingView premium
+# entitlement has never reached it. Whether that means the rows are DELAYED is
+# answered by TradingView's own `update_mode` column, and until the probe has
+# run neither answer is assumed here: this module gains the ability to send the
+# cookie and to READ the column, and changes nothing when the environment is
+# empty.
+#
+# BOTH COOKIES OR NEITHER. TradingView signs the session. `sessionid` alone is
+# accepted and served ANONYMOUSLY -- so a half-set environment would look
+# logged in, behave delayed, and produce no error anywhere. Never a CLI flag:
+# the rule DATABENTO_API_KEY carries, because a flag puts the secret in shell
+# history.
+COOKIE_ENV = "TV_SESSIONID"
+SIGN_ENV = "TV_SESSIONID_SIGN"
+MODE_COLUMN = "update_mode"
+
+
+def cookie_header(sid: str | None, sign: str | None) -> str | None:
+    """The Cookie header, or None when the pair is incomplete -- never a
+    partial header, which would be an anonymous request wearing a login."""
+    if not sid or not sign:
+        return None
+    return f"sessionid={sid}; sessionid_sign={sign}"
+
+
+def session_cookie() -> str | None:
+    """The cookie from the environment, with the half-set case named loudly."""
+    sid, sign = os.environ.get(COOKIE_ENV), os.environ.get(SIGN_ENV)
+    header = cookie_header(sid, sign)
+    if header is None and (sid or sign):
+        LOG.error("only ONE of %s / %s is set. TradingView signs the session, "
+                  "so a half-set pair is served ANONYMOUSLY -- the feed would "
+                  "look logged in and read delayed data. Sending NO cookie.",
+                  COOKIE_ENV, SIGN_ENV)
+    return header
+
+
+def mode_verdict(value) -> str:
+    """What `update_mode` says, in one word. "streaming" is real time; anything
+    containing "delayed" is not, and TradingView spells the delay into the
+    value (`delayed_streaming_900` is fifteen minutes), so the raw string is
+    printed beside the verdict rather than reduced to a boolean."""
+    if value is None:
+        return "UNKNOWN"
+    v = str(value).lower()
+    if "delayed" in v:
+        return "DELAYED"
+    if "streaming" in v or v in ("realtime", "real_time"):
+        return "STREAMING"
+    return "UNRECOGNISED"
 
 
 def tv_payload(limit: int = MAX_SYMBOLS) -> dict:
@@ -134,8 +188,8 @@ def parse(body: dict) -> list[dict]:
     return rows
 
 
-def fetch(limit: int = MAX_SYMBOLS) -> list[dict]:
-    body = _scan(tv_payload(limit))
+def fetch(limit: int = MAX_SYMBOLS, cookie: str | None = None) -> list[dict]:
+    body = _scan(tv_payload(limit), cookie)
     # THE RULE tv_screener.py states and this feed was not following: the
     # server accepts a clause it cannot apply, returns a plausible result set,
     # and lists the dropped clause under ignored_filters. A feed that does not
@@ -148,14 +202,18 @@ def fetch(limit: int = MAX_SYMBOLS) -> list[dict]:
     return parse(body)
 
 
-def _scan(payload: dict) -> dict:
+def _scan(payload: dict, cookie: str | None = None) -> dict:
     """One POST to the scanner endpoint. Split out of fetch() so the drop
     lookup shares exactly the request the feed itself makes, and so a test can
-    replace the network in one place instead of patching urllib."""
+    replace the network in one place instead of patching urllib.
+
+    `cookie` is a complete Cookie header and is NEVER logged.
+    """
+    headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+    if cookie:
+        headers["Cookie"] = cookie
     req = urllib.request.Request(
-        ENDPOINT, data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json",
-                 "User-Agent": "Mozilla/5.0"})
+        ENDPOINT, data=json.dumps(payload).encode(), headers=headers)
     with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as r:
         return json.load(r)
 
@@ -293,6 +351,231 @@ class Ranking:
         return hot, warm, cold
 
 
+def check_update_mode(cookie: str | None) -> tuple[str, object]:
+    """Ask TradingView whether these rows are real time, ONCE, at startup.
+
+    Returns (verdict, raw value). Never raises: a feed that will not start
+    because a diagnostic failed is worse than one that starts without it.
+
+    WHY AT STARTUP AND WHY LOUDLY. A TradingView cookie expires. An expired one
+    does not error -- the endpoint simply serves the anonymous feed, and a
+    delayed watchlist is indistinguishable from a real-time one by looking at
+    it. So the one moment this can be caught for free is the moment the process
+    starts, and it has to be said in a line nobody can mistake for routine.
+
+    The column is asked for in its OWN request rather than added to the poll's
+    columns, so the 1,980 polls of a session stay byte-identical to what they
+    were before this existed.
+    """
+    payload = tv_payload(1)
+    payload["columns"] = list(COLUMNS) + [MODE_COLUMN]
+    try:
+        body = _scan(payload, cookie)
+    except Exception as e:                                    # noqa: BLE001
+        LOG.warning("could not read %s (%s: %s) -- proceeding without it",
+                    MODE_COLUMN, type(e).__name__, e)
+        return "UNKNOWN", None
+    raw = None
+    for item in (body.get("data") or []):
+        row = dict(zip(list(COLUMNS) + [MODE_COLUMN], item.get("d") or []))
+        if row.get(MODE_COLUMN) is not None:
+            raw = row[MODE_COLUMN]
+            break
+    verdict = mode_verdict(raw)
+    if verdict == "STREAMING":
+        LOG.info("%s = %r -- REAL TIME%s", MODE_COLUMN, raw,
+                 " (signed in)" if cookie else " (anonymous)")
+    elif verdict == "DELAYED" and cookie:
+        LOG.error("%s = %r -- THE COOKIE IS NOT WORKING. A cookie was sent and "
+                  "the rows are still DELAYED: it has most likely expired. The "
+                  "watchlist is being built from delayed data and looks "
+                  "identical to a real-time one.", MODE_COLUMN, raw)
+    elif verdict == "DELAYED":
+        LOG.warning("%s = %r -- these rows are DELAYED, and no cookie is set "
+                    "(%s / %s).", MODE_COLUMN, raw, COOKIE_ENV, SIGN_ENV)
+    else:
+        LOG.warning("%s = %r -- not recognised as streaming or delayed.",
+                    MODE_COLUMN, raw)
+    return verdict, raw
+
+
+class Arrivals:
+    """When each name first reached the watchlist, appended as it happens.
+
+    THE MEASUREMENT THIS PROJECT CANNOT MAKE RETROSPECTIVELY. The handover asks
+    for the distribution of how late the feed is, by comparing each name's
+    first appearance against the minute the tape says it first met the screen.
+    The archive cannot answer it: `var/archive/watchlist_YYYYMMDD.txt` is a
+    SINGLE 09:29 snapshot with no per-name arrival times, and the only stamps on
+    record are the blocked entries -- which is why that reading has n = 8.
+
+    So the arrival time is recorded from now on. One line per name per session,
+    written the first time it is written to the watchlist, appended so a crash
+    keeps what it had. After a week this is a distribution instead of an
+    anecdote, and it costs one small file a day.
+    """
+
+    def __init__(self, root: Path = Path("var/archive")):
+        self.root = root
+        self.session = None
+        self.seen: set[str] = set()
+
+    def path_for(self, day) -> Path:
+        return self.root / f"watchlist_arrivals_{day:%Y%m%d}.csv"
+
+    def begin_session(self, day) -> None:
+        if self.session != day:
+            self.session = day
+            self.seen.clear()
+
+    def record(self, symbols: list[str], tiers: dict[str, str], now) -> list[str]:
+        """Append any name not yet seen this session. Returns those names.
+
+        Never raises: this is telemetry sitting inside the loop that keeps the
+        watchlist current, and a disk hiccup must cost a row, never a poll.
+        """
+        new = [t for t in symbols if t not in self.seen]
+        if not new:
+            return []
+        self.seen.update(new)
+        try:
+            path = self.path_for(now)
+            fresh = not path.exists()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8", newline="") as fh:
+                if fresh:
+                    fh.write("ticker,first_et,tier\n")
+                for t in new:
+                    fh.write(f"{t},{now:%Y-%m-%d %H:%M:%S},{tiers.get(t, '')}\n")
+        except Exception as e:                                # noqa: BLE001
+            LOG.info("could not record arrivals (%s: %s)", type(e).__name__, e)
+        return new
+
+
+class Freshness:
+    """Yesterday's screen, re-served. The gate that stops it reaching the file.
+
+    REGISTERED_feed_freshness.md (H-F1), committed before this class existed.
+
+    TradingView's `premarket_*` columns hold the PREVIOUS session's values until
+    today's pre-market prints arrive, so the feed's first poll of a session
+    returns **yesterday's screen as ordinary live rows**. The blocked files
+    stamp them at 04:00:05, 04:00:06, 04:00:08 and 04:00:26 on four separate
+    sessions -- before any bar of today has closed. Eighteen live names across
+    seven sessions were this, and `screen_validate` had to set them aside before
+    it could read its own verdict.
+
+    THIS IS NOT THE CARRY-OVER `Ranking.begin_session` ALREADY FIXED
+    ---------------------------------------------------------------
+    That one was the ranker remembering across midnight, and the fix -- forget
+    at the roll -- is correct and stays. It cannot touch this one, because here
+    the names arrive **fresh from the endpoint**, as rows, carrying yesterday's
+    numbers. A memory that forgets perfectly is no defence against a source that
+    repeats itself.
+
+    THE RULE, and it has no free parameter
+    --------------------------------------
+    A name may not reach the watchlist until its `premarket_volume` has been
+    observed to CHANGE, at least once, this session. Nothing else distinguishes
+    a stale row from a live one: the row does not carry its own age, and a
+    name's volume is the one field that must move the moment it trades today.
+
+    No threshold, no grace window, no clock -- deliberately. The four stamps
+    above sit between 04:00:05 and 04:00:26, and a window fitted to them is
+    precisely the kind of number §4 of the index has a row about.
+
+    THE SAFETY PROPERTY, which is what makes this cheap
+    --------------------------------------------------
+    **It can only ever delay a name's FIRST appearance. It can never remove a
+    name already in the file.** Admission is permanent for the session, so a
+    name whose volume goes quiet later is untouched. That is what keeps this
+    compatible with Ben's rule of 2026-09-05 -- do not remove, deprioritise --
+    and with the fact that dropping a name mid-session orphans a held position.
+
+    A HELD NAME IS WITHHELD ENTIRELY, NOT DEMOTED TO COLD
+    ----------------------------------------------------
+    COLD is an ordering, not a veto: the trader arms every symbol in the file.
+    Writing a stale name as COLD would arm it, which is the defect.
+
+    WHAT IT COSTS
+    -------------
+    One poll -- ten seconds -- for a name that is trading, and the screen's own
+    `premarket_volume >= 100,000` clause means an admitted name has traded a
+    hundred thousand shares since 04:00. On a mid-session restart every name is
+    unproven again and each waits for its next print; accepted, and deliberately
+    NOT bought back with a persisted state file read inside the live loop.
+    """
+
+    def __init__(self):
+        self.session = None
+        self.first_volume: dict[str, float] = {}
+        self.admitted: set[str] = set()
+        self.held: set[str] = set()
+
+    def begin_session(self, day) -> bool:
+        """Start `day`; clear the evidence if this is a NEW session.
+
+        Returns True when it cleared, for the same reason `Ranking` does: a
+        silent clear and a silent non-clear look identical in a log.
+        """
+        if self.session == day:
+            return False
+        rolled = bool(self.first_volume) and self.session is not None
+        self.session = day
+        self.first_volume.clear()
+        self.admitted.clear()
+        self.held.clear()
+        return rolled
+
+    @staticmethod
+    def _volume(row: dict) -> float | None:
+        """The row's pre-market volume, or None if it cannot be compared.
+
+        NaN is excluded on purpose. `nan != anything` is True, so an unguarded
+        comparison would read a NaN volume as "changed" and admit the row --
+        the same NaN-is-not-None trap that produced a sign-flipped median in a
+        study this morning.
+        """
+        v = row.get(VOLUME_COLUMN)
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            return None
+        v = float(v)
+        return None if math.isnan(v) else v
+
+    def admit(self, rows: list[dict]) -> tuple[list[dict], list[str]]:
+        """(rows that may reach the ranker, tickers newly held this poll).
+
+        The second element exists so the hold is logged the first time and not
+        on every subsequent poll -- a line every ten seconds for five hours
+        trains the reader to skip it, which is how the original defect survived
+        four sessions of being printed.
+        """
+        out, newly_held = [], []
+        for row in rows:
+            t = row["ticker"]
+            if t in self.admitted:
+                out.append(row)
+                continue
+            vol = self._volume(row)
+            if vol is None:
+                # Cannot be shown to have moved. Withheld, and it says so.
+                if t not in self.held:
+                    self.held.add(t)
+                    newly_held.append(t)
+                continue
+            if t not in self.first_volume:
+                self.first_volume[t] = vol
+                if t not in self.held:
+                    self.held.add(t)
+                    newly_held.append(t)
+                continue
+            if vol != self.first_volume[t]:
+                self.admitted.add(t)
+                self.held.discard(t)
+                out.append(row)
+        return out, newly_held
+
+
 def write_watchlist(path: Path, symbols: list[str], header: str = "") -> bool:
     """Atomic write. The trader may read this file at any moment, and a
     half-written file is a truncated watchlist rather than an error.
@@ -330,6 +613,8 @@ def build_parser() -> argparse.ArgumentParser:
     notify.add_batch_arg(ap)
     ap.add_argument("--no-telegram", action="store_true",
                     help="run without notifications even if configured")
+    ap.add_argument("--no-cookie", action="store_true",
+                    help=f"ignore {COOKIE_ENV}/{SIGN_ENV} and poll anonymously")
     ap.add_argument("--heartbeat", type=float, default=3600.0,
                     help="seconds between 'feed alive' messages; 0 disables")
     return ap
@@ -348,6 +633,10 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     rank = Ranking(a.max_symbols)
+    fresh = Freshness()
+    arrivals = Arrivals()
+    cookie = None if a.no_cookie else session_cookie()
+    check_update_mode(cookie)
     backoff = 0.0
     tg = (notify.Notifier() if a.no_telegram
           else notify.Notifier.from_env(a.telegram_batch_min))
@@ -361,7 +650,8 @@ def main(argv: list[str] | None = None) -> int:
     # neither take the lock nor be blocked by one -- the whole point of
     # --dry-run is to check the endpoint while a real feed is running.
     if a.dry_run:
-        return _loop(a, rank, tg, prev_screening, last_beat, backoff)
+        return _loop(a, rank, fresh, arrivals, cookie, tg, prev_screening,
+                     last_beat, backoff)
     held = session_lock.active(session_lock.WRITER_LOCK_PATH)
     if held:
         LOG.error("another watchlist writer is running -- %s",
@@ -372,10 +662,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     with session_lock.held("watchlist-writer", "tv_feed",
                            session_lock.WRITER_LOCK_PATH, out=str(a.out)):
-        return _loop(a, rank, tg, prev_screening, last_beat, backoff)
+        return _loop(a, rank, fresh, arrivals, cookie, tg, prev_screening,
+                     last_beat, backoff)
 
 
-def _loop(a, rank, tg, prev_screening, last_beat, backoff) -> int:
+def _loop(a, rank, fresh, arrivals, cookie, tg, prev_screening, last_beat,
+          backoff) -> int:
     while True:
         now = datetime.now(ET)
         if not a.all_hours and not a.once and not in_session(now):
@@ -387,7 +679,7 @@ def _loop(a, rank, tg, prev_screening, last_beat, backoff) -> int:
             continue
 
         try:
-            rows = fetch(a.max_symbols)
+            rows = fetch(a.max_symbols, cookie)
             backoff = 0.0
         except (urllib.error.URLError, urllib.error.HTTPError,
                 TimeoutError, json.JSONDecodeError) as e:
@@ -404,6 +696,20 @@ def _loop(a, rank, tg, prev_screening, last_beat, backoff) -> int:
         if rank.begin_session(now.date()):
             LOG.info("new session %s — ranker memory cleared; yesterday's "
                      "names no longer carry over as COLD", now.date())
+        fresh.begin_session(now.date())
+        arrivals.begin_session(now.date())
+
+        # H-F1. Withhold rows that have not yet been shown to describe TODAY.
+        # This runs BEFORE tiers() and update() and both are given the SAME
+        # list, for the reason the roll is here rather than inside update():
+        # a filter applied in one of them would report one tiering and write
+        # another. A held name is withheld entirely rather than demoted to
+        # COLD, because the trader arms COLD symbols too.
+        rows, newly_held = fresh.admit(rows)
+        if newly_held:
+            LOG.info("holding %d name(s) until %s moves — a row can be "
+                     "yesterday's screen until today's prints arrive: %s",
+                     len(newly_held), VOLUME_COLUMN, ", ".join(newly_held))
 
         hot, warm, cold = rank.tiers(rows)
         symbols = rank.update(rows)
@@ -420,11 +726,27 @@ def _loop(a, rank, tg, prev_screening, last_beat, backoff) -> int:
             changed = write_watchlist(
                 a.out, symbols,
                 header=f"tv_feed {now:%Y-%m-%d %H:%M:%S} ET  "
-                       f"hot={len(hot)} warm={len(warm)} cold={len(cold)}")
+                       f"hot={len(hot)} warm={len(warm)} cold={len(cold)} "
+                       f"held={len(fresh.held)}")
             if changed:
                 LOG.info("watchlist -> %d symbols  HOT %s | WARM %s | COLD %s",
                          len(symbols), hot or "-", warm or "-",
                          cold[:5] or "-")
+            # Written where the file is written, so a name is stamped at the
+            # moment it could first be acted on -- not when it screened.
+            #
+            # `symbols` (what was WRITTEN) rather than the admitted rows (what
+            # SCREENED). The two coincide for a name's FIRST appearance, since
+            # a name cannot be COLD before it has been HOT -- so a mutation
+            # swapping them survives the suite. An equivalent mutant, named
+            # here rather than chased with a contrived test. They part company
+            # only at the MAX_SYMBOLS cap: a name trimmed from the cold end and
+            # later re-screened is in `rows` and not in `symbols`. The file is
+            # the right answer, because this series measures when the TRADER
+            # could have acted, and the trader reads the file.
+            tiers = ({t: "hot" for t in hot} | {t: "warm" for t in warm}
+                     | {t: "cold" for t in cold})
+            arrivals.record(symbols, tiers, now)
 
         # One coalesced message per poll that changed something. Sending per
         # symbol would be up to 2,000 messages a session and would trip
