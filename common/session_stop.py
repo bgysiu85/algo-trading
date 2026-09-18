@@ -78,25 +78,25 @@ def _key(row: dict, scope: str) -> tuple:
     raise ValueError(f"scope must be one of {SCOPES}, not {scope!r}")
 
 
-def apply_cap(rows: list[dict], giveback: float | None, *, scope: str = "session",
-              arm: float = ARM, f: float = MEASURED_FRICTION) -> dict:
-    """The forward sweep. Returns kept rows, removed rows and per-key fire info.
+def _sweep(rows: list[dict], decide, *, scope: str, f: float) -> tuple[list, list, dict]:
+    """The forward sweep both session rules are made of.
 
-    `rows` need `date`, `book`, `entry_et`, `exit_et`, `net`. Times are the ET
-    strings the trade CSVs carry, which sort lexically in clock order within a
-    date -- the same property `time_of_day` relies on.
+    `decide(realised, peak) -> bool` is asked once after each exit lands, in
+    exit order, and the first True stops entries for the rest of that key.
+    The give-back passes its arm-and-ratio test here; the flat stop (H-S6)
+    passes an absolute drawdown. Nothing else differs between them, and that
+    is the point of the comparison registered in REGISTERED_stop_compare.md:
+    two rules spending the same abstention budget through the same machinery.
 
-    giveback=None returns every row, untouched and in input order.
+    Returns (kept, removed, info), where info carries EVERY key -- fired or
+    not -- with its final peak, so a caller can read "armed" off the peak
+    without the sweep knowing what arming means.
     """
-    if giveback is None:
-        return {"kept": list(rows), "removed": [], "fired": {}, "armed": set(),
-                "giveback": None, "scope": scope, "arm": arm, "f": f}
-
     by_key: dict[tuple, list[dict]] = defaultdict(list)
     for r in rows:
         by_key[_key(r, scope)].append(r)
 
-    kept, removed, fired, armed = [], [], {}, set()
+    kept, removed, info = [], [], {}
     for key, group in by_key.items():
         # Entry order decides WHICH trade is judged next; exit order decides
         # WHEN its P&L lands. A trade entered before the trip is kept even if
@@ -110,21 +110,166 @@ def apply_cap(rows: list[dict], giveback: float | None, *, scope: str = "session
             while p < len(pending) and pending[p]["exit_et"] <= row["entry_et"]:
                 realised += float(pending[p]["net"]) - f
                 peak = max(peak, realised)
-                if peak >= arm:
-                    armed.add(key)
-                    if realised <= giveback * peak and tripped_at is None:
-                        tripped_at = pending[p]["exit_et"]
+                if tripped_at is None and decide(realised, peak):
+                    tripped_at = pending[p]["exit_et"]
                 p += 1
             if tripped_at is not None:
                 removed.append(row)
                 n_removed += 1
             else:
                 kept.append(row)
-        if tripped_at is not None:
-            fired[key] = {"at": tripped_at, "peak": peak,
-                          "removed": n_removed, "n": len(group)}
+        info[key] = {"at": tripped_at, "peak": peak,
+                     "removed": n_removed, "n": len(group)}
+    return kept, removed, info
+
+
+def apply_cap(rows: list[dict], giveback: float | None, *, scope: str = "session",
+              arm: float = ARM, f: float = MEASURED_FRICTION) -> dict:
+    """The give-back cap. Returns kept rows, removed rows and per-key fire info.
+
+    `rows` need `date`, `book`, `entry_et`, `exit_et`, `net`. Times are the ET
+    strings the trade CSVs carry, which sort lexically in clock order within a
+    date -- the same property `time_of_day` relies on.
+
+    giveback=None returns every row, untouched and in input order.
+    """
+    if giveback is None:
+        return {"kept": list(rows), "removed": [], "fired": {}, "armed": set(),
+                "giveback": None, "scope": scope, "arm": arm, "f": f}
+
+    def decide(realised: float, peak: float) -> bool:
+        return peak >= arm and realised <= giveback * peak
+
+    kept, removed, info = _sweep(rows, decide, scope=scope, f=f)
+    # `peak` is a running max, so a key that ever armed still shows it at the
+    # end -- reading it off the final peak is the same set, one pass later.
+    armed = {k for k, v in info.items() if v["peak"] >= arm}
+    fired = {k: v for k, v in info.items() if v["at"] is not None}
     return {"kept": kept, "removed": removed, "fired": fired, "armed": armed,
             "giveback": giveback, "scope": scope, "arm": arm, "f": f}
+
+
+# --- H-S6: the flat daily stop, and its solved threshold --------------------
+
+def flat_stop(rows: list[dict], stop: float | None, *, scope: str = "session",
+              f: float = MEASURED_FRICTION) -> dict:
+    """The DAILY LOSS STOP, registered as the comparator in
+    REGISTERED_stop_compare.md §1:
+
+        if realised <= -STOP: no further ENTRIES this key
+
+    No arm, no peak, no ratio -- an absolute drawdown from zero. The two rules
+    are genuinely different rather than reparametrisations: a session that goes
+    +200 then back to +50 trips the give-back and never trips this; a session
+    that goes straight to -150 trips this and can never trip the give-back,
+    which needs a $40 peak first.
+
+    `stop` is a POSITIVE dollar drawdown. None returns every row untouched.
+    """
+    if stop is None:
+        return {"kept": list(rows), "removed": [], "fired": {}, "armed": set(),
+                "stop": None, "scope": scope, "f": f}
+    if stop <= 0:
+        # A stop of zero fires on the first cent lost and a negative one fires
+        # before the session opens. Neither is the rule, and silently accepting
+        # one would put a rule in the report under this function's name.
+        raise ValueError(f"stop must be a positive drawdown in dollars, not {stop!r}")
+
+    kept, removed, info = _sweep(rows, lambda realised, peak: realised <= -stop,
+                                 scope=scope, f=f)
+    fired = {k: v for k, v in info.items() if v["at"] is not None}
+    return {"kept": kept, "removed": removed, "fired": fired,
+            # A flat stop has no arm: every key is eligible from its first
+            # trade. `armed` is every key, so the reported armed/fired ratio
+            # means the same thing in both tables.
+            "armed": set(info), "stop": stop, "scope": scope, "f": f}
+
+
+def stop_candidates(rows: list[dict], *, scope: str, f: float) -> list[float]:
+    """Every drawdown depth at which a flat stop could trip on this book.
+
+    The rule only ever fires at an exit, so the achievable thresholds are the
+    negated realised balances at each exit -- nothing between two of them
+    changes which trades are removed. Enumerating them makes the solve exact
+    rather than a grid search that can land between two counts.
+
+    "Deep enough never to fire" is deliberately NOT in this set. It is always
+    available in principle and would be picked whenever the target is small,
+    and a comparator that removes nothing scores D_flat = 0 -- handing the
+    give-back a win by default on the cells where the comparison matters most.
+    Excluding it is the choice against the incumbent, which is the direction
+    this file has to err in.
+    """
+    by_key: dict[tuple, list[dict]] = defaultdict(list)
+    for r in rows:
+        by_key[_key(r, scope)].append(r)
+    out: set[float] = set()
+    for group in by_key.values():
+        realised = 0.0
+        for row in sorted(group, key=lambda r: (r["exit_et"], r["entry_et"])):
+            realised += float(row["net"]) - f
+            if realised < 0:
+                out.add(round(-realised, 6))
+    return sorted(out)
+
+
+def solve_stop(rows: list[dict], target: int, *, scope: str = "session",
+               f: float = MEASURED_FRICTION, of_book: str | None = None) -> dict:
+    """REGISTERED_stop_compare §2: the threshold is SOLVED, never chosen.
+
+    Find the `STOP` whose flat rule removes as close as possible to `target`
+    trades -- the number the give-back removed on the same book. Both rules
+    then spend the same abstention budget and only WHICH trades they spend it
+    on differs. The count comes from the give-back's behaviour and never from
+    either rule's P&L, so no stop is ever selected for performing well.
+
+    Removal count is non-increasing in `STOP` (a deeper stop trips later or
+    never, per key, hence in the sum), so the candidate list is searched by
+    bisection rather than swept. Ties in |count - target| go to the LARGER
+    stop, which is the rule that removes fewer trades -- fixed here, before
+    the run, so the tie-break cannot become a choice made on results.
+
+    `of_book` counts only that book's removals. The registered cell is
+    (strategy, scope, friction), and under SESSION scope one pooled stop
+    removes from both strategies at once; matching on the pooled total would
+    leave the strategy actually being read unmatched, which is the one thing
+    §2 says must not happen.
+    """
+    cands = stop_candidates(rows, scope=scope, f=f)
+    if not cands or target <= 0:
+        return {"valid": False, "stop": None, "removed": 0, "target": target,
+                "candidates": len(cands), "evaluations": 0}
+
+    seen: dict[float, int] = {}
+
+    def count(s: float) -> int:
+        if s not in seen:
+            gone = flat_stop(rows, s, scope=scope, f=f)["removed"]
+            seen[s] = (len(gone) if of_book is None
+                       else sum(1 for r in gone if r.get("book") == of_book))
+        return seen[s]
+
+    # The smallest candidate whose count is <= target. Everything below it
+    # removes more, everything above removes the same or fewer.
+    lo, hi = 0, len(cands) - 1
+    if count(cands[hi]) > target:
+        best = cands[hi]                      # even the deepest stop overshoots
+    else:
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if count(cands[mid]) <= target:
+                hi = mid
+            else:
+                lo = mid + 1
+        best = cands[lo]
+        if lo > 0:
+            # The neighbour below removes MORE than the target; it wins only
+            # if it is strictly closer, so a tie keeps the larger stop.
+            under, over = cands[lo], cands[lo - 1]
+            if abs(count(over) - target) < abs(count(under) - target):
+                best = over
+    return {"valid": True, "stop": best, "removed": count(best), "target": target,
+            "of_book": of_book, "candidates": len(cands), "evaluations": len(seen)}
 
 
 def per_trade(rows: list[dict], f: float) -> float:

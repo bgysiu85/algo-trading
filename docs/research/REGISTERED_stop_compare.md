@@ -1,13 +1,28 @@
 # REGISTERED — H-S6: does the give-back's SHAPE beat a flat daily stop? (PRE-RUN)
 
-`PROGRAM_INDEX` §7 item 11, the daily loss stop, has been on the list since
+## 0. A correction to this doc's own citation (PRE-RUN, 2026-09-18)
+
+This registration and `REGISTERED_giveback_cap` §1 both cite "`PROGRAM_INDEX`
+§7 item 11, the daily loss stop". **That number is stale in both.** §7 was
+rewritten on 2026-09-12 and again on 09-16 and 09-17; item 11 in the current
+list is *Cameron's breakeven stop as a `pit_delta` variant*, and **the daily
+loss stop is not in the current §7 at all** — it was dropped in a rewrite and
+two chats have been citing its old number to each other since.
+
+Nothing about the hypothesis changes. What changes is how it is referred to:
+**the rule is named here, in full, and the index entry is created to match**
+rather than pointed at by number. §4's standard already says a hash cited in
+prose is a second source of truth that goes stale in silence; an item NUMBER
+cited across chats is the same failure with a smaller blast radius.
+
+## 1. The question, and why it is not answered by H-S4 passing
+
+The daily loss stop — an absolute drawdown from zero — has been wanted since
 2026-09-12 and has never been run. It is registered now because H-S4 passed:
 `session_scenarios_RESULT_20260918.md` reports MC5's 50% give-back cap clearing
 all six of its readings under both scopes at every friction level, and §6 of
 that registration says a pass is not adoptable on its own. **Committed before
 `common/stop_compare.py` exists.**
-
-## 1. The question, and why it is not answered by H-S4 passing
 
 The give-back cap fires on sessions **selected for having declined from a
 peak**, and on such a session stopping is close to tautologically better than
@@ -22,8 +37,8 @@ For each session, walking the closed trades in time order:
         no further ENTRIES this session
 ```
 
-No arm, no peak, no ratio. An absolute drawdown from zero, which is what item
-11 has always meant and what most traders actually run.
+No arm, no peak, no ratio. An absolute drawdown from zero — what the daily
+loss stop has always meant, and what most traders actually run.
 
 The two rules are genuinely different and it is worth saying how, so the result
 cannot be read as a tautology either way. A session that goes **+$200 then back
