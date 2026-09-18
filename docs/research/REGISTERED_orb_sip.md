@@ -348,3 +348,85 @@ wrong day. Fixed, with a test.
 
 The rules in §2, the friction levels in §3.3, the sizing in §3.4, the criteria
 and controls in §4, the secondary readings in §5, the holdout, and amendment A.
+
+---
+
+# AMENDMENT C — 2026-09-18. The unit of account, and a disclosed peek.
+
+## C.0 What was seen, before anything below is read
+
+The engine was smoke-tested on **one session, 2025-03-05**, to check it produced
+trades at all. That run is not a result and no arm, control, friction sweep or
+criterion was computed from it, but it did put four figures in front of me and
+they are disclosed here rather than used silently:
+
+- 2,316 trades across both range lengths; 87% of exits are the stop, 13% the
+  close — the paper's ~17% win rate has the same shape;
+- stop exits average **−1.04R**, and −1.29R when the stop is hit on the entry
+  bar (amendment A's pessimistic reading, working as intended);
+- mean **−0.26R** per trade over every qualifying name, with the close exits
+  averaging +4.91R;
+- at flat 100 shares the same trades read **−$16 to −$20 per trade**.
+
+The change below is driven by the last line's *unit*, not its sign: it is
+negative in both units, and C is registered before any arm exists.
+
+## C.1 Flat 100 shares is the wrong unit for this universe
+
+§3.4 made flat 100 shares the book the criteria are read on, copied from the
+small-cap work where every name sits in a $2–$20 band. This universe does not:
+the median entry price on that session was **$49.68** and the risk per share
+(10% of ATR) ran from **$0.067 at the 10th percentile to $0.719 at the 90th**.
+At a fixed 100 shares, one trade in a $400 name with a $1.00 stop carries
+fifteen times the risk of a trade in an $8 name with a $0.07 stop, so a
+per-trade dollar average is a price-weighted average of unlike bets, and
+criterion 3's "$1.00 per trade" means something different for every row.
+
+The paper does not have this problem because it risks a fixed **1% of the
+position's capital**, which is equal risk per trade. So:
+
+**The primary unit becomes R — the trade's P/L divided by its own registered
+risk (entry to stop), net of friction.** Equal risk per trade is what the
+published strategy does, and it is the unit its 0.38R-per-trade gross edge is
+quoted in.
+
+**The risk-normalised book** is R × $100, i.e. every trade sized to risk $100
+(shares = $100 / r, rounded down, and a trade needing more than 10,000 shares
+is reported and excluded as unsizeable). Reported in dollars for readability;
+it is the same number as R.
+
+**Flat 100 shares stays in the report** as context, and the paper's own
+$25,000 / 1% / 4× book stays exactly as §3.4 registered it.
+
+## C.2 The criteria, restated in the new unit
+
+Unchanged in spirit, unchanged thresholds where the unit did not change:
+
+1. **drop-top-3 and drop-top-5 by symbol, on the risk-normalised book, both > 0**;
+2. **symbol-cluster bootstrap P(total > 0) ≥ 0.95** on the same book;
+3. **mean net ≥ +0.05R per trade at BASE friction** (was "$1.00 per trade").
+   0.05R is one eighth of the paper's claimed gross 0.38R and it is the level
+   below which the strategy cannot survive a doubling of friction;
+4. trades ≥ 100 — unchanged;
+5. both halves > 0 in R — unchanged;
+6. both sides > 0 in R — unchanged;
+7. the boundary rule — unchanged.
+
+The random-20 control and the unfiltered arm are compared **in R**, for the
+same reason.
+
+## C.3 The friction ratio, and why it is now a headline number
+
+BASE friction is 3¢ per round trip (1¢ entry, 2¢ stop). Measured on that one
+session, that is **17% of R for the median qualifying name and 32% of R for the
+median top-20 name** — the top 20 are the fast movers, whose 10%-ATR stop is
+tightest in cents. So the report states, per arm: friction as a share of R at
+each level, and the gross-minus-net gap. A strategy whose entire edge is 0.38R
+gross cannot be judged without that ratio in view, and §7's prediction is
+precisely that this is what removes it.
+
+## C.4 What C does not change
+
+The universe, the ranking, the two tapes, the fill model, the friction levels
+themselves, the controls, the secondary readings, the holdout, and amendments A
+and B.
