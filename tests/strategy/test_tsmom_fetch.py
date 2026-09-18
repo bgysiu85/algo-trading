@@ -185,7 +185,7 @@ def test_definition_cost_is_SAMPLED_not_summed(run):
     still to fetch.
     """
     client = _FakeClient()
-    jobs, usd, nbytes, _ = F.plan(client, {"ES": "", "GC": ""},
+    jobs, usd, nbytes, _, _ = F.plan(client, {"ES": "", "GC": ""},
                                   F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
     n_days = len(F.definition_days("2010-06-06", "2026-09-17"))
     assert len(jobs) == 2 + 2 * n_days, "the job list is not the full grid"
@@ -321,7 +321,7 @@ def test_every_definition_request_asks_for_exactly_one_session():
     like a scoping failure.
     """
     client = _FakeClient()
-    jobs, _, _, _ = F.plan(client, {"ES": ""}, F.Path("/nonexistent"),
+    jobs, _, _, _, _ = F.plan(client, {"ES": ""}, F.Path("/nonexistent"),
                            "2010-06-06", "2026-09-17")
     defs = [kw for _, sc, _, kw in jobs if sc == F.DEF_SCHEMA]
     assert defs
@@ -333,7 +333,7 @@ def test_every_definition_request_asks_for_exactly_one_session():
 
 def test_bars_come_from_continuous_front_and_next(run):
     client = _FakeClient()
-    jobs, _, _, _ = F.plan(client, {"CL": ""}, F.Path("/nonexistent"),
+    jobs, _, _, _, _ = F.plan(client, {"CL": ""}, F.Path("/nonexistent"),
                            "2010-06-06", "2026-09-17")
     bars = [kw for _, sc, _, kw in jobs if sc == F.BAR_SCHEMA]
     assert len(bars) == 1
@@ -417,3 +417,63 @@ def test_a_BAR_pricing_failure_names_the_job_it_failed_on():
     assert "2010-06-06..2026-09-17" in msg, "the date range is missing"
     assert "continuous" in msg, "the symbology is missing"
     assert msg.count("ES") >= 2, "the root is named only inside the symbols string"
+
+
+def test_a_root_that_lists_late_is_discovered_not_fatal(capsys):
+    """RTY stopped the third live run, and it was the SPEC that was wrong.
+
+    RTY did not exist on CME Globex in 2010 -- Russell 2000 futures were on ICE
+    until CME relisted them for trade date 2017-07-10 (CME SER-7960). Selection
+    rule 3 of the spec asserts every root has history from the dataset's start.
+    For RTY that is false, and nothing had checked it.
+
+    A late listing is a coverage fact, not an error: discover the first session,
+    fetch from there, and SAY SO.
+    """
+    class _LateMeta(_FakeMeta):
+        def get_cost(self, **kw):
+            if kw.get("schema") == F.DEF_SCHEMA and kw["start"] < "2017-07-10":
+                raise RuntimeError("422 symbology_invalid_request: None of the "
+                                   "symbols could be resolved")
+            return super().get_cost(**kw)
+
+    client = _FakeClient()
+    client.metadata = _LateMeta()
+    jobs, usd, _, _, late = F.plan(client, {"RTY": ""}, F.Path("/nonexistent"),
+                                   "2010-06-06", "2026-09-17")
+    assert "RTY" in late, "a root with seven years missing was priced as complete"
+    assert late["RTY"] >= "2017-07", late["RTY"]
+    assert late["RTY"] < "2017-09", "the search overshot the real first session"
+
+    days = [kw["start"] for _, sc, _, kw in jobs if sc == F.DEF_SCHEMA]
+    assert min(days) == late["RTY"]
+    assert all(d >= "2017-07-10" for d in days), (
+        "jobs were planned for months the root did not exist in")
+    out = capsys.readouterr().out
+    assert "LATE LISTINGS" in out and "RTY" in out
+
+
+def test_a_root_that_never_resolves_is_a_wrong_root_and_aborts():
+    """Late listing and wrong symbol must not look the same."""
+    class _NeverMeta(_FakeMeta):
+        def get_cost(self, **kw):
+            if kw.get("schema") == F.DEF_SCHEMA:
+                raise RuntimeError("422 symbology_invalid_request: None of the "
+                                   "symbols could be resolved")
+            return super().get_cost(**kw)
+
+    client = _FakeClient()
+    client.metadata = _NeverMeta()
+    with pytest.raises(SystemExit) as e:
+        F.plan(client, {"NOPE": ""}, F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
+    msg = str(e.value)
+    assert "NOPE" in msg and "wrong root" in msg and "nothing downloaded" in msg
+
+
+def test_a_root_that_resolves_immediately_costs_one_call():
+    """The discovery must not tax the eleven roots that are fine."""
+    client = _FakeClient()
+    F.plan(client, {"ES": ""}, F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
+    assert len(client.metadata.calls) == 2, (
+        f"{len(client.metadata.calls)} calls for one healthy root -- discovery "
+        "is running when it should not (1 bar + 1 definition sample)")

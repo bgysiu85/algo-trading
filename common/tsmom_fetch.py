@@ -259,6 +259,7 @@ def plan(client, roots: dict, root_dir: Path, start: str, end: str):
         nbytes += n
 
     days = definition_days(start, end)
+    late: dict[str, str] = {}
     for root in roots:
         todo = []
         for day in days:
@@ -273,27 +274,91 @@ def plan(client, roots: dict, root_dir: Path, start: str, end: str):
         if not todo:
             continue
 
-        sample = None
-        for cand in todo[:4]:
-            try:
-                sample = _retry(lambda kw=cand[3]: _price(client, kw))
-                break
-            except Exception as e:                   # noqa: BLE001
-                if _is_symbology_miss(e):
-                    continue
-                raise SystemExit(
-                    f"pricing failed on {root} {DEF_SCHEMA} {cand[3]['start']} "
-                    f"-- nothing downloaded: {_scrub(e)}")
+        sample, first_i = _first_resolvable(client, todo, root)
         if sample is None:
             raise SystemExit(
-                f"pricing failed on {root} {DEF_SCHEMA}: none of the first four "
-                "monthly samples could be resolved -- nothing downloaded")
+                f"pricing failed on {root} {DEF_SCHEMA}: NO session in "
+                f"{todo[0][3]['start']}..{todo[-1][3]['start']} could be "
+                "resolved -- nothing downloaded. That is not a late listing, "
+                "it is a wrong root.")
+        if first_i:
+            late[root] = todo[first_i][3]["start"]
+            todo = todo[first_i:]
         u, n = sample
         usd += u * len(todo)
         nbytes += n * len(todo)
         jobs += todo
 
-    return jobs, usd, nbytes, have
+    if late:
+        # COVERAGE, printed in the same pass as the cost. PROGRAM_INDEX section
+        # 4 requires it beside the P/L; it is just as necessary beside a price,
+        # because a root that starts seven years late is not the instrument the
+        # registration described.
+        print("\nLATE LISTINGS -- these roots have no GLBX history at the "
+              "dataset's start:")
+        for r, d in sorted(late.items()):
+            missing = (date.fromisoformat(d) - date.fromisoformat(start)).days / 365.25
+            print(f"  {r:<5} first resolvable session {d}   "
+                  f"({missing:.1f} years after {start})")
+        print("  The warm-up rule (261 returns) already keeps these out of the "
+              "book until they have\n  history; what changes is that the book "
+              "has FEWER MARKETS in its early years.\n  Recorded in the "
+              "manifest and in REGISTERED_tsmom_fetch section 1.4.")
+
+    return jobs, usd, nbytes, have, late
+
+
+def _first_resolvable(client, todo, root):
+    """(priced sample, index of the first session that resolves) for one root.
+
+    WHY THIS EXISTS, 2026-09-18. The third live run stopped at
+
+        pricing failed on RTY definition: none of the first four monthly
+        samples could be resolved -- nothing downloaded
+
+    RTY did not exist on CME Globex in 2010. Russell 2000 futures were listed on
+    ICE; CME relisted them for trade date 2017-07-10 (CME SER-7960), so
+    RTY.FUT has no GLBX history for about seven of the sixteen years.
+
+    Selection rule 3 of `claude/tsmom_spec_20260917.md` section 2.1 ASSERTS that
+    every root "has continuous GLBX.MDP3 daily history from the dataset's
+    start". For RTY that is false and was never checked -- the third property in
+    two days asserted in prose and not verified.
+
+    So a root's first session is DISCOVERED rather than assumed: the first four
+    samples, then a yearly stride, then a scan within the year that hit. All
+    metadata lookups, all free. A root that resolves immediately costs one call.
+    """
+    for i, cand in enumerate(todo[:4]):
+        try:
+            return _retry(lambda kw=cand[3]: _price(client, kw)), i
+        except Exception as e:                       # noqa: BLE001
+            if not _is_symbology_miss(e):
+                raise SystemExit(
+                    f"pricing failed on {root} {DEF_SCHEMA} "
+                    f"{cand[3]['start']} -- nothing downloaded: {_scrub(e)}")
+
+    hit = None
+    for i in range(0, len(todo), 12):                # yearly stride
+        try:
+            _retry(lambda kw=todo[i][3]: _price(client, kw))
+            hit = i
+            break
+        except Exception as e:                       # noqa: BLE001
+            if not _is_symbology_miss(e):
+                raise SystemExit(
+                    f"pricing failed on {root} {DEF_SCHEMA} "
+                    f"{todo[i][3]['start']} -- nothing downloaded: {_scrub(e)}")
+    if hit is None:
+        return None, 0
+
+    for i in range(max(0, hit - 11), hit + 1):       # narrow to the month
+        try:
+            return _retry(lambda kw=todo[i][3]: _price(client, kw)), i
+        except Exception as e:                       # noqa: BLE001
+            if not _is_symbology_miss(e):
+                raise
+    return None, 0
 
 
 def write_manifest(root_dir: Path, rec: dict) -> Path:
@@ -356,7 +421,7 @@ def main(argv=None) -> int:
           f"range     {start} .. {end}   (vendor: {ds_start} .. {ds_end})\n"
           f"roots     {len(roots)}\n")
 
-    jobs, usd, nbytes, have = plan(client, roots, root_dir, start, end)
+    jobs, usd, nbytes, have, late = plan(client, roots, root_dir, start, end)
     print(f"{len(jobs)} job(s) to run, {have} already on disk and skipped "
           f"(retrieval is what bills; a file on disk is free forever)")
     print(f"estimate  ${usd:.2f}   {nbytes:,} bytes ({nbytes / 2**30:.3f} GiB)\n")
@@ -439,6 +504,9 @@ def main(argv=None) -> int:
         "start": start, "end": end, "roots": sorted(roots),
         "jobs_run": done, "jobs_planned": len(jobs),
         "estimated_usd": round(usd, 4), "estimated_bytes": nbytes,
+        # A root that starts years late is a coverage fact a report must be able
+        # to READ, not one it has to be told.
+        "late_listings": late,
     }
     print(f"\n{done}/{len(jobs)} succeeded.")
     print(f"manifest: {write_manifest(root_dir, rec)}")
