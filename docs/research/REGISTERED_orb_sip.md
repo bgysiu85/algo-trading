@@ -649,3 +649,97 @@ recorded as wrong.
 It does not touch the universe, the ranking, the filters, the friction levels,
 the criteria, the controls, the holdout, the resolved figure of record, or the
 verdict already recorded. It buys no data. It produces no P/L.
+
+---
+
+# AMENDMENT G — 2026-09-19, PRE-MEASUREMENT. Symbols, or days?
+
+## G.0 What G is, and the F.3 wording it corrects
+
+F.3's consequence sentence read "ORB closes permanently. No variant is
+registered." F.5 in the same amendment read that F "does not touch the universe,
+the ranking, the **filters**...". A market-context gate
+(`handover_orb_build_chat_20260918.md` §5) is a filter, so those two sentences
+conflict. **The drafting error is recorded here rather than resolved silently
+in whichever direction suits.** F measured stop width and closed stop width; a
+measurement cannot close a hypothesis it never tested. F.3's sentence is
+narrowed to its scope: **the stop-width lever is closed permanently.**
+
+G does not reopen the verdict, which stands at 1 of 7 with the holdout unspent.
+G is DESCRIPTIVE and decides one thing only: **whether §5's market-context gate
+has a mechanism worth a registration, or is dead before it gets one.**
+
+## G.1 The question
+
+The book is +4.8R across 7,239 trades and turns on five symbols — MWA +57R,
+TD +52R, NYT +51R, IONS +51R, THC +51R — with drop-top-1 at (52.1)R. A
+market-context gate turns whole SESSIONS on and off. It can therefore only
+reach that concentration if the concentration lives in **days**. If the
+carrying trades are single names doing single-name things on unrelated
+sessions, no market-wide gate can touch them, whatever its threshold.
+
+F already relocated the failure to the entry rather than the exit (winners
+reach a median 0.63R against them, losers 5.51R), which is why this is worth
+one query rather than none.
+
+## G.2 What is measured
+
+Resolved primary cell, range 5, rank <= 20, holdout withheld. The ledger is
+already on disk. **Nothing is bought, no trade is re-simulated, and no gate is
+applied** — a gate needs SPY state as a column and G adds none, precisely so
+that G cannot be read as the gate's result.
+
+- **CARRIER TRADES** — the N largest trades by net R at BASE. N is fixed at
+  **20 and 50**, both reported, neither chosen after the fact.
+- **CARRIER DAYS** — the distinct sessions those trades fall on.
+- **THE REST OF THE BOOK on a carrier day** — every other primary-cell trade
+  that session, the carrier trade itself excluded.
+
+## G.3 The primary reading, and the bar, fixed now
+
+**Mean net R of the rest of the book on carrier days, against mean net R on all
+other days.**
+
+A gate switches whole sessions, so what it can exploit is whether carrier days
+are *generally* good days, not whether one name ran.
+
+**The gate is registered only if that lift is at least +0.10R** — twice
+criterion 3's own bar, because a lift smaller than the thing being measured is
+not a mechanism. **At both N = 20 and N = 50.** A split result is a refusal,
+not a result: it means the reading depends on where the carrier line was drawn.
+
+If the bar is missed, **§5's market-context gate is retired unrun**, recorded
+against the four precedents it would have joined (`luck_vs_edge_RESULT_20260917`,
+`cold_veto_RESULT_20260917`, `spy_intraday_RESULT_20260918` H-S2, and the
+BandWidth squeeze pre-flight), and the source item is closed rather than left
+to be re-proposed.
+
+## G.4 The supporting reading
+
+**Do the carrier trades cluster on fewer sessions than chance allows?**
+
+The observed distinct-day count against a **2,000-draw permutation null**
+(SEED 20260916, the project's seed): the same number of trades drawn at random
+from the same ledger, so the null inherits the real distribution of trades per
+session rather than assuming it is flat. Reported as the observed count, the
+null's central mass, and a one-sided p.
+
+This is supporting, not deciding. Clustering without a lift is a fact about
+where the winners landed, not a mechanism a gate could trade.
+
+## G.5 Prediction, scored either way
+
+Written before the measurement: **the lift lands below +0.10R and the gate is
+retired.** The basis is the handover's own §5 prior — one symbol is worth
+(56.9)R of swing, and splitting a book that concentrated by market state yields
+two concentrated halves rather than one clean one — plus the regime-gate
+family's 0-for-4 record here. A secondary prediction, recorded so it can be
+wrong on its own: **the carrier trades do NOT cluster beyond chance.**
+
+## G.6 What G does not do
+
+It does not touch the universe, the ranking, the filters, the friction levels,
+the criteria, the controls, the holdout, the resolved figure of record, or the
+verdict. It buys no data, applies no gate, and produces no P/L for any variant.
+It cannot produce a pass, and a positive reading only earns §5 a registration —
+never an adoption.
