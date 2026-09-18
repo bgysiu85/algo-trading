@@ -88,10 +88,33 @@ improves the total.
 So the second condition is tested the way H-S6 tested the give-back's shape:
 **as a difference, at a matched abstention budget.**
 
-> For each book, take the scored `CEIL` cell and its removal count *k*. Solve a
-> `dist_from_high >= D` threshold so that `ret_5m <= CEIL AND dist_from_high >= D`
-> removes as close as possible to *k* trades in total. Compare the two books per
-> trade.
+> For each book, take the anchor `CEIL` cell and its removal count *k*. Solve a
+> `dist_from_high >= D` threshold so that **`dist_from_high >= D` alone** refuses
+> as close as possible to *k* baseline entries. Compare the two books per trade.
+
+### PRE-RUN AMENDMENT B — the comparator is distance INSTEAD of extension
+
+Written the same day, before any cell had a number, and recorded rather than
+silently corrected because the error is instructive.
+
+This section first specified the comparator as
+`ret_5m <= CEIL **AND** dist_from_high >= D`, solved to match the ceiling's own
+removal count. That is **vacuous**, and the first run of the solver proved it in
+one line: the pair is a **superset** of the ceiling, so it can only ever refuse
+*more*, and the closest achievable match to the ceiling's own count is always
+`D = -inf` — no distance condition at all. The solver dutifully returned a
+perfect match, and the comparison would have printed "the second condition adds
+nothing" as a finding when it had never been tested.
+
+That is §4's recurring shape — *a control whose output is indistinguishable from
+the failure it detects* — and what caught it was a unit test asserting that `D`
+landed **among the data** rather than at an infinity.
+
+The corrected comparator spends the same budget on **different** trades, which
+is the only arrangement that can answer the question: *at the same abstention
+budget, does `dist_from_high` pick better trades to refuse than `ret_5m` does?*
+Two rules, one budget, disjoint allocations — exactly H-S6's arrangement rather
+than a nested one.
 
 Both rules then spend the same abstention budget and the only thing that differs
 is **which** trades they spend it on. `D` is **solved against the constraint,
