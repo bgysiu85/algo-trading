@@ -430,3 +430,60 @@ precisely that this is what removes it.
 The universe, the ranking, the two tapes, the fill model, the friction levels
 themselves, the controls, the secondary readings, the holdout, and amendments A
 and B.
+
+---
+
+# AMENDMENT D — 2026-09-18, POST-RUN. A defect in the fill model.
+
+The first full run happened (446 sessions, 917,628 trades, holdout withheld)
+and exposed a modelling error in §3.2 large enough to decide the result. The
+run's figures are reported in the result doc with this amendment applied; the
+pre-fix primary figure is superseded, not averaged.
+
+## D.1 The entry bar's open cannot be the protective stop's fill
+
+§3.2 said a stop gaps through: a bar that opens beyond the level fills at that
+open. That is right on every bar except the one the position was opened in.
+The entry filled *inside* that bar, at the trigger or above; the bar's **open
+is a price from before the order existed**. Booking the stop there is selling
+at a price the position could not have been sold at.
+
+It is the same error the project already ruled on twice: *"the entry bar's high
+happened before the close you bought at"*, and *"the entry bar's own high
+cannot raise the trail"* (`PROGRAM_INDEX` §5, fill modelling). §3.2 inherited
+ORB's convention and did not carry that exception across.
+
+**The size of it, from the run:** 39.9% of top-20 trades have the stop hit on
+the entry bar, and the two readings of amendment A differed by **0.69R a
+trade** (−0.631R against +0.055R). Most of that gap is not the question A
+asked — whether the stop is live on the entry bar — it is this: the stops that
+did fire there were filled at a pre-entry open.
+
+**Fixed:** on the entry bar the stop fills **at the stop price**. On any later
+bar it still gaps through, because the open then is after the entry. Both
+directions are tested, and reverting either half fails a test.
+
+## D.2 Amendment A stands, and is now a real question again
+
+A's primary reading — the stop is live on the entry bar — is unchanged, and
+with D.1 fixed it is no longer entangled with a bad fill price. The
+sensitivity (stop live from the next bar) is still reported beside it, and
+A.1's rule still holds: a pass on one and a failure on the other is not a
+pass.
+
+## D.3 What the first run already says, and what it does not
+
+Regardless of D.1, two readings from that run do not depend on the entry-bar
+fill and are recorded now:
+
+- **The RVOL ranking anti-selects on this sample.** Mean net R falls
+  monotonically across the eligible set's RVOL deciles, from −0.247R in decile
+  1 to −0.519R in decile 10, and the top-20 arm (−0.631R) is worse than the
+  unfiltered arm (−0.250R) and worse than the random-20 control's 95th
+  percentile (−0.235R). The paper's selection rule is the whole of its claimed
+  edge, and out of sample it points the other way.
+- **Friction is 35% of R at BASE** and 5.7% at the paper's commission-only
+  level, on a stop 10% of ATR wide.
+
+Neither is a verdict on the strategy until the run is redone with D.1 fixed.
+The criteria are read once, on that run.
