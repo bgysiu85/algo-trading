@@ -306,3 +306,39 @@ def test_entry_gate_is_a_backtest_parameter_on_both_engines():
     for mod in (mcl, mc5):
         assert "entry_gate" in inspect.signature(mod.backtest_session).parameters
         assert "entry_gate" not in inspect.signature(mod.evaluate_last_bar).parameters
+
+
+# --- the input file ----------------------------------------------------------
+
+def test_the_features_path_is_the_preflights_OWN_default():
+    """A restated path is a second source of truth, and this one was WRONG --
+    `running_up_preflight.csv` against the pre-flight's actual
+    `running_up_features.csv`. It would have failed after a multi-minute engine
+    pass rather than at the start, which is the expensive way to find out.
+    """
+    from common.running_up_preflight import build_parser
+    default = [a.default for a in build_parser()._actions if a.dest == "csv"][0]
+    assert C.FEATURES_CSV == default
+    assert C.FEATURES_CSV.endswith("running_up_features.csv")
+
+
+def test_a_missing_features_file_is_refused_before_the_tape_pass(tmp_path, capsys):
+    """Refused with the command that produces it, not a traceback -- and BEFORE
+    the engine runs, because the solve needs that population and a run without
+    it would be a different study wearing this one's name."""
+    import pytest as _pytest
+    with _pytest.raises(SystemExit) as e:
+        C.main(["--features", str(tmp_path / "nope.csv"),
+                "--pairs", str(tmp_path / "pairs.json")])
+    assert "running_up_preflight" in str(e.value)
+
+
+def test_the_entry_stamp_format_matches_between_the_two_files():
+    """The population check compares (symbol, date, entry_et) tuples across the
+    features file and this run's books. gate_study stamps %H:%M and so does the
+    pre-flight; a seconds mismatch would make EVERY row disagree and print a
+    spurious INPUT REFUSAL on a perfectly good pair of files."""
+    import inspect
+    from common import first_entry_skip as F
+    src = inspect.getsource(F._et)
+    assert '"%H:%M"' in src, src

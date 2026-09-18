@@ -52,6 +52,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import sys
 from collections import Counter
 from datetime import date as _date
 from pathlib import Path
@@ -69,7 +70,23 @@ ET = ZoneInfo("America/New_York")
 PAIRS = "var/state/screen_pairs_pit_itch_v2.json"
 DATASET = "XNAS.ITCH"
 REGISTERED = "docs/research/REGISTERED_chase_gate.md"
-FEATURES_CSV = "var/reports/running_up_preflight.csv"
+def _preflight_csv_default() -> str:
+    """The pre-flight's OWN --csv default, read from its parser rather than
+    restated here.
+
+    It is `running_up_features.csv`, not `running_up_preflight.csv`, and this
+    file had the wrong one until it was checked against the machine that holds
+    the data. A restated path is a second source of truth that fails at the
+    worst moment -- after a several-minute engine pass has already run.
+    """
+    from common.running_up_preflight import build_parser
+    for a in build_parser()._actions:
+        if a.dest == "csv":
+            return a.default
+    return "var/reports/running_up_features.csv"
+
+
+FEATURES_CSV = _preflight_csv_default()
 
 # Every one of these is a number the pre-flight PRINTED, on a pass that could
 # not see a P&L. Registration §1.
@@ -444,6 +461,11 @@ def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
     archive = Path(a.archive) if a.archive else default_archive()
 
+    if not Path(a.features).exists():
+        sys.exit(f"the features file {a.features} does not exist. It is written "
+                 f"by:\n    python -m common.running_up_preflight --jobs 8\n"
+                 "and this study solves its matched comparator's threshold on "
+                 "that population, so it is refused rather than run without it.")
     feats = read_features(a.features)
     dists, solved = {}, {}
     for eng in ("mcl", "mc5"):
