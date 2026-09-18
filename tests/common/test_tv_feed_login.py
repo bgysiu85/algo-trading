@@ -265,9 +265,35 @@ def _main_once(monkeypatch, tmp_path, argv):
                                     ("STREAMING", "streaming"))[1])
     monkeypatch.setattr(tv_feed, "Arrivals",
                         lambda root=None: Arrivals(root=tmp_path / "archive"))
+    state = tmp_path / "feed_state.json"
     assert tv_feed.main(argv + ["--once", "--dry-run", "--all-hours",
-                                "--no-telegram", "--heartbeat", "0"]) == 0
+                                "--no-telegram", "--heartbeat", "0",
+                                "--feed-state", str(state)]) == 0
+    calls["state"] = state
     return calls
+
+
+def test_main_publishes_the_contract_1_8_feed_block(monkeypatch, tmp_path):
+    """main() is where the state file gets wired, and a _loop test would not
+    see it -- the same gap that let main skip the startup check entirely."""
+    from common import feed_state as FS
+    monkeypatch.setenv(tv_feed.COOKIE_ENV, "abc")
+    monkeypatch.setenv(tv_feed.SIGN_ENV, "sig")
+    got = FS.read(_main_once(monkeypatch, tmp_path, [])["state"])
+    assert got is not None, "main() published nothing for the portal to read"
+    assert got["mode"] == "streaming" and got["delay_seconds"] == 0
+    assert got["cookie_state"] == "signed" and got["authenticated"] is True
+
+
+def test_main_records_no_cookie_as_disabled_rather_than_absent(
+        monkeypatch, tmp_path):
+    """Told 'no cookie is set', Ben sets both variables and nothing changes --
+    the flag is still on the command line."""
+    from common import feed_state as FS
+    monkeypatch.setenv(tv_feed.COOKIE_ENV, "abc")
+    monkeypatch.setenv(tv_feed.SIGN_ENV, "sig")
+    got = FS.read(_main_once(monkeypatch, tmp_path, ["--no-cookie"])["state"])
+    assert got["cookie_state"] == "disabled" and got["authenticated"] is False
 
 
 def test_main_checks_update_mode_before_it_starts_polling(monkeypatch, tmp_path):

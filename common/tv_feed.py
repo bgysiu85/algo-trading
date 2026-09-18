@@ -69,6 +69,7 @@ from datetime import datetime, time as dtime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from common import feed_state as FS
 from common import notify, session_lock
 from common.tv_screener import (CHANGE_COLUMN, COLUMNS, FILTERS, MARKET,
                                 PRICE_MAX, PRICE_MIN, VOLUME_COLUMN,
@@ -600,6 +601,61 @@ def in_session(now: datetime) -> bool:
     return SESSION_START <= now.timetz().replace(tzinfo=None) < SESSION_END
 
 
+class ModeWatch:
+    """Checks `update_mode` at startup and then on a timer, and publishes the
+    answer where `ui_bridge` can find it.
+
+    WHY A TIMER AND NOT ONLY STARTUP. A startup-only check cannot see the
+    failure that matters most: a cookie that expires MID-SESSION. Sessions are
+    5.5 hours and the cookie's lifetime is not ours to control, so a feed that
+    verified itself at 04:00 can be serving delayed rows at 07:00 with nothing
+    anywhere saying so. One extra request an hour against ~1,980 polls costs
+    nothing measurable; the poll itself stays byte-identical either way,
+    because the column is asked for in its own request.
+
+    The FIRST publish happens before any check has run and says `unknown`. That
+    is not a placeholder -- it is what stops yesterday's file, still sitting in
+    `var/`, from rendering as a confident "Real-time" all through this morning.
+    """
+
+    def __init__(self, cookie, cookie_state: str, interval_min: float,
+                 path=FS.STATE_PATH):
+        self.cookie = cookie
+        self.cookie_state = cookie_state
+        self.interval = max(0.0, float(interval_min)) * 60.0
+        self.path = path
+        self.last = None
+        self.state = None
+
+    def publish(self, state: dict) -> None:
+        self.state = state
+        if not FS.publish(state, self.path):
+            LOG.warning("could not write %s -- the portal will read the feed's "
+                        "mode as unknown, which is the safe direction", self.path)
+
+    def begin(self) -> None:
+        """Before the first check: honestly unknown, and never stale."""
+        self.publish(FS.initial(self.cookie_state))
+
+    def check(self) -> dict:
+        verdict, raw = check_update_mode(self.cookie)
+        self.last = time.monotonic()
+        state = FS.block(verdict, raw, self.cookie_state)
+        self.publish(state)
+        return state
+
+    def due(self) -> bool:
+        if not self.interval or self.last is None:
+            return False
+        return time.monotonic() - self.last >= self.interval
+
+    def maybe_check(self) -> None:
+        if self.due():
+            LOG.info("re-checking %s (%.0f min since the last one)",
+                     MODE_COLUMN, self.interval / 60.0)
+            self.check()
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="TradingView screen -> watchlist.txt")
     ap.add_argument("--interval", type=float, default=DEFAULT_INTERVAL)
@@ -617,6 +673,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help=f"ignore {COOKIE_ENV}/{SIGN_ENV} and poll anonymously")
     ap.add_argument("--heartbeat", type=float, default=3600.0,
                     help="seconds between 'feed alive' messages; 0 disables")
+    ap.add_argument("--mode-check-min", type=float, default=60.0,
+                    help=f"minutes between {MODE_COLUMN} re-checks; 0 = check "
+                         "only at startup")
+    ap.add_argument("--feed-state", type=Path, default=FS.STATE_PATH,
+                    help="where to publish the feed's real-time state")
     return ap
 
 
@@ -636,7 +697,12 @@ def main(argv: list[str] | None = None) -> int:
     fresh = Freshness()
     arrivals = Arrivals()
     cookie = None if a.no_cookie else session_cookie()
-    check_update_mode(cookie)
+    watch = ModeWatch(cookie,
+                      FS.cookie_state_from_env(COOKIE_ENV, SIGN_ENV,
+                                               disabled=a.no_cookie),
+                      a.mode_check_min, a.feed_state)
+    watch.begin()
+    watch.check()
     backoff = 0.0
     tg = (notify.Notifier() if a.no_telegram
           else notify.Notifier.from_env(a.telegram_batch_min))
@@ -651,7 +717,7 @@ def main(argv: list[str] | None = None) -> int:
     # --dry-run is to check the endpoint while a real feed is running.
     if a.dry_run:
         return _loop(a, rank, fresh, arrivals, cookie, tg, prev_screening,
-                     last_beat, backoff)
+                     last_beat, backoff, watch)
     held = session_lock.active(session_lock.WRITER_LOCK_PATH)
     if held:
         LOG.error("another watchlist writer is running -- %s",
@@ -663,11 +729,11 @@ def main(argv: list[str] | None = None) -> int:
     with session_lock.held("watchlist-writer", "tv_feed",
                            session_lock.WRITER_LOCK_PATH, out=str(a.out)):
         return _loop(a, rank, fresh, arrivals, cookie, tg, prev_screening,
-                     last_beat, backoff)
+                     last_beat, backoff, watch)
 
 
 def _loop(a, rank, fresh, arrivals, cookie, tg, prev_screening, last_beat,
-          backoff) -> int:
+          backoff, watch=None) -> int:
     while True:
         now = datetime.now(ET)
         if not a.all_hours and not a.once and not in_session(now):
@@ -775,6 +841,11 @@ def _loop(a, rank, fresh, arrivals, cookie, tg, prev_screening, last_beat,
         if warm:
             LOG.info("outside MCL's $%.0f-%.0f band, deprioritised: %s",
                      PRICE_MIN, PRICE_MAX, ", ".join(warm))
+
+        # The failure a startup-only check cannot see: a cookie that expires
+        # mid-session. One request an hour against ~1,980 polls.
+        if watch is not None:
+            watch.maybe_check()
 
         if a.once:
             tg.flush()

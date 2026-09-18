@@ -1227,3 +1227,56 @@ def test_rounding_alone_stays_quiet(tmp_path, caplog):
 
     assert not [r for r in caplog.records if "realised P&L disagrees" in r.message], (
         "rounding drift fired the warning; it will cry wolf every 5 seconds")
+
+
+# -- contract 1.8: the feed block -------------------------------------------
+#
+# Additive and OPTIONAL, so an agent that does not publish it still validates.
+# The property that matters: a failure to learn the mode must produce `unknown`
+# on the page, never `streaming`. An absent block renders as unknown, so
+# omitting it and publishing "unknown" are the same to the portal -- which is
+# why omitting is the safe response to every kind of trouble.
+
+def test_the_feed_block_is_published_when_the_feed_wrote_one(tmp_path):
+    from common import feed_state as FS
+    p = tmp_path / "feed_state.json"
+    FS.publish(FS.block("DELAYED", "delayed_streaming_900", "signed"), p)
+    b = bridge()
+    b.feed_state_path = p
+    doc = b.build_state(build_trader(), NOW)
+    assert doc["schema_version"] == "1.8"
+    assert doc["feed"]["mode"] == "delayed"
+    assert doc["feed"]["delay_seconds"] == 900
+    # the two the banner needs to tell "expired" from "never set" apart
+    assert doc["feed"]["authenticated"] is True
+    assert doc["feed"]["cookie_state"] == "signed"
+
+
+def test_no_feed_file_omits_the_block_rather_than_claiming_real_time(tmp_path):
+    """The feed has not started, or predates the field. An absent block is
+    rendered as unknown by the portal, which is true; a default of streaming
+    would be a dashboard telling Ben he is seeing the market when he is
+    seeing a quarter-hour-old picture of it."""
+    b = bridge()
+    b.feed_state_path = tmp_path / "nothing_here.json"
+    assert "feed" not in b.build_state(build_trader(), NOW)
+
+
+def test_a_corrupt_feed_file_omits_the_block(tmp_path):
+    p = tmp_path / "feed_state.json"
+    p.write_text('{"mode": "streaming"', encoding="utf-8")   # truncated write
+    b = bridge()
+    b.feed_state_path = p
+    assert "feed" not in b.build_state(build_trader(), NOW)
+
+
+def test_the_document_still_builds_when_the_feed_file_is_nonsense(tmp_path):
+    """The whole document must not fail over a diagnostic. Positions, P&L and
+    the watchlist matter more than the feed tile."""
+    p = tmp_path / "feed_state.json"
+    p.write_text("mode: streaming\n", encoding="utf-8")       # not even JSON
+    b = bridge()
+    b.feed_state_path = p
+    doc = b.build_state(build_trader(), NOW)
+    assert doc["account"]["account_id"] == "DUM215828"
+    assert "feed" not in doc

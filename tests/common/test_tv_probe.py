@@ -236,3 +236,75 @@ def test_replay_re_reads_a_csv_without_touching_the_network(monkeypatch, tmp_pat
     out = tmp_path / "tv_probe.txt"
     assert tv_probe.main(["--replay", str(csv_path), "--out", str(out)]) == 0
     assert "never" in out.read_text(encoding="utf-8")
+
+
+# --- the run must not eat the previous one -----------------------------------
+
+def test_a_short_run_renames_the_previous_report_aside(tmp_path, monkeypatch):
+    """A 3-minute anonymous check overwrote a 35-minute AUTHENTICATED capture on
+    2026-09-18 and cost that morning's raw CSV. Same lesson as `screen_sim
+    --after` refusing the deciding file: a partial run does not get to write
+    over a complete one.
+    """
+    out, csvp = tmp_path / "tv_probe.txt", tmp_path / "tv_probe.csv"
+    out.write_text("THE 35-MINUTE RUN", encoding="utf-8")
+    csvp.write_text("poll_et,arm,ticker,premarket_volume,premarket_change,premarket_close\n",
+                    encoding="utf-8")
+
+    monkeypatch.setattr(tv_probe, "_scan", lambda p, c=None: {"data": []})
+    monkeypatch.setattr(tv_probe.time, "sleep", lambda s: None)
+    assert tv_probe.main(["--minutes", "0", "--out", str(out), "--csv", str(csvp),
+                          "--no-columns"]) == 0
+
+    kept = [p for p in tmp_path.iterdir() if p.name.startswith("tv_probe_2")]
+    assert kept, sorted(p.name for p in tmp_path.iterdir())
+    assert any("THE 35-MINUTE RUN" in p.read_text(encoding="utf-8")
+               for p in kept if p.suffix == ".txt")
+
+
+def test_force_overwrites_instead_of_keeping(tmp_path, monkeypatch):
+    out, csvp = tmp_path / "tv_probe.txt", tmp_path / "tv_probe.csv"
+    out.write_text("OLD", encoding="utf-8")
+    monkeypatch.setattr(tv_probe, "_scan", lambda p, c=None: {"data": []})
+    monkeypatch.setattr(tv_probe.time, "sleep", lambda s: None)
+    tv_probe.main(["--minutes", "0", "--out", str(out), "--csv", str(csvp),
+                   "--no-columns", "--force"])
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith("tv_probe_2")]
+
+
+# --- the dating columns ------------------------------------------------------
+
+def test_a_unix_stamp_is_printed_as_ET_not_as_a_number():
+    """`1789632000` tells a reader nothing. `09-17 04:00 ET` says the row
+    describes YESTERDAY's pre-market, which is the question H-F1 asks."""
+    assert tv_probe._stamp(1789632000) == "09-17 04:00 ET"
+    assert tv_probe._stamp("1789632000") == "09-17 04:00 ET"
+    assert tv_probe._stamp(None) == "absent"
+    assert tv_probe._stamp("streaming") == "streaming"
+    assert tv_probe._stamp(42) == "42", "a small number is not a timestamp"
+
+
+def test_the_dating_columns_are_printed_for_BOTH_arms():
+    """One arm cannot tell 'the feed is 15 minutes behind' from 'this column
+    always names the last completed session'. Side by side, it is one line."""
+    cols = {"plain": {"update_mode": "delayed_streaming_900",
+                      "premarket_time": 1789632000},
+            "auth": {"update_mode": "streaming",
+                     "premarket_time": 1789718400}}
+    body = "\n".join(tv_probe.render(
+        tv_probe.summarise([rec("VEEA", "04:08:52", 120_000)]),
+        columns=cols, polls=197, authed=True))
+    line = [l for l in body.splitlines() if "premarket_time" in l][0]
+    assert "09-17 04:00 ET" in line and "09-18 04:00 ET" in line, line
+
+
+def test_an_unrun_auth_arm_says_so_rather_than_printing_absent():
+    """'absent' would read as 'the column came back empty', which is a
+    different finding from 'we never asked'."""
+    cols = {"plain": {"update_mode": "delayed_streaming_900",
+                      "premarket_time": 1789632000}}
+    body = "\n".join(tv_probe.render(
+        tv_probe.summarise([rec("VEEA", "04:08:52", 120_000)]),
+        columns=cols, polls=10, authed=False))
+    line = [l for l in body.splitlines() if "premarket_time" in l][0]
+    assert "(arm not run)" in line, line
