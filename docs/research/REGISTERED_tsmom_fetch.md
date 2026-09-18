@@ -95,6 +95,44 @@ own file and cannot fail for the right reason. `common/holdout.py` set the
 precedent — a promised counter that nothing incremented was removed rather than
 shipped as decoration.)*
 
+### 1.3 Pricing is SAMPLED, not summed — the second live run, 2026-09-18
+
+```
+pricing failed on NG definition 2023-01-13 -- nothing downloaded:
+504 The remote gateway timed out.
+```
+
+The error named its job, which §1.1 had just made it do. What it named was a
+**structural** problem rather than a bad request: the pull priced **every job
+individually — 12 roots × 190 monthly samples = 2,280 metadata round trips,
+plus 12 for the bars — before downloading a single byte.** At a few hundred
+milliseconds each that is ten minutes of pricing, and NG 2023-01-13 was call
+1,304 of 2,292. Nothing was lost. Nothing could ever finish, either: any one
+transient failure anywhere in that sequence aborted everything.
+
+**Definition is now priced the way the registered $3.65 was produced** —
+`tsmom_data_price --scope lean` samples ONE representative session per root and
+multiplies. Same methodology as the registered figure, **24 calls instead of
+2,292**. The per-session cost is exact; the count is arithmetic. Bars are one
+call each regardless and are still summed. Jobs already on disk are still
+excluded from both the count and the total.
+
+**And a transient gateway failure is now retried** with backoff — 504, 502,
+503, 429, timeouts, connection resets. The retry is as narrow as the symbology
+one: anything else still aborts, because a blanket retry turns a mis-scoped
+request into a slow failure instead of a loud one.
+
+**Holiday handling moved to download time** as a consequence. The grid is built
+weekend-free; a definition day that will not resolve when fetched moves forward
+up to three days; a month that still cannot be placed is named, and above 2% the
+run says plainly that the roll calendar has holes and the engine should not be
+run on the archive until that is explained.
+
+**Sixteen mutations, sixteen caught** — one only after the sweep found that a
+test asserting the error names its job had been **lost in a block replacement**
+while this restructure was written. The sweep earning its keep, and an argument
+for running it after a refactor rather than only after a fix.
+
 ## 2. The guards, and what each is for
 
 1. **Estimate first, always.** The total prints before anything transfers.

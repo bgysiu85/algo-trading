@@ -59,6 +59,7 @@ import argparse
 import json
 import re
 import sys
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -173,86 +174,125 @@ def _is_symbology_miss(e: Exception) -> bool:
     return "symbology_invalid_request" in t or "could not be resolved" in t.lower()
 
 
+# Gateway hiccups, as opposed to anything about the request. A 504 on one of
+# 2,292 calls used to abort the whole run; now it is slept on and retried.
+TRANSIENT = ("504", "502", "503", "429", "timed out", "timeout",
+             "connection reset", "connection aborted", "temporarily unavailable")
+
+# Module-level so a test can replace it. A test that can reach the real
+# time.sleep is a test that can hang the suite, which one mutation duly did.
+_SLEEP = time.sleep
+
+
+def _is_transient(e: Exception) -> bool:
+    t = str(e).lower()
+    return any(k in t for k in TRANSIENT)
+
+
 def _price(client, kw: dict):
     return (float(client.metadata.get_cost(**kw)),
             int(client.metadata.get_billable_size(**kw)))
 
 
+def _retry(fn, *, attempts: int = 4, sleep=None):
+    """Run fn, retrying ONLY a transient gateway failure, with backoff.
+
+    Narrow on purpose, for the same reason `_is_symbology_miss` is: a blanket
+    retry turns a mis-scoped request into a slow failure instead of a loud one.
+    """
+    nap = sleep or _SLEEP
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as e:                       # noqa: BLE001
+            if _is_transient(e) and i < attempts - 1:
+                nap(2 ** i)
+                continue
+            raise
+
+
 def plan(client, roots: dict, root_dir: Path, start: str, end: str):
-    """Every job that would actually run, priced. Jobs already on disk are
-    skipped and are NOT in the total."""
+    """Every job that would actually run, and what it would cost.
+
+    WHY THE DEFINITION COST IS SAMPLED RATHER THAN SUMMED, 2026-09-18.
+    The first version priced every job individually: 12 roots x 190 monthly
+    samples = 2,280 metadata round trips, plus 12 for the bars, BEFORE a single
+    byte is downloaded. At a few hundred milliseconds each that is ten minutes
+    of pricing in which any one transient failure aborts everything. It did:
+
+        pricing failed on NG definition 2023-01-13 -- nothing downloaded:
+        504 The remote gateway timed out.
+
+    That was call 1,304 of 2,292. Nothing was lost, and nothing could ever
+    finish either.
+
+    So definition is priced the way `common.tsmom_data_price --scope lean`
+    priced it, and the way the registered $3.65 was produced: ONE representative
+    session per root, multiplied by the number of sessions still to fetch. Same
+    methodology as the registered figure, 24 calls instead of 2,292. The
+    per-session cost is exact; the count is arithmetic. Bars are one call each
+    regardless, so they are still summed.
+
+    Jobs already on disk are skipped and are NOT in the total -- billing is on
+    retrieval, so the printed estimate describes only work that will happen.
+    """
     jobs, have = [], 0
+    usd, nbytes = 0.0, 0
 
     for root in roots:
         out = bar_path(root_dir, root)
-        kw = dict(dataset=DATASET, schema=BAR_SCHEMA,
-                  symbols=f"{root}.c.0,{root}.c.1", stype_in="continuous",
-                  start=start, end=end)
         if out.exists():
             have += 1
             continue
-        jobs.append((root, BAR_SCHEMA, out, kw))
-
-    usd, nbytes = 0.0, 0
-    for root, schema, out, kw in jobs:               # the bar jobs, priced
+        kw = dict(dataset=DATASET, schema=BAR_SCHEMA,
+                  symbols=f"{root}.c.0,{root}.c.1", stype_in="continuous",
+                  start=start, end=end)
         try:
-            u, n = _price(client, kw)
+            u, n = _retry(lambda kw=kw: _price(client, kw))
         except Exception as e:                       # noqa: BLE001
             raise SystemExit(
-                f"pricing failed on {root} {schema} "
-                f"{kw['start']}..{kw['end']} ({kw['symbols']}, "
-                f"stype_in={kw['stype_in']}) -- nothing downloaded: {_scrub(e)}")
+                f"pricing failed on {root} {BAR_SCHEMA} {start}..{end} "
+                f"({kw['symbols']}, stype_in={kw['stype_in']}) "
+                f"-- nothing downloaded: {_scrub(e)}")
+        jobs.append((root, BAR_SCHEMA, out, kw))
         usd += u
         nbytes += n
 
-    # Definition jobs price as they are planned, because an unresolvable day is
-    # moved rather than fatal.
-    unplaced: list[tuple[str, str]] = []
+    days = definition_days(start, end)
     for root in roots:
-        for day in definition_days(start, end):
+        todo = []
+        for day in days:
             out = def_path(root_dir, root, day)
             if out.exists():
                 have += 1
                 continue
-            placed = False
-            for shift in range(4):                   # the 15th, then forward
-                d = (date.fromisoformat(day) + timedelta(days=shift)).isoformat()
-                nxt = (date.fromisoformat(d) + timedelta(days=1)).isoformat()
-                kw = dict(dataset=DATASET, schema=DEF_SCHEMA,
-                          symbols=f"{root}.FUT", stype_in="parent",
-                          start=d, end=nxt)
-                try:
-                    u, n = _price(client, kw)
-                except Exception as e:               # noqa: BLE001
-                    if _is_symbology_miss(e):
-                        continue                     # a holiday; try the next day
-                    raise SystemExit(
-                        f"pricing failed on {root} {DEF_SCHEMA} {d} "
-                        f"-- nothing downloaded: {_scrub(e)}")
-                jobs.append((root, DEF_SCHEMA, def_path(root_dir, root, d), kw))
-                usd += u
-                nbytes += n
-                placed = True
-                break
-            if not placed:
-                unplaced.append((root, day[:7]))
+            nxt = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
+            kw = dict(dataset=DATASET, schema=DEF_SCHEMA, symbols=f"{root}.FUT",
+                      stype_in="parent", start=day, end=nxt)
+            todo.append((root, DEF_SCHEMA, out, kw))
+        if not todo:
+            continue
 
-    if unplaced:
-        # Reported, never silent. A month with no roll-calendar sample is a hole
-        # in the thing the roll rule reads, and a run that quietly drops a few
-        # is indistinguishable from one that drops a year.
-        print(f"WARNING: {len(unplaced)} month(s) had no resolvable session "
-              f"within 4 days of the 15th and were skipped:")
-        for root, mon in unplaced[:12]:
-            print(f"  {root} {mon}")
-        if len(unplaced) > 12:
-            print(f"  ... and {len(unplaced) - 12} more")
-        share = len(unplaced) / max(1, len(roots) * len(definition_days(start, end)))
-        if share > 0.02:
+        sample = None
+        for cand in todo[:4]:
+            try:
+                sample = _retry(lambda kw=cand[3]: _price(client, kw))
+                break
+            except Exception as e:                   # noqa: BLE001
+                if _is_symbology_miss(e):
+                    continue
+                raise SystemExit(
+                    f"pricing failed on {root} {DEF_SCHEMA} {cand[3]['start']} "
+                    f"-- nothing downloaded: {_scrub(e)}")
+        if sample is None:
             raise SystemExit(
-                f"ABORT: {share:.1%} of monthly samples unplaceable, above the "
-                "2% the registration allows. That is a calendar problem, not a "
-                "few holidays -- nothing downloaded.")
+                f"pricing failed on {root} {DEF_SCHEMA}: none of the first four "
+                "monthly samples could be resolved -- nothing downloaded")
+        u, n = sample
+        usd += u * len(todo)
+        nbytes += n * len(todo)
+        jobs += todo
+
     return jobs, usd, nbytes, have
 
 
@@ -339,18 +379,60 @@ def main(argv=None) -> int:
         return 0
 
     print(f"SPENDING ${usd:.2f}. Downloading {len(jobs)} job(s).\n")
-    done = 0
+    done, failed = 0, []
+    unplaced: list[tuple[str, str]] = []
     for root, schema, out, kw in jobs:
         out.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            data = client.timeseries.get_range(**kw)
-            data.to_file(out)
-        except Exception as e:                       # noqa: BLE001
-            print(f"  {root:<5} {schema:<10} FAILED: {_scrub(e)[:70]}")
-            continue
-        done += 1
-        if done % 25 == 0 or schema == BAR_SCHEMA:
-            print(f"  {root:<5} {schema:<10} -> {out.name}   ({done}/{len(jobs)})")
+        placed, broke = False, False
+        # Weekends were removed when the grid was built. HOLIDAYS are not
+        # knowable here -- the exchange calendar is not in hand -- so a
+        # definition day that will not resolve moves forward up to three days.
+        for shift in (range(4) if schema == DEF_SCHEMA else range(1)):
+            k, dest = dict(kw), out
+            if shift:
+                d = (date.fromisoformat(kw["start"]) + timedelta(days=shift)).isoformat()
+                k["start"] = d
+                k["end"] = (date.fromisoformat(d) + timedelta(days=1)).isoformat()
+                dest = def_path(root_dir, root, d)
+                if dest.exists():
+                    placed = True
+                    break
+            try:
+                data = _retry(lambda k=k: client.timeseries.get_range(**k))
+                data.to_file(dest)
+            except Exception as e:                   # noqa: BLE001
+                if schema == DEF_SCHEMA and _is_symbology_miss(e):
+                    continue
+                failed.append((root, schema, k.get("start"), _scrub(e)[:60]))
+                broke = True
+                break
+            done += 1
+            placed = True
+            if done % 50 == 0 or schema == BAR_SCHEMA:
+                print(f"  {root:<5} {schema:<10} -> {dest.name}   ({done}/{len(jobs)})")
+            break
+        if not placed and not broke and schema == DEF_SCHEMA:
+            unplaced.append((root, kw["start"][:7]))
+
+    if unplaced:
+        # Reported, never silent. A month with no roll-calendar sample is a hole
+        # in the thing the roll rule reads, and a run that quietly drops a few
+        # is indistinguishable from one that drops a year.
+        print(f"\n{len(unplaced)} month(s) had no resolvable session within 4 "
+              f"days of the 15th:")
+        for r, mon in unplaced[:12]:
+            print(f"  {r} {mon}")
+        if len(unplaced) > 12:
+            print(f"  ... and {len(unplaced) - 12} more")
+        share = len(unplaced) / max(1, len(roots) * len(definition_days(start, end)))
+        if share > 0.02:
+            print(f"WARNING: {share:.1%} of monthly samples unplaceable, above "
+                  "the 2% the registration allows. The roll calendar has holes; "
+                  "do not run the engine on this archive until it is explained.")
+    if failed:
+        print(f"\n{len(failed)} job(s) FAILED:")
+        for r, sc, d, msg in failed[:10]:
+            print(f"  {r:<5} {sc:<10} {d}  {msg}")
 
     rec = {
         "pulled_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

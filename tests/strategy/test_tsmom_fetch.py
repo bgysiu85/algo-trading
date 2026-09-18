@@ -53,6 +53,13 @@ class _FakeClient:
         self.timeseries = _FakeTimeseries()
 
 
+@pytest.fixture(autouse=True)
+def _no_real_sleep(monkeypatch):
+    """No test reaches time.sleep. One mutation retried every failure with real
+    backoff and hung a 300-second mutation sweep."""
+    monkeypatch.setattr(F, "_SLEEP", lambda _: None)
+
+
 @pytest.fixture
 def run(tmp_path, monkeypatch):
     """main() against a fake client, a temp archive, and a resolved key."""
@@ -169,52 +176,103 @@ def test_no_monthly_sample_lands_on_a_weekend():
         assert x[:7] == (x[:8] + "15")[:7]
 
 
-def test_a_holiday_is_retried_forward_and_a_run_of_them_is_reported():
-    """Weekends are known in advance; holidays are not.
+def test_definition_cost_is_SAMPLED_not_summed(run):
+    """2,292 metadata round trips before one byte is the defect this fixes.
 
-    An unresolvable day moves rather than aborting -- but it is reported, because
-    a run that quietly drops a few months is indistinguishable from one that
-    drops a year.
+    The first live --confirm-less run died at call 1,304 with a 504, having
+    priced nothing it could keep. Definition is now priced the way the
+    registered $3.65 was: one representative session per root, times the number
+    still to fetch.
     """
-    class _HolidayMeta(_FakeMeta):
-        def __init__(self, dead):
-            super().__init__()
-            self.dead = dead
+    client = _FakeClient()
+    jobs, usd, nbytes, _ = F.plan(client, {"ES": "", "GC": ""},
+                                  F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
+    n_days = len(F.definition_days("2010-06-06", "2026-09-17"))
+    assert len(jobs) == 2 + 2 * n_days, "the job list is not the full grid"
+    # 2 bar calls + 2 definition samples, NOT 2 + 2*190
+    assert len(client.metadata.calls) == 4, (
+        f"{len(client.metadata.calls)} metadata calls for 2 roots -- pricing is "
+        "summed per job again, which is ten minutes of round trips in which any "
+        "one 504 aborts everything")
+    # and the scaled total still describes the whole job list
+    assert usd == pytest.approx(0.01 * (2 + 2 * n_days))
+    assert nbytes == 1000 * (2 + 2 * n_days)
 
-        def get_cost(self, **kw):
-            if kw.get("start") in self.dead:
+
+def test_a_transient_gateway_failure_is_retried_not_fatal():
+    """504/502/503/429/timeout is the gateway, not the request."""
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError("504 The remote gateway timed out.")
+        return "ok"
+
+    assert F._retry(flaky, sleep=lambda _: None) == "ok"
+    assert calls["n"] == 3
+
+
+def test_a_real_error_is_NOT_retried():
+    """A blanket retry turns a mis-scoped request into a slow failure instead
+    of a loud one -- the same reason _is_symbology_miss is narrow."""
+    calls = {"n": 0}
+
+    def broken():
+        calls["n"] += 1
+        raise RuntimeError("422 symbology_invalid_request")
+
+    with pytest.raises(RuntimeError):
+        F._retry(broken, sleep=lambda _: None)
+    assert calls["n"] == 1, "a non-transient failure was retried"
+
+
+def test_a_holiday_is_retried_forward_at_DOWNLOAD_time(tmp_path, monkeypatch):
+    """Weekends are removed from the grid; holidays are not knowable, so a
+    definition day that will not resolve moves forward up to three days."""
+    dead = {"2011-07-15"}
+
+    class _HolidayTs(_FakeTimeseries):
+        def get_range(self, **kw):
+            if kw.get("start") in dead:
                 raise RuntimeError("422 symbology_invalid_request: None of the "
                                    "symbols could be resolved")
-            return super().get_cost(**kw)
+            return _FakeData(self.downloads)
 
     client = _FakeClient()
-    client.metadata = _HolidayMeta({"2011-07-15"})       # one holiday
-    jobs, usd, _, _ = F.plan(client, {"ES": ""}, F.Path("/nonexistent"),
-                             "2010-06-06", "2026-09-17")
-    got = {kw["start"] for _, sc, _, kw in jobs if sc == F.DEF_SCHEMA}
-    assert "2011-07-15" not in got
-    assert "2011-07-16" in got, "the holiday was not retried forward"
-    assert len(got) == len(F.definition_days("2010-06-06", "2026-09-17"))
+    client.timeseries = _HolidayTs()
+    monkeypatch.setattr(F, "require_databento",
+                        lambda: type("m", (), {"Historical": lambda *_: client}))
+    monkeypatch.setattr("common.secrets_util.resolve", lambda *a, **k: "db-" + "x" * 20)
+    F.main(["--archive", str(tmp_path), "--roots", "ES", "--confirm"])
+
+    # .stem on "2011-07-16.dbn.zst" leaves ".dbn" -- strip both suffixes
+    names = {F.Path(p).name.split(".")[0] for p in client.timeseries.downloads}
+    assert "2011-07-15" not in names
+    assert "2011-07-16" in names, "the holiday was not retried forward"
 
 
-def test_a_non_symbology_failure_still_aborts_and_names_the_job():
-    """A blanket retry would turn a mis-scoped request into a slow one instead
-    of a loud one. And the first version's error named no job at all, which is
-    why the live 422 could not be diagnosed from its own output."""
-    class _BrokenMeta(_FakeMeta):
-        def get_cost(self, **kw):
-            raise RuntimeError("500 internal error")
+def test_unplaced_months_are_reported_at_download_time(tmp_path, monkeypatch, capsys):
+    """A run that quietly drops months is indistinguishable from one that drops
+    a year, so every hole in the roll calendar is named."""
+    class _DeadTs(_FakeTimeseries):
+        def get_range(self, **kw):
+            if "2013-01-01" <= kw.get("start", "") <= "2014-12-31":
+                raise RuntimeError("422 symbology_invalid_request: None of the "
+                                   "symbols could be resolved")
+            return _FakeData(self.downloads)
 
     client = _FakeClient()
-    client.metadata = _BrokenMeta()
-    with pytest.raises(SystemExit) as e:
-        F.plan(client, {"ES": ""}, F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
-    msg = str(e.value)
-    assert "nothing downloaded" in msg
-    assert "ES" in msg and F.BAR_SCHEMA in msg, (
-        "the error does not name the failing job -- which is exactly why the "
-        "live 422 on 2026-09-18 could not be diagnosed from its own output")
-    assert "continuous" in msg
+    client.timeseries = _DeadTs()
+    monkeypatch.setattr(F, "require_databento",
+                        lambda: type("m", (), {"Historical": lambda *_: client}))
+    monkeypatch.setattr("common.secrets_util.resolve", lambda *a, **k: "db-" + "x" * 20)
+    F.main(["--archive", str(tmp_path), "--roots", "ES", "--confirm"])
+    out = capsys.readouterr().out
+    assert "24 month(s) had no resolvable session" in out
+    assert "ES 2013-01" in out
+    assert "WARNING" in out and "above the 2%" in out, (
+        "a year of holes in the roll calendar was reported as routine")
 
 
 def test_a_non_symbology_failure_on_a_DEFINITION_job_aborts(capsys):
@@ -241,39 +299,6 @@ def test_a_non_symbology_failure_on_a_DEFINITION_job_aborts(capsys):
         "a 500 on a definition job was retried away as though it were a "
         "holiday -- a blanket retry turns a mis-scoped request into a slow one "
         "instead of a loud one")
-
-
-def test_unplaced_months_are_reported_and_a_run_of_them_aborts(capsys):
-    """A run that quietly drops a few months is indistinguishable from one that
-    drops a year, so the count is printed and 2% stops the run."""
-    class _DeadRange(_FakeMeta):
-        def __init__(self, dead_from, dead_to):
-            super().__init__()
-            self.lo, self.hi = dead_from, dead_to
-
-        def get_cost(self, **kw):
-            if kw.get("schema") == F.DEF_SCHEMA and self.lo <= kw["start"] <= self.hi:
-                raise RuntimeError("422 symbology_invalid_request: None of the "
-                                   "symbols could be resolved")
-            return super().get_cost(**kw)
-
-    # One month unplaceable: reported, run continues.
-    client = _FakeClient()
-    client.metadata = _DeadRange("2011-07-01", "2011-07-31")
-    jobs, _, _, _ = F.plan(client, {"ES": ""}, F.Path("/nonexistent"),
-                           "2010-06-06", "2026-09-17")
-    out = capsys.readouterr().out
-    assert "WARNING" in out and "1 month(s)" in out and "2011-07" in out, (
-        "an unplaceable month was skipped silently")
-    assert jobs
-
-    # A year of them: above the registered 2%, so the run stops.
-    client2 = _FakeClient()
-    client2.metadata = _DeadRange("2013-01-01", "2014-12-31")
-    with pytest.raises(SystemExit) as e:
-        F.plan(client2, {"ES": ""}, F.Path("/nonexistent"),
-               "2010-06-06", "2026-09-17")
-    assert "ABORT" in str(e.value) and "nothing downloaded" in str(e.value)
 
 
 def test_the_definition_grid_is_monthly_deterministic_and_capped():
@@ -363,3 +388,32 @@ def test_no_test_in_this_file_writes_outside_tmp_path():
     assert bad == [], (
         f"F.main called without --archive at line(s) {bad} -- that writes into "
         "the repo's default archive path")
+
+
+def test_a_BAR_pricing_failure_names_the_job_it_failed_on():
+    """The defect behind the defect, 2026-09-18.
+
+    The first live run printed only
+
+        pricing failed, nothing downloaded: 422 symbology_invalid_request
+
+    with no root, no schema, no date -- so a 422 whose cause was a Sunday could
+    not be diagnosed from its own output. This test was written for that, and
+    then LOST in a block replacement while the download path was restructured;
+    the mutation sweep caught its absence, which is the sweep earning its keep.
+    """
+    class _BrokenMeta(_FakeMeta):
+        def get_cost(self, **kw):
+            raise RuntimeError("500 internal error")
+
+    client = _FakeClient()
+    client.metadata = _BrokenMeta()
+    with pytest.raises(SystemExit) as e:
+        F.plan(client, {"ES": ""}, F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
+    msg = str(e.value)
+    assert "nothing downloaded" in msg
+    # every part that identifies WHICH call failed
+    assert F.BAR_SCHEMA in msg, "the schema is missing"
+    assert "2010-06-06..2026-09-17" in msg, "the date range is missing"
+    assert "continuous" in msg, "the symbology is missing"
+    assert msg.count("ES") >= 2, "the root is named only inside the symbols string"
