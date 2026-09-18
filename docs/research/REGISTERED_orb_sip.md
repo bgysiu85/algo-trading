@@ -876,3 +876,124 @@ friction levels, the criteria, the controls, the resolved figure of record, or
 the verdict. **It does not touch the holdout**, which stays locked whatever H
 reads. The volume-confirmation-on-the-break candidate from the same source
 stays separate and unregistered; a two-filter grid on this book is a search.
+
+---
+
+# AMENDMENT I — 2026-09-19, PRE-RUN. Volume confirmation on the break.
+
+The last named candidate from the source review
+(`handover_orb_build_chat_20260918.md` §5, `source_videos_14_breitstein_20260918.md`
+§14.2). H retired the market-context family; I is a different mechanism — the
+quality of the break itself, per trade, not the state of the market, per
+session — so H.5's retirement does not reach it and it gets its own test.
+
+**If I fails, ORB has no named candidate left.** The verdict stands at 1 of 7
+and `holdout.json` is unspent; I cannot change either (I.7).
+
+## I.0 What was looked at before this was written
+
+A census of the BUCKETING VARIABLE ALONE, 628 trades over 40 sampled sessions:
+usable on 99.7%, split 59.6% confirmed / 40.4% weak, zero exact ties, median
+break-to-prior volume ratio 1.30x, five prior bars available at the median.
+**No P/L and no bucket-by-outcome reading.** As in H.0, this establishes only
+that the buckets are neither empty nor degenerate.
+
+## I.1 The rule, parameter-free
+
+Breitstein: *"weak volume breakouts are far more likely to fail."* Stated as a
+warning, never defined. The faithful operationalisation is local, because
+confirmation means the break itself brought participation:
+
+- **CONFIRMED** — the breakout bar's volume is strictly greater than the median
+  volume of the five minutes immediately preceding it.
+- **WEAK** — otherwise. Exact ties count as WEAK (none in the census).
+- The gate trades CONFIRMED and skips WEAK.
+
+**No multiplier.** Not 1.5x, not 2x — a sign comparison, one bit per trade. The
+five-minute baseline is the strategy's own opening-range length, inherited
+rather than chosen; no other window is run (I.6).
+
+## I.2 THE LOOK-AHEAD, DISCLOSED: THIS IS A CEILING, NOT A STRATEGY
+
+A minute bar's volume is complete only at the end of that minute. The entry
+happens **during** it. **So the breakout bar's volume is not known at the
+moment the rule would have to fire, and I.1's primary reading uses information
+the trader does not have.**
+
+This is deliberate and it is the point:
+
+- **If the cheating version fails, the honest version cannot succeed.** A
+  filter that cannot help even when handed the future is dead, and one run
+  settles it.
+- **A pass earns nothing but a further registration.** It would mean only that
+  the mechanism is real, and the tradeable form below would then have to be
+  registered and tested on its own. **I.1 can never be adopted.**
+
+**The tradeable reading, reported beside it for information only:** the last
+COMPLETED bar's volume (minute `entry_min - 1`) against the median of the five
+before that (`entry_min - 6` .. `entry_min - 2`). Fully knowable at the entry.
+**The decision rests on the ceiling alone** — reporting both and then choosing
+whichever reads better is the two-denominator failure this program refuses.
+
+## I.3 The bar
+
+Criteria 1-6 as written in section 4, **unrelaxed**, on the CONFIRMED bucket,
+**criterion 1 above all** (`handover_orb_build_chat_20260918.md` §2: a proposal
+improving the mean without improving drop-top-N has not addressed the failure).
+Criterion 7 stays unscored per E.2's scope, so I cannot produce a ship decision.
+
+## I.4 The controls, all four required
+
+**(a) The shuffled-label null.** The same CONFIRMED/WEAK labels dealt to the
+same trades at random, preserving the observed 60/40 proportion, **2,000 draws,
+seed 20260916**. **The real bucket's mean AND drop-top-5 must both exceed the
+95th percentile.** This is a per-trade shuffle, where H's was per-session,
+because I is a per-trade filter. A gate that cannot beat a random relabelling
+of the same shape is a relabelling.
+
+**(b) The composition control.** Volume on the break is mechanically higher
+early in the session and on heavily-traded names, so CONFIRMED may be a
+time-of-day or an RVOL filter wearing volume's clothes. **Report the CONFIRMED
+share by entry-minute bucket and by RVOL rank decile.** If CONFIRMED is
+concentrated in the first minutes after the range, or in the top ranks, the
+reading is reported as that and not as volume.
+
+**(c) Two denominators.** Per trade and per symbol-day. A disagreement is a
+refusal, not a result.
+
+**(d) drop-top-N on the delta.** Per symbol, its CONFIRMED total less its WEAK
+total; the difference must survive dropping its top contributors.
+
+## I.5 Prediction, scored either way
+
+**Primary: NOT ADOPTABLE — the CONFIRMED bucket fails criterion 1**, even on
+the ceiling reading.
+
+**Secondary, separately scored: the CONFIRMED mean WILL exceed WEAK's, while
+drop-top-5 stays negative.** Recorded with the note that **the same secondary
+prediction was WRONG in amendment H** — there the direction effect did not
+exist at all. It is made again here because volume-at-the-break is a better
+documented microstructure regularity than index direction, and because a
+prediction repeated after being wrong is worth more than one quietly dropped.
+
+Basis for the primary: nothing measured so far has moved concentration; F
+localised the failure to entry selection and H found nothing there; and the
+ceiling still has to clear drop-top-5 on a book where five symbols are worth
+262R.
+
+## I.6 What a failure closes
+
+**The volume-confirmation family is retired for ORB** — no multiplier sweep
+(1.5x, 2x, 3x), no alternative baseline window, no dollar-volume restatement,
+no "confirmed on the retest instead". Those are one hypothesis with a knob.
+
+**And with it, ORB closes with no named candidate remaining.** Any future ORB
+work needs a new mechanism and new data, not another cut of this book.
+
+## I.7 What I does not do
+
+It buys no data, re-simulates no trade, and does not touch the universe, the
+ranking, the filters, the friction levels, the criteria, the controls, the
+resolved figure of record, the verdict, or the holdout. I.1's primary reading
+is a ceiling that uses unavailable information and **is never adoptable on its
+own terms**.
