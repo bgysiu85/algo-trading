@@ -743,3 +743,136 @@ the criteria, the controls, the holdout, the resolved figure of record, or the
 verdict. It buys no data, applies no gate, and produces no P/L for any variant.
 It cannot produce a pass, and a positive reading only earns §5 a registration —
 never an adoption.
+
+---
+
+# AMENDMENT H — 2026-09-19, PRE-RUN. The market-context gate.
+
+Earned by amendment G, proposed by `handover_orb_build_chat_20260918.md` §5,
+sourced from `source_videos_14_breitstein_20260918.md` §14.2–14.3. H registers
+the gate. It does not adopt it, and H.5's prediction is that it fails.
+
+The verdict stands at 1 of 7 and `holdout.json` is unspent. H cannot change
+either: see H.6.
+
+## H.0 What was looked at before this was written
+
+A feasibility census of the BUCKETING VARIABLE ALONE, on 62 sampled sessions:
+SPY bars present on 62 of 62, never fewer than 5 in the window, 46.8% up,
+53.2% down, 0.0% exactly flat, median absolute move $0.275. **No P/L, no
+bucket-by-outcome reading, and no ORB trade was touched.** A rule whose buckets
+might be empty or degenerate cannot be registered sight-unseen; the census
+establishes only that they are neither.
+
+SPY, QQQ, IWM and DIA are all already inside the XNAS.ITCH minute files on
+disk. **Nothing is bought.** SPY is named here and the others are not, so that
+"try QQQ instead" cannot follow a failure — see H.5.
+
+## H.1 The rule, and why it has no parameter
+
+Breitstein states market context as decisive — *"this one variable can
+single-handedly downgrade an A setup to a C or worse"* — and never
+operationalises it. The faithful operationalisation is the strategy's own rule
+applied to the index:
+
+- **Decision instant: 09:35 ET**, the end of the strategy's own 5-minute
+  opening range, at which the trigger arms. Nothing after it is read.
+- **SPY's opening-range move** = close of the 09:34 bar minus open of the 09:30
+  bar (minutes 570–574 inclusive, the same window the strategy uses on its own
+  names), XNAS.ITCH, already on disk.
+- A trade is **WITH** when its side matches the sign of that move, **AGAINST**
+  when it opposes it, **FLAT** when the move is exactly zero (0 of 62 in the
+  census; handled, not expected).
+- **The gate trades WITH and skips AGAINST.**
+
+**There is no threshold.** The magnitude of SPY's move is deliberately unused
+and will not be swept. A gate with a threshold is a grid, a grid on a book this
+concentrated is a search rather than a test, and the four failed precedents all
+had one. This rule has a single bit per session and nothing to tune.
+
+## H.2 The bar: the unrelaxed criteria, on the retained bucket
+
+The gate is **ADOPTABLE** only if the WITH bucket clears criteria 1–6 as
+written in section 4 — **criterion 1 above all**, because
+`handover_orb_build_chat_20260918.md` §2 fixed the test that a proposal
+improving the mean without improving drop-top-N has not addressed the failure.
+
+| | required of the WITH bucket |
+|---|---|
+| 1 | drop-top-3 **and** drop-top-5 both > 0 |
+| 2 | cluster bootstrap P(total > 0) >= 0.95 |
+| 3 | mean net >= +0.05R at BASE |
+| 4 | trades >= 100 |
+| 5 | both halves > 0 |
+| 6 | both sides > 0 |
+| 7 | **stays unscored**, per E.2's scope and the handover's refusal (a) |
+
+**Because 7 stays unscored, H cannot produce a ship decision.** The most it can
+earn is: criteria 1–6 clear, every control below passes, and a holdout spend is
+then *proposed to Ben as a decision* — never taken automatically, and never by
+this amendment.
+
+## H.3 The controls, all four required
+
+**(a) The shuffled-sign control. This is the one G's result makes mandatory.**
+G measured that carrier days are better days, but measured it *conditional on
+the outcome* — days were selected because they held a giant winner. A 50/50
+session split can inherit that artifact. So: randomly reassign SPY's sign
+across sessions, preserving the observed up/down proportion, **2,000 draws,
+seed 20260916**, and rescore. **The real WITH bucket's mean AND its drop-top-5
+must both exceed the 95th percentile of that null.** A gate that cannot beat a
+coin flip applied to the same sessions is a relabelling, not a rule.
+
+**(b) The side-composition control.** The strategy's direction comes from each
+stock's own opening range, so on an up day more names break up and WITH is
+correlated with long. Criterion 6 already reads long (0.028)R against short
++0.029R. **The gate's advantage must hold within side** — WITH-long against
+AGAINST-long, and WITH-short against AGAINST-short — or it is a restatement of
+the side split and is reported as one.
+
+**(c) Two denominators.** Per trade and per session. **A disagreement is a
+refusal, not a result** (PROGRAM_INDEX §4).
+
+**(d) drop-top-N on the delta, not only the level** (PROGRAM_INDEX §4 item 4).
+The WITH − AGAINST difference must survive dropping its top contributing
+symbols, or the difference is those symbols.
+
+Date-level throughout, never pooled: per (date, bucket) aggregates, because
+ORB days are market-wide by construction and the clustering trap that inverted
+the Bollinger dip-buy (pooled +0.286%/trade → date-level (0.010)%, t = (0.18))
+applies here with more force.
+
+## H.4 What is reported either way
+
+Both buckets in full, never the retained one alone: trades, mean, gross,
+friction, total, drop-top-1/3/5, win rate, bootstrap, both halves, both sides,
+and the per-session distribution. A gate is a claim about what it *discards* as
+much as what it keeps.
+
+## H.5 Prediction, scored either way, and what a failure closes
+
+**Primary: NOT ADOPTABLE. The WITH bucket fails criterion 1.**
+
+**Secondary, falsifiable on its own: the WITH bucket's mean WILL exceed the
+AGAINST bucket's, and its drop-top-5 will still be negative.** A real direction
+effect that does not fix concentration is the outcome this registration
+expects, and the two halves of that sentence are scored separately.
+
+Basis: the regime-gate family is 0 for 4 here; G established that a session
+gate would need roughly the best 4.5% of sessions (20 of 446) to make the rest
+of the book profitable, while this rule splits about 50/50; and the five
+carrier symbols will land in one bucket or the other and still dominate it.
+
+**If the parameter-free rule fails, the market-context family is RETIRED for
+ORB.** No threshold sweep, no second index, no second window, no "QQQ instead",
+no "only when SPY moves more than X". Those are the same hypothesis with a
+knob, and a knob is what this amendment exists to refuse.
+
+## H.6 What H does not do
+
+It buys no data, re-simulates no trade, and reads no bar after 09:35 for its
+bucketing. It does not touch the universe, the ranking, the filters, the
+friction levels, the criteria, the controls, the resolved figure of record, or
+the verdict. **It does not touch the holdout**, which stays locked whatever H
+reads. The volume-confirmation-on-the-break candidate from the same source
+stays separate and unregistered; a two-filter grid on this book is a search.
