@@ -192,13 +192,25 @@ def past_apex(s: pd.Series, lookback: int = APEX_LOOKBACK,
 
 # --- signals --------------------------------------------------------------
 
-def signals(df: pd.DataFrame, require_macd_pos: bool | None = None) -> pd.DataFrame:
+def signals(df: pd.DataFrame, require_macd_pos: bool | None = None,
+            vol_multiple: float | None = None) -> pd.DataFrame:
     """Add indicator and condition columns. df needs open/high/low/close/volume.
 
-    require_macd_pos overrides REQUIRE_MACD_POSITIVE for this call only.
+    require_macd_pos overrides REQUIRE_MACD_POSITIVE for this call only, and
+    vol_multiple overrides VOL_MULTIPLE the same way. Both default to None,
+    which reads the module constant, so the live path -- which passes neither
+    -- is bit-identical and a sweep cannot change what the trader does.
+
+    REGISTERED_entry_sweep.md (H-E2) is why vol_multiple exists: the 3x surge
+    is one of the two clauses that force MCL's entry onto the spike bar, and
+    V9 removed it together with MACD > 0, so neither has ever been read alone.
     """
     if require_macd_pos is None:
         require_macd_pos = REQUIRE_MACD_POSITIVE
+    if vol_multiple is None:
+        vol_multiple = VOL_MULTIPLE
+    if vol_multiple <= 0:
+        raise ValueError(f"vol_multiple must be positive, got {vol_multiple!r}")
     out = df.copy()
     c, h, l, v = out["close"], out["high"], out["low"], out["volume"]
 
@@ -213,7 +225,7 @@ def signals(df: pd.DataFrame, require_macd_pos: bool | None = None) -> pd.DataFr
     out["c_macd"] = (ml > ms) & (ml > 0) if require_macd_pos else (ml > ms)
     out["c_mfi"] = rising(m)
     out["c_rsi"] = rising(r)
-    out["c_vol"] = (v >= prev_vol * VOL_MULTIPLE) & (prev_vol > 0)
+    out["c_vol"] = (v >= prev_vol * vol_multiple) & (prev_vol > 0)
     out["c_floor"] = (trail_avg > 0) & (prev_vol >= trail_avg * FLOOR_FRACTION)
     out["entry"] = (out["c_macd"] & out["c_mfi"] & out["c_rsi"]
                     & out["c_vol"] & out["c_floor"])
@@ -431,6 +443,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
                      price_min: float | None = None,
                      use_apex: bool | None = None,
                      require_macd_pos: bool | None = None,
+                     vol_multiple: float | None = None,
                      scale_out_pct: float | None = None,
                      partial_trail_pct: float = 2.5,
                      rebuy_qty: int | None = None,
@@ -617,7 +630,7 @@ def backtest_session(df: pd.DataFrame, session_date, tz,
         trail_pct = TRAIL_PCT
     if commission_plan is None:
         commission_plan = COMMISSION_PLAN
-    sig = signals(df, require_macd_pos=require_macd_pos)
+    sig = signals(df, require_macd_pos=require_macd_pos, vol_multiple=vol_multiple)
     local = sig.index.tz_convert(tz)
     in_sess = in_session_mask(sig.index, session_date, tz)
     idx = [i for i, f in enumerate(in_sess) if f]

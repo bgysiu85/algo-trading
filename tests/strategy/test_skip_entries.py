@@ -120,7 +120,9 @@ def mc5_run(bars, signal_at, monkeypatch, **kw):
     df = pd.DataFrame(bars, columns=["open", "high", "low", "close"], index=idx)
     df["volume"] = 10_000
 
-    def fake_signals(df5):
+    def fake_signals(df5, **kwargs):
+        # **kwargs mirrors the real signals(): a fake whose signature has
+        # drifted from the function it replaces stops testing that function.
         out = df5.copy()
         out["entry"] = False
         for i in signal_at:

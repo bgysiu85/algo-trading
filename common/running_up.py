@@ -161,6 +161,20 @@ def features(df: pd.DataFrame, ts, *, seed_key: str = "") -> dict:
     return out
 
 
+def ret_at(df: pd.DataFrame, ts, back: int = 5) -> float:
+    """The `back`-minute return at `ts`, from that session's closed bars only.
+
+    The one feature `entry_sweep` reads, without paying for the other ten.
+    Same window rules as `features()`, and the same refusal of a naive stamp:
+    read as UTC it would move every session boundary four or five hours.
+    """
+    ts = pd.Timestamp(ts)
+    if ts.tz is None:
+        raise ValueError(f"ret_at() needs a tz-aware timestamp, got {ts!r}; "
+                         "stamp it in ET (running_up.ET) before calling")
+    return _ret(session_slice(df, ts), back)
+
+
 # --- separation, computed the same way for every feature --------------------
 
 def auc(pos: np.ndarray, neg: np.ndarray) -> float:

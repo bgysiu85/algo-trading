@@ -51,7 +51,9 @@ def row(sig, r):
 def patched(monkeypatch):
     holder = {}
     monkeypatch.setattr(MCL, "signals",
-                        lambda df, require_macd_pos=None: holder["sig"].copy())
+                        # **kwargs mirrors the real signals(); a fake whose signature
+                        # has drifted stops testing the function it replaces.
+                        lambda df, **kwargs: holder["sig"].copy())
 
     def run(sig, **kw):
         holder["sig"] = sig

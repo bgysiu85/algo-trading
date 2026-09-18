@@ -222,7 +222,7 @@ def _looks_5m(df: pd.DataFrame) -> bool:
 
 # --- signals --------------------------------------------------------------
 
-def signals(df5: pd.DataFrame) -> pd.DataFrame:
+def signals(df5: pd.DataFrame, entry_rsi_roc: float | None = None) -> pd.DataFrame:
     """Add indicators and conditions. df5 must already be 5-minute bars."""
     out = df5.copy()
     c = out["close"]
@@ -238,7 +238,12 @@ def signals(df5: pd.DataFrame) -> pd.DataFrame:
     out["macd_slope"] = ols_slope(ml)
 
     # entry: all three, as specified
-    out["c_rsi"] = out["rsi_roc"] >= ENTRY_RSI_ROC_PCT
+    # entry_rsi_roc overrides ENTRY_RSI_ROC_PCT for this call only; None reads
+    # the constant, so the live path -- which passes nothing -- is unchanged.
+    # REGISTERED_entry_sweep.md (H-E2): this is MC5's one "how much
+    # confirmation" dial, the counterpart to MCL's surge multiple.
+    out["c_rsi"] = out["rsi_roc"] >= (ENTRY_RSI_ROC_PCT if entry_rsi_roc is None
+                                      else entry_rsi_roc)
     out["c_ema"] = e_fast > e_slow
     out["c_macd"] = ml > ms
     out["entry"] = out["c_rsi"] & out["c_ema"] & out["c_macd"]
@@ -443,6 +448,7 @@ def backtest_session(df, session_date, tz,
                      skip_entries: int = 0,
                      entry_gate: "pd.Series | None" = None,
                      profit_floor: "tuple[int, int] | None" = None,
+                     entry_rsi_roc: float | None = None,
                      session_end: "dtime | None" = None) -> list[Trade]:
     """Run one pre-market session on 5-minute bars.
 
@@ -492,7 +498,7 @@ def backtest_session(df, session_date, tz,
     # can evaluate both settings over the same frame with no shared state.
     apex = USE_APEX_EXIT if use_apex is None else use_apex
     df5 = df if _looks_5m(df) else to_5m(df)
-    sig = signals(df5)
+    sig = signals(df5, entry_rsi_roc=entry_rsi_roc)
     local = sig.index.tz_convert(tz)
     in_sess = ((local.date == session_date)
                & (local.time >= SESSION_START)
