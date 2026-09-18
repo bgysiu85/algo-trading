@@ -133,3 +133,50 @@ once the flatten was removed, moving P/L by **+343** in total.
    book; live, 29% of buy attempts were refused.
 4. **The live trader is untouched** by all of this: still 04:00-09:30, no RTH/POST screen,
    no floor, no re-arm.
+
+## 7. For PROGRAM_INDEX — the lines this chat owes it
+
+`PROGRAM_INDEX.md` lives in the claude.ai project, not in the repo, and several chats
+edited it today, so this chat did not rewrite it. Paste-ready:
+
+**§0 (the dated summary):**
+
+> **2026-09-18 — MC5's exits and its window are both closed.** A profit floor beside the
+> 5% trail (arm at +15 ticks, floor at +10) is **REFUSED for MCL (+0.28/trade, (0.01) per
+> symbol-day, bootstrap 0.470) and NOTHING for MC5 ((0.36)/trade, P = 0.003)**: it rescues
+> ~830 losers a book (+12,343 MCL, +8,332 MC5) and hands the same money back in cut
+> winners and re-entries. At +5 ticks the family reads the same way to within a nickel a
+> trade, and **no floor exit below ~7 ticks can clear a $4.26 round trip** — 0% do at +5.
+> **Extending MC5 to 04:00–20:00 with the screen running all day reads NOTHING on all five
+> criteria: 38,503 added trades at (8.27), P = 0.000.** Every hour of entry loses at $4.26
+> and **every block loses GROSS** — RTH (4.42)/trade before any cost. The running screen
+> finds 23,235 symbol-days against the pre-market list's 6,378; trading ~7× as often
+> multiplies the loss ~7×. See `profit_floor_RESULT.md`, `profit_floor_v2_RESULT.md`,
+> `mc5_full_day_RESULT.md`, `handover_mc5_exits_and_full_day_20260918.md`.
+
+**§2 roster, MC5 row:** add — *2026-09-18: the profit floor (both cells) and the full-day
+window are both closed on it; 04:00–20:00 reads NOTHING with every block negative gross.*
+
+**§4 standards — one new row:**
+
+> **An exit rule cheaper than a round trip is not an exit rule** | Added 2026-09-18. A
+> floor at entry + 5 ticks books $4.00 gross on 100 shares before commission, so 0% of its
+> exits clear $4.26 and the win rate FALLS while P/L does not move. Price the rule's own
+> payout against friction before registering it.
+
+**§5 traps:**
+
+> - **A short-window arm silently drops a last-bar entry.** An entry on the final
+>   in-session bar has no bar left to be managed on, so a 09:30 arm books nothing for it
+>   while a 20:00 arm books a trade: 226 entries, (1,955), which read as the extension
+>   inventing pre-market trades until they were counted separately.
+> - **A reconciliation compares populations, not just books.** `mc5_full_day`'s arm A read
+>   DOES NOT MATCH purely because four dates have no regular-hours pull;
+>   `common/pairs_restrict` re-scores the published rule on the same sessions.
+
+**§7 open items:** H-C1 (MC5 re-arm) registered and unbuilt; a measured RTH/POST capture
+ladder past 09:30; the concurrency cap still unmodelled.
+
+**§3 infrastructure — new modules:** `common/screen_day.py`, `common/mc5_full_day.py`,
+`common/profit_floor_study.py`, `common/pairs_restrict.py`; `profit_floor` and
+`session_end` parameters on the MC5/MCL engines.
