@@ -184,3 +184,61 @@ book comparison stands: nothing here ranks the two, and nothing here may be read
 as saying either is better.
 
 Recorded before the run, as every amendment in this project must be.
+
+---
+
+## AMENDMENT B — POST-RUN, 2026-09-18, after the first run and because of it
+
+**The first run measured MC5 on a window shifted by four minutes. §5's boundary
+check is what caught it. The numbers below are re-run; the first run's MC5
+figures are withdrawn.**
+
+### What happened
+
+Excursions are read off the **1-minute** tape for both books, because that is
+the finest record of where the price went. **MC5 acts on 5-minute bars.** A bar
+is stamped with its START, so an MC5 trade stamped 09:25 is filled at that
+bar's **close**, four one-minute bars later. Measured against the stamp:
+
+- the four minutes belonging to the exit bar were counted as **after the
+  exit**, when they happened **before the fill**; and
+- the same four minutes at the entry were excluded from **inside the trade**,
+  when the position was not yet open during them.
+
+Every MC5 trade in the census was affected, not only the ones at the session
+end. MCL is exact — it trades the 1-minute bars directly.
+
+### How it was caught, and it is the only reason it was
+
+§5 required `window_close` exits to leave **exactly nothing** after them, on the
+grounds that there are no bars after the session's last one. The first run
+reported **679 of 1,159** window-close exits with tape after them — **every one
+of them MC5**, 668 of them stamped 09:25 with up to four minutes following. The
+check was carried over from `mfe_exit`, where it had caught nothing, and kept on
+the stated grounds that *a silent window bug would corrupt every number in
+§2.2*. That is precisely what it was.
+
+Nothing else in the report looked wrong. Had the check not been there — or had
+it been printed as decoration rather than scored — the MC5 columns would have
+been read, quoted, and carried into whatever came next.
+
+### The fix
+
+Both boundaries move to the **last tape bar of the engine's own bar**:
+`entry_t` and `exit_t` are offset by `bar_minutes − 1`. A 1-minute engine is
+bit-identical to the first run.
+
+### The check added with it, because the constant is a claim
+
+`BAR_MINUTES = {"MCL": 1, "MC5": 5}` asserts something about two other modules,
+and if it is ever wrong the offset is wrong and every number shifts by a few
+minutes with nothing looking amiss. So it is **scored against the data**: a book
+assumed to trade N-minute bars must have **every** entry minute land on an
+N-minute boundary, and the report says so per book. A test separately asserts
+that `mc5` still carries its resampler and `mcl` still does not.
+
+### What is unchanged
+
+No rule, no threshold, no verdict, no P&L, no holdout. §1's bar stands and its
+test still passes. The only change is **which minutes belong to which side of a
+trade**, and it makes the measurement match the strategy rather than the tape.

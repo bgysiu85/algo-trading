@@ -240,7 +240,85 @@ def test_the_cut_takes_one_bar_trailing_stops_and_nothing_else():
     # not: each book's line prints its own count.
     assert "EMPTY" not in text
     block = text.split("THE ONE-BAR TRAILING-STOP EXITS")[1]
-    assert "1 trades with bars left in the session" in block
+    assert "1 trades with tape left in the session" in block
+
+
+# --- the grain: a 5-minute engine read on a 1-minute tape ---------------------
+
+def test_a_five_minute_trade_does_not_count_its_own_exit_bar_as_after_the_exit():
+    """THE DEFECT THE FIRST RUN SHIPPED, and the boundary check is what found
+    it. MC5 acts on 5-minute bars, the tape is 1-minute, and a bar is stamped
+    with its START -- so a trade stamped 09:25 fills at 09:29. Measured against
+    the stamp, 09:26..09:29 read as 'after the exit' when they happened BEFORE
+    the fill."""
+    b = bars([(10, 10, 10, 10)] * 10)          # 05:00 .. 05:09
+    # entry bar stamped 05:00 (fills 05:04), exit bar stamped 05:05 (fills 05:09)
+    t = T(b, 0, 5, 10.0, 9.5)
+    wrong = R.excursion(b, t, bar_minutes=1)
+    right = R.excursion(b, t, bar_minutes=5)
+    assert wrong["post_bars"] == 4, "05:06..05:09 counted as after the exit"
+    assert right["post_bars"] == 0, "the exit bar's own minutes are not after it"
+
+
+def test_the_one_minute_engine_is_bit_identical_to_no_offset_at_all():
+    b = bars([(10, 10, 10, 10), (10, 11, 9, 9.5), (9.5, 9.6, 9.0, 9.1)])
+    t = T(b, 0, 1, 10.0, 9.5)
+    a, c = R.excursion(b, t), R.excursion(b, t, bar_minutes=1)
+    assert a.keys() == c.keys()
+    for k in a:                       # NaN != NaN, so compare it as a shape
+        if isinstance(a[k], float) and math.isnan(a[k]):
+            assert isinstance(c[k], float) and math.isnan(c[k]), k
+        else:
+            assert a[k] == c[k], k
+
+
+def test_the_grain_is_scored_against_the_data_not_merely_asserted():
+    """If the assumed grain is wrong the boundaries move by the wrong amount and
+    every number shifts a few minutes with nothing looking amiss. A book assumed
+    to trade N-minute bars must have EVERY entry land on an N-minute boundary."""
+    ok = [_row(book="MC5", **{"entry_et": "05:05"}),
+          _row(book="MC5", **{"entry_et": "05:10"})]
+    text = "\n".join(_render(ok))
+    assert "all 2 entries on a 5-minute boundary" in text
+    assert "THE GRAIN IS WRONG" not in text
+
+    bad = ok + [_row(book="MC5", symbol="ODD", **{"entry_et": "05:07"})]
+    text = "\n".join(_render(bad))
+    assert "THE GRAIN IS WRONG" in text
+    assert "ODD" in text
+
+
+def test_a_one_minute_book_is_not_required_to_sit_on_five_minute_boundaries():
+    text = "\n".join(_render([_row(book="MCL", **{"entry_et": "05:07"})]))
+    assert "MCL   assumed 1-minute bars   all 1 entries" in text
+    assert "THE GRAIN IS WRONG" not in text
+
+
+def test_run_day_actually_passes_the_grain_through():
+    """THE WIRING GAP a unit test cannot see. `excursion` can take the grain
+    correctly and `run_day` can still call it with the default, which is the
+    shipped defect exactly -- and `run_day` needs the Databento archive, so no
+    test here can drive it. Read the call instead."""
+    import ast
+    import inspect
+    tree = ast.parse(inspect.getsource(R.run_day))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and getattr(n.func, "id", None) == "excursion"]
+    assert calls, "run_day no longer calls excursion"
+    for c in calls:
+        assert len(c.args) >= 3 or any(k.arg == "bar_minutes" for k in c.keywords), \
+            "run_day calls excursion without the engine's bar grain"
+
+
+def test_the_engines_still_trade_the_bars_this_module_assumes():
+    """The constant is a claim about two other modules. mc5 resamples to five
+    minutes and mcl does not; if that ever changes, the offset is wrong and the
+    numbers move quietly."""
+    from strategy.mc5 import mc5 as M5
+    from strategy.mcl import mcl as ML
+    assert hasattr(M5, "to_5m"), "mc5 no longer resamples; BAR_MINUTES is stale"
+    assert not hasattr(ML, "to_5m"), "mcl now resamples; BAR_MINUTES is stale"
+    assert R.BAR_MINUTES == {"MCL": 1, "MC5": 5}
 
 
 # --- the boundary check, scored -----------------------------------------------

@@ -81,6 +81,14 @@ BOOKS = (("MCL", "mcl"), ("MC5", "mc5"))
 TRAIL_REASON = "trailing_stop"
 CLOSE_REASON = "window_close"
 
+# THE GRAIN EACH ENGINE ACTS ON, which is not the grain the tape is read at.
+# MCL trades the 1-minute bars directly; MC5 resamples to 5 minutes. Both are
+# measured on the 1-minute tape here, so MC5's stamps have to be moved to the
+# end of the bar they name -- see `excursion`. A test asserts mc5 carries the
+# resampler and mcl does not, and the report scores the claim against the data
+# (every MC5 entry minute must land on a 5-minute boundary).
+BAR_MINUTES = {"MCL": 1, "MC5": 5}
+
 
 def _pct(a: float, b: float) -> float:
     """(a / b - 1) * 100, or NaN when b is not a usable denominator."""
@@ -89,7 +97,7 @@ def _pct(a: float, b: float) -> float:
     return (float(a) / float(b) - 1.0) * 100.0
 
 
-def excursion(bars: pd.DataFrame, trade) -> dict | None:
+def excursion(bars: pd.DataFrame, trade, bar_minutes: int = 1) -> dict | None:
     """One trade's path, inside its life and after its exit.
 
     STRICTLY AFTER the reference bar on both sides, the convention `mfe_exit`
@@ -98,9 +106,23 @@ def excursion(bars: pd.DataFrame, trade) -> dict | None:
     bar after the fill is not observable at minute granularity. Both choices
     understate, which is the safe direction for a census whose interesting
     outcome is "there was a lot of recovery available".
+
+    `bar_minutes` IS THE GRAIN THE ENGINE TRADED, AND IT IS NOT ALWAYS THE
+    TAPE'S. MC5 acts on 5-minute bars while the excursions are read off the
+    1-minute tape, and a bar is stamped with its START -- so an MC5 trade
+    stamped 09:25 actually fills at that bar's CLOSE, four one-minute bars
+    later. Measured against the stamp, those four minutes are counted as
+    "after the exit" when they happened BEFORE the fill, and the entry side is
+    shifted the same way. The first run of this census did exactly that on
+    every MC5 trade; §5's boundary check is what caught it, on 679 window_close
+    exits that had tape after them when by construction they cannot.
+
+    So both boundaries are moved to the LAST TAPE BAR of the engine's bar.
+    `bar_minutes=1` leaves a 1-minute engine bit-identical.
     """
-    entry_t = pd.Timestamp(trade.entry_time)
-    exit_t = pd.Timestamp(trade.exit_time)
+    off = pd.Timedelta(minutes=int(bar_minutes) - 1)
+    entry_t = pd.Timestamp(trade.entry_time) + off
+    exit_t = pd.Timestamp(trade.exit_time) + off
     entry_px = float(trade.entry_price)
     exit_px = float(trade.exit_price)
 
@@ -222,7 +244,7 @@ def run_day(args: tuple) -> tuple:
             res["raw"][name] += len(trades)
             for t in trades:
                 t.symbol, t.date = s, day
-                row = excursion(bars, t)
+                row = excursion(bars, t, BAR_MINUTES[name])
                 if row:
                     row["book"] = name
                     res["rows"].append(row)
@@ -247,7 +269,8 @@ def share(rows, key) -> float:
 def inside_block(rows: list[dict]) -> list[str]:
     """§2.1 -- Ben's question, as he asked it."""
     L = ["INSIDE THE TRADE: DOES A POSITION THAT GOES UNDER COME BACK?", "",
-         "  Measured from the bar AFTER entry to the exit bar. 'Came back' looks",
+         "  Read on the 1-MINUTE tape for both books, from the minute after the",
+         "  entry bar's close to the exit bar's close. 'Came back' looks",
          "  only at bars after the position FIRST went under -- a high before the",
          "  dip is not a recovery from it. 'To a profit' clears entry plus the",
          f"  measured friction (${FRICTION_PER_SHARE:.4f}/share).", ""]
@@ -265,7 +288,7 @@ def inside_block(rows: list[dict]) -> list[str]:
             L.append(f"    of those, cleared entry + friction {share(under, 'back_to_profit'):5.1f}%")
             rec = _f(under, "bars_to_recover")
             if len(rec):
-                L.append(f"    bars to recover                    "
+                L.append(f"    minutes to recover                 "
                          f"p50 {_q(rec, 50):.0f}   p90 {_q(rec, 90):.0f}")
             mae = _f(under, "mae_pct")
             L.append(f"    how far under it went              "
@@ -316,6 +339,36 @@ def entries_block(rows: list[dict], symdays: int) -> list[str]:
     return L
 
 
+def grain_block(rows: list[dict]) -> list[str]:
+    """SCORED. Every excursion here is read off the 1-minute tape, but MC5 acts
+    on 5-minute bars, so its stamps are moved to the end of the bar they name.
+    If the assumed grain is wrong the move is wrong, and the numbers shift by a
+    few minutes with nothing else looking amiss -- which is exactly what the
+    first run of this census did. So the claim is checked against the data:
+    a book assumed to trade N-minute bars must have EVERY entry minute land on
+    an N-minute boundary."""
+    L = ["GRAIN CHECK: DOES EACH BOOK ACT ON THE BARS THIS ASSUMES?", "",
+         "  Excursions are read on the 1-minute tape. A 5-minute bar is stamped",
+         "  with its START, so a trade's fill is at the END of the bar it names",
+         "  and both boundaries are moved there.", ""]
+    for name, _ in BOOKS:
+        n = BAR_MINUTES[name]
+        b = [r for r in rows if r["book"] == name]
+        if not b:
+            L += [f"  {name}   no trades", ""]
+            continue
+        off = [r for r in b if int(r["entry_et"].split(":")[1]) % n]
+        L.append(f"  {name}   assumed {n}-minute bars   "
+                 + (f"{len(off):,} of {len(b):,} entries NOT on a {n}-minute "
+                    f"boundary -- THE GRAIN IS WRONG" if off
+                    else f"all {len(b):,} entries on a {n}-minute boundary"))
+        if off:
+            L += [f"    {r['symbol']:<6} {r['date']}  {r['entry_et']} ET"
+                  for r in off[:5]]
+    L.append("")
+    return L
+
+
 def window_block(rows: list[dict]) -> list[str]:
     """§5, SCORED, not decorative.
 
@@ -354,15 +407,15 @@ def after_block(rows: list[dict], title: str, note: str) -> list[str]:
     for name, _ in BOOKS:
         b = [r for r in rows if r["book"] == name and r["post_bars"] > 0]
         if not b:
-            L += [f"  {name}  no trades with bars after the exit", ""]
+            L += [f"  {name}  no trades with tape after the exit", ""]
             continue
         hi, lo = _f(b, "post_hi_vs_exit"), _f(b, "post_lo_vs_exit")
-        L.append(f"  {name}   {len(b):,} trades with bars left in the session")
+        L.append(f"  {name}   {len(b):,} trades with tape left in the session")
         L.append(f"    price came back to ENTRY           {share(b, 'recovered_entry'):5.1f}%")
         L.append(f"    ... and to entry + friction        {share(b, 'recovered_profit'):5.1f}%")
         bte = _f(b, "bars_to_entry")
         if len(bte):
-            L.append(f"    bars until it did                  "
+            L.append(f"    minutes until it did               "
                      f"p50 {_q(bte, 50):.0f}   p90 {_q(bte, 90):.0f}")
         L.append(f"    highest after the exit, vs exit    "
                  f"p50 {_q(hi, 50):+.2f}%   p90 {_q(hi, 90):+.2f}%")
@@ -414,13 +467,16 @@ def render(rows, days, symdays, elapsed, jobs, pairs, dataset, errors,
 
     L += entries_block(rows, symdays)
 
+    L += grain_block(rows)
+
     L += window_block(rows)
 
     L += inside_block(rows)
 
     L += after_block(
         rows, "AFTER THE EXIT: ALL TRADES",
-        "  From the bar AFTER the exit to the session's last bar. The LOW is the\n"
+        "  From the minute after the exit bar's close to the session's last\n"
+        "  minute. The LOW is the\n"
         "  half mfe_exit never measured, and it is the half that says whether\n"
         "  holding on would have recovered or deepened.")
 
