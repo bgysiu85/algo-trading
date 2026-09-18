@@ -388,3 +388,32 @@ def test_no_test_in_this_file_writes_outside_tmp_path():
     assert bad == [], (
         f"F.main called without --archive at line(s) {bad} -- that writes into "
         "the repo's default archive path")
+
+
+def test_a_BAR_pricing_failure_names_the_job_it_failed_on():
+    """The defect behind the defect, 2026-09-18.
+
+    The first live run printed only
+
+        pricing failed, nothing downloaded: 422 symbology_invalid_request
+
+    with no root, no schema, no date -- so a 422 whose cause was a Sunday could
+    not be diagnosed from its own output. This test was written for that, and
+    then LOST in a block replacement while the download path was restructured;
+    the mutation sweep caught its absence, which is the sweep earning its keep.
+    """
+    class _BrokenMeta(_FakeMeta):
+        def get_cost(self, **kw):
+            raise RuntimeError("500 internal error")
+
+    client = _FakeClient()
+    client.metadata = _BrokenMeta()
+    with pytest.raises(SystemExit) as e:
+        F.plan(client, {"ES": ""}, F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
+    msg = str(e.value)
+    assert "nothing downloaded" in msg
+    # every part that identifies WHICH call failed
+    assert F.BAR_SCHEMA in msg, "the schema is missing"
+    assert "2010-06-06..2026-09-17" in msg, "the date range is missing"
+    assert "continuous" in msg, "the symbology is missing"
+    assert msg.count("ES") >= 2, "the root is named only inside the symbols string"
