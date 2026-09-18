@@ -163,3 +163,32 @@ The A-to-A′ difference is reported as its own line: it prices the warm-up chan
 nothing else, and it is not a finding about the strategy.
 
 §4's criteria are unchanged and attach to **C's entries at or after 09:30**.
+
+---
+
+## Amendment D — POST-RUN, 2026-09-18: the reconciliation is scored on the sessions the study could run
+
+**Written after the first full run, and it changes no reading.** Marked POST-RUN.
+
+The run covered **546 sessions and 6,378 symbol-days** against the published universe's
+550 and 6,411. Four dates — 2026-09-10, 09-11, 09-14, 09-15 — have a pre-market pull and
+no regular-hours one, so `mc5_full_day` cannot run them at all (§2 requires all three
+full-day windows). Arm A therefore booked 6,425 trades at (8.62) against the published
+6,462 at (8.57), and §2's check read DOES NOT MATCH — correctly, because the two figures
+are computed over different populations.
+
+That is a population difference and not a different book, so the fix is to score the
+published baseline over the SAME sessions rather than to loosen the check:
+
+1. `common/pairs_restrict` writes the published universe cut to the study's own
+   `sessions` list (it only ever removes rows, and a test pins that).
+2. `pit_strategy --strategy mc5 --dataset XNAS.ITCH --pairs <that file>` produces the
+   published figure over that population.
+3. `mc5_full_day --expect <trades>:<per trade>` re-reads arm A against it.
+
+If arm A still does not match after that, the difference is NOT the population and the
+study stays at NO VERDICT until it is explained.
+
+**Nothing else moves.** §4's five criteria, the arms, the universe files and the added
+trades are untouched, and the reconciliation cannot change any of them: it decides only
+whether a verdict may be printed at all.
