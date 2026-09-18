@@ -243,6 +243,84 @@ def test_the_cut_takes_one_bar_trailing_stops_and_nothing_else():
     assert "1 trades with tape left in the session" in block
 
 
+# --- §2.4: which came first ---------------------------------------------------
+
+def test_the_order_is_measured_not_just_the_maximum_and_the_minimum():
+    """A max high and a min low say BOTH happened. They do not say in what
+    order, and the order decides whether more room would have helped. These two
+    trades have an identical high and an identical low after the exit, and
+    opposite answers."""
+    up_first = bars([(10, 10, 10, 10),
+                     (10, 10, 9.5, 9.5),        # stopped out at 9.5
+                     (9.5, 10.5, 9.4, 10.4),    # back over entry FIRST
+                     (10.4, 10.5, 8.0, 8.1)])   # then the fall
+    down_first = bars([(10, 10, 10, 10),
+                       (10, 10, 9.5, 9.5),
+                       (9.5, 9.6, 8.0, 8.1),    # the fall FIRST
+                       (8.1, 10.5, 8.0, 10.4)])  # then back over entry
+    a = R.excursion(up_first, T(up_first, 0, 1, 10.0, 9.5))
+    b = R.excursion(down_first, T(down_first, 0, 1, 10.0, 9.5))
+
+    # identical magnitudes, which is the point
+    assert a["post_hi_vs_exit"] == pytest.approx(b["post_hi_vs_exit"])
+    assert a["post_lo_vs_exit"] == pytest.approx(b["post_lo_vs_exit"])
+    assert a["recovered_entry"] is True and b["recovered_entry"] is True
+
+    # opposite orders, at a further 5% below the exit (9.5 -> 9.025)
+    assert a["seq_5"] == "back"
+    assert b["seq_5"] == "drop"
+
+
+def test_one_bar_that_does_both_resolves_as_the_FALL():
+    """The conservative direction, and it is not arbitrary. Inside a single
+    1-minute bar the order is unobservable, and a position given more room
+    would have had its stop hit intrabar. Resolving a tie the other way would
+    count a recovery that may never have been reachable."""
+    b = bars([(10, 10, 10, 10),
+              (10, 10, 9.5, 9.5),            # stopped out at 9.5
+              (9.5, 10.5, 9.0, 9.2)])        # one bar, above entry AND 5% below
+    r = R.excursion(b, T(b, 0, 1, 10.0, 9.5))
+    assert r["recovered_entry"] is True
+    assert r["seq_5"] == "drop", "an unobservable order was resolved optimistically"
+
+
+def test_the_further_fall_is_measured_from_the_EXIT_not_from_the_entry():
+    """W is 'a further W% below the exit' -- more room given to a position that
+    has already been stopped. Measured from entry it would be a different and
+    much shallower question, and on a stop that fired at -5% the 5% rung would
+    sit exactly at the exit."""
+    b = bars([(10, 10, 10, 10),
+              (10, 10, 9.5, 9.5),            # exit 9.5; 5% further is 9.025
+              (9.5, 9.6, 9.3, 9.4),          # 9.3: below entry*0.95, above exit*0.95
+              (9.4, 10.5, 9.4, 10.4)])       # then back over entry
+    r = R.excursion(b, T(b, 0, 1, 10.0, 9.5))
+    assert r["seq_5"] == "back", "the rung was measured from the entry price"
+
+
+def test_a_trade_that_does_neither_says_so_rather_than_picking_a_side():
+    b = bars([(10, 10, 10, 10), (10, 10, 9.5, 9.5), (9.5, 9.6, 9.3, 9.4)])
+    r = R.excursion(b, T(b, 0, 1, 10.0, 9.5))
+    assert r["seq_5"] == "neither"
+
+
+def test_the_ladder_is_reported_whole_with_nothing_selected_among_it():
+    """Three W's declared before the run. A report that printed only the
+    flattering one would be a threshold search wearing a census's clothes."""
+    text = "\n".join(_render([_row(reason="trailing_stop", bars_held=1)]))
+    for w in ("2.5", "5.0", "10.0"):
+        assert f"a further {float(w):>4.1f}% down" in text
+    assert "WHICH CAME FIRST, ALL TRADES" in text
+    assert "WHICH CAME FIRST, THE ONE-BAR TRAILING-STOP EXITS" in text
+    # and it repeats the limit rather than letting the reader forget it
+    assert "STILL NOT A PRICE ON A WIDER STOP" in R.seq_block.__doc__
+
+
+def test_a_window_close_trade_has_no_order_to_report():
+    b = bars([(10, 10, 10, 10), (10, 11, 9, 9.5)])
+    r = R.excursion(b, T(b, 0, 1, 10.0, 9.5, reason="window_close"))
+    assert all(r[R._seq_key(w)] == "neither" for w in R.DROPS)
+
+
 # --- the grain: a 5-minute engine read on a 1-minute tape ---------------------
 
 def test_a_five_minute_trade_does_not_count_its_own_exit_bar_as_after_the_exit():
@@ -272,33 +350,49 @@ def test_the_one_minute_engine_is_bit_identical_to_no_offset_at_all():
             assert a[k] == c[k], k
 
 
-def test_the_grain_is_scored_against_the_data_not_merely_asserted():
-    """If the assumed grain is wrong the boundaries move by the wrong amount and
-    every number shifts a few minutes with nothing looking amiss. A book assumed
-    to trade N-minute bars must have EVERY entry land on an N-minute boundary."""
-    ok = [_row(book="MC5", **{"entry_et": "05:05"}),
-          _row(book="MC5", **{"entry_et": "05:10"})]
+def test_the_grain_is_scored_against_the_trade_it_was_applied_to():
+    """The offset is read off the engine per symbol-day, so the checkable claim
+    is per TRADE: a trade moved as 5-minute must sit on a 5-minute boundary. A
+    trade that does not is shifted, and shifted numbers look like every other
+    number."""
+    ok = [_row(book="MC5", entry_et="05:05", bar_min=5),
+          _row(book="MC5", entry_et="05:10", bar_min=5)]
     text = "\n".join(_render(ok))
-    assert "all 2 entries on a 5-minute boundary" in text
-    assert "THE GRAIN IS WRONG" not in text
+    assert "2 trades on 5-minute bars" in text
+    assert "every trade sits on the boundary of the bar it was moved by" in text
+    assert "MOVED BY A BAR THEY ARE NOT ON" not in text
 
-    bad = ok + [_row(book="MC5", symbol="ODD", **{"entry_et": "05:07"})]
+    bad = ok + [_row(book="MC5", symbol="ODD", entry_et="05:07", bar_min=5)]
     text = "\n".join(_render(bad))
-    assert "THE GRAIN IS WRONG" in text
+    assert "MOVED BY A BAR THEY ARE NOT ON" in text
     assert "ODD" in text
 
 
+def test_a_thin_name_traded_unresampled_is_not_flagged_as_off_the_grid():
+    """The real case, 3 of 6,460 on the 2026-09-18 run: a name so thinly traded
+    that its 1-minute bars already look 5-minute to the engine, which then uses
+    them unresampled. Its bars ARE the tape's, the offset is zero, and an entry
+    at 05:07 is correct rather than wrong. A per-book constant would have moved
+    it four minutes and called the result a measurement."""
+    rows = [_row(book="MC5", entry_et="05:05", bar_min=5),
+            _row(book="MC5", symbol="THIN", entry_et="05:07", bar_min=1)]
+    text = "\n".join(_render(rows))
+    assert "1 trades on 1-minute bars" in text and "1 trades on 5-minute bars" in text
+    assert "MOVED BY A BAR THEY ARE NOT ON" not in text
+
+
 def test_a_one_minute_book_is_not_required_to_sit_on_five_minute_boundaries():
-    text = "\n".join(_render([_row(book="MCL", **{"entry_et": "05:07"})]))
-    assert "MCL   assumed 1-minute bars   all 1 entries" in text
-    assert "THE GRAIN IS WRONG" not in text
+    text = "\n".join(_render([_row(book="MCL", entry_et="05:07", bar_min=1)]))
+    assert "MCL   1 trades on 1-minute bars" in text
+    assert "MOVED BY A BAR THEY ARE NOT ON" not in text
 
 
-def test_run_day_actually_passes_the_grain_through():
-    """THE WIRING GAP a unit test cannot see. `excursion` can take the grain
-    correctly and `run_day` can still call it with the default, which is the
-    shipped defect exactly -- and `run_day` needs the Databento archive, so no
-    test here can drive it. Read the call instead."""
+def test_run_day_actually_derives_and_passes_the_grain():
+    """THE WIRING GAP a unit test cannot see, and it has now bitten twice.
+    `excursion` and `engine_bar_minutes` can both be right while `run_day`
+    calls `excursion` with the default -- which IS the shipped defect -- and
+    `run_day` needs the Databento archive, so nothing here can drive it. Read
+    the calls instead."""
     import ast
     import inspect
     tree = ast.parse(inspect.getsource(R.run_day))
@@ -308,17 +402,38 @@ def test_run_day_actually_passes_the_grain_through():
     for c in calls:
         assert len(c.args) >= 3 or any(k.arg == "bar_minutes" for k in c.keywords), \
             "run_day calls excursion without the engine's bar grain"
+        arg = c.args[2] if len(c.args) >= 3 else next(
+            k.value for k in c.keywords if k.arg == "bar_minutes")
+        assert not isinstance(arg, ast.Constant), \
+            "the grain passed is a literal, not the engine's own answer"
+
+    # ...and the grain must come from the ENGINE, per frame. A constant would
+    # be right for MCL, right for MC5 on all but a handful of thin symbol-days,
+    # and wrong on those with nothing to show for it.
+    derived = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+               and getattr(n.func, "id", None) == "engine_bar_minutes"]
+    assert derived, "run_day no longer derives the grain from the engine"
+    assert len(derived[0].args) >= 2, \
+        "engine_bar_minutes must see the frame, or the thin case is invisible"
 
 
-def test_the_engines_still_trade_the_bars_this_module_assumes():
-    """The constant is a claim about two other modules. mc5 resamples to five
-    minutes and mcl does not; if that ever changes, the offset is wrong and the
-    numbers move quietly."""
+def test_the_grain_comes_from_the_engine_and_not_from_a_constant_here():
+    """The constant this module used to carry was a CLAIM about two other
+    modules. It is now read from them: mc5's own BAR_MINUTES, and mc5's own
+    `_looks_5m` for the frames it declines to resample."""
     from strategy.mc5 import mc5 as M5
     from strategy.mcl import mcl as ML
-    assert hasattr(M5, "to_5m"), "mc5 no longer resamples; BAR_MINUTES is stale"
-    assert not hasattr(ML, "to_5m"), "mcl now resamples; BAR_MINUTES is stale"
-    assert R.BAR_MINUTES == {"MCL": 1, "MC5": 5}
+
+    assert not hasattr(ML, "BAR_MINUTES"), "mcl now has a grain; derive it too"
+    assert R.engine_bar_minutes(ML, None) == 1
+
+    assert M5.BAR_MINUTES == 5
+    dense = bars([(10, 10, 10, 10)] * 60)                      # 1-minute apart
+    assert R.engine_bar_minutes(M5, dense) == M5.BAR_MINUTES
+    sparse = dense.iloc[::10]                                  # 10 minutes apart
+    assert M5._looks_5m(sparse), "the fixture no longer exercises the thin case"
+    assert R.engine_bar_minutes(M5, sparse) == 1, \
+        "a frame the engine will NOT resample was still moved by five minutes"
 
 
 # --- the boundary check, scored -----------------------------------------------

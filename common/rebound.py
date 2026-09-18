@@ -81,13 +81,41 @@ BOOKS = (("MCL", "mcl"), ("MC5", "mc5"))
 TRAIL_REASON = "trailing_stop"
 CLOSE_REASON = "window_close"
 
-# THE GRAIN EACH ENGINE ACTS ON, which is not the grain the tape is read at.
-# MCL trades the 1-minute bars directly; MC5 resamples to 5 minutes. Both are
-# measured on the 1-minute tape here, so MC5's stamps have to be moved to the
-# end of the bar they name -- see `excursion`. A test asserts mc5 carries the
-# resampler and mcl does not, and the report scores the claim against the data
-# (every MC5 entry minute must land on a 5-minute boundary).
-BAR_MINUTES = {"MCL": 1, "MC5": 5}
+def engine_bar_minutes(mod, df) -> int:
+    """The grain THIS engine will act on for THIS frame, read off the engine's
+    OWN constant and its OWN predicate rather than restated here.
+
+    MCL has no `BAR_MINUTES` and trades the 1-minute tape directly. MC5 carries
+    `BAR_MINUTES = 5` and resamples -- **except** when `_looks_5m` says the
+    frame already looks 5-minute, which happens on a name so thinly traded that
+    its 1-minute bars are more than five minutes apart on the median. There the
+    engine uses the frame unresampled, so its bars ARE the tape's bars and the
+    offset is zero.
+
+    That case is rare -- 3 of 6,460 MC5 entries on the 2026-09-18 run -- and it
+    is exactly why this is derived instead of assumed: a constant in this module
+    would have been right 99.95% of the time and silently wrong on the rest, and
+    "silently wrong on a few" is how the four-minute shift got shipped in the
+    first place.
+    """
+    n = int(getattr(mod, "BAR_MINUTES", 1))
+    if n <= 1:
+        return 1
+    looks = getattr(mod, "_looks_5m", None)
+    return 1 if (looks is not None and bool(looks(df))) else n
+
+# §2.4 (AMENDMENT C, PRE-RUN). Three further falls below the EXIT price,
+# declared here before the run and bracketing the shipped 5% trail: half of it,
+# it, and double it. All three are reported, none is selected among, and none
+# is a candidate for anything -- the point is the ORDER of events, not a value.
+# "Did the price get back to entry BEFORE it fell another W%" is a fact about
+# the observed path; it is still NOT a price on a wider stop (§3), because a
+# wider trail changes where the stop sits at every later bar.
+DROPS = (2.5, 5.0, 10.0)
+
+
+def _seq_key(w: float) -> str:
+    return "seq_" + f"{w:g}".replace(".", "_")
 
 
 def _pct(a: float, b: float) -> float:
@@ -137,6 +165,7 @@ def excursion(bars: pd.DataFrame, trade, bar_minutes: int = 1) -> dict | None:
         "book": None, "symbol": trade.symbol, "date": trade.date,
         "entry_et": _et(trade.entry_time), "exit_et": _et(trade.exit_time),
         "reason": trade.reason, "bars_held": int(trade.bars_held),
+        "bar_min": int(bar_minutes),
         "entry_px": entry_px, "exit_px": exit_px,
         "exit_pct": _pct(exit_px, entry_px),
         "won": bool(float(trade.net) > 0.0),
@@ -176,7 +205,8 @@ def excursion(bars: pd.DataFrame, trade, bar_minutes: int = 1) -> dict | None:
         row.update(post_hi_pct=float("nan"), post_lo_pct=float("nan"),
                    post_hi_vs_exit=float("nan"), post_lo_vs_exit=float("nan"),
                    recovered_entry=False, recovered_profit=False,
-                   bars_to_entry=float("nan"), post_bars=0)
+                   bars_to_entry=float("nan"), post_bars=0,
+                   **{_seq_key(w): "neither" for w in DROPS})
     else:
         hi, lo = float(after["high"].max()), float(after["low"].min())
         row.update(post_hi_pct=_pct(hi, entry_px), post_lo_pct=_pct(lo, entry_px),
@@ -188,6 +218,16 @@ def excursion(bars: pd.DataFrame, trade, bar_minutes: int = 1) -> dict | None:
         back = after[after["high"] > entry_px]
         row["bars_to_entry"] = (float(len(after[after.index <= back.index[0]]))
                                 if not back.empty else float("nan"))
+        # §2.4 -- WHICH CAME FIRST. The max high and the min low say both
+        # happened; they do not say in what order, and the order is the whole
+        # question. See `seq_block`.
+        t_back = back.index[0] if not back.empty else None
+        for w in DROPS:
+            dn = after[after["low"] <= exit_px * (1.0 - w / 100.0)]
+            t_dn = dn.index[0] if not dn.empty else None
+            row[_seq_key(w)] = (
+                "back" if t_back is not None and (t_dn is None or t_back < t_dn)
+                else "drop" if t_dn is not None else "neither")
     return row
 
 
@@ -241,10 +281,11 @@ def run_day(args: tuple) -> tuple:
         res["symdays"] += 1
         for name, (mod, trades) in got.items():
             bars = session_bars(df, day, mod)
+            bm = engine_bar_minutes(mod, df)
             res["raw"][name] += len(trades)
             for t in trades:
                 t.symbol, t.date = s, day
-                row = excursion(bars, t, BAR_MINUTES[name])
+                row = excursion(bars, t, bm)
                 if row:
                     row["book"] = name
                     res["rows"].append(row)
@@ -340,32 +381,42 @@ def entries_block(rows: list[dict], symdays: int) -> list[str]:
 
 
 def grain_block(rows: list[dict]) -> list[str]:
-    """SCORED. Every excursion here is read off the 1-minute tape, but MC5 acts
-    on 5-minute bars, so its stamps are moved to the end of the bar they name.
-    If the assumed grain is wrong the move is wrong, and the numbers shift by a
-    few minutes with nothing else looking amiss -- which is exactly what the
-    first run of this census did. So the claim is checked against the data:
-    a book assumed to trade N-minute bars must have EVERY entry minute land on
-    an N-minute boundary."""
-    L = ["GRAIN CHECK: DOES EACH BOOK ACT ON THE BARS THIS ASSUMES?", "",
+    """SCORED. Every excursion here is read off the 1-minute tape, and each
+    trade's boundaries are moved to the end of the bar THAT trade's engine
+    acted on -- taken from the engine itself (`engine_bar_minutes`), never
+    assumed. The claim that leaves is checkable: a trade recorded as acting on
+    N-minute bars must have an entry minute on an N-minute boundary. If it does
+    not, the offset applied to it was wrong and its numbers are shifted by up to
+    N-1 minutes with nothing else looking amiss -- which is what the first run
+    of this census did to every MC5 trade.
+    """
+    L = ["GRAIN CHECK: WAS EACH TRADE MOVED BY ITS OWN ENGINE'S BAR?", "",
          "  Excursions are read on the 1-minute tape. A 5-minute bar is stamped",
-         "  with its START, so a trade's fill is at the END of the bar it names",
-         "  and both boundaries are moved there.", ""]
+         "  with its START, so a trade fills at the END of the bar it names and",
+         "  both boundaries are moved there. The grain is read off the engine",
+         "  for each symbol and session, because a name thin enough that its",
+         "  1-minute bars already look 5-minute is traded UNRESAMPLED and",
+         "  must not be moved at all.", ""]
     for name, _ in BOOKS:
-        n = BAR_MINUTES[name]
         b = [r for r in rows if r["book"] == name]
         if not b:
             L += [f"  {name}   no trades", ""]
             continue
-        off = [r for r in b if int(r["entry_et"].split(":")[1]) % n]
-        L.append(f"  {name}   assumed {n}-minute bars   "
-                 + (f"{len(off):,} of {len(b):,} entries NOT on a {n}-minute "
-                    f"boundary -- THE GRAIN IS WRONG" if off
-                    else f"all {len(b):,} entries on a {n}-minute boundary"))
+        grains = Counter(int(r.get("bar_min", 1)) for r in b)
+        L.append(f"  {name}   " + "   ".join(
+            f"{c:,} trades on {g}-minute bars" for g, c in sorted(grains.items())))
+        off = [r for r in b
+               if int(r.get("bar_min", 1)) > 1
+               and int(r["entry_et"].split(":")[1]) % int(r["bar_min"])]
         if off:
-            L += [f"    {r['symbol']:<6} {r['date']}  {r['entry_et']} ET"
-                  for r in off[:5]]
-    L.append("")
+            L.append(f"    {len(off):,} of {len(b):,} MOVED BY A BAR THEY ARE NOT ON"
+                     " -- those trades are shifted; the rest are not:")
+            L += [f"      {r['symbol']:<6} {r['date']}  {r['entry_et']} ET  "
+                  f"moved as {r['bar_min']}-minute" for r in off[:5]]
+        else:
+            L.append("    every trade sits on the boundary of the bar it was "
+                     "moved by")
+        L.append("")
     return L
 
 
@@ -434,6 +485,44 @@ def after_block(rows: list[dict], title: str, note: str) -> list[str]:
     return L
 
 
+def seq_block(rows: list[dict], title: str) -> list[str]:
+    """§2.4, AMENDMENT C (PRE-RUN). WHICH CAME FIRST.
+
+    §2.2 reports the highest and the lowest price after the exit, and on these
+    names both are usually large -- the same trade goes well above and well
+    below. A maximum and a minimum say both happened; they do not say in what
+    ORDER, and the order is the whole question. A position given more room
+    recovers only if the recovery arrives BEFORE the further fall does.
+
+    So: after the exit, did the price trade back above entry before it fell a
+    further W% below the exit? Three W's, declared before the run, bracketing
+    the shipped 5% trail. Reported for all three, chosen among for none.
+
+    STILL NOT A PRICE ON A WIDER STOP (§3). A wider trail tracks the peak, so
+    it sits somewhere else at every later bar and the position's path is not
+    this one. This bounds the opportunity's SHAPE; only a TRAIL_PCT re-run
+    turns it into dollars.
+    """
+    L = [title, "", "  After the exit: did price get back above ENTRY before it fell a",
+         "  further W% below the EXIT? 'neither' = it did neither before the",
+         "  session ended. Order, not magnitude -- §2.2 has the magnitudes.", ""]
+    for name, _ in BOOKS:
+        b = [r for r in rows if r["book"] == name and r["post_bars"] > 0]
+        if not b:
+            L += [f"  {name}  no trades with tape after the exit", ""]
+            continue
+        L.append(f"  {name}   {len(b):,} trades")
+        for w in DROPS:
+            c = Counter(r.get(_seq_key(w), "neither") for r in b)
+            n = len(b)
+            L.append(f"    a further {w:>4.1f}% down   "
+                     f"back to entry first {100.0 * c['back'] / n:5.1f}%   "
+                     f"fell first {100.0 * c['drop'] / n:5.1f}%   "
+                     f"neither {100.0 * c['neither'] / n:5.1f}%")
+        L.append("")
+    return L
+
+
 def render(rows, days, symdays, elapsed, jobs, pairs, dataset, errors,
            error_days, raw=None) -> list[str]:
     L = ["THE REBOUND CENSUS: WHEN A POSITION GOES UNDER, DOES IT COME BACK?", "",
@@ -496,6 +585,11 @@ def render(rows, days, symdays, elapsed, jobs, pairs, dataset, errors,
         L += after_block(one_bar,
                          "AFTER THE EXIT: THE ONE-BAR TRAILING-STOP EXITS (§2.3)",
                          note)
+
+    L += seq_block(rows, "WHICH CAME FIRST, ALL TRADES (§2.4)")
+    if one_bar:
+        L += seq_block(one_bar,
+                       "WHICH CAME FIRST, THE ONE-BAR TRAILING-STOP EXITS (§2.4)")
 
     L += ["WHAT THIS IS NOT", "",
           "  NOT A PRICE ON A WIDER STOP. A wider trail changes the PATH, not",

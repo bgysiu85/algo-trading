@@ -242,3 +242,78 @@ that `mc5` still carries its resampler and `mcl` still does not.
 No rule, no threshold, no verdict, no P&L, no holdout. §1's bar stands and its
 test still passes. The only change is **which minutes belong to which side of a
 trade**, and it makes the measurement match the strategy rather than the tape.
+
+---
+
+## AMENDMENT C — PRE-RUN, 2026-09-18, before the corrected run
+
+**Added: §2.4, which came first.**
+
+§2.2 reports the highest and the lowest price after the exit. On the first run
+**both were large on the same trades** — MCL's one-bar stop-outs had a median
+high of +10.53% and a median low of −14.93% against the exit, and 84.7% fell at
+least another 5% while 66.8% rose at least 5%. Most trades did both.
+
+**A maximum and a minimum say both happened. They do not say in what order, and
+the order is the whole question.** A position given more room recovers only if
+the recovery arrives *before* the further fall does. Without the sequence, "63%
+came back to entry" and "85% fell another 5%" are both true and neither is
+decisive.
+
+So, for every trade, from the bar after the exit: **did the price trade back
+above entry before it fell a further W% below the exit?** Three answers per
+trade and per W — `back`, `drop`, `neither`.
+
+**W is fixed at 2.5%, 5.0% and 10.0%**, declared here before the run: half the
+shipped trail, the trail, and double it. **All three are reported. None is
+selected among, and none is a candidate for anything.** A report that printed
+only the flattering rung would be a threshold search wearing a census's clothes,
+and a test asserts the whole ladder reaches the report.
+
+**Two resolutions, both fixed before the numbers exist:**
+
+- **A single bar that does both resolves as the FALL.** Inside one 1-minute bar
+  the order is unobservable, and a position given more room would have had its
+  stop hit intrabar. Resolving the other way would count a recovery that may
+  never have been reachable.
+- **W is measured from the EXIT price, not from entry** — it is *further* room
+  given to a position already stopped. Measured from entry, on a stop that fired
+  at −5%, the 5% rung would sit exactly at the exit and the question would be
+  vacuous.
+
+**This is still not a price on a wider stop, and §3 is unchanged.** A wider
+trail tracks the peak, so it sits somewhere else at every later bar and the
+position's path is not this one; and a position held longer consumes bars the
+strategy would have re-entered on. §2.4 bounds the opportunity's **shape**. Only
+a `TRAIL_PCT` re-run turns it into dollars, and the report repeats that beside
+the block rather than leaving it to §3.
+
+Recorded before the corrected run, which is the run these numbers come from.
+
+### Amendment B, second correction — the grain is DERIVED, not assumed
+
+The first fix carried `BAR_MINUTES = {"MCL": 1, "MC5": 5}` as a constant in the
+census. The corrected run's own grain check then found **3 of 6,460** MC5
+entries not on a five-minute boundary — CLSD 2025-09-15 09:07, CWVX 2025-11-20
+08:31, GRAN 2026-06-10 04:39.
+
+The cause is in MC5 itself. `mc5.backtest_session` resamples to five minutes
+**unless `_looks_5m` says the frame already looks 5-minute**, which is true on a
+name so thinly traded that its 1-minute bars are more than five minutes apart on
+the median. On those symbol-days the engine trades the frame **unresampled**, so
+its bars *are* the tape's bars and the correct offset is **zero**.
+
+A constant would have been right 99.95% of the time and silently wrong on the
+rest — which is the same shape as the defect it was introduced to fix. So the
+grain is now read from the engine, per symbol-day: `mc5`'s own `BAR_MINUTES` and
+`mc5`'s own `_looks_5m`, with MCL carrying neither and therefore reading 1.
+
+The grain check is re-pointed to match: it now scores **per trade** — a trade
+moved as an N-minute trade must sit on an N-minute boundary — so a thin name
+traded unresampled is correctly *not* flagged, and a genuinely mis-moved trade
+still is.
+
+**This is a fact about MC5 worth recording on its own:** on a sufficiently thin
+name the strategy runs its indicators on unevenly spaced bars and calls them
+five-minute bars. It affects three entries here and is not this census's
+business to judge, but it is not documented anywhere else.
