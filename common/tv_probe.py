@@ -108,6 +108,24 @@ def _scan(payload: dict, cookie: str | None = None) -> dict:
         return json.load(r)
 
 
+def _stamp(v) -> str:
+    """A candidate dating column, as its raw value AND as ET when it looks like
+    a unix timestamp.
+
+    `1789632000` says nothing to a reader; `09-17 04:00 ET` says the row is
+    describing YESTERDAY's pre-market, which is the whole question H-F1 asks.
+    """
+    if v is None:
+        return "absent"
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return str(v)[:22]
+    if 1e9 < n < 4e9:
+        return datetime.fromtimestamp(n, ET).strftime("%m-%d %H:%M ET")
+    return str(v)[:22]
+
+
 def columns_payload(extra: tuple[str, ...]) -> dict:
     """The shipped query with candidate columns appended.
 
@@ -260,11 +278,19 @@ def render(summary: dict, columns: dict[str, object] | None, polls: int,
             L.append("     recognises. The raw values are printed above and decide nothing")
             L.append("     until someone reads them.")
         L.append("")
-        rest = {c: (columns.get("plain") or {}).get(c)
-                for c in CANDIDATE_TIME_COLUMNS if c != MODE_COLUMN}
         L.append("     Separately -- does any column DATE the row, for H-F1's gate?")
-        for c, v in rest.items():
-            L.append(f"       {c:<26} {'absent' if v is None else repr(v)[:40]}")
+        L.append(f"       {'column':<26} {'anonymous':<22} authenticated")
+        rest = {}
+        for c in CANDIDATE_TIME_COLUMNS:
+            if c == MODE_COLUMN:
+                continue
+            pv = (columns.get("plain") or {}).get(c)
+            av = (columns.get("auth") or {}).get(c) if columns.get("auth") else None
+            rest[c] = pv
+            # BOTH arms, because one alone cannot say whether a stamp naming
+            # yesterday is the 15-minute delay or simply what the column means.
+            L.append(f"       {c:<26} {_stamp(pv):<22} "
+                     f"{_stamp(av) if columns.get('auth') else '(arm not run)'}")
         got_any = [c for c, v in rest.items() if v is not None]
         L.append("       " + (f"-> {', '.join(got_any)} came back with values; the "
                               "freshness gate's inference can become an exact test"
@@ -336,6 +362,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="re-read an existing CSV and re-render; no network")
     ap.add_argument("--no-columns", action="store_true",
                     help="skip the 5.1 column probe")
+    ap.add_argument("--force", action="store_true",
+                    help="overwrite an existing report instead of renaming it "
+                         "aside with its timestamp")
     return ap
 
 
@@ -384,6 +413,16 @@ def main(argv: list[str] | None = None) -> int:
                 LOG.warning("%s column probe failed (%s: %s)", arm,
                             type(e).__name__, e)
 
+    # A LATER RUN MUST NOT SILENTLY EAT AN EARLIER ONE. A 3-minute anonymous
+    # check would otherwise overwrite a 35-minute authenticated capture -- which
+    # is exactly what happened on 2026-09-18, and cost that morning's raw CSV.
+    # Same lesson as `screen_sim --after` refusing the deciding file: a partial
+    # run does not get to write over a complete one.
+    for path in (a.csv, a.out):
+        if path.exists() and not a.force:
+            keep = path.with_name(f"{path.stem}_{datetime.now(ET):%Y%m%d_%H%M%S}{path.suffix}")
+            path.rename(keep)
+            LOG.warning("kept the previous %s as %s", path.name, keep.name)
     if a.csv.exists():
         a.csv.unlink()
     stop = datetime.now(ET) + timedelta(minutes=a.minutes)
@@ -404,8 +443,17 @@ def main(argv: list[str] | None = None) -> int:
             LOG.info("%d polls, %s remaining", polls, stop - datetime.now(ET))
         time.sleep(a.interval)
 
-    with a.csv.open(encoding="utf-8") as fh:
-        records = list(csv.DictReader(fh))
+    # A run whose every poll failed -- or one given no time at all -- must
+    # still produce a report SAYING it got nothing, rather than raising on the
+    # file it never wrote. A crash here reads as a broken tool; an empty report
+    # reads as the endpoint being unreachable, which is the actual finding.
+    if a.csv.exists():
+        with a.csv.open(encoding="utf-8") as fh:
+            records = list(csv.DictReader(fh))
+    else:
+        records = []
+        LOG.warning("no rows were captured -- every poll failed, or the window "
+                    "was zero. The report will say so.")
     report_io.emit(
         "\n".join(render(summarise(records), columns, polls, bool(cookie))),
         a.out, header=f"common.tv_probe --minutes {a.minutes} "
