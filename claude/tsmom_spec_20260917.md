@@ -244,8 +244,17 @@ this rule reads a return, a Sharpe, or anything a backtest produces.
    Australia, at a size a ~$22k account can hold at all.
 2. **It is PRICE-quoted, not YIELD-quoted.** See §2.3; this is a sign trap, not a
    preference.
-3. **Its full-size CME predecessor has GLBX.MDP3 daily history from the dataset's
-   start**, so the signal can be measured over more than the micro's own life.
+3. **Its full-size CME predecessor has GLBX.MDP3 daily history**, so the signal
+   can be measured over more than the micro's own life. **Where that history
+   begins after the dataset's start, the root enters the book when the warm-up
+   rule admits it and the coverage table reports the gap.**
+   *(Amended PRE-RUN 2026-09-18. The original read "from the dataset's start"
+   and was false for RTY: Russell 2000 futures were listed on ICE until CME
+   relisted them for trade date 2017-07-10, so RTY has no GLBX history for about
+   seven of the sixteen years, and nothing had checked it. The instrument set is
+   NOT changed — swapping RTY out after seeing which root failed would be
+   choosing an instrument from a property of the data.
+   `REGISTERED_tsmom_fetch` §1.4.)*
 4. **It is the most liquid contract in its bucket** by 2026 volume, where a bucket
    is a group of near-substitutes (US large-cap index, US small-cap index,
    precious metal, base metal, crude, gas, and one per currency pair).

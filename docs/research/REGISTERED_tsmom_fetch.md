@@ -133,6 +133,61 @@ test asserting the error names its job had been **lost in a block replacement**
 while this restructure was written. The sweep earning its keep, and an argument
 for running it after a refactor rather than only after a fix.
 
+### 1.4 RTY does not have the history the spec claims — the third live run, 2026-09-18
+
+```
+pricing failed on RTY definition: none of the first four monthly samples
+could be resolved -- nothing downloaded
+```
+
+**RTY did not exist on CME Globex in 2010.** Russell 2000 futures were listed on
+**ICE**; CME relisted the E-mini for trade date **2017-07-10**
+([CME SER-7960](https://www.cmegroup.com/notices/ser/2017/07/SER-7960.pdf)). So
+`RTY.FUT` has no GLBX history for roughly **seven of the sixteen years**.
+
+**This is a defect in the SPEC, not in the code.** Selection rule 3 of
+`claude/tsmom_spec_20260917.md` §2.1 states that every root *"has continuous
+GLBX.MDP3 daily history from the dataset's start."* For RTY that is false, and
+nothing checked it — **the third property in two days asserted in prose and not
+verified** (§1.1's non-sessions, `REGISTERED_tsmom` §6.1's January boundary, and
+now this). The pattern is consistent enough to be worth naming: *the assertions
+this project writes about its own inputs are where its defects live.*
+
+**What changes, and what does not:**
+
+- **The instrument set is unchanged.** RTY stays. The §2 warm-up rule (261
+  returns before an instrument enters) already handles a late start correctly —
+  it enters the book in 2018 and not before.
+- **What changes is the honest description of the book**: it has **fewer markets
+  in its early years** than the registration implied. The equal-weight portfolio
+  is over *instruments with a live signal*, so 2010–2017 is a smaller,
+  less-diversified book than 2018 onward. **Every result must be read with that
+  in mind**, and §3's coverage output is now the thing that says so.
+- **No substitution.** Swapping RTY for something with longer history, now, after
+  seeing which root failed, would be choosing an instrument from a property of
+  the data. Rule 3 is amended to describe reality rather than the set being
+  changed to fit the rule.
+
+**Amendment B, PRE-RUN:** selection rule 3 of spec §2.1 is corrected to read —
+*its full-size CME predecessor has GLBX.MDP3 daily history, and where that
+history begins after the dataset's start, the root enters the book when the
+warm-up rule admits it and the coverage table reports the gap.*
+
+**And a root's first session is now DISCOVERED rather than assumed.** The pull
+probes the first four monthly samples, then a yearly stride, then narrows within
+the year that hits — all free metadata lookups, one call for a root that
+resolves immediately. A late listing is reported as **LATE LISTINGS** with the
+years missing, and recorded in the manifest as `late_listings` so a report can
+**read** it. A root that resolves at *no* session in the whole range is a wrong
+root, not a late one, and still aborts.
+
+*(The discovery's three loops originally repeated the same error path. Mutation
+testing showed the copy in the first loop could not fail independently — delete
+it and the stride or the narrowing scan reaches the same failure and aborts
+identically. `PROGRAM_INDEX` §4: a second condition that cannot fail
+independently of the first is not a second condition. The three were collapsed
+into one `_probe`.)*
+
 ## 2. The guards, and what each is for
 
 1. **Estimate first, always.** The total prints before anything transfers.

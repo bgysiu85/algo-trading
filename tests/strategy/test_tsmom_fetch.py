@@ -185,7 +185,7 @@ def test_definition_cost_is_SAMPLED_not_summed(run):
     still to fetch.
     """
     client = _FakeClient()
-    jobs, usd, nbytes, _ = F.plan(client, {"ES": "", "GC": ""},
+    jobs, usd, nbytes, _, _ = F.plan(client, {"ES": "", "GC": ""},
                                   F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
     n_days = len(F.definition_days("2010-06-06", "2026-09-17"))
     assert len(jobs) == 2 + 2 * n_days, "the job list is not the full grid"
@@ -321,7 +321,7 @@ def test_every_definition_request_asks_for_exactly_one_session():
     like a scoping failure.
     """
     client = _FakeClient()
-    jobs, _, _, _ = F.plan(client, {"ES": ""}, F.Path("/nonexistent"),
+    jobs, _, _, _, _ = F.plan(client, {"ES": ""}, F.Path("/nonexistent"),
                            "2010-06-06", "2026-09-17")
     defs = [kw for _, sc, _, kw in jobs if sc == F.DEF_SCHEMA]
     assert defs
@@ -333,7 +333,7 @@ def test_every_definition_request_asks_for_exactly_one_session():
 
 def test_bars_come_from_continuous_front_and_next(run):
     client = _FakeClient()
-    jobs, _, _, _ = F.plan(client, {"CL": ""}, F.Path("/nonexistent"),
+    jobs, _, _, _, _ = F.plan(client, {"CL": ""}, F.Path("/nonexistent"),
                            "2010-06-06", "2026-09-17")
     bars = [kw for _, sc, _, kw in jobs if sc == F.BAR_SCHEMA]
     assert len(bars) == 1
@@ -417,3 +417,177 @@ def test_a_BAR_pricing_failure_names_the_job_it_failed_on():
     assert "2010-06-06..2026-09-17" in msg, "the date range is missing"
     assert "continuous" in msg, "the symbology is missing"
     assert msg.count("ES") >= 2, "the root is named only inside the symbols string"
+
+
+def test_a_root_that_lists_late_is_discovered_not_fatal(capsys):
+    """RTY stopped the third live run, and it was the SPEC that was wrong.
+
+    RTY did not exist on CME Globex in 2010 -- Russell 2000 futures were on ICE
+    until CME relisted them for trade date 2017-07-10 (CME SER-7960). Selection
+    rule 3 of the spec asserts every root has history from the dataset's start.
+    For RTY that is false, and nothing had checked it.
+
+    A late listing is a coverage fact, not an error: discover the first session,
+    fetch from there, and SAY SO.
+    """
+    class _LateMeta(_FakeMeta):
+        def get_cost(self, **kw):
+            if kw.get("schema") == F.DEF_SCHEMA and kw["start"] < "2017-07-10":
+                raise RuntimeError("422 symbology_invalid_request: None of the "
+                                   "symbols could be resolved")
+            return super().get_cost(**kw)
+
+    client = _FakeClient()
+    client.metadata = _LateMeta()
+    jobs, usd, _, _, late = F.plan(client, {"RTY": ""}, F.Path("/nonexistent"),
+                                   "2010-06-06", "2026-09-17")
+    assert "RTY" in late, "a root with seven years missing was priced as complete"
+    assert late["RTY"] >= "2017-07", late["RTY"]
+    assert late["RTY"] < "2017-09", "the search overshot the real first session"
+
+    days = [kw["start"] for _, sc, _, kw in jobs if sc == F.DEF_SCHEMA]
+    assert min(days) == late["RTY"]
+    assert all(d >= "2017-07-10" for d in days), (
+        "jobs were planned for months the root did not exist in")
+    out = capsys.readouterr().out
+    assert "LATE LISTINGS" in out and "RTY" in out
+
+
+def test_a_root_that_never_resolves_is_a_wrong_root_and_aborts():
+    """Late listing and wrong symbol must not look the same."""
+    class _NeverMeta(_FakeMeta):
+        def get_cost(self, **kw):
+            if kw.get("schema") == F.DEF_SCHEMA:
+                raise RuntimeError("422 symbology_invalid_request: None of the "
+                                   "symbols could be resolved")
+            return super().get_cost(**kw)
+
+    client = _FakeClient()
+    client.metadata = _NeverMeta()
+    with pytest.raises(SystemExit) as e:
+        F.plan(client, {"NOPE": ""}, F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
+    msg = str(e.value)
+    assert "NOPE" in msg and "wrong root" in msg and "nothing downloaded" in msg
+
+
+def test_a_root_that_resolves_immediately_costs_one_call():
+    """The discovery must not tax the eleven roots that are fine."""
+    client = _FakeClient()
+    F.plan(client, {"ES": ""}, F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
+    assert len(client.metadata.calls) == 2, (
+        f"{len(client.metadata.calls)} calls for one healthy root -- discovery "
+        "is running when it should not (1 bar + 1 definition sample)")
+
+
+def test_a_real_error_during_LATE_LISTING_DISCOVERY_still_aborts():
+    """Discovery walks years of samples; it must not swallow a real failure.
+
+    Caught by mutation: deleting the non-symbology re-raise inside
+    _first_resolvable left every test green, because every other test feeds
+    discovery either a clean client or a symbology miss. A 500 on the fifth
+    sample would have been read as "this root lists late" and silently truncated
+    the archive to whatever resolved after it.
+    """
+    class _BreaksAfterFour(_FakeMeta):
+        def __init__(self, ok_first=4):
+            super().__init__()
+            self.n, self.ok_first = 0, ok_first
+
+        def get_cost(self, **kw):
+            if kw.get("schema") != F.DEF_SCHEMA:
+                return super().get_cost(**kw)
+            self.n += 1
+            if self.n <= self.ok_first:
+                raise RuntimeError("422 symbology_invalid_request: None of the "
+                                   "symbols could be resolved")
+            raise RuntimeError("500 internal server error")
+
+    # ok_first=0: the 500 lands on the FIRST definition sample, inside the
+    # first loop. ok_first=4: it lands in the yearly stride. Both paths re-raise,
+    # and mutation-testing showed the first one was uncovered when this test
+    # only exercised the second.
+    for ok_first in (0, 4):
+        client = _FakeClient()
+        client.metadata = _BreaksAfterFour(ok_first)
+        with pytest.raises(SystemExit) as e:
+            F.plan(client, {"ES": ""}, F.Path("/nonexistent"),
+                   "2010-06-06", "2026-09-17")
+        msg = str(e.value)
+        assert "nothing downloaded" in msg and "500" in msg, (
+            f"a 500 at sample {ok_first + 1} was read as a late listing")
+
+
+def test_the_manifest_records_late_listings(tmp_path, monkeypatch):
+    """A root that starts seven years late is a coverage fact a report must be
+    able to READ, not one it has to be told.
+
+    Goes through main(). An earlier version built the manifest record itself and
+    so asserted nothing about what main() puts in it -- mutation-testing found
+    that by blanking the field in main() and staying green.
+    """
+    import json as _json
+
+    class _LateMeta(_FakeMeta):
+        def get_cost(self, **kw):
+            if kw.get("schema") == F.DEF_SCHEMA and kw["start"] < "2017-07-10":
+                raise RuntimeError("422 symbology_invalid_request: None of the "
+                                   "symbols could be resolved")
+            return super().get_cost(**kw)
+
+    class _LateTs(_FakeTimeseries):
+        def get_range(self, **kw):
+            if kw.get("schema") == F.DEF_SCHEMA and kw["start"] < "2017-07-10":
+                raise RuntimeError("422 symbology_invalid_request")
+            return _FakeData(self.downloads)
+
+    client = _FakeClient()
+    client.metadata = _LateMeta()
+    client.timeseries = _LateTs()
+    monkeypatch.setattr(F, "require_databento",
+                        lambda: type("m", (), {"Historical": lambda *_: client}))
+    monkeypatch.setattr("common.secrets_util.resolve", lambda *a, **k: "db-" + "x" * 20)
+    F.main(["--archive", str(tmp_path), "--roots", "RTY", "--confirm"])
+
+    mp = tmp_path / F.DATASET / "manifest_tsmom.json"
+    m = _json.loads(mp.read_text(encoding="utf-8"))
+    assert m["pulls"][-1]["late_listings"].get("RTY"), (
+        "the manifest says nothing about a root missing seven years of history")
+    assert m["pulls"][-1]["late_listings"]["RTY"] >= "2017-07"
+
+
+def test_a_real_error_on_the_SECOND_sample_is_not_read_as_a_late_listing():
+    """The case that makes the first loop's re-raise load-bearing.
+
+    Mutation-testing showed the earlier version of this check could not fail:
+    the yearly stride re-probes index 0, so a 500 on the FIRST sample aborts
+    either way. The re-raise in the first loop only matters when sample 1
+    legitimately misses and sample 2 fails for real -- there, deleting it lets
+    discovery skip to the stride, find a later sample that works, and declare a
+    LATE LISTING. The archive is then silently truncated to whatever resolved
+    after a transient-looking server error.
+    """
+    class _MissThenBreak(_FakeMeta):
+        def get_cost(self, **kw):
+            if kw.get("schema") != F.DEF_SCHEMA:
+                return super().get_cost(**kw)
+            d = kw["start"]
+            if d == "2010-06-15":                  # sample 1: genuine miss
+                raise RuntimeError("422 symbology_invalid_request: None of the "
+                                   "symbols could be resolved")
+            # Samples 2-4 ONLY. The yearly stride probes index 0 and then
+            # every twelfth, so it never touches these -- which is what makes
+            # the first loop's re-raise load-bearing rather than a duplicate of
+            # the stride's. An earlier version broke everything before 2012,
+            # the stride hit it at index 12, and the mutation survived.
+            if d in ("2010-07-15", "2010-08-13", "2010-09-15"):
+                raise RuntimeError("500 internal server error")
+            return super().get_cost(**kw)
+
+    client = _FakeClient()
+    client.metadata = _MissThenBreak()
+    with pytest.raises(SystemExit) as e:
+        F.plan(client, {"ES": ""}, F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
+    msg = str(e.value)
+    assert "500" in msg and "nothing downloaded" in msg, (
+        "a 500 on the second monthly sample was read as ES listing late in "
+        "2012 -- five and a half years of history dropped without a word")
