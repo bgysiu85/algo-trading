@@ -285,9 +285,14 @@ def run_day(args: tuple) -> tuple:
         # so it does not depend on any gate being right.
         for base in ("MCL", "MC5"):
             for t in got[base]:
-                if getattr(t, "bars_held", 0) <= 1 and t.entry_px:
+                # `entry_price` / `exit_price` -- the Trade OBJECT's attributes.
+                # `entry_px` / `exit_px` are the keys `gate_study.trade_row`
+                # puts in its dict, and reaching for those here is what broke
+                # the first smoke run. The two vocabularies sit one line apart
+                # in this loop, so a test pins the object's names.
+                if getattr(t, "bars_held", 0) <= 1 and t.entry_price:
                     res["trail"][base].append(
-                        (float(t.exit_px) / float(t.entry_px) - 1.0) * 100.0)
+                        (float(t.exit_price) / float(t.entry_price) - 1.0) * 100.0)
 
         # Binding and refusal, counted against each baseline's own entries.
         for name, eng, spec in BOOKS:
