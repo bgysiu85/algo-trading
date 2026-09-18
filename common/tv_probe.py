@@ -59,7 +59,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from common import report_io
-from common.tv_feed import ENDPOINT, REQUEST_TIMEOUT, tv_payload
+from common.tv_feed import (COOKIE_ENV, ENDPOINT, MODE_COLUMN, REQUEST_TIMEOUT,
+                            SIGN_ENV, cookie_header, mode_verdict, tv_payload)
 from common.tv_screener import CHANGE_COLUMN, COLUMNS, MARKET, VOLUME_COLUMN
 
 LOG = logging.getLogger("tv_probe")
@@ -68,14 +69,25 @@ ET = ZoneInfo("America/New_York")
 OUT_CSV = Path("var/reports/tv_probe.csv")
 OUT_TXT = Path("var/reports/tv_probe.txt")
 
-COOKIE_ENV = "TV_SESSIONID"
+# BOTH cookies, or neither. TradingView signs the session: `sessionid` alone is
+# accepted by the endpoint and served ANONYMOUSLY, so a half-set environment
+# produces an "authenticated" arm that is not authenticated, the two arms agree
+# perfectly, and the probe reports "the login makes no difference" -- closing
+# this line of work for exactly the wrong reason. That is §4's recurring shape:
+# a control whose output is indistinguishable from the failure it detects.
+# Learned from the analysis chat's tv_delay_probe.py, which had it right first.
+# COOKIE_ENV, SIGN_ENV, MODE_COLUMN, cookie_header and mode_verdict live in
+# common/tv_feed.py -- the LIVE module -- and are imported rather than restated,
+# so the probe cannot measure one definition of "signed in" while the feed uses
+# another.
 
-# GUESSES, and labelled as such. Every one of these is a column name that MIGHT
-# date a row; none is documented for this endpoint. The probe's whole job here
-# is to replace the guessing with an answer, so a name that comes back empty is
-# a result, not a failure.
+# `update_mode` is NOT a guess -- it is the column that answers the question
+# directly ("streaming" = real time, anything containing "delayed" = not), and
+# it is the primary reading of §5.1. The rest are guesses at a column that
+# might DATE a row rather than describe its feed, which is a different question
+# and the one H-F1's freshness gate would like answered.
 CANDIDATE_TIME_COLUMNS = (
-    "update_mode",
+    MODE_COLUMN,
     "update_time",
     "last_bar_update_time",
     "time",
@@ -86,10 +98,10 @@ CANDIDATE_TIME_COLUMNS = (
 
 
 def _scan(payload: dict, cookie: str | None = None) -> dict:
-    """One POST. `cookie` is the raw sessionid value and is never logged."""
+    """One POST. `cookie` is a complete Cookie header and is never logged."""
     headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
     if cookie:
-        headers["Cookie"] = f"sessionid={cookie}"
+        headers["Cookie"] = cookie
     req = urllib.request.Request(
         ENDPOINT, data=json.dumps(payload).encode(), headers=headers)
     with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as r:
@@ -206,22 +218,60 @@ def render(summary: dict, columns: dict[str, object] | None, polls: int,
              f"{'yes' if authed else f'NO ({COOKIE_ENV} not set)'}")
     L.append("")
 
-    L.append("5.1  DOES ANY COLUMN DATE THE ROW?")
+    L.append("5.1  IS THE FEED DELAYED, AND DOES THE LOGIN CHANGE IT?")
     L.append("")
-    if columns is None:
+    if not columns:
         L.append("     not probed on this run")
-    else:
-        for c, v in columns.items():
-            L.append(f"     {c:<28} {'absent' if v is None else repr(v)[:40]}")
-        got = [c for c, v in columns.items() if v is not None]
         L.append("")
-        L.append("     " + ("a column came back with values -- the gate's inference "
-                            f"can become an exact test: {', '.join(got)}"
-                            if got else
-                            "none of the candidates returned a value. The gate's "
-                            "wait-for-movement rule stays the only test available."))
+    else:
+        for arm in ("plain", "auth"):
+            got = columns.get(arm)
+            if got is None:
+                L.append(f"     {arm:<6} not run")
+                continue
+            raw = got.get(MODE_COLUMN)
+            L.append(f"     {arm:<6} {mode_verdict(raw):<14} "
+                     f"{MODE_COLUMN} = {raw!r}")
+        L.append("")
+        plain = mode_verdict((columns.get("plain") or {}).get(MODE_COLUMN))
+        auth = mode_verdict((columns.get("auth") or {}).get(MODE_COLUMN)) \
+            if columns.get("auth") is not None else None
+        if plain == "STREAMING":
+            L.append("     THE ANONYMOUS REQUEST IS ALREADY REAL TIME. There is no delay")
+            L.append("     to remove and this whole line of work closes -- no cookie, no")
+            L.append("     IB scanner, no paid feed. Whatever made the watchlist look late")
+            L.append("     is somewhere else.")
+        elif plain == "DELAYED" and auth == "STREAMING":
+            L.append("     The endpoint honours the login: delayed anonymously, streaming")
+            L.append("     signed in. Option B is one Cookie header on the request tv_feed")
+            L.append("     already makes -- and the feed must then check this column at")
+            L.append("     STARTUP, because an expired cookie reverts to delayed and looks")
+            L.append("     identical.")
+        elif plain == "DELAYED" and auth == "DELAYED":
+            L.append("     The scanner endpoint ignores the login. Option B is DEAD; the")
+            L.append("     remaining free move is IB's scanner, and after that it is a")
+            L.append("     paid consolidated feed.")
+        elif plain == "DELAYED" and auth is None:
+            L.append("     Delayed anonymously, and the authenticated arm did not run, so")
+            L.append("     whether the login fixes it is still unmeasured. Set BOTH cookie")
+            L.append("     variables and repeat.")
+        else:
+            L.append(f"     {MODE_COLUMN} did not come back in a form this probe")
+            L.append("     recognises. The raw values are printed above and decide nothing")
+            L.append("     until someone reads them.")
+        L.append("")
+        rest = {c: (columns.get("plain") or {}).get(c)
+                for c in CANDIDATE_TIME_COLUMNS if c != MODE_COLUMN}
+        L.append("     Separately -- does any column DATE the row, for H-F1's gate?")
+        for c, v in rest.items():
+            L.append(f"       {c:<26} {'absent' if v is None else repr(v)[:40]}")
+        got_any = [c for c, v in rest.items() if v is not None]
+        L.append("       " + (f"-> {', '.join(got_any)} came back with values; the "
+                              "freshness gate's inference can become an exact test"
+                              if got_any else
+                              "-> none returned a value; H-F1's wait-for-movement rule "
+                              "stays the only test available"))
     L.append("")
-
     L.append("5.2  THE ROLL, OBSERVED (unauthenticated arm)")
     L.append("")
     L.append("     ticker      first seen   first moved   held")
@@ -304,19 +354,35 @@ def main(argv: list[str] | None = None) -> int:
                        header=f"common.tv_probe --replay {a.replay}")
         return 0
 
-    cookie = os.environ.get(COOKIE_ENV) or None
+    sid, sign = os.environ.get(COOKIE_ENV), os.environ.get(SIGN_ENV)
+    cookie = cookie_header(sid, sign)
     if not cookie:
-        LOG.warning("%s is not set -- the authenticated arm will not run, and "
-                    "§5.3 cannot be read this morning.", COOKIE_ENV)
+        if sid or sign:
+            LOG.error("only ONE of %s / %s is set. TradingView signs the "
+                      "session: a half-set pair is served ANONYMOUSLY, both "
+                      "arms would agree, and this probe would report 'the "
+                      "login makes no difference' when the login never "
+                      "happened. The authenticated arm is NOT running.",
+                      COOKIE_ENV, SIGN_ENV)
+        else:
+            LOG.warning("%s / %s are not set -- the authenticated arm will not "
+                        "run, and §5.3 cannot be read this morning.",
+                        COOKIE_ENV, SIGN_ENV)
 
     columns = None
     if not a.no_columns:
-        try:
-            columns = read_columns(_scan(columns_payload(CANDIDATE_TIME_COLUMNS)),
-                                   CANDIDATE_TIME_COLUMNS)
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
-                json.JSONDecodeError) as e:
-            LOG.warning("column probe failed (%s: %s)", type(e).__name__, e)
+        columns = {}
+        for arm, ck in (("plain", None), ("auth", cookie)):
+            if arm == "auth" and not cookie:
+                continue
+            try:
+                columns[arm] = read_columns(
+                    _scan(columns_payload(CANDIDATE_TIME_COLUMNS), ck),
+                    CANDIDATE_TIME_COLUMNS)
+            except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
+                    json.JSONDecodeError) as e:
+                LOG.warning("%s column probe failed (%s: %s)", arm,
+                            type(e).__name__, e)
 
     if a.csv.exists():
         a.csv.unlink()

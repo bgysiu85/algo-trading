@@ -131,12 +131,13 @@ def test_an_unknown_column_reads_as_absent_rather_than_raising():
     assert len(names) == len(COLUMNS) + 2
 
 
-def test_a_present_column_is_reported_as_making_the_gate_exact():
+def test_a_dating_column_that_comes_back_is_reported_for_the_freshness_gate():
     body = "\n".join(tv_probe.render(
         tv_probe.summarise([rec("VEEA", "04:00:05", 120_000)]),
-        columns={"update_mode": "delayed_streaming_900", "update_time": None},
+        columns={"plain": {"update_mode": "delayed_streaming_900",
+                           "update_time": "2026-09-19T04:00:05Z"}},
         polls=1, authed=False))
-    assert "update_mode" in body and "exact test" in body
+    assert "update_time" in body and "exact test" in body
 
 
 # --- what it must NOT do -----------------------------------------------------
@@ -175,7 +176,7 @@ def test_the_cookie_is_read_from_the_environment_and_never_a_flag():
     flat = [s for opts in flags for s in opts]
     assert not any("session" in s or "cookie" in s or "token" in s for s in flat), flat
     src = inspect.getsource(tv_probe.main)
-    assert f'os.environ.get(COOKIE_ENV)' in src
+    assert "os.environ.get(COOKIE_ENV)" in src and "os.environ.get(SIGN_ENV)" in src
 
 
 def test_the_cookie_value_never_reaches_the_csv_or_the_report():
@@ -209,9 +210,9 @@ def test_the_cookie_is_sent_as_a_cookie_header_when_given(monkeypatch):
 
     monkeypatch.setattr(tv_probe.urllib.request, "urlopen", fake_urlopen)
     monkeypatch.setattr(tv_probe.json, "load", lambda fh: {"data": []})
-    tv_probe._scan({"filter": []}, cookie="abc123")
+    tv_probe._scan({"filter": []}, cookie=tv_probe.cookie_header("abc", "sig"))
     cookie = [v for k, v in seen["headers"].items() if k.lower() == "cookie"]
-    assert cookie == ["sessionid=abc123"]
+    assert cookie == ["sessionid=abc; sessionid_sign=sig"]
 
     seen.clear()
     tv_probe._scan({"filter": []}, cookie=None)

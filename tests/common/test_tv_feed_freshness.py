@@ -269,7 +269,7 @@ def test_the_loop_actually_holds_a_stale_row_end_to_end(monkeypatch, tmp_path):
     ]
     calls = {"n": 0}
 
-    def fake_fetch(limit=None):
+    def fake_fetch(limit=None, cookie=None):
         i = min(calls["n"], len(polls) - 1)
         calls["n"] += 1
         return [dict(r) for r in polls[i]]
@@ -281,13 +281,14 @@ def test_the_loop_actually_holds_a_stale_row_end_to_end(monkeypatch, tmp_path):
          "--heartbeat", "0"])
 
     rank, fresh = tv_feed.Ranking(), tv_feed.Freshness()
+    arr = tv_feed.Arrivals(root=tmp_path / "archive")
     tg = tv_feed.notify.Notifier()
-    assert tv_feed._loop(args, rank, fresh, tg, set(), 0.0, 0.0) == 0
+    assert tv_feed._loop(args, rank, fresh, arr, None, tg, set(), 0.0, 0.0) == 0
     written = [ln for ln in out.read_text(encoding="utf-8").splitlines()
                if ln.strip() and not ln.startswith("#")]
     assert written == [], f"the first poll armed {written}"
 
-    assert tv_feed._loop(args, rank, fresh, tg, set(), 0.0, 0.0) == 0
+    assert tv_feed._loop(args, rank, fresh, arr, None, tg, set(), 0.0, 0.0) == 0
     text = out.read_text(encoding="utf-8")
     written = [ln for ln in text.splitlines()
                if ln.strip() and not ln.startswith("#")]
@@ -301,13 +302,14 @@ def test_the_header_reports_how_many_are_held(monkeypatch, tmp_path):
     """A hold that is invisible in the file is a hold nobody will notice on the
     morning it is wrong."""
     monkeypatch.setattr(tv_feed, "fetch",
-                        lambda limit=None: [row("BIAF", 480_000),
-                                            row("RML", 1_250_000)])
+                        lambda limit=None, cookie=None: [row("BIAF", 480_000),
+                                                         row("RML", 1_250_000)])
     out = tmp_path / "watchlist.txt"
     args = tv_feed.build_parser().parse_args(
         ["--once", "--all-hours", "--out", str(out), "--no-telegram",
          "--heartbeat", "0"])
     tv_feed._loop(args, tv_feed.Ranking(), tv_feed.Freshness(),
+                  tv_feed.Arrivals(root=tmp_path / "archive"), None,
                   tv_feed.notify.Notifier(), set(), 0.0, 0.0)
     header = out.read_text(encoding="utf-8").splitlines()[0]
     assert "held=2" in header, header
