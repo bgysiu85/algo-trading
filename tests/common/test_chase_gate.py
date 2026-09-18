@@ -342,3 +342,52 @@ def test_the_entry_stamp_format_matches_between_the_two_files():
     from common import first_entry_skip as F
     src = inspect.getsource(F._et)
     assert '"%H:%M"' in src, src
+
+
+# --- the object, not the dict ------------------------------------------------
+
+def test_every_Trade_attribute_this_module_reads_actually_EXISTS():
+    """THE BUG THE FIRST SMOKE RUN FOUND, and the class of bug it belongs to.
+
+    `run_day` handles Trade OBJECTS; `gate_study.trade_row` turns them into
+    dicts whose keys are `entry_px` / `exit_px`. The object's attributes are
+    `entry_price` / `exit_price`. Both vocabularies appear within a few lines
+    of each other in this module, and the first version reached for the dict's
+    names on the object -- an AttributeError three minutes into an engine pass.
+
+    Every test fixture here builds dicts, so none of them could have caught it:
+    the same shape as a test fake whose signature has drifted from the real
+    function. This one asks the real dataclass instead.
+    """
+    import ast
+    import dataclasses
+    import inspect
+
+    from common.harness import Trade
+
+    fields = {f.name for f in dataclasses.fields(Trade)}
+    src = inspect.getsource(C.run_day)
+    tree = ast.parse(src)   # run_day is module level; no dedent needed
+    read = {n.attr for n in ast.walk(tree)
+            if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
+            and n.value.id == "t"}
+    unknown = read - fields
+    assert not unknown, f"run_day reads {unknown} off a Trade, which has {sorted(fields)}"
+
+
+def test_the_trail_distance_is_computed_from_real_Trade_objects():
+    """Exercises the arithmetic with the object the engine actually returns,
+    rather than the dict the report layer uses."""
+    from common.harness import Trade
+
+    t = Trade(symbol="VEEA", date="2026-09-11",
+              entry_time=pd.Timestamp("2026-09-11 05:00", tz=RU.ET),
+              exit_time=pd.Timestamp("2026-09-11 05:01", tz=RU.ET),
+              entry_price=10.0, exit_price=9.5, qty=100, reason="trail",
+              bars_held=1, gross=-50.0, commission=1.0, net=-51.0,
+              r_multiple=-1.0, setup_kind=None)
+    assert t.bars_held <= 1 and t.entry_price
+    pct = (float(t.exit_price) / float(t.entry_price) - 1.0) * 100.0
+    assert pct == pytest.approx(-5.0)
+    block = "\n".join(C.trail_block({"MCL": [pct], "MC5": []}))
+    assert "100.0%" in [l for l in block.splitlines() if "within 0.5pp" in l][0]
