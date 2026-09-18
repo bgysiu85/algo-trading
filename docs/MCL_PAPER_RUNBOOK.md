@@ -264,6 +264,70 @@ It exits on its own at 09:30 ET once flat. Ctrl-C is handled cleanly.
 **Watch the first order.** The single most likely failure is a rejection you don't notice.
 Confirm the first BUY line reads `filled` and not `REJECTED`.
 
+### The feed, signed in (2026-09-18)
+
+Polled without a login, TradingView's scanner serves the watchlist **15 minutes
+late** — it says so itself, `update_mode = delayed_streaming_900`. Signed in with
+your session cookies the same endpoint reads `streaming`
+(`docs/research/feed_freshness_probe_RESULT.md`). `tv_feed` sends the cookies
+when **both** `TV_SESSIONID` and `TV_SESSIONID_SIGN` are set in the environment
+it starts under, and sends nothing when either is missing.
+
+**Only a production tag that carries the cookie code can use it.** Check once,
+from `D:\TradingProd`:
+
+```powershell
+.venv\Scripts\python.exe -c "from common.tv_feed import COOKIE_ENV; print('cookie support present')"
+```
+
+An `ImportError` means the tag predates it (`prod-20260918` does) and the two
+variables do nothing until the next promotion, after a close.
+
+**One-time:** in a logged-in TradingView tab, F12 → Application → Cookies →
+`https://www.tradingview.com`, copy the values of `sessionid` and
+`sessionid_sign` into a 1Password item **TradingView** in the **Trading** vault,
+fields `sessionid` and `sessionid_sign`. Never into the repo, a `.ps1`, or a
+chat.
+
+**Every session**, in the SAME PowerShell window you will start the trader from,
+before `.\run_paper.ps1`:
+
+```powershell
+$env:TV_SESSIONID = op read "op://Trading/TradingView/sessionid"
+```
+
+```powershell
+$env:TV_SESSIONID_SIGN = op read "op://Trading/TradingView/sessionid_sign"
+```
+
+Each line asks 1Password (Windows Hello) and holds the value in that window
+only; `run_paper.ps1` and the python it starts inherit it. Both lines or
+neither — `sessionid` alone is served **anonymously** with no error, which is
+why a half-set pair logs ERROR and sends nothing.
+
+**Do not `setx` these two.** Unlike `DATABENTO_API_KEY`, `tv_feed` does not
+resolve an `op://` reference; a persisted reference would be sent as the cookie
+and served anonymously. (Resolving them through `secrets_util` is a pending
+change; until then the `$env:` lines are the way.)
+
+**Read the startup line.** `tv_feed` checks `update_mode` once at startup:
+
+- `streaming` → INFO, signed in. Good.
+- `delayed` **with** a cookie sent → **ERROR**: the cookies have expired or the
+  session was logged out. Repeat the one-time step (new values into the same
+  vault item) and restart.
+- `delayed` with no cookie → WARNING: the variables were not set in this window.
+
+Cookies do not rotate on their own; they die on logout in that browser, a
+password change, "log out of all devices", or their expiry date (visible in the
+DevTools Expires column). Do not log out of the browser you copied them from.
+
+**Two things this does not settle.** TradingView's terms describe its features
+as for manual use; signing the feed with your account is your decision to make,
+not a side effect of setting two variables (`claude/tv_cookie_in_the_cloud_20260918.md`
+§1). And a session variable does not travel to a scheduled task or a cloud host
+— those need the cookies in the process environment another way.
+
 ---
 
 ## End of session: the watchlist archives itself
