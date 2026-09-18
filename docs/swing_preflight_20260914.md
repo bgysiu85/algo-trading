@@ -320,7 +320,7 @@ line of swing strategy code exists.
 | # | Criterion | Fails if |
 |---|---|---|
 | **G1** | **Construction.** A candidate is either market-relative (cross-sectional rank, long-vs-market, or dollar-neutral) **or** outright directional with a pre-registered target above the §6 detectability floor. | An outright directional candidate targets < 20%/yr. Its result is then **uninterpretable**, not merely weak, and must not be reported as evidence either way. |
-| **G2** | **Cost measured, not assumed.** Quoted spread and depth at the touch measured for the *candidate universe* from **live IBKR quote sampling** across several sessions, or from a **priced, scoped Databento pull**. Model the **full quoted spread** (E/Q ~ 1.0, §3.2). See §11 item 1 — the existing fill-pricing tools cannot do this. | Measured all-in round trip > **40 bps**. The universe is then too illiquid and must be narrowed. |
+| **G2** | ~~**Cost measured, not assumed.**~~ **CLEARED 2026-09-19** on one full session: measured all-in round trip **5.46 bps** against a 40 bps threshold, every symbol passing individually. See `swing_g2_RESULT_20260919.md`. | Provisionally cleared, not closed -- one session, and G2's own text says *several*. |
 | **G3** | **Financing charged, always, and stated.** Every P/L reported **both** cash-funded and at 2:1 with **7.13%/yr charged per day held**. | A candidate is profitable only when financing is ignored. |
 | **G4** | **Gap risk in the sizing rule.** Max-loss-per-position assumption = stop level **plus the p90 extra** (~7.3 pp at a 5% stop), not the stop level. | A risk model that treats the stop as the max loss. |
 | **G5** | **Horizon floor, N >= 5.** | A candidate with median hold < 5 days, unless G2 measures cost at the low end (<= 10 bps). Below N=5 cost is 5-26% of the median move and MFE adds no information over \|fwd\| (§2). |
@@ -382,25 +382,10 @@ reason, leaving the sample **100% survivors**.
 
 ## 11. Open items this creates, in priority order
 
-1. **Measure real large/mid-cap spreads — and not the way the first version of this document
-   said.** *(Corrected 2026-09-14, same day, after reading the tools rather than trusting the
-   search that named them.)* G2 cannot be satisfied from public data (§3.1). It also cannot be
-   satisfied by the tooling already on disk:
-
-   - `common/friction_quotes.py` prices **Ben's own Flex fills** against the tape. It takes an
-     IBKR trade report as its input, so it can only measure a universe he has already traded.
-   - `common/quote_fill.py` is the same shape one level over — it runs off the traded-pairs
-     file and prices **MCL's modelled fills**.
-   - The **Databento archive is scoped to the small-cap screened universe.** Large-cap `tcbbo`
-     is not on disk, so obtaining it is a **new retrieval** — and retrieval is what Databento
-     bills. The project's hard rule applies: a tool that can spend money states the number
-     before it spends it.
-
-   **The cheaper and better route is to measure the spread live off IBKR.** A sampler that
-   records bid, ask and quoted size for a candidate universe every ~30 seconds across several
-   sessions yields a **current** distribution, **at the venue Ben actually trades**, for free —
-   which is a better instrument than 2013 SEC data or a purchased tape, and it sidesteps §3.1
-   entirely. Price a scoped Databento pull as the fallback. This blocks G2.
+1. ~~**Measure real large/mid-cap spreads.**~~ **DONE 2026-09-19.** The live
+   IBKR sampler ran a full regular session; `strategy/swing/` holds the tooling
+   and `swing_g2_RESULT_20260919.md` the result. Measured **5.46 bps** all-in.
+   Two more sessions, ideally including a volatile one, before G2 is closed.
 2. **Decide G1: market-relative or directional.** §6 makes this the highest-leverage decision
    in the programme, and it is a decision, not a measurement.
 3. **Source a point-in-time universe** (historical index constituents). This is the

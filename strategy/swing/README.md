@@ -2,8 +2,8 @@
 
 Swing trading: 2-20 trading day holds in liquid US large/mid caps.
 
-**Status as of 2026-09-14: pre-flight only. There is no strategy here, by
-design.** `docs/swing_preflight_20260914.md` fixed go/no-go criteria G1-G8
+**Status as of 2026-09-19: G2 measured and provisionally cleared at 5.46 bps.
+Still no strategy here, by design.** `docs/swing_preflight_20260914.md` fixed go/no-go criteria G1-G8
 before any entry logic exists, the same way `strategy/orb/` did. This folder
 holds the tooling that answers G2 and nothing else.
 
@@ -189,8 +189,14 @@ The report's own caveats section is the authority, but the short version:
 
 ## Open, blocking
 
-- **G2** stays open until the sampler has run over several sessions and the
-  report clears 40 bps for the chosen universe.
+- **G2** is **provisionally cleared**: 2026-09-18, one full regular session,
+  31,043 usable observations, median all-in round trip **5.46 bps** against a
+  40 bps threshold, every symbol passing individually and depth no longer
+  binding at USD 9,000. Two more sessions -- ideally including a volatile one
+  -- before it is called closed. `docs/swing_g2_RESULT_20260919.md`.
+- **Entry time of day is a free lever and is not yet registered.** The open
+  costs 2.7x the close (7.98 bps at 09:30, 2.96 at 15:30). Any candidate must
+  state when it enters and pay that bucket's spread.
 - **G8** (point-in-time universe) has no answer yet. The pre-flight's own
   universe is 100% survivors — fine for magnitude and dispersion, not for any
   strategy result.
