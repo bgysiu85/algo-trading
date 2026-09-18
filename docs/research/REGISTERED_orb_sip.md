@@ -487,3 +487,66 @@ fill and are recorded now:
 
 Neither is a verdict on the strategy until the run is redone with D.1 fixed.
 The criteria are read once, on that run.
+
+---
+
+# AMENDMENT E — 2026-09-18, PRE-DATA. The entry-minute ordering, resolved.
+
+The run is done and its verdict stands: the strategy does not pass, in either
+reading (`claude/orb_sip_RESULT_20260918.md`). E does not reopen that. It
+settles **which figure is the honest one to record**, because the two readings
+differ by 0.40R a trade and the difference is a fact about the tape, not a
+choice.
+
+## E.1 The question
+
+39.9% of top-20 trades have the stop price touched during the minute the
+position was opened in. A one-minute bar carries a high and a low but not their
+order. One-second bars on XNAS.ITCH — the same L0 tier as the minute bars
+already on disk (`claude/second_bars_PRICE_20260918.md`) — carry it.
+
+For each such trade: **did the stop price trade before or after the entry
+trigger was reached, inside that minute?**
+
+## E.2 The method, fixed before the data is bought
+
+- **Scope:** only the symbol-days that produced one of those trades — the
+  top-20, 5-minute arm, outside the holdout. Nothing else is fetched.
+- **Per trade**, on that minute's seconds: the entry fills at the first second
+  reaching the trigger (gapping through if that second opened beyond it); the
+  stop is placed off that fill; only seconds **at or after** the entry second
+  can hit it. Within the entry second the stop fills at the stop, never at that
+  second's open — amendment D, one resolution down.
+- **Three outcomes, all counted:** `entry_first` (the stop fired),
+  `stop_first` (it could not have), `same_second` (both inside one second —
+  unresolved, and reported as such rather than assumed).
+- **Resolution is per trade, not global.** The ledger is re-read with each
+  trade's own answer: `entry_first` keeps the stop, `stop_first` takes the
+  trade's alternative path (the ledger already carries it), `same_second` keeps
+  the stop, which is the conservative side.
+
+## E.3 What each outcome means, stated now
+
+- The resolved mean R is **the figure of record** for this strategy and
+  supersedes both readings in the result doc.
+- **It cannot produce a pass.** The optimistic reading — the ceiling this study
+  can reach — already fails criterion 2 (bootstrap 0.834 against 0.95) and
+  criterion 7 (best top-N at the grid's edge). A resolved figure between the
+  two readings cannot clear a bar the better of them missed.
+- `same_second` above **20%** of the sample means one-second bars did not
+  resolve the question either, and the write-up says the question is open at
+  this resolution rather than quoting a number as settled.
+
+## E.4 Cost gate and scope discipline
+
+The estimate runs without `--confirm` and the number is reported before
+anything is bought (`PROGRAM_INDEX` §1). **If it is not $0.00, nothing is
+bought without a decision on the number**, and the result doc keeps both
+readings side by side. Whole-day pricing is an upper bound; a windowed request
+is the fallback if the whole-day figure blocks it.
+
+## E.5 What E does not do
+
+It does not touch the universe, the ranking, the filters, the friction levels,
+the criteria, the controls, the holdout, or the verdict. It does not re-trade
+anything: the ledger is re-read, not rebuilt.
