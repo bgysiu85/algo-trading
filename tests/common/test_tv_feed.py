@@ -378,3 +378,91 @@ def test_nothing_dropped_means_no_extra_request(monkeypatch):
     monkeypatch.setattr(F, "_scan", lambda payload: calls.append(payload) or {})
     assert F.explain_drops([]) == {}
     assert calls == []
+
+
+# --- contract 1.8: publishing the feed's real-time state ----------------------
+#
+# `tv_feed` knows whether the rows are real time; `ui_bridge`, a different
+# process, publishes the document the portal reads. These pin the handover.
+
+def test_the_state_file_says_unknown_before_the_first_check_has_run(tmp_path):
+    """Yesterday's file is still in var/ this morning, and it would render as a
+    confident Real-time for as long as nobody looked. The writer owns freshness
+    so neither side has to invent an age rule."""
+    from common import feed_state as FS
+    p = tmp_path / "feed_state.json"
+    FS.publish(FS.block("STREAMING", "streaming", "signed"), p)     # yesterday
+    w = F.ModeWatch(None, "absent", 60.0, p)
+    w.begin()
+    assert FS.read(p)["mode"] == "unknown"
+
+
+def test_the_startup_check_publishes_what_it_found(tmp_path, monkeypatch):
+    from common import feed_state as FS
+    p = tmp_path / "feed_state.json"
+    monkeypatch.setattr(F, "check_update_mode",
+                        lambda cookie: ("DELAYED", "delayed_streaming_900"))
+    w = F.ModeWatch("sessionid=x; sessionid_sign=y", "signed", 60.0, p)
+    w.begin()
+    w.check()
+    got = FS.read(p)
+    assert got["mode"] == "delayed" and got["delay_seconds"] == 900
+    assert got["cookie_state"] == "signed" and got["authenticated"] is True
+
+
+def test_the_mode_is_re_checked_on_a_timer_because_a_cookie_expires_mid_session(
+        tmp_path, monkeypatch):
+    """The failure a startup-only check CANNOT see. Sessions are 5.5 hours and
+    the cookie's lifetime is not ours to control, so a feed that verified
+    itself at 04:00 can be serving delayed rows at 07:00 with nothing saying
+    so. One request an hour against ~1,980 polls."""
+    from common import feed_state as FS
+    p = tmp_path / "feed_state.json"
+    seen = ["streaming", "delayed_streaming_900"]
+    monkeypatch.setattr(F, "check_update_mode",
+                        lambda cookie: (F.mode_verdict(seen.pop(0)), "x")
+                        if seen else ("UNKNOWN", None))
+    w = F.ModeWatch("c", "signed", 60.0, p)
+    w.begin()
+    w.check()
+    assert FS.read(p)["mode"] == "streaming"
+
+    assert w.due() is False, "an hour has not passed"
+    w.last -= 3601                     # an hour and a second ago
+    assert w.due() is True
+    w.maybe_check()
+    assert FS.read(p)["mode"] == "delayed", "the expiry was never noticed"
+
+
+def test_zero_minutes_means_startup_only_and_never_polls_the_column(tmp_path):
+    w = F.ModeWatch("c", "signed", 0.0, tmp_path / "s.json")
+    w.last = 0.0
+    assert w.due() is False
+
+
+def test_a_state_file_that_cannot_be_written_does_not_stop_the_feed(
+        tmp_path, monkeypatch, caplog):
+    """A feed that will not start because a diagnostic file could not be
+    written is worse than one that starts without it -- and the reader treats
+    a missing file as unknown, which is the safe direction."""
+    blocked = tmp_path / "a-file"
+    blocked.write_text("not a directory", encoding="utf-8")
+    monkeypatch.setattr(F, "check_update_mode", lambda cookie: ("STREAMING", "streaming"))
+    w = F.ModeWatch("c", "signed", 60.0, blocked / "nested" / "s.json")
+    with caplog.at_level("WARNING"):
+        w.begin()
+        w.check()
+    assert any("unknown" in r.message or "unknown" in str(r.args)
+               for r in caplog.records), caplog.text
+
+
+def test_main_publishes_the_half_set_pair_as_incomplete(tmp_path, monkeypatch):
+    """The state that sends Ben to the WRONG fix if it is reported as absent:
+    one variable set, the other not. TradingView signs the session, so the
+    request goes out anonymous while the environment looks configured."""
+    from common import feed_state as FS
+    monkeypatch.setenv(F.COOKIE_ENV, "abc")
+    monkeypatch.delenv(F.SIGN_ENV, raising=False)
+    assert FS.cookie_state_from_env(F.COOKIE_ENV, F.SIGN_ENV) == "incomplete"
+    b = FS.block("DELAYED", "delayed_streaming_900", "incomplete")
+    assert b["authenticated"] is False and b["cookie_state"] == "incomplete"

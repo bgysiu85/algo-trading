@@ -46,13 +46,15 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from typing import Any
 
+from common import feed_state as FS
+
 LOG = logging.getLogger("ui_bridge")
 
 # Every module in this repo names the exchange clock for itself; this is a
 # fact about the market, not a value anyone configures.
 ET = ZoneInfo("America/New_York")
 
-CONTRACT_VERSION = "1.7"
+CONTRACT_VERSION = "1.8"
 PUSH_EVERY_S = 5.0
 HTTP_TIMEOUT_S = 3.0
 MAX_FILLS = 500
@@ -228,7 +230,9 @@ class UIBridge:
 
     def __init__(self, base_url: str, token: str, agent_id: str = "",
                  push_every_s: float = PUSH_EVERY_S,
-                 timeout_s: float = HTTP_TIMEOUT_S):
+                 timeout_s: float = HTTP_TIMEOUT_S,
+                 feed_state_path=FS.STATE_PATH):
+        self.feed_state_path = feed_state_path
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.agent_id = agent_id or socket.gethostname().lower()
@@ -443,6 +447,14 @@ class UIBridge:
             "events": list(self._events),
             "notifications": list(self._notifications),
             "links": [],
+            # Contract 1.8, ADDITIVE AND OPTIONAL. `tv_feed` knows whether the
+            # rows are real time; this process publishes the document. The
+            # block is omitted entirely when the file is missing, unreadable or
+            # malformed, and the portal renders an absent block exactly as it
+            # renders `unknown` -- so a failure to learn the mode can never
+            # come out the other end as `streaming`.
+            **({"feed": feed} if (feed := FS.read(self.feed_state_path))
+               else {}),
         }
 
     @staticmethod
