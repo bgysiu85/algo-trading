@@ -116,3 +116,50 @@ indicators. So:
    `REGISTERED_screen_itch.md` §2.1's stop rule fires, this study stops with it.
 
 Nothing in §1, §3 or §4 changes.
+
+---
+
+## Amendment B — PRE-RUN, 2026-09-18: the two things the build had to decide
+
+Written while building `common/screen_day.py`, before any session has run.
+
+1. **The volume threshold after 09:30 is carried, not measured.** `itch_capture`
+   (`REGISTERED_screen_itch_v2.md`) measured XNAS.ITCH's share of consolidated volume per
+   ET half-hour from 04:30 to 09:30 only. `ScreenConfig.capture_at` carries the last step
+   forward, so RTH and POST screen at the **09:30 capture**. Nasdaq's share of a name's
+   volume is higher in regular hours than at the open, so this capture is too low, the
+   threshold is too easy, and the RTH/POST universe is too BIG — the conservative
+   direction for a study asking whether trading later adds anything. Printed in the
+   report beside every count. A measured RTH/POST ladder would be its own registration.
+2. **POST's reference close** is today's repaired regular close
+   (`var/state/regular_close.json`, the same construction PRE and RTH divide by). A date
+   with no repaired close for a name screens nothing for that name in POST, and the count
+   of such dates is printed.
+
+## Amendment C — PRE-RUN, 2026-09-18: the control arm B and C are actually scored against
+
+§2 asks arm A to reproduce the published `pit_strategy` figure. It cannot do that AND be
+the like-for-like control at the same time, and the reason is warm-up:
+
+- the published point-in-time runs load the **prior pre-market slice** as warm-up
+  (`pit_strategy` says so in its own header: *"none of them reproduces the published
+  backtest — that one warms up on the IB cache's 20:00 sessions"*);
+- arms B and C must be handed **full-day** frames, so their warm-up is the prior day's
+  whole session. MACD is an EMA with unbounded memory, so indicator values at 04:00
+  differ and the trades will not match trade for trade.
+
+So there are two controls, and both are printed:
+
+- **A (reconciliation):** MC5 04:00–09:30 on the pre-market frames, the published
+  configuration. It must reproduce the published v2 figure — **MC5 6,462 trades,
+  (8.57)/trade at $4.26** on `screen_pairs_pit_itch_v2.json`, 6,411 symbol-days — or the
+  run prints NO VERDICT. It is a check that this module builds the same book, nothing else.
+- **A′ (the scored control):** MC5 04:00–09:30 on the **full-day frames**, same universe.
+  Every scored comparison in §4 is **B against A′** and **C against A′**, because those
+  three share a tape, a warm-up and a frame, and differ only in the window and the
+  universe.
+
+The A-to-A′ difference is reported as its own line: it prices the warm-up change and
+nothing else, and it is not a finding about the strategy.
+
+§4's criteria are unchanged and attach to **C's entries at or after 09:30**.

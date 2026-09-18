@@ -277,3 +277,74 @@ not a choice of arm.
 
 It does not touch the universe, the ranking, the friction levels, the criteria,
 the controls or the holdout. The primary cell is unchanged.
+
+---
+
+# AMENDMENT B — 2026-09-18, PRE-RUN. Still no trade simulated.
+
+Building the universe table exposed a defect in the tape §3.1 chose, and one
+plain bug. Both are fixed here, before any P/L exists.
+
+## B.1 XNAS.BASIC's RTH minute bars carry off-exchange prints that are not the
+## session's range
+
+The first universe build read ATR(14) of **$11.79 for AAPL** against a real
+daily range of $3–4. The cause, on 2024-09-12:
+
+| | low | high |
+|---|---|---|
+| XNAS.BASIC minute bars | **209.27** | 229.35 |
+| XNAS.ITCH minute bars | 219.82 | 223.54 |
+| EQUS.SUMMARY daily (consolidated) | 219.82 | 223.55 |
+
+The BASIC low is a single 13:38 bar printing 209.27 with its own open and close
+at 223.0x. NVDA the same day: BASIC 104.95 against a true 115.38. **ITCH agrees
+with the consolidated daily bar to the cent.**
+
+Measured over the 1,343 liquid names on that session, BASIC's session low is
+more than 0.5% below the consolidated low on **11.3%** of them and more than 2%
+below on **7.7%**; the high is overstated by more than 0.5% on 7.2%. ITCH
+differs from consolidated by more than 0.5% on 0.8–1.9% of names, and those
+differences are the opposite sign — an extreme that printed off-exchange only.
+
+The pre-market TRF defect (`tape_spikes_RESULT_20260917.md`) was about *when*
+prints land. This is a different thing: prints that are in the right minute and
+are not the exchange's range. ORB's earlier RTH spike census did not catch it
+because its threshold was 25%, and these are 3–7% dislocations. **They would
+have set every opening range, every ATR and every stop trigger in this
+strategy.**
+
+**The decision: two tapes, by column.**
+- **Prices — the opening range, ATR, the entry trigger, the stop and the exit —
+  come from XNAS.ITCH RTH minute bars.**
+- **Opening-range volume, and therefore the RVOL ranking, stays on
+  XNAS.BASIC**, whose 56% capture ranks like consolidated (rank correlation
+  0.95, top-20 overlap 16 of 20) where ITCH's 12% does not (0.81, 12 of 20).
+- EQUS.SUMMARY still supplies the 14-day average daily volume.
+
+This is a tape correction, not a threshold change: no filter, criterion,
+control or the holdout moves. The §3.1 sentence "minute bars on XNAS.BASIC" is
+superseded by this amendment.
+
+**What it costs, stated now:** entries and stops are decided by exchange prints
+only, so a break that traded only off-exchange does not trigger. That is the
+conservative direction, and it is the same direction as the live path, where a
+stop order rests on an exchange.
+
+**Coverage:** the ITCH 09:30–16:00 pull holds 550 of the 555 sessions;
+2026-09-10, -11, -14, -15 and -16 are missing and all five sit inside the
+locked holdout, so the primary run is unaffected. They are pulled before the
+holdout is ever opened.
+
+## B.2 The daily-volume merge was a day out
+
+`ohlcv-1d` bars are stamped 00:00 UTC **on** their session date. The first
+build converted that to ET, which moved every bar to 19:00 the previous
+evening, and merged each session's volume onto the day before. 78% of rows
+still matched, so nothing raised; the liquidity filter was simply reading the
+wrong day. Fixed, with a test.
+
+## B.3 What B does not change
+
+The rules in §2, the friction levels in §3.3, the sizing in §3.4, the criteria
+and controls in §4, the secondary readings in §5, the holdout, and amendment A.
