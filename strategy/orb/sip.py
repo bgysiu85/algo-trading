@@ -139,9 +139,21 @@ def trade_symbol_day(symbol: str, date: str, minute, open_, high, low, close,
         if stopped.any():
             j = first + int(np.argmax(stopped))
             # The protective stop gaps through in the same direction as the
-            # entry did: a bar that opened past it fills at the open.
-            exit_px = (min(stop_px, open_[j]) if side == LONG
-                       else max(stop_px, open_[j]))
+            # entry did: a bar that OPENED past it fills at that open.
+            #
+            # EXCEPT ON THE ENTRY BAR, where the open PRECEDES the entry
+            # (amendment D). The entry filled inside that bar at the trigger
+            # or above; the bar's open is a price from before the order
+            # existed, and using it as the stop's fill books a loss at a price
+            # the position could not have been sold at. On a 10%-ATR stop that
+            # error is the size of the whole result: it cost 0.69R a trade in
+            # the first full run. On the entry bar the stop fills AT the stop.
+            gap_ok = j > i
+            if gap_ok:
+                exit_px = (min(stop_px, open_[j]) if side == LONG
+                           else max(stop_px, open_[j]))
+            else:
+                exit_px = stop_px
             exit_idx, reason = j, "stop"
 
     return Trade(symbol=symbol, date=date, side=side,

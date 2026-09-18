@@ -167,3 +167,34 @@ def test_slippage_hurts_a_short_in_the_other_direction():
 def test_the_net_of_a_flat_trade_is_the_cost_of_trading_it():
     t = a_trade(entry=10.0, exit_=10.0)
     assert S.net(t, 100, S.BASE) < 0 and S.net(t, 100, S.PAPER) == pytest.approx(-0.7)
+
+
+def test_the_entry_bars_open_cannot_be_the_stops_fill():
+    """Amendment D. The entry bar opened at 10.30, broke 10.60 (the trigger)
+    and traded down to 10.45. The stop is 10.50. The position was opened
+    inside that bar at 10.60, so 10.30 is a price from before the order
+    existed: filling the stop there books a loss the trade could not have
+    taken. On the entry bar the stop fills AT the stop."""
+    rows = UP_RANGE + [(5, 10.30, 10.75, 10.45, 10.55),
+                       (6, 10.55, 10.6, 10.5, 10.55)]
+    t, why = run(rows, atr=1.0)
+    assert why == S.OK and t.entry_px == pytest.approx(10.6)
+    assert t.exit_reason == "stop" and t.exit_min == M0 + 5
+    assert t.exit_px == pytest.approx(10.5), "not 10.30, the pre-entry open"
+
+
+def test_a_later_bar_still_gaps_through_the_stop():
+    """The rule narrows to the entry bar only: on any later bar the open is
+    after the entry, so a gap through the stop is real."""
+    rows = UP_RANGE + [(5, 10.6, 10.7, 10.58, 10.65),
+                       (6, 10.20, 10.25, 10.1, 10.15)]
+    t, _ = run(rows, atr=1.0)
+    assert t.exit_reason == "stop" and t.exit_px == pytest.approx(10.2)
+
+
+def test_a_short_on_the_entry_bar_fills_at_its_stop_too():
+    rows = DOWN_RANGE + [(5, 10.05, 10.15, 9.85, 9.95)]
+    t, why = run(rows, atr=1.0)
+    assert why == S.OK and t.entry_px == pytest.approx(9.9)
+    assert t.stop_px == pytest.approx(10.0)
+    assert t.exit_reason == "stop" and t.exit_px == pytest.approx(10.0)
