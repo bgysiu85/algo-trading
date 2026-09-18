@@ -65,6 +65,36 @@ And the error now **names the failing job** (root, schema, dates, symbols,
 symbology). The first version's did not, which is why a 422 whose cause was a
 Sunday could not be diagnosed from its own output.
 
+### 1.2 A defect in the METHOD, not the code, 2026-09-18
+
+Worth recording separately because it makes every mutation result in this line
+provisional until re-run.
+
+The sweeps here rewrite the module in rapid succession — mutate, run pytest,
+restore, mutate again. **Python invalidates a `__pycache__` entry on the
+source's mtime and size, and successive writes inside one clock second defeat
+that.** After a sweep restored the original file, the next run was still
+executing the bytecode of the last mutant (`share > 0.50`). The symptom was a
+test failing identically alone and in the suite, against source that was
+correct when read — and a commit that went in with it failing, because the
+`echo EXIT=$?` after the redirect did not gate the commit. `PROGRAM_INDEX` §5
+already has that one: *a test that pipes through `| tail -1 &&` masks its exit
+code.*
+
+**Every mutation sweep in this line was re-run with `python3 -B` and
+`-p no:cacheprovider`, after clearing `__pycache__`.** All verdicts held —
+**12/12 on `tsmom_data_price`, 10/10 on `tsmom_holdout`, 14/14 on
+`tsmom_fetch`** — but they were not trustworthy until they had been.
+
+The general form, for `PROGRAM_INDEX` §5: **"the source says X" is not evidence
+that X ran.** It is §5's "a report must read its own inputs, not assert them"
+one layer down — the interpreter was not reading its inputs either.
+
+*(No test enforces this: a check that the sweep used `-B` can only inspect its
+own file and cannot fail for the right reason. `common/holdout.py` set the
+precedent — a promised counter that nothing incremented was removed rather than
+shipped as decoration.)*
+
 ## 2. The guards, and what each is for
 
 1. **Estimate first, always.** The total prints before anything transfers.
@@ -87,7 +117,7 @@ Sunday could not be diagnosed from its own output.
 7. **Exceptions are scrubbed** before printing. A Telegram token once leaked
    out of `common/notify.py`'s exception handler.
 
-**Eleven mutations run against these, eleven caught.**
+**Fourteen mutations run against these, fourteen caught** — under §1.2's re-run conditions, not the first pass's.
 
 ## 3. The manifest, and why the pull writes one
 
