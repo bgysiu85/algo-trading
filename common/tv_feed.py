@@ -60,6 +60,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import time
 import urllib.error
@@ -70,8 +71,8 @@ from zoneinfo import ZoneInfo
 
 from common import notify, session_lock
 from common.tv_screener import (CHANGE_COLUMN, COLUMNS, FILTERS, MARKET,
-                                PRICE_MAX, PRICE_MIN, check_response,
-                                failing_clauses)
+                                PRICE_MAX, PRICE_MIN, VOLUME_COLUMN,
+                                check_response, failing_clauses)
 
 LOG = logging.getLogger("tv_feed")
 ET = ZoneInfo("America/New_York")
@@ -293,6 +294,130 @@ class Ranking:
         return hot, warm, cold
 
 
+class Freshness:
+    """Yesterday's screen, re-served. The gate that stops it reaching the file.
+
+    REGISTERED_feed_freshness.md (H-F1), committed before this class existed.
+
+    TradingView's `premarket_*` columns hold the PREVIOUS session's values until
+    today's pre-market prints arrive, so the feed's first poll of a session
+    returns **yesterday's screen as ordinary live rows**. The blocked files
+    stamp them at 04:00:05, 04:00:06, 04:00:08 and 04:00:26 on four separate
+    sessions -- before any bar of today has closed. Eighteen live names across
+    seven sessions were this, and `screen_validate` had to set them aside before
+    it could read its own verdict.
+
+    THIS IS NOT THE CARRY-OVER `Ranking.begin_session` ALREADY FIXED
+    ---------------------------------------------------------------
+    That one was the ranker remembering across midnight, and the fix -- forget
+    at the roll -- is correct and stays. It cannot touch this one, because here
+    the names arrive **fresh from the endpoint**, as rows, carrying yesterday's
+    numbers. A memory that forgets perfectly is no defence against a source that
+    repeats itself.
+
+    THE RULE, and it has no free parameter
+    --------------------------------------
+    A name may not reach the watchlist until its `premarket_volume` has been
+    observed to CHANGE, at least once, this session. Nothing else distinguishes
+    a stale row from a live one: the row does not carry its own age, and a
+    name's volume is the one field that must move the moment it trades today.
+
+    No threshold, no grace window, no clock -- deliberately. The four stamps
+    above sit between 04:00:05 and 04:00:26, and a window fitted to them is
+    precisely the kind of number §4 of the index has a row about.
+
+    THE SAFETY PROPERTY, which is what makes this cheap
+    --------------------------------------------------
+    **It can only ever delay a name's FIRST appearance. It can never remove a
+    name already in the file.** Admission is permanent for the session, so a
+    name whose volume goes quiet later is untouched. That is what keeps this
+    compatible with Ben's rule of 2026-09-05 -- do not remove, deprioritise --
+    and with the fact that dropping a name mid-session orphans a held position.
+
+    A HELD NAME IS WITHHELD ENTIRELY, NOT DEMOTED TO COLD
+    ----------------------------------------------------
+    COLD is an ordering, not a veto: the trader arms every symbol in the file.
+    Writing a stale name as COLD would arm it, which is the defect.
+
+    WHAT IT COSTS
+    -------------
+    One poll -- ten seconds -- for a name that is trading, and the screen's own
+    `premarket_volume >= 100,000` clause means an admitted name has traded a
+    hundred thousand shares since 04:00. On a mid-session restart every name is
+    unproven again and each waits for its next print; accepted, and deliberately
+    NOT bought back with a persisted state file read inside the live loop.
+    """
+
+    def __init__(self):
+        self.session = None
+        self.first_volume: dict[str, float] = {}
+        self.admitted: set[str] = set()
+        self.held: set[str] = set()
+
+    def begin_session(self, day) -> bool:
+        """Start `day`; clear the evidence if this is a NEW session.
+
+        Returns True when it cleared, for the same reason `Ranking` does: a
+        silent clear and a silent non-clear look identical in a log.
+        """
+        if self.session == day:
+            return False
+        rolled = bool(self.first_volume) and self.session is not None
+        self.session = day
+        self.first_volume.clear()
+        self.admitted.clear()
+        self.held.clear()
+        return rolled
+
+    @staticmethod
+    def _volume(row: dict) -> float | None:
+        """The row's pre-market volume, or None if it cannot be compared.
+
+        NaN is excluded on purpose. `nan != anything` is True, so an unguarded
+        comparison would read a NaN volume as "changed" and admit the row --
+        the same NaN-is-not-None trap that produced a sign-flipped median in a
+        study this morning.
+        """
+        v = row.get(VOLUME_COLUMN)
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            return None
+        v = float(v)
+        return None if math.isnan(v) else v
+
+    def admit(self, rows: list[dict]) -> tuple[list[dict], list[str]]:
+        """(rows that may reach the ranker, tickers newly held this poll).
+
+        The second element exists so the hold is logged the first time and not
+        on every subsequent poll -- a line every ten seconds for five hours
+        trains the reader to skip it, which is how the original defect survived
+        four sessions of being printed.
+        """
+        out, newly_held = [], []
+        for row in rows:
+            t = row["ticker"]
+            if t in self.admitted:
+                out.append(row)
+                continue
+            vol = self._volume(row)
+            if vol is None:
+                # Cannot be shown to have moved. Withheld, and it says so.
+                if t not in self.held:
+                    self.held.add(t)
+                    newly_held.append(t)
+                continue
+            if t not in self.first_volume:
+                self.first_volume[t] = vol
+                if t not in self.held:
+                    self.held.add(t)
+                    newly_held.append(t)
+                continue
+            if vol != self.first_volume[t]:
+                self.admitted.add(t)
+                self.held.discard(t)
+                out.append(row)
+        return out, newly_held
+
+
 def write_watchlist(path: Path, symbols: list[str], header: str = "") -> bool:
     """Atomic write. The trader may read this file at any moment, and a
     half-written file is a truncated watchlist rather than an error.
@@ -348,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     rank = Ranking(a.max_symbols)
+    fresh = Freshness()
     backoff = 0.0
     tg = (notify.Notifier() if a.no_telegram
           else notify.Notifier.from_env(a.telegram_batch_min))
@@ -361,7 +487,7 @@ def main(argv: list[str] | None = None) -> int:
     # neither take the lock nor be blocked by one -- the whole point of
     # --dry-run is to check the endpoint while a real feed is running.
     if a.dry_run:
-        return _loop(a, rank, tg, prev_screening, last_beat, backoff)
+        return _loop(a, rank, fresh, tg, prev_screening, last_beat, backoff)
     held = session_lock.active(session_lock.WRITER_LOCK_PATH)
     if held:
         LOG.error("another watchlist writer is running -- %s",
@@ -372,10 +498,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     with session_lock.held("watchlist-writer", "tv_feed",
                            session_lock.WRITER_LOCK_PATH, out=str(a.out)):
-        return _loop(a, rank, tg, prev_screening, last_beat, backoff)
+        return _loop(a, rank, fresh, tg, prev_screening, last_beat, backoff)
 
 
-def _loop(a, rank, tg, prev_screening, last_beat, backoff) -> int:
+def _loop(a, rank, fresh, tg, prev_screening, last_beat, backoff) -> int:
     while True:
         now = datetime.now(ET)
         if not a.all_hours and not a.once and not in_session(now):
@@ -404,6 +530,19 @@ def _loop(a, rank, tg, prev_screening, last_beat, backoff) -> int:
         if rank.begin_session(now.date()):
             LOG.info("new session %s — ranker memory cleared; yesterday's "
                      "names no longer carry over as COLD", now.date())
+        fresh.begin_session(now.date())
+
+        # H-F1. Withhold rows that have not yet been shown to describe TODAY.
+        # This runs BEFORE tiers() and update() and both are given the SAME
+        # list, for the reason the roll is here rather than inside update():
+        # a filter applied in one of them would report one tiering and write
+        # another. A held name is withheld entirely rather than demoted to
+        # COLD, because the trader arms COLD symbols too.
+        rows, newly_held = fresh.admit(rows)
+        if newly_held:
+            LOG.info("holding %d name(s) until %s moves — a row can be "
+                     "yesterday's screen until today's prints arrive: %s",
+                     len(newly_held), VOLUME_COLUMN, ", ".join(newly_held))
 
         hot, warm, cold = rank.tiers(rows)
         symbols = rank.update(rows)
@@ -420,7 +559,8 @@ def _loop(a, rank, tg, prev_screening, last_beat, backoff) -> int:
             changed = write_watchlist(
                 a.out, symbols,
                 header=f"tv_feed {now:%Y-%m-%d %H:%M:%S} ET  "
-                       f"hot={len(hot)} warm={len(warm)} cold={len(cold)}")
+                       f"hot={len(hot)} warm={len(warm)} cold={len(cold)} "
+                       f"held={len(fresh.held)}")
             if changed:
                 LOG.info("watchlist -> %d symbols  HOT %s | WARM %s | COLD %s",
                          len(symbols), hot or "-", warm or "-",

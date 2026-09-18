@@ -141,6 +141,13 @@ CHANGE_COLUMN = "premarket_change"
 #    06:00. That is the intended shape; HOT/WARM/COLD in tv_feed keeps a name
 #    that later drops out rather than deleting it.
 PREMARKET_VOLUME_MIN = 100_000
+# Named because common/tv_feed.py's freshness gate reads this column off every
+# row, and a restated string in a second module is a second source of truth.
+# REGISTERED_feed_freshness.md §3: a name may not reach the watchlist until
+# THIS column has been observed to change within the session, because
+# TradingView holds the previous session's premarket_* values until today's
+# prints arrive -- so the feed's first poll returns yesterday's screen.
+VOLUME_COLUMN = "premarket_volume"
 PREMARKET_PRICE_RANGE = (2.0, 25.0)    # Pre-mkt price  2 to 25 USD, inclusive
 
 # Retained for day_over_day_only() and the record; NOT in the shipped screen.
@@ -163,7 +170,7 @@ FILTERS = [
     # float filter, which used the same operation.
     {"left": "premarket_close", "operation": "in_range",
      "right": list(PREMARKET_PRICE_RANGE)},
-    {"left": "premarket_volume", "operation": "egreater",
+    {"left": VOLUME_COLUMN, "operation": "egreater",
      "right": PREMARKET_VOLUME_MIN},
 ]
 

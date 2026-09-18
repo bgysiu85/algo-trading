@@ -79,10 +79,18 @@ dropping a name mid-session orphans a held position.
 ### What it costs, stated before the run
 
 One poll — ten seconds — for a name that is actively printing. **The screen
-itself bounds this:** a name only passes with `premarket_volume >= 100,000` and
-`relative_volume_10d_calc >= 5`, so an admitted name is by construction one that
-trades. The pathological case for a wait-for-a-print rule is a thin name, and a
-thin name is not on this screen.
+itself bounds this:** the shipped screen is three clauses, and one of them is
+`premarket_volume >= 100,000`, so an admitted name has already traded a hundred
+thousand shares since 04:00 and is not sitting still. The pathological case for
+a wait-for-a-print rule is a thin name, and a thin name does not clear that
+clause.
+
+(Written first as "`premarket_volume >= 100,000` **and**
+`relative_volume_10d_calc >= 5`", which is wrong: relative volume was removed
+from the screen on 2026-09-08 and is retained in `tv_screener` for
+`day_over_day_only()` and the record only. Corrected here rather than quietly,
+because the clause was load-bearing in the cost argument above and a
+registration that overstates its own bound is the thing §4 warns about.)
 
 The one real cost is a **mid-session restart**: the feed comes up at 06:00, every
 name is unproven again, and each waits for its next print. Bounded by the same
