@@ -308,6 +308,29 @@ def plan(client, roots: dict, root_dir: Path, start: str, end: str):
     return jobs, usd, nbytes, have, late
 
 
+def _probe(client, cand, root):
+    """Price one candidate session. None on a symbology miss; SystemExit on
+    anything else.
+
+    THE ONE ERROR PATH. The first draft repeated the same re-raise in all three
+    discovery loops, and mutation-testing showed the copy in the first loop
+    could not fail independently: delete it and the yearly stride (which
+    re-probes index 0) or the narrowing scan (which re-probes 1..hit) reaches
+    the same failure and aborts with the same message. `PROGRAM_INDEX` section
+    4 -- a second condition that cannot fail independently of the first is not a
+    second condition -- so the three became one rather than keeping two that
+    could never be tested.
+    """
+    try:
+        return _retry(lambda kw=cand[3]: _price(client, kw))
+    except Exception as e:                           # noqa: BLE001
+        if _is_symbology_miss(e):
+            return None
+        raise SystemExit(
+            f"pricing failed on {root} {DEF_SCHEMA} {cand[3]['start']} "
+            f"-- nothing downloaded: {_scrub(e)}")
+
+
 def _first_resolvable(client, todo, root):
     """(priced sample, index of the first session that resolves) for one root.
 
@@ -330,34 +353,22 @@ def _first_resolvable(client, todo, root):
     metadata lookups, all free. A root that resolves immediately costs one call.
     """
     for i, cand in enumerate(todo[:4]):
-        try:
-            return _retry(lambda kw=cand[3]: _price(client, kw)), i
-        except Exception as e:                       # noqa: BLE001
-            if not _is_symbology_miss(e):
-                raise SystemExit(
-                    f"pricing failed on {root} {DEF_SCHEMA} "
-                    f"{cand[3]['start']} -- nothing downloaded: {_scrub(e)}")
+        got = _probe(client, cand, root)
+        if got:
+            return got, i
 
     hit = None
     for i in range(0, len(todo), 12):                # yearly stride
-        try:
-            _retry(lambda kw=todo[i][3]: _price(client, kw))
+        if _probe(client, todo[i], root):
             hit = i
             break
-        except Exception as e:                       # noqa: BLE001
-            if not _is_symbology_miss(e):
-                raise SystemExit(
-                    f"pricing failed on {root} {DEF_SCHEMA} "
-                    f"{todo[i][3]['start']} -- nothing downloaded: {_scrub(e)}")
     if hit is None:
         return None, 0
 
     for i in range(max(0, hit - 11), hit + 1):       # narrow to the month
-        try:
-            return _retry(lambda kw=todo[i][3]: _price(client, kw)), i
-        except Exception as e:                       # noqa: BLE001
-            if not _is_symbology_miss(e):
-                raise
+        got = _probe(client, todo[i], root)
+        if got:
+            return got, i
     return None, 0
 
 
