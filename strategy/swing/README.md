@@ -49,11 +49,24 @@ analysis should never cost a session of data.
 
 ```
 python -m strategy.swing.spread_sampler --self-test
-python -m strategy.swing.spread_sampler --minutes 390
+python -m strategy.swing.spread_sampler --wait-for-open --minutes 390
 ```
 
 Defaults to `var/reports/spread_samples.csv`, append mode, flushed per row, so
 a disconnect mid-session loses nothing and a re-run continues the same file.
+
+`--wait-for-open` sleeps until the next 09:30 ET open and only then starts the
+clock, so `--minutes 390` means open-to-close rather than 390 minutes from
+whenever the command was typed. Weekends are skipped; holidays are not
+modelled, and on one the collector will sit through a shut market — a wasted
+night rather than a wrong number, and the report will show a session with no
+usable rows.
+
+**IB Gateway must stay up and logged into paper for the whole run.** It is the
+data source, not a handshake at startup. Its daily auto-restart will otherwise
+land mid-session: *Configure → Settings → Lock and Exit*, choose auto-restart
+(which re-authenticates without credentials) over auto-logoff, and set a time
+outside 23:30–06:00 AEST.
 
 Carries the standing guards: ports 7497 and 4002 accepted, 7496 and 4001
 refused **by name**, and `managedAccounts()` must return DU accounts before
@@ -138,6 +151,21 @@ rejected. A file of nothing but delayed rows produces a refusal, not an empty
 table — an empty table reads as "no data" when the truth is "the wrong data".
 
 If that warning appears, fix the subscription. Do not relax the filter.
+
+### The same shape again: a dropped socket
+
+A disconnect does not clear `ib_async`'s ticker objects — they keep their last
+bid and ask indefinitely. Writing those with a fresh timestamp records a stale
+quote as a live one, and nothing downstream can tell the difference.
+
+The first real run lost 134.6 minutes and then 10.7 more, and it took an
+after-the-fact timestamp diff to notice. So the loop now checks
+`ib.isConnected()` at the top of every tick **and again immediately before
+writing** (a drop during the settle would otherwise slip through), writes
+nothing while down, reconnects and resubscribes on its own, and records every
+outage with its duration — printed at the end and written to
+`<samples>.csv.outages.txt`, so a hole in the CSV is explained rather than
+merely present.
 
 ---
 

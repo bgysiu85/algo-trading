@@ -254,6 +254,89 @@ def test_session_windows_have_the_right_edges():
     assert R.in_session("2026-09-17T01:00:00Z", "all")
 
 
+# ---------------------------------------- wait-for-open and outage logging ----
+
+def test_seconds_until_open_is_zero_inside_regular_hours():
+    from datetime import datetime, timezone
+    assert S.seconds_until_open(
+        datetime(2026, 9, 17, 13, 30, tzinfo=timezone.utc)) == 0
+    assert S.seconds_until_open(
+        datetime(2026, 9, 17, 19, 59, tzinfo=timezone.utc)) == 0
+
+
+def test_seconds_until_open_from_the_evening_before():
+    """21:02 ET Wednesday -> 09:30 ET Thursday is 12h28m."""
+    from datetime import datetime, timezone
+    got = S.seconds_until_open(datetime(2026, 9, 17, 1, 2, tzinfo=timezone.utc))
+    assert got == pytest.approx(12 * 3600 + 28 * 60, abs=60)
+
+
+def test_seconds_until_open_skips_the_weekend():
+    from datetime import datetime, timezone
+    # Friday 17:00 ET -> Monday 09:30 ET is 64.5 hours
+    fri = S.seconds_until_open(datetime(2026, 9, 18, 21, 0, tzinfo=timezone.utc))
+    assert fri == pytest.approx(64.5 * 3600, abs=60)
+    # Saturday 09:30 ET -> Monday 09:30 ET is 48 hours
+    sat = S.seconds_until_open(datetime(2026, 9, 19, 13, 30, tzinfo=timezone.utc))
+    assert sat == pytest.approx(48 * 3600, abs=60)
+
+
+def test_seconds_until_open_never_returns_a_past_time():
+    """Any answer must be non-negative, on every hour of a whole week."""
+    from datetime import datetime, timedelta, timezone
+    t = datetime(2026, 9, 14, 0, 0, tzinfo=timezone.utc)
+    for h in range(24 * 7):
+        assert S.seconds_until_open(t + timedelta(hours=h)) >= 0
+
+
+def test_outages_start_empty_and_say_so():
+    o = S.Outages()
+    assert o.total_seconds() == 0
+    assert o.events == []
+    assert "none" in o.summary()[0]
+
+
+def test_outages_record_duration_and_render():
+    """The two real holes from the 2026-09-17 run."""
+    from datetime import datetime, timezone
+    o = S.Outages()
+    o.record(datetime(2026, 9, 17, 1, 44, 30, tzinfo=timezone.utc),
+             datetime(2026, 9, 17, 3, 59, 6, tzinfo=timezone.utc))
+    o.record(datetime(2026, 9, 17, 7, 18, 40, tzinfo=timezone.utc),
+             datetime(2026, 9, 17, 7, 29, 24, tzinfo=timezone.utc))
+    assert len(o.events) == 2
+    assert o.total_seconds() == pytest.approx((134.6 + 10.7) * 60, abs=60)
+    text = "\n".join(o.summary())
+    assert "2 disconnection(s)" in text
+    assert "NO rows were written" in text
+    assert "134.6 min" in text
+
+
+def test_the_run_loop_guards_on_isconnected_before_writing():
+    """A guard that exists but is never reached is not a guard.
+
+    The loop is only reachable through a live socket, so this reads the source
+    and asserts the check sits between the top of the loop and the write --
+    the same approach as test_the_sampler_places_no_orders.
+    """
+    src = Path(S.__file__).read_text(encoding="utf-8")
+    loop = src.index("while not _stop:")
+    write = src.index("writer.write_row({", loop)
+    between = src[loop:write]
+    assert between.count("ib.isConnected()") >= 2, (
+        "expected an isConnected() check at the top of the tick AND again "
+        "immediately before writing; a drop during the settle would otherwise "
+        "write stale quotes with a fresh timestamp")
+
+
+def test_the_guard_check_would_fail_if_the_guard_were_removed():
+    """The control for the test above."""
+    fake = "while not _stop:\n    pass\n    writer.write_row({})"
+    loop = fake.index("while not _stop:")
+    write = fake.index("writer.write_row({", loop)
+    assert fake[loop:write].count("ib.isConnected()") == 0
+
+
 # ------------------------------------------- the sampler's session banner ----
 
 def test_session_banner_warns_on_an_overnight_start():

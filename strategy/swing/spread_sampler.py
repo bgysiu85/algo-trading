@@ -212,6 +212,64 @@ def session_banner(start_utc: datetime, minutes: float) -> tuple[list[str], bool
     return lines, warn
 
 
+
+def seconds_until_open(now_utc: datetime) -> float:
+    """Seconds until the next US regular-hours open. 0 when already inside.
+
+    Weekends skip to Monday. Holidays are NOT modelled -- on a holiday this
+    returns 0 all day and the collector will sit there recording a shut market,
+    which the report then excludes as a session with no usable rows. That is a
+    wasted night, not a wrong number, and the banner says so.
+    """
+    et = _et(now_utc)
+    mins = et.hour * 60 + et.minute + et.second / 60.0
+    if et.weekday() < 5 and RTH_OPEN_MIN <= mins < RTH_CLOSE_MIN:
+        return 0.0
+    ahead = 0
+    while True:
+        cand = et + timedelta(days=ahead)
+        if cand.weekday() < 5:
+            open_at = cand.replace(hour=9, minute=30, second=0, microsecond=0)
+            if open_at > et:
+                return (open_at - et).total_seconds()
+        ahead += 1
+        if ahead > 7:                                    # unreachable in practice
+            raise RuntimeError("no market open found within a week")
+
+
+class Outages:
+    """Every stretch the socket was down, so a hole in the CSV is explained.
+
+    Without this a disconnect is invisible after the fact: the rows simply stop
+    and resume, and nothing distinguishes "Gateway restarted" from "the market
+    was quiet". The first real run had two holes -- 134.6 and 10.7 minutes --
+    and it took an after-the-fact timestamp diff to find them.
+    """
+
+    def __init__(self):
+        self.events: list[tuple[str, str, float]] = []
+
+    def record(self, start_utc: datetime, end_utc: datetime) -> None:
+        self.events.append((
+            start_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            end_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            (end_utc - start_utc).total_seconds(),
+        ))
+
+    def total_seconds(self) -> float:
+        return sum(e[2] for e in self.events)
+
+    def summary(self) -> list[str]:
+        if not self.events:
+            return ["[outages] none -- the connection held for the whole run"]
+        out = [f"[outages] {len(self.events)} disconnection(s), "
+               f"{self.total_seconds()/60:.1f} min total. NO rows were written "
+               f"while down."]
+        for a, b, secs in self.events:
+            out.append(f"    {a} -> {b}   ({secs/60:.1f} min)")
+        return out
+
+
 # ------------------------------------------------------------- universe ----
 
 def load_universe(path: str | None) -> list[str]:
@@ -321,6 +379,21 @@ def self_test() -> int:
     if cov != 390:
         print(f"  FAIL open-to-close overlap was {cov}, expected 390"); ok = False
     print("[self-test] session banner OK")
+
+    if seconds_until_open(datetime(2026, 9, 17, 13, 30, tzinfo=timezone.utc)) != 0:
+        print("  FAIL inside RTH should be 0"); ok = False
+    fri = seconds_until_open(datetime(2026, 9, 18, 21, 0, tzinfo=timezone.utc))
+    if abs(fri - 64.5 * 3600) > 1:
+        print(f"  FAIL Friday evening should reach Monday, got {fri/3600:.2f}h")
+        ok = False
+    o = Outages()
+    if o.total_seconds() != 0 or "none" not in o.summary()[0]:
+        print("  FAIL empty outages"); ok = False
+    o.record(datetime(2026, 9, 17, 1, 44, tzinfo=timezone.utc),
+             datetime(2026, 9, 17, 3, 59, tzinfo=timezone.utc))
+    if abs(o.total_seconds() - 135 * 60) > 1:
+        print("  FAIL outage duration"); ok = False
+    print("[self-test] wait-for-open and outage accounting OK")
 
     b = batches(list(range(37)), 45)
     if len(b) != 1:
@@ -459,11 +532,37 @@ def run(args) -> int:
 
     signal.signal(signal.SIGINT, _sigint)
 
+    if args.wait_for_open:
+        wait = seconds_until_open(datetime.now(timezone.utc))
+        if wait <= 0:
+            print("[wait] regular hours are already open; collecting now")
+        else:
+            print(f"[wait] sleeping {wait/3600:.2f} h until the next 09:30 ET open "
+                  f"(Ctrl-C to abort)")
+            waited = 0.0
+            while waited < wait and not _stop:
+                chunk = min(60.0, wait - waited)
+                time.sleep(chunk)
+                waited += chunk
+                left = (wait - waited) / 60.0
+                if int(waited) % 900 < 60:            # a line every ~15 min
+                    print(f"[wait] {left:6.1f} min until the open", flush=True)
+            if _stop:
+                writer.close()
+                ib.disconnect()
+                print("[wait] aborted before the open; nothing collected")
+                return 0
+            print("[wait] open reached; collecting")
+
+    # the clock starts when collection does, not when the process did
     started = time.time()
     deadline = started + args.minutes * 60 if args.minutes > 0 else None
     subscribed: list = []
     tick = 0
     md_seen: dict[int, int] = {}
+    outages = Outages()
+    down_since: datetime | None = None
+    skipped_ticks = 0
 
     try:
         if not rotating:
@@ -475,12 +574,49 @@ def run(args) -> int:
                 print("[run] duration reached")
                 break
 
+            # THE GUARD. A dropped socket does not clear the ticker objects --
+            # they keep their last bid and ask forever. Writing those with a
+            # fresh timestamp records a stale quote as a live one, which is
+            # indistinguishable from real data afterwards. So: write nothing
+            # while down, and account for the hole.
+            if not ib.isConnected():
+                if down_since is None:
+                    down_since = datetime.now(timezone.utc)
+                    print(f"\n  *** DISCONNECTED at {down_since:%H:%M:%S}Z. "
+                          "Writing nothing until the socket is back. ***")
+                    print("  *** Most likely IB Gateway's daily restart. "
+                          "Configure -> Settings -> Lock and Exit. ***")
+                subscribed = []
+                try:
+                    ib.connect(args.host, args.port,
+                               clientId=args.client_id, timeout=15)
+                except Exception as e:                   # noqa: BLE001
+                    print(f"  [reconnect] failed ({type(e).__name__}); "
+                          f"retrying in {args.interval:.0f}s", flush=True)
+                    skipped_ticks += 1
+                    time.sleep(max(5.0, args.interval))
+                    continue
+                back = datetime.now(timezone.utc)
+                outages.record(down_since, back)
+                print(f"  *** RECONNECTED at {back:%H:%M:%S}Z after "
+                      f"{(back - down_since).total_seconds()/60:.1f} min ***\n")
+                down_since = None
+                ib.reqMarketDataType(1)
+                if not rotating:
+                    subscribed = [ib.reqMktData(c, "", False, False)
+                                  for c in groups[0]]
+                    ib.sleep(args.settle)
+
             gi = tick % len(groups)
             if rotating:
                 for t in subscribed:
                     ib.cancelMktData(t.contract)
                 subscribed = [ib.reqMktData(c, "", False, False) for c in groups[gi]]
                 ib.sleep(args.settle)
+
+            if not ib.isConnected():        # dropped during the settle above
+                skipped_ticks += 1
+                continue
 
             ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             wrote = 0
@@ -529,10 +665,19 @@ def run(args) -> int:
                 pass
         writer.close()
         ib.disconnect()
+        if down_since is not None:                   # still down when we stopped
+            outages.record(down_since, datetime.now(timezone.utc))
         mins = (time.time() - started) / 60.0
         print(f"\n[done] {writer.n} rows over {tick} ticks, {mins:.1f} min")
         print(f"[done] {out.resolve()}")
         print(f"[done] market data types seen: {md_seen or 'none'}")
+        for line in outages.summary():
+            print(line)
+        if skipped_ticks:
+            print(f"[done] {skipped_ticks} tick(s) skipped while disconnected")
+        side = out.with_suffix(out.suffix + ".outages.txt")
+        side.write_text("\n".join(outages.summary()) + "\n", encoding="utf-8")
+        print(f"[done] outage log: {side.resolve()}")
         print("\nNext:  python -m strategy.swing.spread_report " + str(out))
     return 0
 
@@ -558,6 +703,11 @@ def main(argv=None) -> int:
                     help="4002 IB Gateway paper (default) or 7497 TWS paper. "
                          "Live ports are refused by name.")
     ap.add_argument("--client-id", type=int, default=71)
+    ap.add_argument("--wait-for-open", action="store_true",
+                    help="sleep until the next 09:30 ET open before collecting, "
+                         "so --minutes counts from the open rather than from "
+                         "whenever the command was typed. Holidays are not "
+                         "modelled.")
     ap.add_argument("--self-test", action="store_true",
                     help="run the offline checks and exit; no IB connection")
     a = ap.parse_args(argv)
