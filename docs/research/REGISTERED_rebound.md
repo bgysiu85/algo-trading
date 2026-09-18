@@ -156,3 +156,31 @@ had in weeks.
 `holdout.json` untouched. No strategy constant is read, written or swept; no
 engine parameter changes. The census reads the published books and the tape, and
 writes a report and a CSV.
+
+---
+
+## AMENDMENT A — PRE-RUN, 2026-09-18, before `common/rebound.py` has been run
+
+**Added: entries per symbol-day, per book, in the population check.**
+
+Ben asked, reading the two denominators: *"shouldn't MC5 trade less given that
+it's on a higher timeframe setup?"* It is a fair question and the answer is not
+in any document. MC5 is on **5-minute** bars — 66 in a session against MCL's 330
+— and yet takes **6,462** trades to MCL's **3,908**. Either it is finding an
+entry on far more symbol-days, or it is re-entering repeatedly within a day, and
+those are different things with different implications.
+
+The census already reads every trade with its symbol and its date, so the answer
+costs one pass over rows already in memory. The population check therefore also
+prints, per book:
+
+- how many of the 6,411 symbol-days carried **at least one** entry;
+- **entries per touched symbol-day**, as a mean and as p50 / p90 / max.
+
+**Still no P&L and still no verdict.** These are counts of the population, which
+is what a population check is for, and they are printed for both books
+separately rather than as a comparison scored one way or the other. The §1 bar on
+book comparison stands: nothing here ranks the two, and nothing here may be read
+as saying either is better.
+
+Recorded before the run, as every amendment in this project must be.
