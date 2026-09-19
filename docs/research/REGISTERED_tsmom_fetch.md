@@ -281,6 +281,30 @@ forbids (§0.1, "never inferred from volume or open interest"). The fix — amen
 C — and whatever it needs beyond `c.0`/`c.1` are **AT-99**, and it blocks the roll
 cross-check (AT-41) and the run (AT-43).
 
+### 1.7 The top-up, 2026-09-19 (AT-99 step 2)
+
+Amendment C (`REGISTERED_tsmom.md` §0.2) and G3's choice of MTN need data the first
+pull did not buy. `common.tsmom_fetch` gains exactly that, and **nothing already on
+disk is re-bought** (billing is on retrieval, and every job checks first):
+
+| Added | Why |
+|---|---|
+| **GC, SI, HG: `continuous` c.2, c.3, c.4**, as a second bar file `<ROOT>.c2-c4.dbn.zst` | the held active-cycle contract is often c.3 or c.4 (HG/SI in late August: December is c.4) |
+| **TN**: c.0 + c.1 bars and the monthly roll calendar, via `--with-tn` | arm (b)'s signal (G3). TN listed 2016-01-11; late-listing discovery (§1.4) finds and reports it |
+| **MTN**: c.0 + c.1 bars **from 2024-03-25 only**, bars only, and only when TN is in the pull | the traded instrument; requested before its listing it would not resolve (the RTY trap) |
+| **Every calendar month's `definition` sample** | the 190-sample cap is removed (§1.6 (a)); the grid is one sample per month of the range, 196 for the registered range |
+
+**A latent defect fixed in the same pass.** A holiday sample is saved under the day
+it actually resolved on (up to three days after the 15th). The skip check looked
+only at the grid day, so every re-run would have re-planned that month and ended
+"INCOMPLETE" on a complete archive. None of the 2,196 existing files is shifted (checked
+on disk), so the first pull was not affected, but the top-up re-runs on top of it.
+The check now accepts the grid day or up to three days after it.
+
+**Guards unchanged:** estimate first, nothing without `--confirm`, `--max-cost`
+default $5.00, key via `secrets_util`. Tests: 33 in `test_tsmom_fetch.py`; twelve
+mutations of the new code, twelve caught.
+
 ## 2. The guards, and what each is for
 
 1. **Estimate first, always.** The total prints before anything transfers.

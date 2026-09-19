@@ -185,7 +185,9 @@ def test_definition_cost_is_SAMPLED_not_summed(run):
     still to fetch.
     """
     client = _FakeClient()
-    jobs, usd, nbytes, _, _ = F.plan(client, {"ES": "", "GC": ""},
+    # ES and CL: roots with ONE bar file each. GC would add its c.2-c.4 file
+    # (amendment C), which is its own test below.
+    jobs, usd, nbytes, _, _ = F.plan(client, {"ES": "", "CL": ""},
                                   F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
     n_days = len(F.definition_days("2010-06-06", "2026-09-17"))
     assert len(jobs) == 2 + 2 * n_days, "the job list is not the full grid"
@@ -301,17 +303,85 @@ def test_a_non_symbology_failure_on_a_DEFINITION_job_aborts(capsys):
         "instead of a loud one")
 
 
-def test_the_definition_grid_is_monthly_deterministic_and_capped():
+def test_the_definition_grid_covers_EVERY_month_of_its_range():
+    """The grid used to be capped at 190 samples, on a comment's claim that
+    sixteen years is about 190 months. The registered range is 196 months, and
+    the cap silently dropped April-September 2026 from the archive
+    (REGISTERED_tsmom_fetch section 1.6 (a)). The read-back found it, not a test.
+    """
     days = F.definition_days("2010-06-06", "2026-09-17")
     assert days == F.definition_days("2010-06-06", "2026-09-17"), "not deterministic"
-    assert len(days) <= F.DEFINITION_SAMPLES
-    months = {d[:7] for d in days}
-    assert len(months) == len(days), "two samples landed in one month"
+    months = [d[:7] for d in days]
+    assert len(set(months)) == len(days), "two samples landed in one month"
     assert days == sorted(days)
     assert all("2010-06-06" <= d <= "2026-09-17" for d in days)
-    # The grid the estimate was priced on. If this drifts, the $3.65 in
-    # REGISTERED_tsmom section 0.1 stops describing the pull.
-    assert 180 <= len(days) <= 190, f"{len(days)} samples, not ~190"
+    assert len(days) == 196, f"{len(days)} samples for a 196-month range"
+    assert months[0] == "2010-06" and months[-1] == "2026-09"
+    for m in ("2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"):
+        assert m in months, f"{m} missing -- the cap is back"
+
+
+def test_a_cap_is_still_honoured_when_a_caller_asks_for_one():
+    assert len(F.definition_days("2010-06-06", "2026-09-17", samples=12)) == 12
+
+
+def test_metals_also_buy_ranks_c2_to_c4_and_nothing_else_does():
+    """Amendment C: in GC/SI/HG the held contract is the nearest ACTIVE-cycle
+    month, often c.3 or c.4 (HG or SI in late August: December is c.4)."""
+    client = _FakeClient()
+    jobs, _, _, _, _ = F.plan(client, {"GC": "", "SI": "", "HG": "", "CL": "",
+                                       "ZN": ""},
+                              F.Path("/nonexistent"), "2010-06-06", "2026-09-17")
+    bars = [(r, kw["symbols"]) for r, sc, _, kw in jobs if sc == F.BAR_SCHEMA]
+    for r in ("GC", "SI", "HG"):
+        assert (r, f"{r}.c.0,{r}.c.1") in bars
+        assert (r, f"{r}.c.2,{r}.c.3,{r}.c.4") in bars, f"{r} deeper ranks missing"
+    for r in ("CL", "ZN"):
+        assert [s for rr, s in bars if rr == r] == [f"{r}.c.0,{r}.c.1"], (
+            f"{r} bought deeper ranks it never holds")
+    outs = {str(o) for _, sc, o, _ in jobs if sc == F.BAR_SCHEMA}
+    assert len(outs) == len(bars), "two bar jobs write the same file"
+
+
+def test_the_deeper_file_is_skipped_once_on_disk_while_the_c0_file_is_not_rebought(tmp_path):
+    """The top-up must price ONLY the new file for a root already pulled."""
+    F.bar_path(tmp_path, "GC").parent.mkdir(parents=True)
+    F.bar_path(tmp_path, "GC").write_bytes(b"dbn")
+    client = _FakeClient()
+    jobs, _, _, have, _ = F.plan(client, {"GC": ""}, tmp_path,
+                                 "2026-06-01", "2026-09-17")
+    bars = [kw["symbols"] for _, sc, _, kw in jobs if sc == F.BAR_SCHEMA]
+    assert bars == ["GC.c.2,GC.c.3,GC.c.4"]
+    assert have == 1
+
+
+def test_MTN_is_bars_only_from_its_listing_and_comes_only_with_TN(run):
+    client = _FakeClient()
+    jobs, _, _, _, _ = F.plan(client, {"TN": ""}, F.Path("/nonexistent"),
+                              "2010-06-06", "2026-09-17", bar_only=dict(F.BAR_ONLY))
+    mtn = [(sc, kw) for r, sc, _, kw in jobs if r == "MTN"]
+    assert [sc for sc, _ in mtn] == [F.BAR_SCHEMA], "MTN must be bars only"
+    assert mtn[0][1]["start"] == "2024-03-25", (
+        "MTN requested before it listed does not resolve -- the RTY trap")
+    assert mtn[0][1]["symbols"] == "MTN.c.0,MTN.c.1"
+
+    # and through main(): without TN in the roots, no MTN
+    rc, client, arch = run(["--confirm"])
+    assert not (arch / F.DATASET / F.BAR_SCHEMA / "MTN.dbn.zst").exists()
+
+
+def test_with_tn_brings_MTN_and_the_manifest_says_so(tmp_path, monkeypatch):
+    client = _FakeClient()
+    monkeypatch.setattr(F, "require_databento",
+                        lambda: type("m", (), {"Historical": lambda *_: client}))
+    monkeypatch.setattr("common.secrets_util.resolve", lambda *a, **k: "db-" + "x" * 20)
+    rc = F.main(["--archive", str(tmp_path), "--roots", "TN", "--with-tn",
+                 "--confirm", "--start", "2026-01-01"])
+    assert rc == 0
+    assert (tmp_path / F.DATASET / F.BAR_SCHEMA / "MTN.dbn.zst").exists()
+    m = json.loads((tmp_path / F.DATASET / "manifest_tsmom.json").read_text(encoding="utf-8"))
+    assert "MTN" in m["pulls"][-1]["roots"] and "TN" in m["pulls"][-1]["roots"]
+    assert "amendment C" in m["scope_amendment"]
 
 
 def test_every_definition_request_asks_for_exactly_one_session():
@@ -591,3 +661,33 @@ def test_a_real_error_on_the_SECOND_sample_is_not_read_as_a_late_listing():
     assert "500" in msg and "nothing downloaded" in msg, (
         "a 500 on the second monthly sample was read as ES listing late in "
         "2012 -- five and a half years of history dropped without a word")
+
+
+def test_a_month_saved_at_its_HOLIDAY_SHIFT_counts_as_on_disk(tmp_path):
+    """A holiday sample lands under the day it resolved on. A re-run that only
+    looks for the grid day re-plans it forever and reports INCOMPLETE on a
+    complete archive."""
+    day = F.definition_days("2026-01-01", "2026-01-31")[0]         # 2026-01-15
+    from datetime import date as _d, timedelta as _t
+    shifted = (_d.fromisoformat(day) + _t(days=1)).isoformat()
+    p = F.def_path(tmp_path, "ES", shifted)
+    p.parent.mkdir(parents=True)
+    p.write_bytes(b"dbn")
+    F.bar_path(tmp_path, "ES").parent.mkdir(parents=True)
+    F.bar_path(tmp_path, "ES").write_bytes(b"dbn")
+    jobs, usd, _, have, _ = F.plan(_FakeClient(), {"ES": ""}, tmp_path,
+                                   "2026-01-01", "2026-01-31")
+    assert jobs == [] and usd == 0, "the shifted sample was planned again"
+    assert have == 2
+
+
+def test_a_sample_four_days_on_is_NOT_the_same_month_sample(tmp_path):
+    """The shift is at most three days; a file further on is another sample."""
+    day = F.definition_days("2026-01-01", "2026-01-31")[0]
+    from datetime import date as _d, timedelta as _t
+    p = F.def_path(tmp_path, "ES", (_d.fromisoformat(day) + _t(days=4)).isoformat())
+    p.parent.mkdir(parents=True)
+    p.write_bytes(b"dbn")
+    jobs, _, _, _, _ = F.plan(_FakeClient(), {"ES": ""}, tmp_path,
+                              "2026-01-01", "2026-01-31")
+    assert [sc for _, sc, _, _ in jobs].count(F.DEF_SCHEMA) == 1
