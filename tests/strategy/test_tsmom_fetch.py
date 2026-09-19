@@ -691,3 +691,72 @@ def test_a_sample_four_days_on_is_NOT_the_same_month_sample(tmp_path):
     jobs, _, _, _, _ = F.plan(_FakeClient(), {"ES": ""}, tmp_path,
                               "2026-01-01", "2026-01-31")
     assert [sc for _, sc, _, _ in jobs].count(F.DEF_SCHEMA) == 1
+
+
+def test_a_root_with_a_KNOWN_late_listing_is_not_reported_late_again(tmp_path, capsys):
+    """The 2026-09-19 top-up estimate printed RTY as first resolvable
+    2026-04-15, '15.9 years' late: discovery re-probed the seven years RTY does
+    not have and landed on the first NEW month. The manifest already knew."""
+    m = tmp_path / F.DATASET / "manifest_tsmom.json"
+    m.parent.mkdir(parents=True)
+    m.write_text(json.dumps({"pulls": [{"late_listings": {"RTY": "2017-06-15"}}]}),
+                 encoding="utf-8")
+    assert F.read_known_late(tmp_path) == {"RTY": "2017-06-15"}
+
+    client = _FakeClient()
+    jobs, _, _, _, late = F.plan(client, {"RTY": ""}, tmp_path,
+                                 "2010-06-06", "2026-09-17",
+                                 known_late=F.read_known_late(tmp_path))
+    assert late == {}, f"RTY re-reported late: {late}"
+    days = [kw["start"] for _, sc, _, kw in jobs if sc == F.DEF_SCHEMA]
+    assert days and min(days) >= "2017-06-15", "months before the listing were planned"
+
+
+def test_TN_is_fetched_from_its_EXCHANGE_listing_date_not_what_resolves_first():
+    """The vendor resolved TN.FUT in 2010; CME listed the Ultra 10-year on
+    2016-01-11. Bars and roll calendar both start at the listing."""
+    client = _FakeClient()
+    jobs, _, _, _, _ = F.plan(client, {"TN": ""}, F.Path("/nonexistent"),
+                              "2010-06-06", "2026-09-17")
+    bars = [kw for _, sc, _, kw in jobs if sc == F.BAR_SCHEMA]
+    assert [kw["start"] for kw in bars] == ["2016-01-11"]
+    days = [kw["start"] for _, sc, _, kw in jobs if sc == F.DEF_SCHEMA]
+    assert min(days) >= "2016-01-11"
+    # and a root with no known date still starts at the range start
+    jobs, _, _, _, _ = F.plan(client, {"CL": ""}, F.Path("/nonexistent"),
+                              "2010-06-06", "2026-09-17")
+    assert [kw["start"] for _, sc, _, kw in jobs if sc == F.BAR_SCHEMA] == ["2010-06-06"]
+
+
+def test_known_late_takes_the_EARLIEST_date_across_pulls(tmp_path):
+    m = tmp_path / F.DATASET / "manifest_tsmom.json"
+    m.parent.mkdir(parents=True)
+    m.write_text(json.dumps({"pulls": [
+        {"late_listings": {"RTY": "2017-06-15"}},
+        {"late_listings": {"RTY": "2026-04-15"}},      # a bad later record
+        {"late_listings": {}}]}), encoding="utf-8")
+    assert F.read_known_late(tmp_path) == {"RTY": "2017-06-15"}
+
+
+def test_main_reads_the_manifest_before_discovering_late_listings(tmp_path, monkeypatch, capsys):
+    """Through main(): a re-run over an archive whose manifest knows RTY's
+    listing must not print RTY as late again."""
+    m = tmp_path / F.DATASET / "manifest_tsmom.json"
+    m.parent.mkdir(parents=True)
+    m.write_text(json.dumps({"pulls": [{"late_listings": {"RTY": "2017-06-15"}}]}),
+                 encoding="utf-8")
+
+    class _LateMeta(_FakeMeta):
+        def get_cost(self, **kw):
+            if kw.get("schema") == F.DEF_SCHEMA and kw["start"] < "2017-06-15":
+                raise RuntimeError("symbology_invalid_request: could not be resolved")
+            return super().get_cost(**kw)
+
+    client = _FakeClient()
+    client.metadata = _LateMeta()
+    monkeypatch.setattr(F, "require_databento",
+                        lambda: type("m", (), {"Historical": lambda *_: client}))
+    monkeypatch.setattr("common.secrets_util.resolve", lambda *a, **k: "db-" + "x" * 20)
+    rc = F.main(["--archive", str(tmp_path), "--roots", "RTY"])
+    assert rc == 0
+    assert "LATE LISTINGS" not in capsys.readouterr().out

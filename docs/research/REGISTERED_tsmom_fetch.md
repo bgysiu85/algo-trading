@@ -301,6 +301,28 @@ only at the grid day, so every re-run would have re-planned that month and ended
 on disk), so the first pull was not affected, but the top-up re-runs on top of it.
 The check now accepts the grid day or up to three days after it.
 
+**The estimate, and two defects it showed, 2026-09-19 20:46.** Ben ran the
+estimate: **269 jobs, $0.55, 0.049 GiB**. That's 5 bar files, 72 new monthly samples
+(12 roots × Apr–Sep 2026) and 192 TN samples. Its LATE LISTINGS block was wrong twice:
+
+- **"RTY first resolvable 2026-04-15, 15.9 years late."** Discovery re-probed the
+  seven years RTY does not have and landed on the first *new* month. Had it been
+  confirmed, the manifest would have recorded RTY as listing in 2026. **Fix:** a
+  re-run reads the manifest's earlier `late_listings` and does not probe before
+  them.
+- **"TN first resolvable 2010-10-15."** CME listed the Ultra 10-year on
+  **2016-01-11**. Something answered to `TN.FUT` five years earlier, and discovery
+  takes whatever resolves first. Buying it would have put five years of a
+  different instrument's bars under TN's name. That is the RTY defect in reverse: data
+  that exists and is wrong. **Fix:** `LISTED_FROM` pins TN at the exchange's listing
+  date for bars and roll calendar both (MTN already was), and nothing earlier is
+  bought.
+
+Both fixed **before `--confirm`**, so nothing wrong was bought. Six more mutations,
+six caught. The corrected scope is 206 jobs (TN's samples start in 2016), so it
+can only cost **less** than $0.55. Ben approves the ceiling, and the
+confirming run carries `--max-cost 0.55` so it cannot spend more.
+
 **Guards unchanged:** estimate first, nothing without `--confirm`, `--max-cost`
 default $5.00, key via `secrets_util`. Tests: 33 in `test_tsmom_fetch.py`; twelve
 mutations of the new code, twelve caught.
