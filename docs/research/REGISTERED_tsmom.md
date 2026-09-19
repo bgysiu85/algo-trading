@@ -115,6 +115,78 @@ deferred months or the term structure would use. It is not the default, because
 $71.62 of data the strategy does not read is a slower pull, a larger archive and
 a worse re-read forever.
 
+## 0.2 Amendment C — PRE-RUN, 2026-09-19: which contract is held (AT-99)
+
+**Why.** Reading the bought bars back (`REGISTERED_tsmom_fetch.md` §1.6, before any
+return was computed) showed the registered roll rule — *front month, rolled five
+trading days before expiry* — does two things the paper does not do:
+
+1. **In the metals it holds contracts nobody trades.** "Front month" by expiry is
+   often a serial month outside the liquid cycle. Median daily volume, front vs
+   next contract: GC 54 vs 1,874, SI 18 vs 353, HG 66 vs 354; the front contract
+   printed no bar at all on 630, 1,234 and 559 sessions. The paper holds "the most
+   liquid futures contract (typically the nearest or next nearest-to-delivery
+   contract)" (MOP p. 230).
+2. **In physically delivered contracts it holds into the delivery month.** GC, SI
+   and HG deliver on "any business day beginning on the first business day of the
+   delivery month" and stop trading on "the third last business day of the
+   delivery month" [CME fact cards]. ZN and TN deliver during the delivery month
+   and stop trading on the "seventh business day preceding the last business day
+   of the delivery month" [CME]. Five sessions before *last trade* is therefore
+   two to three weeks *inside* the delivery period — past first notice day, where
+   a broker forces the position out and the liquidity has already rolled.
+
+**What is amended — spec §4 rule 1, for five roots only:**
+
+> For **GC, SI, HG, ZN and TN**, the held contract is the **nearest contract in the
+> root's active cycle whose delivery month has not begun**, rolled **five trading
+> days before the first business day of its delivery month**.
+
+| Root | Active cycle (held months) | Source |
+|---|---|---|
+| GC | Feb, Apr, Jun, Aug, Oct, Dec | CME gold fact card: the months listed beyond the near three (Feb/Apr/Aug/Oct over 23 months, Jun/Dec over 72) |
+| SI | Mar, May, Jul, Sep, Dec | the market's standard active cycle. CME's card also lists Jan within 23 months; **Jan is not held** (see below) |
+| HG | Mar, May, Jul, Sep, Dec | CME/broker spec: "active contract months are March, May, July, September, and December" |
+| ZN, TN | Mar, Jun, Sep, Dec | quarterly; the only months listed |
+
+**Unchanged for ES, RTY, CL, NG, 6A, 6B, 6E, 6J:** front month, five trading days
+before expiry. Each is either cash-settled (ES, RTY), stops trading before its
+delivery month (CL, NG), or delivers after last trade (the FX contracts), so the
+registered rule never holds them into delivery. **MTN** (the traded instrument
+for arm (b), G3) is cash-settled and needs no change; its **signal** comes from
+TN, rolled by the rule above.
+
+**What this is NOT.** It is **not** "hold the contract with the most volume" —
+the registration forbids inferring the roll from volume or open interest,
+because both are outcomes, and that is not amended. Every cycle above is a
+**fixed published calendar**, known before any data, identical in every year.
+The one judgement is **SI's January**: CME lists it, but the cycle registered is
+the conventional five-month one. Fixed here, before any return is seen, and
+**not** revisited on results. The run reports, as a diagnostic that selects
+nothing, the held contract's share of root volume on each roll date, so a
+cycle that is wrong shows up as a number rather than as a surprise.
+
+**What it costs in data.** In the metals, the held contract is often the third,
+fourth or fifth nearest (for HG in late August, December is `c.4`), so
+`c.0`/`c.1` do not carry it. **ZN and TN** roll into the next quarter while it is
+still `c.1`, so they are covered. The top-up (AT-99 steps 2–4) therefore buys:
+**all-contract daily bars (`parent`) for GC, SI and HG**; **TN** daily bars and
+roll calendar (arm (b)'s signal, G3); **MTN** daily bars for 2024-03-25 onward;
+and the **April–September 2026 `definition` samples** the 190-sample cap dropped
+(fetch §1.6 (a)). Priced before anything is spent, under the registered rule
+that nothing is bought until Ben confirms the figure.
+
+**What is NOT amended:** the instrument set, the signal, the sizing, the friction
+levels, the holdout, the multiplicity budget and every pass criterion of §4. The
+roll cross-check (AT-41) still compares `definition` expiries against the `c.0`
+symbol-change dates; that check validates the **calendar data**, which this
+amendment does not touch, not the choice of held contract.
+
+Sources: [CME gold fact card](https://www.cmegroup.com/market-regulation/files/gold-futures-and-options-fact-card.pdf) ·
+[CME silver fact card](https://www.cmegroup.com/trading/metals/files/fact-card-silver-futures-options.pdf) ·
+[HG specification](https://help.metrotrade.com/kb/copper-futures-hg-contract-specifications) ·
+[CME Ultra 10-Year T-Note futures](https://www.cmegroup.com/education/articles-and-reports/ultra-10-year-us-treasury-note-futures.html) (listed 2016-01-11; physical delivery; last trade seventh business day before the last business day of the delivery month).
+
 ---
 
 ## 1. The hypothesis, in one sentence
@@ -158,7 +230,7 @@ search it was meant to anchor.
 | Position vol target | 40% ex-ante per position | MOP p. 236 |
 | Portfolio construction | equal weight across instruments with a live signal | MOP p. 236 |
 | Rebalance | monthly, **tranched over five sleeves** on trading days 1, 5, 9, 13, 17 | spec §1.4 [D]; `diversifier_candidates` §4 |
-| Roll | front month, **5 trading days before expiry from the `definition` schema**, cross-checked against the `c.0` symbol-change dates | spec §4; §0.1 amendment A |
+| Roll | front month, **5 trading days before expiry from the `definition` schema**, cross-checked against the `c.0` symbol-change dates. **GC, SI, HG, ZN, TN: nearest active-cycle contract, rolled 5 trading days before its delivery month begins** | spec §4; §0.1 amendment A; **§0.2 amendment C** |
 | Signal series | difference-back-adjusted continuous | spec §4 |
 | P/L series | **the actual held contract**, roll charged | spec §4 |
 | Instruments | the eleven of spec §2.2 + the rates arm from G3 | spec §2.1 |

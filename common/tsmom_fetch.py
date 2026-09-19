@@ -63,8 +63,8 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from common.tsmom_data_price import (DATASET, DEFINITION_SAMPLES, ROOTS,
-                                     TN_ROOT, require_databento)
+from common.tsmom_data_price import (DATASET, ROOTS, TN_ROOT,
+                                     require_databento)
 
 # The archive lives OUTSIDE the repo, beside the XNAS trees, for the reason
 # PROGRAM_INDEX section 3 gives: this is expensive, reusable, general-purpose
@@ -75,6 +75,20 @@ ARCHIVE_FALLBACK = Path("databento")
 
 BAR_SCHEMA = "ohlcv-1d"
 DEF_SCHEMA = "definition"
+
+# Amendment C (REGISTERED_tsmom section 0.2, AT-99). In GC, SI and HG the held
+# contract is the nearest ACTIVE-CYCLE month, which is often the third, fourth or
+# fifth nearest expiry -- for HG or SI in late August, December is c.4 -- so
+# c.0/c.1 do not carry it. These ranks are bought as a second bar file per root.
+# c.4 is the deepest the registered cycles ever reach; the engine checks that the
+# held contract is present on every held day and reports any day it is not.
+DEEPER_BARS: dict[str, str] = {r: "c.2,c.3,c.4" for r in ("GC", "SI", "HG")}
+
+# Rates arm (b), chosen by Ben 2026-09-19 (G3): the signal comes from TN, the
+# position is MTN. MTN is BARS ONLY, and only from its listing date -- there is
+# nothing before it to buy, and a continuous symbol requested before its root
+# existed does not resolve (the same trap RTY set, fetch section 1.4).
+BAR_ONLY: dict[str, str] = {"MTN": "2024-03-25"}
 
 
 def default_archive() -> Path:
@@ -117,11 +131,15 @@ def bar_path(root_dir: Path, root: str) -> Path:
     return root_dir / DATASET / BAR_SCHEMA / f"{root}.dbn.zst"
 
 
+def deep_bar_path(root_dir: Path, root: str) -> Path:
+    return root_dir / DATASET / BAR_SCHEMA / f"{root}.c2-c4.dbn.zst"
+
+
 def def_path(root_dir: Path, root: str, day: str) -> Path:
     return root_dir / DATASET / DEF_SCHEMA / root / f"{day}.dbn.zst"
 
 
-def definition_days(start: str, end: str, samples: int = DEFINITION_SAMPLES) -> list[str]:
+def definition_days(start: str, end: str, samples: int | None = None) -> list[str]:
     """The monthly grid the roll calendar is sampled on.
 
     One session per calendar month, the 15th, stepped BACK to the Friday when
@@ -149,10 +167,20 @@ def definition_days(start: str, end: str, samples: int = DEFINITION_SAMPLES) -> 
     still-unresolvable day forward and reports any month it cannot place.
 
     Deterministic and derived from the range, NOT a count chosen to hit a cost.
+
+    THE CAP, REMOVED 2026-09-19 (AT-99). The grid used to stop at
+    DEFINITION_SAMPLES = 190, whose comment said "sixteen years is about 190
+    monthly samples". The registered range is 2010-06 .. 2026-09, which is 196
+    months, so the cap silently dropped April-September 2026 from the archive
+    (REGISTERED_tsmom_fetch section 1.6 (a)). The cap existed to stop the sample
+    count drifting away from the $3.65 in amendment A; the pull it priced is now
+    done, and a grid that does not cover its own range is the worse failure.
+    `samples` remains for a caller that wants a cap, and the default is one
+    sample for every calendar month in the range.
     """
     s, e = date.fromisoformat(start), date.fromisoformat(end)
     days, y, m = [], s.year, s.month
-    while (y, m) <= (e.year, e.month) and len(days) < samples:
+    while (y, m) <= (e.year, e.month) and (samples is None or len(days) < samples):
         d = date(y, m, 15)
         while d.weekday() >= 5:              # Sat=5, Sun=6 -> step back to Friday
             d -= timedelta(days=1)
@@ -162,6 +190,21 @@ def definition_days(start: str, end: str, samples: int = DEFINITION_SAMPLES) -> 
         if m == 13:
             y, m = y + 1, 1
     return days
+
+
+def _month_on_disk(root_dir: Path, root: str, day: str) -> bool:
+    """The month's sample is on disk -- at the grid day OR at the holiday shift.
+
+    A holiday sample is SAVED under the day it actually resolved on, up to three
+    days after the grid day (see main). Checking only the grid day meant every
+    re-run re-planned that month, priced it again, found the shifted file at
+    download time without counting it as done, and ended "INCOMPLETE" on an
+    archive that was complete. Found by reading the code before the AT-99
+    top-up, not by a run.
+    """
+    d0 = date.fromisoformat(day)
+    return any(def_path(root_dir, root, (d0 + timedelta(days=k)).isoformat()).exists()
+               for k in range(4))
 
 
 def _is_symbology_miss(e: Exception) -> bool:
@@ -211,7 +254,8 @@ def _retry(fn, *, attempts: int = 4, sleep=None):
             raise
 
 
-def plan(client, roots: dict, root_dir: Path, start: str, end: str):
+def plan(client, roots: dict, root_dir: Path, start: str, end: str,
+         bar_only: dict | None = None):
     """Every job that would actually run, and what it would cost.
 
     WHY THE DEFINITION COST IS SAMPLED RATHER THAN SUMMED, 2026-09-18.
@@ -239,14 +283,24 @@ def plan(client, roots: dict, root_dir: Path, start: str, end: str):
     jobs, have = [], 0
     usd, nbytes = 0.0, 0
 
+    bar_jobs = []
     for root in roots:
-        out = bar_path(root_dir, root)
+        bar_jobs.append((root, bar_path(root_dir, root),
+                         f"{root}.c.0,{root}.c.1", start))
+        if root in DEEPER_BARS:
+            ranks = ",".join(f"{root}.{c}" for c in DEEPER_BARS[root].split(","))
+            bar_jobs.append((root, deep_bar_path(root_dir, root), ranks, start))
+    for root, listed in (bar_only or {}).items():
+        bar_jobs.append((root, bar_path(root_dir, root),
+                         f"{root}.c.0,{root}.c.1", max(start, listed)))
+
+    for root, out, symbols, bstart in bar_jobs:
         if out.exists():
             have += 1
             continue
         kw = dict(dataset=DATASET, schema=BAR_SCHEMA,
-                  symbols=f"{root}.c.0,{root}.c.1", stype_in="continuous",
-                  start=start, end=end)
+                  symbols=symbols, stype_in="continuous",
+                  start=bstart, end=end)
         try:
             u, n = _retry(lambda kw=kw: _price(client, kw))
         except Exception as e:                       # noqa: BLE001
@@ -264,7 +318,7 @@ def plan(client, roots: dict, root_dir: Path, start: str, end: str):
         todo = []
         for day in days:
             out = def_path(root_dir, root, day)
-            if out.exists():
+            if _month_on_disk(root_dir, root, day):
                 have += 1
                 continue
             nxt = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
@@ -386,10 +440,12 @@ def write_manifest(root_dir: Path, rec: dict) -> Path:
     prior = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {"pulls": []}
     prior["pulls"].append(rec)
     prior["dataset"] = DATASET
-    prior["schemas"] = {BAR_SCHEMA: "continuous c.0 + c.1",
-                        DEF_SCHEMA: f"parent, {DEFINITION_SAMPLES} monthly samples"}
+    prior["schemas"] = {BAR_SCHEMA: ("continuous c.0 + c.1; GC/SI/HG also c.2-c.4 "
+                                     "(amendment C); MTN from its 2024-03-25 listing"),
+                        DEF_SCHEMA: "parent, one sample per calendar month"}
     prior["registration"] = "docs/research/REGISTERED_tsmom_fetch.md"
-    prior["scope_amendment"] = "REGISTERED_tsmom.md section 0.1 amendment A"
+    prior["scope_amendment"] = ("REGISTERED_tsmom.md section 0.1 amendment A; "
+                                "section 0.2 amendment C")
     p.write_text(json.dumps(prior, indent=2) + "\n", encoding="utf-8")
     return p
 
@@ -398,7 +454,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Pull the TSMOM archive. CAN SPEND.")
     ap.add_argument("--roots", nargs="+", metavar="ROOT")
     ap.add_argument("--with-tn", action="store_true",
-                    help="include TN (rates arm (b) of tsmom spec section 2.3)")
+                    help="include TN, and MTN bars (rates arm (b), chosen at G3)")
     ap.add_argument("--archive", type=Path, default=None)
     ap.add_argument("--start", help="override (default: the dataset's start)")
     ap.add_argument("--end", help="override (default: the dataset's end)")
@@ -432,7 +488,10 @@ def main(argv=None) -> int:
           f"range     {start} .. {end}   (vendor: {ds_start} .. {ds_end})\n"
           f"roots     {len(roots)}\n")
 
-    jobs, usd, nbytes, have, late = plan(client, roots, root_dir, start, end)
+    # MTN is the traded side of TN: it comes with TN and never without it.
+    bar_only = dict(BAR_ONLY) if "TN" in roots else None
+    jobs, usd, nbytes, have, late = plan(client, roots, root_dir, start, end,
+                                         bar_only=bar_only)
     print(f"{len(jobs)} job(s) to run, {have} already on disk and skipped "
           f"(retrieval is what bills; a file on disk is free forever)")
     print(f"estimate  ${usd:.2f}   {nbytes:,} bytes ({nbytes / 2**30:.3f} GiB)\n")
@@ -512,7 +571,8 @@ def main(argv=None) -> int:
 
     rec = {
         "pulled_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "start": start, "end": end, "roots": sorted(roots),
+        "start": start, "end": end,
+        "roots": sorted(set(roots) | set(bar_only or {})),
         "jobs_run": done, "jobs_planned": len(jobs),
         "estimated_usd": round(usd, 4), "estimated_bytes": nbytes,
         # A root that starts years late is a coverage fact a report must be able
