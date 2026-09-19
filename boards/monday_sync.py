@@ -22,8 +22,8 @@ Command Centre, which stays the source of truth) and makes monday.com match it:
                                           safe to run as often as you like)
   * the card's Notes posted to the item's Updates tab (only the new dated lines when
     a note is added; the whole Notes once on any item that has no update yet)
-  * columns: Status, Assignee (who is looking after it now), Owner chat (who raised
-    it), Priority, Type, Target date, Done on, Task ID,
+  * columns: Status, Assignee (who is looking after it now), Owner (who raised it;
+    "Owner chat" on a board that still has monday's built-in Owner people column), Priority, Type, Target date, Done on, Task ID,
     Workstreams, Blocked by, Source doc, Notes, Notion link, ClickUp link, Sync rev
     (created if missing; labels are added as needed)
 
@@ -110,7 +110,9 @@ COLUMNS: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "status":     ("Status", "status", ()),
     "priority":   ("Priority", "status", ()),
     "assignee":   ("Assignee", "status", ()),
-    "owner":      ("Owner chat", "status", ()),
+    # "Owner" once Ben has removed monday's built-in people column of that name;
+    # "Owner chat" on a board that still has it (the name the column was created with).
+    "owner":      ("Owner", "status", ("Owner chat",)),
     "type":       ("Type", "dropdown", ()),
     "target":     ("Target date", "date", ("Due date",)),
     "done_on":    ("Done on", "date", ()),
@@ -686,7 +688,7 @@ class Syncer:
                 out[key] = hit["id"]
                 continue
             clash = next((c for c in cols if c["title"].strip().lower() == title.lower()), None)
-            use_title = title if clash is None else f"{title} (sync)"
+            use_title = title if clash is None else (aliases[0] if aliases else f"{title} (sync)")
             out[key] = self.api.create_column(str(board["id"]), use_title, ctype)
             self.log(f"column  : created '{use_title}' ({ctype})")
         return out

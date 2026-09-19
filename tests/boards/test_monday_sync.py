@@ -536,3 +536,20 @@ class TestAssignee:
     def test_old_export_without_assignee_falls_back_to_owner(self):
         t = {"owner": "MCL chat"}
         assert ms.assignee_of(t) == "MCL chat"
+
+
+def test_owner_column_named_owner_is_used_once_the_people_column_is_gone():
+    api = FakeMonday()
+    b = api.boards_["5031413876"]
+    b["columns"] = [c for c in b["columns"] if c["id"] != "project_owner"]
+    b["columns"].append({"id": "own1", "title": "Owner", "type": "status"})
+    res = ms.Syncer(api, Silent()).sync(export())
+    assert res["columns"]["owner"] == "own1"
+    assert "Owner chat" not in [c["title"] for c in b["columns"]]
+
+
+def test_renamed_owner_chat_column_still_matched():
+    api = FakeMonday()
+    api.boards_["5031413876"]["columns"].append({"id": "oc", "title": "Owner chat", "type": "status"})
+    res = ms.Syncer(api, Silent()).sync(export())
+    assert res["columns"]["owner"] == "oc"
