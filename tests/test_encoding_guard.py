@@ -33,7 +33,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-SCANNED = ("tests", "common", "strategy", "brokers", "main.py")
+SCANNED = ("tests", "common", "strategy", "brokers", "boards", "main.py")
 
 # Module-qualified opens that are not file text I/O or take no encoding.
 NOT_FILE_TEXT = {"codecs", "zipfile", "tarfile", "io", "os", "webbrowser",

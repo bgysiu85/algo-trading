@@ -59,6 +59,11 @@ strategy/
   vw9/                    vw9.py (logic), backtest.py (engine), preflight.py,
                           study.py, setup_counts.py, vw9_5m.py, vw9_15m.py
 
+boards/                 project tracking, not trading: mirrors the Notion task board
+                        into ClickUp and monday.com. clickup_sync.py, monday_sync.py;
+                        run as `python -m boards.<name> check|sync`. Reads the board
+                        export from Claude outputs\boards\, writes var\boards\.
+
 tests/                  mirrors the source tree
 docs/                   MCL_PAPER_RUNBOOK.md, ema_crossover.md
 bar_cache/              gitignored; one shared window, 3d_to_2000/
