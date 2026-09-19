@@ -187,6 +187,32 @@ The report's own caveats section is the authority, but the short version:
 
 ---
 
+---
+
+## G8 — `pit_universe.py`, the point-in-time universe (AT-45)
+
+Builds S&P 500 and S&P 400 membership **as of each date**, plus daily prices for
+every name that was ever a member, including the ones since delisted. Source:
+EODHD "EOD Historical Data — All World" + the "Indices Historical Constituents"
+marketplace API, bought 2026-09-19 (AT-100). Survey: `claude/swing_g8_sources_20260919.md`.
+
+```
+$env:EODHD_API_KEY = op read "op://Trading/EODHD/api-token"
+python -m strategy.swing.pit_universe constituents
+python -m strategy.swing.pit_universe prices
+python -m strategy.swing.pit_universe report
+```
+
+Writes to `var/swing_pit/`: `raw/` (every response, saved before parsing),
+`membership.csv`, `eod/<code>.csv`, `prices_missing.csv`, `coverage_gaps.csv`,
+`report.txt`. The prices stage resumes: re-running it skips what is on disk.
+The key is read from `EODHD_API_KEY` only; there is no `--key` flag.
+
+The report counts, rather than drops, every membership spell with no prices.
+Those rows **are** the survivorship hole, and the number to watch.
+
+---
+
 ## Open, blocking
 
 - **G2** is **provisionally cleared**: 2026-09-18, one full regular session,
@@ -197,7 +223,7 @@ The report's own caveats section is the authority, but the short version:
 - **Entry time of day is a free lever and is not yet registered.** The open
   costs 2.7x the close (7.98 bps at 09:30, 2.96 at 15:30). Any candidate must
   state when it enters and pay that bucket's spread.
-- **G8** (point-in-time universe) has no answer yet. The pre-flight's own
+- **G8** (point-in-time universe): source bought (EODHD, AT-100); `pit_universe.py` builds it (AT-45). The pre-flight's own
   universe is 100% survivors — fine for magnitude and dispersion, not for any
   strategy result.
 - Amended SEC Rule 605 filings from October 2026 are worth re-checking as an
