@@ -90,6 +90,21 @@ DEEPER_BARS: dict[str, str] = {r: "c.2,c.3,c.4" for r in ("GC", "SI", "HG")}
 # existed does not resolve (the same trap RTY set, fetch section 1.4).
 BAR_ONLY: dict[str, str] = {"MTN": "2024-03-25"}
 
+# Listing dates taken from the EXCHANGE, not discovered from the vendor.
+#
+# WHY, 2026-09-19. The top-up estimate reported
+#
+#     TN    first resolvable session 2010-10-15
+#
+# but CME listed the Ultra 10-year for trading on 2016-01-11 (CME, "Ultra
+# 10-Year U.S. Treasury Note Futures"). Something answered to `TN.FUT` in 2010
+# that is not the contract arm (b) is built on, and late-listing discovery takes
+# whatever resolves first. Five years of a different instrument's bars under
+# TN's name would be the RTY defect in the other direction: data that exists and
+# is wrong. So a root with a known listing date is fetched from that date, bars
+# and roll calendar both, and nothing before it is bought.
+LISTED_FROM: dict[str, str] = {"TN": "2016-01-11", **BAR_ONLY}
+
 
 def default_archive() -> Path:
     import os
@@ -255,7 +270,7 @@ def _retry(fn, *, attempts: int = 4, sleep=None):
 
 
 def plan(client, roots: dict, root_dir: Path, start: str, end: str,
-         bar_only: dict | None = None):
+         bar_only: dict | None = None, known_late: dict | None = None):
     """Every job that would actually run, and what it would cost.
 
     WHY THE DEFINITION COST IS SAMPLED RATHER THAN SUMMED, 2026-09-18.
@@ -285,11 +300,12 @@ def plan(client, roots: dict, root_dir: Path, start: str, end: str,
 
     bar_jobs = []
     for root in roots:
+        rstart = max(start, LISTED_FROM.get(root, start))
         bar_jobs.append((root, bar_path(root_dir, root),
-                         f"{root}.c.0,{root}.c.1", start))
+                         f"{root}.c.0,{root}.c.1", rstart))
         if root in DEEPER_BARS:
             ranks = ",".join(f"{root}.{c}" for c in DEEPER_BARS[root].split(","))
-            bar_jobs.append((root, deep_bar_path(root_dir, root), ranks, start))
+            bar_jobs.append((root, deep_bar_path(root_dir, root), ranks, rstart))
     for root, listed in (bar_only or {}).items():
         bar_jobs.append((root, bar_path(root_dir, root),
                          f"{root}.c.0,{root}.c.1", max(start, listed)))
@@ -316,7 +332,16 @@ def plan(client, roots: dict, root_dir: Path, start: str, end: str,
     late: dict[str, str] = {}
     for root in roots:
         todo = []
+        # A root with a known start -- from the exchange (LISTED_FROM) or from a
+        # previous pull's own discovery (the manifest's late_listings) -- is not
+        # probed before it. Without this, a re-run re-probes RTY's seven missing
+        # years, finds the first NEW month it lacks, and reports RTY as
+        # "first resolvable 2026-04-15, 15.9 years late" -- which the top-up
+        # estimate of 2026-09-19 printed, and the manifest would have recorded.
+        floor = max(LISTED_FROM.get(root, start), (known_late or {}).get(root, start))
         for day in days:
+            if day < floor:
+                continue
             out = def_path(root_dir, root, day)
             if _month_on_disk(root_dir, root, day):
                 have += 1
@@ -426,6 +451,18 @@ def _first_resolvable(client, todo, root):
     return None, 0
 
 
+def read_known_late(root_dir: Path) -> dict:
+    """Every late listing a previous pull discovered, earliest date per root."""
+    p = root_dir / DATASET / "manifest_tsmom.json"
+    if not p.exists():
+        return {}
+    known: dict[str, str] = {}
+    for pull in json.loads(p.read_text(encoding="utf-8")).get("pulls", []):
+        for r, d in (pull.get("late_listings") or {}).items():
+            known[r] = min(known.get(r, d), d)
+    return known
+
+
 def write_manifest(root_dir: Path, rec: dict) -> Path:
     """What was bought, when, and under which registration.
 
@@ -491,7 +528,8 @@ def main(argv=None) -> int:
     # MTN is the traded side of TN: it comes with TN and never without it.
     bar_only = dict(BAR_ONLY) if "TN" in roots else None
     jobs, usd, nbytes, have, late = plan(client, roots, root_dir, start, end,
-                                         bar_only=bar_only)
+                                         bar_only=bar_only,
+                                         known_late=read_known_late(root_dir))
     print(f"{len(jobs)} job(s) to run, {have} already on disk and skipped "
           f"(retrieval is what bills; a file on disk is free forever)")
     print(f"estimate  ${usd:.2f}   {nbytes:,} bytes ({nbytes / 2**30:.3f} GiB)\n")
