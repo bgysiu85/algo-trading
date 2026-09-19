@@ -134,21 +134,23 @@ been catching itself making all week.
 
 ## 5. What the next session does, in order
 
-1. **Read the manifest.** Confirm the pull, record the ACTUAL against the
+*Board cards (2026-09-19): **AT-8** manifest (Ben, Next up) · **AT-3** rates arm (Ben, Waiting on Ben) · **AT-41** roll cross-check (Blocked by AT-8) · **AT-42** engine (Next up — needs no data) · **AT-43** run (Blocked by AT-3, AT-8, AT-41, AT-42) · **AT-54** repo-wide `secrets_util` rule (Build & test) · **AT-7** Databento cancel and **AT-56** PROGRAM_INDEX carry TSMOM notes.*
+
+1. **Read the manifest.** (AT-8) Confirm the pull, record the ACTUAL against the
    estimate in fetch §1.5, and find out which roots beyond RTY list late.
-2. **G3** — ask Ben for the rates arm. Not from a backtest.
+2. **G3** — ask Ben for the rates arm. Not from a backtest. (AT-3)
 3. **The roll cross-check, before any return is computed.** Two independent
    readings of the roll calendar: `definition`'s `expiration`, and the dates
    `c.0` changes instrument. **Registered threshold, fixed before the numbers
    are seen: more than 2% of rolls disagreeing by more than one session, on any
-   single root, stops the run.** This is the first thing the engine does.
+   single root, stops the run.** This is the first thing the engine does. (AT-41)
 4. **The engine**, with hand-built tests for: roll handling (a synthetic
    two-contract series where the continuous series and the held-contract book
    must differ by exactly the gap); the volatility estimator (`pandas` path
    against a hand-built weighted sum — `bias=True` versus `bias=False` is a
-   one-flag difference that produces a plausible number); and integer contracts.
+   one-flag difference that produces a plausible number); and integer contracts. (AT-42)
 5. **Then the run**, on the training side only. `split_months` is the one
-   implementation and every runner calls it.
+   implementation and every runner calls it. (AT-43)
 
 ---
 
