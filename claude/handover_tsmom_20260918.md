@@ -134,6 +134,8 @@ been catching itself making all week.
 
 ## 5. What the next session does, in order
 
+*Update 2026-09-19 17:30: **AT-8 Done** — the pull is complete (2,208/2,208 jobs; RTY the only late listing). The read-back found that the registered roll rule holds untraded serial months in GC/SI/HG and holds GC/SI/HG/ZN past first notice day, which is now **AT-99** (amendment C, blocks AT-41 and AT-43). Detail: `REGISTERED_tsmom_fetch.md` §1.6.*
+
 *Board cards (2026-09-19): **AT-8** manifest (Ben, Next up) · **AT-3** rates arm (Ben, Waiting on Ben) · **AT-41** roll cross-check (Blocked by AT-8) · **AT-42** engine (Next up — needs no data) · **AT-43** run (Blocked by AT-3, AT-8, AT-41, AT-42) · **AT-54** repo-wide `secrets_util` rule (Build & test) · **AT-7** Databento cancel and **AT-56** PROGRAM_INDEX carry TSMOM notes.*
 
 1. **Read the manifest.** (AT-8) Confirm the pull, record the ACTUAL against the

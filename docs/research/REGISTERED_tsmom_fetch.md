@@ -218,6 +218,69 @@ ACTUAL is what gets registered afterwards — a measurement, not a third estimat
 last and average — 36 calls instead of 24, still free. Not done now, because it
 would be refining a number the pull is about to replace with a fact.)*
 
+### 1.6 The pull, read back — 2026-09-19 (AT-8)
+
+`manifest_tsmom.json`, written 2026-09-18T15:40:22Z, read directly off
+`E:\Databento\GLBX.MDP3` (the folder was connected to the session read-only), and
+**checked against the files on disk rather than taken on its word**:
+
+| | manifest | on disk |
+|---|---|---|
+| jobs | **2,208 run / 2,208 planned** | 12 `ohlcv-1d` files + 2,196 `definition` files = 2,208 |
+| roots | 12: 6A 6B 6E 6J CL ES GC HG NG RTY SI ZN | the same 12. NQ is absent **by rule 5** (spec §2.2), not by failure |
+| late listings | `{"RTY": "2017-06-15"}` — **RTY is the only one** | RTY has 106 definition samples, every other root 190 |
+| size | estimated 1.127 GiB | 2.6 MB of bars + 50.8 MB of definition, compressed |
+| cost | **estimate $3.01**; the manifest has no billed figure | — |
+
+Every root's `c.0` and `c.1` bars run **2010-06-07 → 2026-09-17** (RTY from
+2017-07-09). **The pull is complete. The billed cost is not in the manifest**, so the
+registered record of cost remains the $3.01–$3.65 bracket of §1.5; no gate turns on
+the difference.
+
+**Two things the read-back found that the pull did not report.**
+
+**(a) The roll-calendar grid stops at 2026-03.** `definition_days` caps the grid at
+`DEFINITION_SAMPLES = 190`, whose comment says "sixteen years is about 190 monthly
+samples". The range is 2010-06 → 2026-09, **196 months**, so the cap silently
+dropped **April–September 2026**. The cap existed so the sample count could not
+drift away from the $3.65 in amendment A; it did its job and also truncated the
+range. This is the fifth instance of §6's pattern in the handover: a number stated in
+a comment and not checked against the range it describes. **Impact: holdout side
+only** (2022-01-01 onward is locked), and the 2026-03-13 snapshot already lists
+every contract expiring April–October 2026 (6E 5, CL 7, ES 2, NG 7), so the
+calendar has the expiry dates anyway. Recorded, not yet fixed; a six-month top-up
+is part of AT-99.
+
+**(b) For the metals, the calendar front month is often a contract nobody trades.**
+Databento's `c.0` is the nearest expiry, which for GC, SI and HG is frequently a
+serial month outside the liquid cycle:
+
+| root | sessions | `c.0` bars missing (no trade that day) | median daily volume `c.0` | median `c.1` |
+|---|---|---|---|---|
+| GC | 5,047 | **630** | **54** | 1,874 |
+| SI | 4,940 | **1,234** | **18** | 353 |
+| HG | 4,958 | **559** | **66** | 354 |
+| ZN | 5,057 | 46 | 867,592 | 1,238 |
+| CL | 5,056 | 0 | 221,691 | 54,095 |
+| 6E | 5,040 | 79 | 24,017 | 448 |
+
+Even `c.1` is a thin contract for gold much of the time: the liquid gold
+contract trades well over 100,000 lots a day. **The registered roll rule —
+"front month, rolled five trading days before expiry" (spec §4 rule 1) — therefore
+holds an untraded serial contract in all three metals**, which is not what the
+paper does (p. 230: "the most liquid futures contract"). It also holds physically
+delivered contracts (GC, SI, HG, ZN) past **first notice day**, into the delivery
+period, where the broker forces you out and liquidity has already moved on.
+
+**This was found by reading the bars before any return was computed, so it is a
+PRE-RUN finding and changes no result.** It is the kind of amendment that is
+allowed: it rests on the exchanges' published contract cycles and notice dates,
+which are fixed in advance, not on anything the strategy earned. It is **not**
+settled by choosing the contract with the most volume, which the registration
+forbids (§0.1, "never inferred from volume or open interest"). The fix — amendment
+C — and whatever it needs beyond `c.0`/`c.1` are **AT-99**, and it blocks the roll
+cross-check (AT-41) and the run (AT-43).
+
 ## 2. The guards, and what each is for
 
 1. **Estimate first, always.** The total prints before anything transfers.

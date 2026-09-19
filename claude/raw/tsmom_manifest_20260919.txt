@@ -1,0 +1,35 @@
+TSMOM data pull - manifest read-back, 2026-09-19 (AT-8)
+Source: E:\Databento\GLBX.MDP3\manifest_tsmom.json (pulled_at 2026-09-18T15:40:22Z)
+
+jobs_run 2208 / jobs_planned 2208
+on disk: ohlcv-1d 12 files (2,591,620 B); definition 2,196 files (50,798,524 B)
+roots: 6A 6B 6E 6J CL ES GC HG NG RTY SI ZN   (NQ excluded by spec rule 5)
+late_listings: RTY 2017-06-15 (only one)
+estimated_usd 3.0122  estimated_bytes 1,209,634,504  (no billed figure in manifest)
+definition samples per root: 190 (RTY 106); grid 2010-06-15 .. 2026-03-13 -> Apr-Sep 2026 missing (cap of 190 < 196 months)
+
+bars per series (first .. last, c.0 instrument changes, max gap days)
+root sym     bars  first       last        changes gap
+6A  c.0  4880 2010-06-07 2026-09-17 142  5    c.1 4768 143  5
+6B  c.0  4867 2010-06-07 2026-09-17 142  4    c.1 4697 143  5
+6E  c.0  4961 2010-06-07 2026-09-17 142  4    c.1 4906 143  4
+6J  c.0  4921 2010-06-07 2026-09-17 142  5    c.1 4819 143  8
+CL  c.0  5056 2010-06-07 2026-09-17 195  4    c.1 5056 195  4
+ES  c.0  5052 2010-06-07 2026-09-17  65  4    c.1 5045  65  4
+GC  c.0  4417 2010-06-07 2026-09-17 195 13    c.1 5045 195  4
+HG  c.0  4399 2010-06-07 2026-09-17 195  5    c.1 4928 195  4
+NG  c.0  5055 2010-06-07 2026-09-17 195  4    c.1 5055 195  4
+RTY c.0  2864 2017-07-09 2026-09-17  36  3    c.1 2629  36 14
+SI  c.0  3706 2010-06-07 2026-09-16 195 14    c.1 4921 195  4
+ZN  c.0  5011 2010-06-07 2026-09-17  65  4    c.1 4651  65 14
+
+front-month liquidity (median daily volume c.0 / c.1; c.0 sessions with no bar)
+GC 54 / 1,874   630 missing
+SI 18 / 353     1,234 missing
+HG 66 / 354     559 missing
+ZN 867,592 / 1,238   46 missing
+CL 221,691 / 54,095  0 missing
+6E 24,017 / 448      79 missing
+
+Finding: registered roll rule (front month, 5 sessions before expiry) holds untraded
+serial months in GC/SI/HG and holds GC/SI/HG/ZN past first notice day. -> AT-99.
