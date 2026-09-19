@@ -20,7 +20,10 @@ Command Centre, which stays the source of truth) and makes monday.com match it:
   * one item per card, "AT-n · ..."      (created, or updated in place -- the Task ID
                                           column is how a card is recognised, so it is
                                           safe to run as often as you like)
-  * columns: Status, Priority, Owner chat, Type, Target date, Done on, Task ID,
+  * the card's Notes posted to the item's Updates tab (only the new dated lines when
+    a note is added; the whole Notes once on any item that has no update yet)
+  * columns: Status, Assignee (who is looking after it now), Owner chat (who raised
+    it), Priority, Type, Target date, Done on, Task ID,
     Workstreams, Blocked by, Source doc, Notes, Notion link, ClickUp link, Sync rev
     (created if missing; labels are added as needed)
 
@@ -106,6 +109,7 @@ BOARD_STATUSES = ["Waiting on Ben", "Next up", "In progress", "Blocked",
 COLUMNS: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "status":     ("Status", "status", ()),
     "priority":   ("Priority", "status", ()),
+    "assignee":   ("Assignee", "status", ()),
     "owner":      ("Owner chat", "status", ()),
     "type":       ("Type", "dropdown", ()),
     "target":     ("Target date", "date", ("Due date",)),
@@ -119,7 +123,7 @@ COLUMNS: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "clickup":    ("ClickUp", "link", ()),
     "rev":        ("Sync rev", "text", ()),
 }
-READ_KEYS = ("task_id", "rev")   # the only columns read back from monday
+READ_KEYS = ("task_id", "rev", "notes")   # the only columns read back from monday
 
 
 # --------------------------------------------------------------------------- output
@@ -328,7 +332,7 @@ class GraphQL:
 
 # --------------------------------------------------------------------------- monday operations
 
-ITEM_FIELDS = "id name group { id } column_values(ids: $cols) { id text }"
+ITEM_FIELDS = "id name group { id } updates(limit: 1) { id } column_values(ids: $cols) { id text }"
 
 
 class Monday:
@@ -488,6 +492,14 @@ class Monday:
                      f"v{i}": json.dumps(op["values"], ensure_ascii=False)})
         return self._batch(ops, _with_board(build), "update_item")
 
+    def post_updates(self, ops: list[dict]) -> dict:
+        """ops: {'key', 'item_id', 'body'} -- body is HTML. Posts to the item's Updates tab."""
+        def build(i, op):
+            return (f"$i{i}: ID!, $u{i}: String!",
+                    f"create_update(item_id: $i{i}, body: $u{i})",
+                    {f"i{i}": op["item_id"], f"u{i}": op["body"]})
+        return self._batch(ops, build, "post_update")
+
     def move_items(self, ops: list[dict]) -> dict:
         """ops: {'key', 'item_id', 'group_id'}."""
         def build(i, op):
@@ -566,11 +578,46 @@ def revision(payload: dict) -> str:
     return hashlib.sha1(blob).hexdigest()[:10]
 
 
+def update_html(text: str) -> str:
+    """Notes text -> the HTML monday's Updates tab renders: one paragraph per line, the
+    dated prefix of each note ('2026-09-19 -- ...' / '2026-09-19 14:30 -- ...') in bold."""
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        esc = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        m = re.match(r"^(\d{4}-\d{2}-\d{2}(?: \d{1,2}:\d{2})?\s*[\u2014-]+)(.*)$", esc)
+        out.append(f"<p><b>{m.group(1)}</b>{m.group(2)}</p>" if m else f"<p>{esc}</p>")
+    return "".join(out)
+
+
+def new_note_text(new: str, old: str) -> str:
+    """The part of the Notes that is new since monday last saw them.
+
+    Chats add each note as a dated line at the TOP and keep the earlier ones, so the
+    usual change is `new == <added lines> + old`: post only the added lines. Anything
+    else (an edit in the middle, a rewrite) posts the whole Notes, so nothing is lost."""
+    new, old = (new or "").strip(), (old or "").strip()
+    if not new or new == old:
+        return ""
+    if old and new.endswith(old):
+        return new[: len(new) - len(old)].strip()
+    return new
+
+
+def assignee_of(t: dict) -> Optional[str]:
+    """Who is looking after the card now. Exports written before the Assignee field
+    existed (2026-09-19 afternoon) only had `owner`, which then meant the same thing."""
+    return t.get("assignee") or t.get("owner")
+
+
 def card_values(t: dict, col: dict, clickup_url: Optional[str]) -> dict:
     """Column values for one card, keyed by monday column id (without Sync rev)."""
     v = {
         col["status"]: {"label": t["status"]},
         col["priority"]: {"label": t["priority"]} if t.get("priority") else None,
+        col["assignee"]: {"label": assignee_of(t)} if assignee_of(t) else None,
         col["owner"]: {"label": t["owner"]} if t.get("owner") else None,
         col["type"]: {"labels": [t["type"]]} if t.get("type") else None,
         col["target"]: {"date": t["target_date"]} if t.get("target_date") else None,
@@ -598,7 +645,8 @@ class Syncer:
         self.board_name = board_name
         self.clickup_links = clickup_links or {}
         self.tidy = tidy
-        self.counts = {"created": 0, "updated": 0, "moved": 0, "unchanged": 0, "failed": 0}
+        self.counts = {"created": 0, "updated": 0, "moved": 0, "unchanged": 0,
+                       "notes_posted": 0, "failed": 0}
         self.failures: list[str] = []
 
     # -- structure
@@ -675,10 +723,12 @@ class Syncer:
                     tid = m.group(1) if m else ""
                 if tid and tid not in existing:
                     existing[tid] = {"id": str(it["id"]), "group": (it.get("group") or {}).get("id"),
-                                     "rev": vals.get(col["rev"], "").strip()}
+                                     "rev": vals.get(col["rev"], "").strip(),
+                                     "notes": vals.get(col["notes"], ""),
+                                     "has_update": bool(it.get("updates"))}
         self.log(f"items   : {len(existing)} cards already on the board")
 
-        creates, updates, moves = [], [], []
+        creates, updates, moves, notes = [], [], [], []
         for t in tasks:
             gid = grp[t["workstreams"][0]]
             values = card_values(t, col, self.clickup_links.get(t["id"]))
@@ -687,10 +737,18 @@ class Syncer:
                             "values": {k: values[col[k]] for k in COLUMNS if k != "rev"}})
             values[col["rev"]] = rev
             cur = existing.get(t["id"])
+            text = plain(t.get("notes"))
             if cur is None:
+                if text:
+                    notes.append((t["id"], text))
                 creates.append({"key": t["id"], "group_id": gid, "name": name,
                                 "values": {k: v for k, v in values.items() if v is not None}})
                 continue
+            # Notes go to the item's Updates tab: only what is new since monday last saw
+            # them, or all of them on an item that has no update yet (the backfill).
+            post = text if (text and not cur["has_update"]) else new_note_text(text, cur["notes"])
+            if post:
+                notes.append((t["id"], post))
             if cur["group"] != gid:
                 moves.append({"key": t["id"], "item_id": cur["id"], "group_id": gid})
             if cur["rev"] != rev:
@@ -707,6 +765,9 @@ class Syncer:
             self._tally(key, res, "moved", "move", ids)
         for key, res in self.api.update_items(bid, updates).items():
             self._tally(key, res, "updated", "update", ids)
+        posts = [{"key": k, "item_id": ids[k], "body": update_html(txt)} for k, txt in notes if k in ids]
+        for key, res in self.api.post_updates(posts).items():
+            self._tally(key, res, "notes_posted", "post notes", ids)
 
         if self.tidy and not bid.startswith("dry-"):
             self._tidy(board, set(grp.values()))

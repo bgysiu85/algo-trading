@@ -63,6 +63,7 @@ class FakeMonday:
         for iid, it in self.boards_[bid]["items"].items():
             cv = [{"id": c, "text": self._text(it["values"].get(c))} for c in cols]
             out.append({"id": iid, "name": it["name"], "group": {"id": it["group"]},
+                        "updates": [{"id": "u"}] if it.get("updates") else [],
                         "column_values": cv})
         return out
 
@@ -70,6 +71,8 @@ class FakeMonday:
     def _text(v):
         if v is None or v == "":
             return ""
+        if isinstance(v, dict) and set(v) == {"text"}:      # long_text reads back as its text
+            return v["text"]
         return v if isinstance(v, str) else json.dumps(v)
 
     # structure
@@ -141,6 +144,14 @@ class FakeMonday:
             return op["item_id"]
         return self._batch(ops, fn, "update_item")
 
+    def post_updates(self, ops):
+        def fn(op):
+            for b in self.boards_.values():
+                if op["item_id"] in b["items"]:
+                    b["items"][op["item_id"]].setdefault("updates", []).append(op["body"])
+            return "upd-" + op["item_id"]
+        return self._batch(ops, fn, "post_update")
+
     def move_items(self, ops):
         def fn(op):
             for b in self.boards_.values():
@@ -194,8 +205,9 @@ class TestSync(unittest.TestCase):
     def test_item_calls_are_batched(self):
         api = FakeMonday()
         self.run_sync(api)
-        # 72 creates at 10 per call = 8 calls; whole first run well under 40 calls
-        self.assertLess(api.calls, 40)
+        # 72 creates and ~66 note posts at 10 per call = ~15 calls; the one-off column and
+        # group set-up is most of the rest. The whole first run stays well under 50.
+        self.assertLess(api.calls, 50)
 
     def test_second_run_changes_nothing(self):
         api = FakeMonday()
@@ -409,3 +421,118 @@ class TestHelpers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _item(api, res, key):
+    return api.boards_["5031413876"]["items"][res["tasks"][key]["id"]]
+
+
+class TestNotesAsUpdates:
+    """Ben, 2026-09-19: on monday he reads a card's notes on the item's Updates tab."""
+
+    def setup_method(self):
+        self.ex = export()
+
+    def run_sync(self, api):
+        s = ms.Syncer(api, Silent())
+        return s, s.sync(self.ex)
+
+    def test_first_sync_posts_each_cards_notes_once(self):
+        api = FakeMonday()
+        s, res = self.run_sync(api)
+        with_notes = [t for t in self.ex["tasks"] if (t.get("notes") or "").strip()]
+        assert s.counts["notes_posted"] == len(with_notes) > 0
+        t = with_notes[0]
+        ups = _item(api, res, t["id"]).get("updates", [])
+        assert len(ups) == 1 and ups[0].startswith("<p>")
+
+    def test_rerun_posts_nothing(self):
+        api = FakeMonday()
+        self.run_sync(api)
+        s, _ = self.run_sync(api)
+        assert s.counts["notes_posted"] == 0
+
+    def test_added_note_posts_only_the_new_line(self):
+        api = FakeMonday()
+        _, res = self.run_sync(api)
+        t = next(t for t in self.ex["tasks"] if (t.get("notes") or "").strip())
+        t["notes"] = "2026-09-20 \u2014 Decided: go ahead.\n\n" + t["notes"]
+        s, _ = self.run_sync(api)
+        assert s.counts["notes_posted"] == 1
+        last = _item(api, res, t["id"])["updates"][-1]
+        assert last == "<p><b>2026-09-20 \u2014</b> Decided: go ahead.</p>"
+
+    def test_backfill_items_that_have_no_update(self):
+        api = FakeMonday()
+        _, res = self.run_sync(api)
+        for it in api.boards_["5031413876"]["items"].values():   # as loaded before this change
+            it.pop("updates", None)
+        s, _ = self.run_sync(api)
+        with_notes = [t for t in self.ex["tasks"] if (t.get("notes") or "").strip()]
+        assert s.counts["notes_posted"] == len(with_notes)
+        s2, _ = self.run_sync(api)
+        assert s2.counts["notes_posted"] == 0
+
+    def test_dry_run_posts_nothing(self):
+        api = FakeMonday(dry_run=True)
+        self.run_sync(api)
+        assert all(not it.get("updates") for it in api.boards_["5031413876"]["items"].values())
+
+    def test_new_note_text_rules(self):
+        assert ms.new_note_text("b\na", "a") == "b"
+        assert ms.new_note_text("same", "same") == ""
+        assert ms.new_note_text("rewritten", "old") == "rewritten"
+        assert ms.new_note_text("", "old") == ""
+
+    def test_update_html_escapes_and_bolds_the_date(self):
+        h = ms.update_html("2026-09-19 14:30 \u2014 a < b & c\nplain line")
+        assert h == "<p><b>2026-09-19 14:30 \u2014</b> a &lt; b &amp; c</p><p>plain line</p>"
+
+
+class TestPostUpdatesQuery:
+    def test_batch_shape(self):
+        seen = []
+
+        def t(url, headers, data):
+            seen.append(json.loads(data))
+            return 200, {}, json.dumps({"data": {"a0": {"id": "9"}}}).encode()
+        g = ms.GraphQL("tok", transport=t, sleep=lambda s: None, min_interval=0)
+        res = ms.Monday(g).post_updates([{"key": "AT-1", "item_id": "123", "body": "<p>x</p>"}])
+        assert res == {"AT-1": "9"}
+        q = seen[0]["query"]
+        assert "create_update(item_id: $i0, body: $u0)" in q and "$u0: String!" in q
+        assert seen[0]["variables"] == {"i0": "123", "u0": "<p>x</p>"}
+
+
+class TestAssignee:
+    """Ben, 2026-09-19: Assignee = who is looking after the task now (changes with the
+    status); Owner = who raised it."""
+
+    def test_assignee_column_set_and_separate_from_owner(self):
+        ex = export()
+        t = ex["tasks"][0]
+        t["owner"], t["assignee"] = "Portal chat", "Ben"
+        api = FakeMonday()
+        s = ms.Syncer(api, Silent())
+        res = s.sync(ex)
+        col = res["columns"]
+        v = _item(api, res, t["id"])["values"]
+        assert v[col["assignee"]] == {"label": "Ben"}
+        assert v[col["owner"]] == {"label": "Portal chat"}
+        titles = [c["title"] for c in api.boards_["5031413876"]["columns"]]
+        assert "Assignee" in titles and "Owner chat" in titles
+
+    def test_reassigning_updates_the_item(self):
+        ex = export()
+        api = FakeMonday()
+        ms.Syncer(api, Silent()).sync(ex)
+        ex["tasks"][0]["assignee"] = "Build & test chat"
+        s = ms.Syncer(api, Silent())
+        res = s.sync(ex)
+        assert s.counts["updated"] == 1
+        assert _item(api, res, ex["tasks"][0]["id"])["values"][res["columns"]["assignee"]] == \
+            {"label": "Build & test chat"}
+
+    def test_old_export_without_assignee_falls_back_to_owner(self):
+        t = {"owner": "MCL chat"}
+        assert ms.assignee_of(t) == "MCL chat"

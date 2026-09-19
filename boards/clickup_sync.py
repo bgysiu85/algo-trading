@@ -128,6 +128,7 @@ OWNER_TAG = {
     "TSMOM chat": "tsmom-chat",
     "Swing chat": "swing-chat",
     "Any chat": "any-chat",
+    "Project management chat": "pm-chat",
 }
 TAG_COLOUR = {"ben": "#e5484d"}
 MANAGED_TAGS = set(OWNER_TAG.values()) | set(FALLBACK_TAG.values())
@@ -405,9 +406,15 @@ class StatusMap:
 
 # --------------------------------------------------------------------------- description
 
+def assignee_of(t: dict) -> str:
+    """Who is looking after the card now; older exports only had `owner`."""
+    return t.get("assignee") or t["owner"]
+
+
 def description(t: dict, primary_ws: str, rev: str) -> str:
     lines = [
-        f"**Owner:** {t['owner']} · **Type:** {t['type']} · **Priority:** {t['priority']}",
+        f"**Assignee:** {assignee_of(t)} · **Owner (raised by):** {t['owner']} · "
+        f"**Type:** {t['type']} · **Priority:** {t['priority']}",
         f"**Source doc:** {t.get('source_doc') or '—'}",
     ]
     if t.get("blocked_by"):
@@ -552,12 +559,14 @@ class Syncer:
         needed_tags: set[str] = set()
         for t in board["tasks"]:
             status, ftag = smap.resolve(t["status"])
-            tags = sorted({OWNER_TAG.get(t["owner"], "any-chat")} | ({ftag} if ftag else set()))
+            # The chat tag says who is looking after the card NOW (the assignee); the
+            # owner -- who raised it -- is in the description.
+            tags = sorted({OWNER_TAG.get(assignee_of(t), "any-chat")} | ({ftag} if ftag else set()))
             needed_tags |= set(tags)
             primary = t["workstreams"][0]
             payload = {"name": task_name(t), "status": status, "priority": PRIORITY.get(t["priority"]),
                        "due": due_ms(t.get("target_date")), "tags": tags, "list": primary,
-                       "t": {k: t.get(k) for k in ("owner", "type", "priority", "source_doc",
+                       "t": {k: t.get(k) for k in ("owner", "assignee", "type", "priority", "source_doc",
                                                    "notes", "blocked_by", "done_on", "notion_url",
                                                    "workstreams")}}
             rev = revision(payload)

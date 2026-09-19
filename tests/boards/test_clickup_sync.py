@@ -286,3 +286,16 @@ def test_token_windows_style_reference_is_fixed(monkeypatch):
     monkeypatch.setattr(cs, "_op_read", lambda ref: seen.append(ref) or "pk_abcdefghijkl")
     cs.resolve_token(cs.Log())
     assert seen == ["op://Trading/Clickup/api_token"]
+
+
+def test_chat_tag_follows_the_assignee_and_owner_is_in_the_description():
+    board = cs.load_board(BOARD)
+    t = board["tasks"][0]
+    t["owner"], t["assignee"] = "Portal chat", "Build & test chat"
+    fake = FakeClickUp()
+    run(fake, board)
+    task = by_card(fake)[t["id"]]
+    tags = {x["name"] for x in task.get("tags", [])}
+    assert "build-chat" in tags and "portal-chat" not in tags
+    text = task.get("markdown_content") or task.get("description") or task.get("text_content") or ""
+    assert "**Assignee:** Build & test chat" in text and "Portal chat" in text
