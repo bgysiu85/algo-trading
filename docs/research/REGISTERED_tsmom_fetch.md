@@ -327,6 +327,44 @@ confirming run carries `--max-cost 0.55` so it cannot spend more.
 default $5.00, key via `secrets_util`. Tests: 33 in `test_tsmom_fetch.py`; twelve
 mutations of the new code, twelve caught.
 
+### 1.8 The top-up, read back — 2026-09-20 (AT-99 step 4)
+
+Manifest pull 2, written 2026-09-19T12:26:05Z: **206 jobs run out of 206 planned,
+estimate $0.5452** (under the $0.55 ceiling Ben approved), `late_listings` empty
+(RTY was not re-reported, and TN started at its pinned date). Checked against the
+files on disk:
+
+| | on disk |
+|---|---|
+| roll calendar | **196 monthly samples** for every root from 2010-06 to 2026-09; RTY 112 (from 2017-06); TN 129 (from 2016-01) |
+| new bar files | `GC/SI/HG.c2-c4.dbn.zst` (c.2–c.4 from 2010-06-07 to 2026-09-18), `TN.dbn.zst` (from **2016-01-11**), `MTN.dbn.zst` (from **2024-03-25**) |
+| TN identity | the 2016-01-15 sample lists TNH6/TNM6/TNU6, asset `TN`, tick 1/64, $100,000 face: the Ultra 10-year |
+
+**Amendment C can be run on this archive.** For each root, the held contract under
+§0.2 was computed from the roll calendar for every session and looked up in the
+bought bars:
+
+| root | sessions | held contract has no bar | median daily volume of the held contract | the old front-month rule |
+|---|---|---|---|---|
+| GC | 5,055 | **1** | **126,160** | 54 |
+| SI | 5,055 | **0** | **42,422** | 18 |
+| HG | 5,055 | **0** | **44,645** | 66 |
+| ZN | 5,057 | **0** | 1,102,168 | (same contract most days) |
+| TN | 3,328 | **0** | 169,136 | — |
+
+The one GC miss is **2026-09-18**, the last session. The first pull's `GC.dbn.zst` ends
+2026-09-17, a day before the top-up's files, so the held October contract (`c.1` that
+day) is simply not in the older file. It is a file-boundary artifact, on the holdout
+side. Every instrument id in the bars maps to a contract in the roll calendar (0.0%
+unmapped).
+
+**One fact for later, not for now:** MTN's front contract trades a **median of 282
+contracts a day** (since 2024-03-25). That is thin next to TN's 107,477. It does not
+touch the backtest, which takes arm (b)'s signal and P/L from TN, but it bears on
+slippage if the strategy is ever traded.
+
+Raw: `claude/raw/tsmom_topup_readback_20260920.txt`.
+
 ## 2. The guards, and what each is for
 
 1. **Estimate first, always.** The total prints before anything transfers.
