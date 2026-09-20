@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 from common.tl_v0_data import held_series, back_adjust
-from common.tl_v0_lines import atr14, find_pivots, build_line_series, break_events, swing_fallback
+from common.tl_v0_lines import atr14, find_pivots, walk_line_and_breaks, swing_fallback
 from common.report_io import emit
 
 TRAIN_START = pd.Timestamp("2010-06-01")
@@ -93,9 +93,9 @@ def build_weekly(df):
 def lines_for(o, h, l, c, R):
     a = atr14(h, l, c)
     ph, pl = find_pivots(h, R, "high"), find_pivots(l, R, "low")
-    res = build_line_series(len(c), ph, R, c, a, "high")
-    sup = build_line_series(len(c), pl, R, c, a, "low")
-    return a, ph, pl, res, sup
+    res, ups = walk_line_and_breaks(len(c), ph, R, c, a, "high")
+    sup, downs = walk_line_and_breaks(len(c), pl, R, c, a, "low")
+    return a, ph, pl, res, sup, ups, downs
 
 
 def align_weekly_to_daily(daily_dates, weekly_df, cols):
@@ -126,11 +126,9 @@ def run_market(root, spec):
 
     out_entries, out_counts = [], []
     for R in PIVOT_SIZES:
-        a, ph, pl, res, sup = lines_for(o, h, l, c, R)
-        ups, downs = break_events(c, res, sup, a)
+        a, ph, pl, res, sup, ups, downs = lines_for(o, h, l, c, R)
 
-        wa, wph, wpl, wres, wsup = lines_for(wo, wh, wl, wc, R)
-        wups, wdowns = break_events(wc, wres, wsup, wa)
+        wa, wph, wpl, wres, wsup, wups, wdowns = lines_for(wo, wh, wl, wc, R)
         state, wdir = None, np.full(len(wc), np.nan, dtype=object)
         for j in range(len(wc)):
             if wups[j]:

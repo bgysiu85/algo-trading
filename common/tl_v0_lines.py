@@ -79,6 +79,76 @@ def build_line_series(n, pivots, R, closes, atr, kind):
     return line
 
 
+def walk_line_and_breaks(n, pivots, R, closes, atr, kind):
+    """Bar-by-bar state walk matching Pine's tlCore() exactly (AT-113 / G3):
+    a line goes cold (resOn/supOn := false) the instant it breaks, and can
+    ONLY re-arm on the next confirmed pivot pair that revalidates -- it does
+    NOT keep extrapolating and re-testing.
+
+    build_line_series() + break_events() above do NOT do this: the line
+    array keeps extending forward from the last validated pair regardless of
+    whether it has already broken, so break_events' plain rising-edge check
+    can re-fire a second "breakout" on the same stale, already-broken line
+    after a whipsaw (price recrosses it with no new pivot in between). Found
+    2026-09-20 (AT-113), proven with a 16-bar synthetic case
+    (tests/test_tl_v0_lines.py::test_stale_line_does_not_refire) where the
+    old pair fires 2 signals and this walk fires the Pine-correct 1.
+
+    Returns (line, breaks): line[j] is NaN whenever no line is currently
+    armed (mirrors Pine's `na` line value), breaks[j] is True on the bar a
+    break fires (Pine's upBrk/dnBrk for that bar).
+    """
+    line = np.full(n, np.nan)
+    breaks = np.zeros(n, bool)
+    pivot_at = {}
+    for pidx, cidx, val in pivots:
+        pivot_at.setdefault(cidx, []).append((pidx, val))
+
+    on = False
+    active = None  # (ref_idx, ref_val, slope)
+    last_two = []
+    for j in range(n):
+        if j in pivot_at:
+            for (pidx, val) in pivot_at[j]:
+                last_two.append((pidx, val))
+                if len(last_two) > 2:
+                    last_two = last_two[-2:]
+                if len(last_two) == 2:
+                    (p1, v1), (p2, v2) = last_two
+                    slope = (v2 - v1) / (p2 - p1)
+                    direction_ok = (v2 < v1) if kind == "high" else (v2 > v1)
+                    valid = direction_ok and (p2 - p1) <= MAX_SPAN
+                    if valid:
+                        for k in range(p1 + 1, j):
+                            lv = v2 + slope * (k - p2)
+                            if kind == "high":
+                                if closes[k] - lv > BUFFER_MULT * atr[k]:
+                                    valid = False
+                                    break
+                            else:
+                                if lv - closes[k] > BUFFER_MULT * atr[k]:
+                                    valid = False
+                                    break
+                    active = (p2, v2, slope) if valid else None
+                    on = valid
+                else:
+                    active = None
+                    on = False
+        if on and active is not None:
+            ref_idx, ref_val, slope = active
+            lv = ref_val + slope * (j - ref_idx)
+            line[j] = lv
+            if kind == "high":
+                if closes[j] - lv > BUFFER_MULT * atr[j]:
+                    breaks[j] = True
+                    on = False
+            else:
+                if lv - closes[j] > BUFFER_MULT * atr[j]:
+                    breaks[j] = True
+                    on = False
+    return line, breaks
+
+
 def break_events(c, res, sup, a):
     """Crossover-style breakout detection: close crosses beyond the active
     line by > 0.10*ATR14, first bar of the crossing only."""
