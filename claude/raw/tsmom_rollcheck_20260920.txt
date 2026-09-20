@@ -1,0 +1,47 @@
+# generated 2026-09-20 03:54:43 UTC
+# archive E:\Databento\GLBX.MDP3 (read via the device bridge); dataset GLBX.MDP3
+
+TSMOM AT-41 -- roll calendar cross-check (REGISTERED_tsmom_fetch section 5)
+stop rule: > 2% of rolls disagreeing by > 1 session on any single root
+reading (a): definition expiration -> expected c.0 change on the next session
+reading (b): session on which c.0 changes instrument in the bars
+
+root   rolls  >1 sess       %   any  result
+ES        65        0   0.00%     0  PASS
+RTY       36        0   0.00%     0  PASS
+GC       195        0   0.00%     0  PASS
+SI       195        0   0.00%     0  PASS
+HG       195        0   0.00%     0  PASS
+CL       195        0   0.00%     0  PASS
+NG       195        0   0.00%     0  PASS
+6E       142        0   0.00%     0  PASS
+6A       142        0   0.00%     0  PASS
+6B       142        0   0.00%     0  PASS
+6J       142        0   0.00%     0  PASS
+ZN        65        0   0.00%     0  PASS
+TN        42        0   0.00%     0  PASS
+
+OVERALL: PASS -- the registered definition dates are used
+
+Every disagreement (diff = observed - expected, in sessions):
+  none
+
+Load notes (Sunday UTC stubs dropped, unmapped ids, point values):
+  ES   files=ES.dbn.zst sunday_dropped=1659 unmapped=0 (0.00%) pv_mismatch=none
+  RTY  files=RTY.dbn.zst sunday_dropped=782 unmapped=0 (0.00%) pv_mismatch=none
+  GC   files=GC.dbn.zst,GC.c2-c4.dbn.zst sunday_dropped=3348 unmapped=0 (0.00%) pv_mismatch=none
+  SI   files=SI.dbn.zst,SI.c2-c4.dbn.zst sunday_dropped=2637 unmapped=0 (0.00%) pv_mismatch=none
+  HG   files=HG.dbn.zst,HG.c2-c4.dbn.zst sunday_dropped=2538 unmapped=0 (0.00%) pv_mismatch=none
+  CL   files=CL.dbn.zst sunday_dropped=1666 unmapped=0 (0.00%) pv_mismatch=none
+  NG   files=NG.dbn.zst sunday_dropped=1664 unmapped=0 (0.00%) pv_mismatch=none
+  6E   files=6E.dbn.zst sunday_dropped=1440 unmapped=0 (0.00%) pv_mismatch=none
+       expiration revised: 6EM3_2023: 2023-06-19 (from 2018-06-15) -> 2023-06-16 (from 2022-01-14)  (latest used)
+  6A   files=6A.dbn.zst sunday_dropped=1271 unmapped=0 (0.00%) pv_mismatch=none
+       expiration revised: 6AM3_2023: 2023-06-19 (from 2018-06-15) -> 2023-06-16 (from 2022-01-14)  (latest used)
+  6B   files=6B.dbn.zst sunday_dropped=1172 unmapped=0 (0.00%) pv_mismatch=none
+       expiration revised: 6BM3_2023: 2023-06-19 (from 2018-06-15) -> 2023-06-16 (from 2022-01-14)  (latest used)
+  6J   files=6J.dbn.zst sunday_dropped=1342 unmapped=0 (0.00%) pv_mismatch=none
+       expiration revised: 6JM3_2023: 2023-06-19 (from 2018-06-15) -> 2023-06-16 (from 2022-01-14)  (latest used)
+  ZN   files=ZN.dbn.zst sunday_dropped=1368 unmapped=0 (0.00%) pv_mismatch=none
+       expiration revised: ZNZ1_2011: 2011-12-21 (from 2010-09-15) -> 2011-12-20 (from 2010-10-15)  (latest used)
+  TN   files=TN.dbn.zst sunday_dropped=686 unmapped=0 (0.00%) pv_mismatch=none

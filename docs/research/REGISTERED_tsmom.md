@@ -187,6 +187,54 @@ Sources: [CME gold fact card](https://www.cmegroup.com/market-regulation/files/g
 [HG specification](https://help.metrotrade.com/kb/copper-futures-hg-contract-specifications) ·
 [CME Ultra 10-Year T-Note futures](https://www.cmegroup.com/education/articles-and-reports/ultra-10-year-us-treasury-note-futures.html) (listed 2016-01-11; physical delivery; last trade seventh business day before the last business day of the delivery month).
 
+
+## 0.3 Amendment D — PRE-RUN, 2026-09-20: how the engine reads the spec (AT-42)
+
+**Written with the engine, before any return was computed. It changes no rule,
+threshold or number in section 2.** It records the places where section 2 needed
+reading to become code, so each is fixed by a commit rather than chosen after a
+result. Code: `strategy/tsmom/`. Result: `claude/tsmom_engine_RESULT_20260920.md`.
+
+1. **Sessions are weekdays; the Sunday bar is dropped.** GLBX `ohlcv-1d` bars are
+   UTC days: the close is the price at 00:00 UTC (the evening session, not the
+   settlement), and most weeks carry a SUNDAY bar (1,659 for ES), which is the
+   first hour of Monday's Globex session. Counted as sessions, they would move
+   every "five trading days before" and put ~300 returns a year under a 261
+   annualisation. Dropping them is exact for close-to-close returns.
+2. **The k-month sign is the sign of the DOLLAR change of the difference-adjusted
+   series over the window** (= the sum of the held contracts' own moves, gaps
+   excluded). A level ratio of a difference-adjusted series flips sign wherever
+   the adjusted level crosses zero. The **returns** for the volatility estimate
+   are the held contract's own daily returns (dP / that contract's previous
+   close), never a change over an adjusted level.
+3. **Timing.** A rebalance on session d trades at the close of d on information
+   through the close of d−1: signal window ends at d−1, σ is the estimate known
+   at d−1, the sizing price is the held contract's close at d−1. The new
+   position earns from d+1. This is equation (1)'s one-day lag, applied to the
+   decision as a whole.
+4. **The ensemble is the mean of the four k-signs** (the equal-weight average of
+   the four single-k books), so a split vote is a smaller position. A market
+   enters only when all four lookbacks exist **and** 261 returns precede d.
+5. **Integer sizing rounds the NET position** — the sum of the five sleeves'
+   fractional targets — half away from zero. One account holds one net position
+   per market; rounding each sleeve would model five accounts.
+6. **Costs are charged on contract-sides actually traded.** A roll closes |old|
+   and opens |new|; with no size change that is 2·|pos| sides of roll (spec §6,
+   "two sides at every roll"). A rebalance is |new − old|. Arm (a) ZN, full
+   size, is charged the same registered per-contract levels.
+7. **An expiration revised after listing uses the latest snapshot** (the value
+   in force at expiry), and every revision is printed. Five in the archive:
+   6E/6A/6B/6J June 2023 (19 → 16 June: Juneteenth became a holiday) and ZNZ1.
+8. **P/L is in vehicle contracts** (MES, MGC, SIL, …, MTN = TN/10; arm (a) is
+   full-size ZN) over the whole sample, including years before a micro listed.
+   Signals are always from the full-size root (spec §2.2).
+
+**On AT-41's independence (a caveat, not a change).** Reading (b), Databento's
+`c.0`, is built by the vendor from instrument definitions, so it is not an
+independent witness of the exchange calendar; perfect agreement is close to
+guaranteed by construction. The check proves the loader maps contracts and
+expiries without error. It does not prove the vendor's expiries are right.
+
 ---
 
 ## 1. The hypothesis, in one sentence
