@@ -40,9 +40,15 @@ def test_every_bar_maps_and_point_values_agree(loaded):
 
 
 def test_the_roll_calendar_passes_at41(loaded):
+    """PASS under the registered rule -- and, on this archive as read
+    2026-09-20, ZERO disagreements of any size. The second is a pin on the
+    loader, not a rule: a loader that took the FIRST snapshot's expiration
+    would still PASS (6EM3 would be one session off) but not be exact."""
     from strategy.tsmom import rollcheck as RC
     for root, (inp, c0, _) in loaded.items():
-        assert RC.verdict(RC.compare(c0, inp.contracts))["result"] == "PASS", root
+        v = RC.verdict(RC.compare(c0, inp.contracts))
+        assert v["result"] == "PASS", root
+        assert v["any_disagreement"] == 0, root
 
 
 def test_training_side_held_contracts_have_bars_and_roots_enter_on_time(loaded):

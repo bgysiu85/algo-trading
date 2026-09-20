@@ -262,3 +262,33 @@ def test_coverage_reports_the_training_side_and_entry():
     assert cov.loc["TN", "enters"] < cov.loc["RTY", "enters"]
     assert all(str(v) < H.LOCK_FROM for v in cov["last"])
     assert (cov["locked_sessions_set_aside"] > 0).all()
+
+
+def test_pnl_is_yesterdays_position_times_todays_held_move_every_day():
+    """By hand over the whole book, including every day the position changes:
+    P/L(t) = pos(t-1) * dP(t) * vehicle point value."""
+    inp, s = _one_root()
+    res = run_book({"XX": s}, {"XX": ONE}, equity=3_000_000.0)
+    dP = s["dP"].fillna(0.0)
+    for pos, pnl in ((res.pos_frac, res.pnl_frac), (res.pos_int, res.pnl_int)):
+        want = pos["XX"].shift(1).fillna(0.0) * dP * ONE.vehicle_point_value
+        assert np.allclose(pnl["XX"].to_numpy(), want.to_numpy())
+    changed = res.pos_int["XX"].diff().fillna(0) != 0
+    assert changed.sum() > 5, "the fixture must change position on some days"
+
+
+def test_the_261_return_warm_up_is_what_admits_a_root():
+    """A root that trades three days a week: 261 returns take ~20 months, so
+    the 12-month lookback is long available and the WARM-UP is what binds.
+    The root is live on the first rebalance day with 261 returns BEFORE it,
+    and not a session earlier."""
+    full = trending_root("XX", start="2016-01-04", end="2020-12-31")
+    keep = full.prices.index[full.prices.index.dayofweek.isin([0, 2, 4])]
+    thin = E.RootInputs(full.contracts, full.prices.loc[keep])
+    s = _series(thin)
+    res = run_book({"XX": s}, {"XX": ONE}, equity=1e6, tranche_days=tuple(range(1, 24)))
+    n_before = s["ret"].notna().cumsum().shift(1).fillna(0)
+    first_live = res.live["XX"].idxmax()
+    assert n_before[first_live] == WARMUP_RETURNS
+    assert not res.live["XX"][n_before < WARMUP_RETURNS].any()
+    assert first_live > s.index[0] + pd.DateOffset(months=18)
