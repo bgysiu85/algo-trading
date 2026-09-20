@@ -1,0 +1,123 @@
+# generated 2026-09-17 10:43:01 AUS Eastern Standard Time
+# common.first_entry_skip pairs=var/state/screen_pairs_pit.json dataset=XNAS.BASIC sessions=551 symbol_days=6170 cut=2025-08-07 qty=100
+
+H-B1: SKIP THE FIRST ENTRY OF EACH SYMBOL-DAY
+
+  registered  docs/research/REGISTERED_first_entry_skip.md
+  551 sessions   6,170 symbol-days   halves cut at 2025-08-07
+  100 shares   commission in, friction per round trip   elapsed 81.5s on 8 worker(s)
+
+POPULATION CHECK
+
+  MCL trades here     3,955
+  published count     3,955   matches
+
+THE BOOKS
+
+  MCL
+    at $1.00  trades  3,955   net  (28,705.62)   per trade   (7.26)   per symbol-day  (4.65)
+    at $4.26  trades  3,955   net  (41,598.92)   per trade  (10.52)   per symbol-day  (6.74)
+    at $8.92  trades  3,955   net  (60,029.22)   per trade  (15.18)   per symbol-day  (9.73)
+    halves @ $4.26    early 1,664  (10.68)/t (17,772.96)   late 2,291  (10.40)/t (23,825.96)
+    drop top 3 @ $4.26  (43,469.18)   win rate 22.2%
+
+  MCL-skip1
+    at $1.00  trades  1,953   net  (14,120.26)   per trade   (7.23)   per symbol-day  (2.29)
+    at $4.26  trades  1,953   net  (20,487.04)   per trade  (10.49)   per symbol-day  (3.32)
+    at $8.92  trades  1,953   net  (29,588.02)   per trade  (15.15)   per symbol-day  (4.80)
+    halves @ $4.26    early   796  (10.58)/t  (8,420.55)   late 1,157  (10.43)/t (12,066.49)
+    drop top 3 @ $4.26  (21,513.03)   win rate 23.2%
+
+  MC5
+    at $1.00  trades  6,883   net  (70,465.05)   per trade  (10.24)   per symbol-day (11.42)
+    at $4.26  trades  6,883   net  (92,903.63)   per trade  (13.50)   per symbol-day (15.06)
+    at $8.92  trades  6,883   net (124,978.41)   per trade  (18.16)   per symbol-day (20.26)
+    halves @ $4.26    early 2,977  (14.89)/t (44,318.73)   late 3,906  (12.44)/t (48,584.90)
+    drop top 3 @ $4.26  (99,624.56)   win rate 21.2%
+
+  MC5-skip1
+    at $1.00  trades  4,391   net  (49,556.76)   per trade  (11.29)   per symbol-day  (8.03)
+    at $4.26  trades  4,391   net  (63,871.42)   per trade  (14.55)   per symbol-day (10.35)
+    at $8.92  trades  4,391   net  (84,333.48)   per trade  (19.21)   per symbol-day (13.67)
+    halves @ $4.26    early 1,904  (15.94)/t (30,357.12)   late 2,487  (13.48)/t (33,514.30)
+    drop top 3 @ $4.26  (66,315.40)   win rate 20.7%
+
+THE VERDICT: MCL-skip1 against MCL (registered §3, $4.26)
+
+  1. per trade +0.03   per symbol-day +3.42
+  2. early half  per trade +0.10  per symbol-day +1.52     late half  per trade -0.03  per symbol-day +1.91
+  3. drop-top-3 level  MCL-skip1 (21,513.03)  MCL (43,469.18)     drop-top-3 delta 20,397.70
+  4. cluster bootstrap on the delta  P(total > 0) = 1.000  [16,266.36, 25,584.87]  over 1,231 symbols  (RESAMPLES 2000, SEED 20260916)
+
+  NOTHING: fails 2 (both halves, both denominators)
+
+  cost: 8 of MCL's top-10 trades at $4.26 are absent from MCL-skip1
+    QMMM   2025-09-09  09:19 ET      946.32
+    UPC    2026-06-29  08:50 ET      475.55
+    EPSM   2025-10-01  08:12 ET      407.93
+    UPC    2025-10-08  06:55 ET      401.36
+    WBUY   2025-05-09  07:24 ET      398.55
+    TTRX   2025-10-09  07:43 ET      382.48
+    ARTL   2025-06-30  09:17 ET      357.91
+    HCAI   2026-05-18  05:42 ET      315.40
+  (a baseline trade re-entered at a shifted bar counts as absent; that is the
+   signal-ordinal form, not a loss of the name)
+  cascade: 417 MCL-skip1 entries the baseline does not contain
+
+THE VERDICT: MC5-skip1 against MC5 (registered §3, $4.26)
+
+  1. per trade -1.05   per symbol-day +4.71
+  2. early half  per trade -1.06  per symbol-day +2.26     late half  per trade -1.04  per symbol-day +2.44
+  3. drop-top-3 level  MC5-skip1 (66,315.40)  MC5 (99,624.56)     drop-top-3 delta 26,812.87
+  4. cluster bootstrap on the delta  P(total > 0) = 1.000  [15,232.47, 39,563.22]  over 1,496 symbols  (RESAMPLES 2000, SEED 20260916)
+
+  REFUSED: the two denominators disagree: per trade -1.05, per symbol-day +4.71
+
+  cost: 8 of MC5's top-10 trades at $4.26 are absent from MC5-skip1
+    UVIX   2026-07-01  04:20 ET    5,461.25
+    WHLR   2024-09-06  04:05 ET      619.35
+    BTCT   2024-11-13  09:05 ET      520.35
+    MBX    2025-09-22  07:50 ET      493.34
+    LHAI   2025-07-25  05:50 ET      448.85
+    PLSM   2026-06-24  07:15 ET      448.35
+    UPC    2026-06-29  08:45 ET      443.35
+    ROLR   2026-01-14  08:20 ET      420.85
+  (a baseline trade re-entered at a shifted bar counts as absent; that is the
+   signal-ordinal form, not a loss of the name)
+  cascade: 1,360 MC5-skip1 entries the baseline does not contain
+
+THE ACCOUNTING FORM: MCL minus each symbol-day's first trade -- NOT READ
+
+  first trades removed   2,415   net  (26,754.13)   per trade  (11.08)
+    losses avoided       1,896    (46,969.00)
+    winners lost           519      20,214.87
+  later trades kept      1,540   net  (14,844.79)   per trade   (9.64)   per symbol-day  (2.41)
+  top-10 of MCL that were first trades: 8 (exact under this form)
+
+  This is how the live 09-09..09-16 table was built. A later trade exists
+  only because the name kept signalling after the first, which is partly
+  conditioned on the move continuing; the gap between this block and the
+  verdict above is that circularity, measured.
+
+THE ACCOUNTING FORM: MC5 minus each symbol-day's first trade -- NOT READ
+
+  first trades removed   3,731   net  (43,649.35)   per trade  (11.70)
+    losses avoided       2,933    (87,003.40)
+    winners lost           798      43,354.05
+  later trades kept      3,152   net  (49,254.28)   per trade  (15.63)   per symbol-day  (7.98)
+  top-10 of MC5 that were first trades: 8 (exact under this form)
+
+  This is how the live 09-09..09-16 table was built. A later trade exists
+  only because the name kept signalling after the first, which is partly
+  conditioned on the move continuing; the gap between this block and the
+  verdict above is that circularity, measured.
+
+WHAT THIS IS NOT
+
+  NOT OUT OF SAMPLE. holdout.json has not been touched.
+  NOT THE LIVE TABLE. The 134 live trades motivated the registration and
+  are used for nothing here.
+  NOT A CAP MODEL. Each symbol-day runs alone; a skipped entry's freed slot
+  is not in these numbers (registration §6).
+  NOT A SEARCH. One rule, one skip, read on the signal-ordinal form; the
+  variant named in §1 was not run.

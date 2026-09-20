@@ -1,0 +1,124 @@
+# generated 2026-09-18 22:15:57 AUS Eastern Standard Time
+# common.mc5_full_day pairs=var/state/screen_pairs_pit_itch_v2.json day_pairs=var/state/screen_pairs_pit_itch_day.json dataset=XNAS.ITCH sessions=546 symbol_days=6378 qty=100
+
+MC5 EXTENDED TO 04:00-20:00
+
+  registered  docs/research/REGISTERED_mc5_full_day.md (amendments A-C)
+  dataset XNAS.ITCH   universe var/state/screen_pairs_pit_itch_v2.json   day universe var/state/screen_pairs_pit_itch_day.json
+  546 sessions   6,378 symbol-days (A/A'/B)   23,135 (C)   halves cut at 2025-08-05
+  100 shares   commission in, friction per round trip   elapsed 388.9s on 8 worker(s)
+
+THE RECONCILIATION (amendment C)
+
+  arm A: 6,425 trades, (8.62)/trade against published 6,425, (8.62) -- matches
+
+THE BOOKS
+
+  A  published frames, 09:30
+    at $1.00  trades  6,425   net  (34,439.57)   per trade   (5.36)   per symbol-day  (5.40)
+    at $4.26  trades  6,425   net  (55,385.07)   per trade   (8.62)   per symbol-day  (8.68)
+    at $8.92  trades  6,425   net  (85,325.57)   per trade  (13.28)   per symbol-day (13.38)
+    by entry block @ $4.26   PRE 6,425 (8.62)/t   RTH 0 0.00/t   POST 0 0.00/t
+    exits: trailing_stop 5,746   window_close 679
+
+  A' full-day frames, 09:30
+    at $1.00  trades  8,347   net  (42,402.64)   per trade   (5.08)   per symbol-day  (6.65)
+    at $4.26  trades  8,347   net  (69,613.86)   per trade   (8.34)   per symbol-day (10.91)
+    at $8.92  trades  8,347   net (108,510.88)   per trade  (13.00)   per symbol-day (17.01)
+    by entry block @ $4.26   PRE 8,347 (8.34)/t   RTH 0 0.00/t   POST 0 0.00/t
+    exits: trailing_stop 7,573   window_close 774
+
+  B  full day, frozen universe
+    at $1.00  trades 23,435   net (122,654.48)   per trade   (5.23)   per symbol-day (19.23)
+    at $4.26  trades 23,435   net (199,052.58)   per trade   (8.49)   per symbol-day (31.21)
+    at $8.92  trades 23,435   net (308,259.68)   per trade  (13.15)   per symbol-day (48.33)
+    by entry block @ $4.26   PRE 8,566 (8.31)/t   RTH 12,281 (8.15)/t   POST 2,588 (10.76)/t
+    exits: trailing_stop 21,441   window_close 1,994
+
+  C  full day, running screen
+    at $1.00  trades 47,075   net (236,117.90)   per trade   (5.02)   per symbol-day (10.21)
+    at $4.26  trades 47,075   net (389,582.40)   per trade   (8.28)   per symbol-day (16.84)
+    at $8.92  trades 47,075   net (608,951.90)   per trade  (12.94)   per symbol-day (26.32)
+    by entry block @ $4.26   PRE 8,572 (8.31)/t   RTH 30,155 (7.68)/t   POST 8,348 (10.39)/t
+    exits: trailing_stop 39,719   window_close 7,356
+
+WARM-UP, PRICED (A' against A -- not a finding about the strategy)
+
+  per trade +0.28   trades 8,347 against 6,425
+
+ARM B's added trades -- reported, not scored
+
+  1. 14,869 added trades   per trade (8.60)   net (127,892.25)
+  2. halves   early 6,566 (9.20)/t   late 8,303 (8.13)/t
+  3. drop-top-5 symbols (132,800.23)
+  4. cluster bootstrap P(total > 0) = 0.000 [(140,756.63), (115,128.91)] over 1,906 symbols  (RESAMPLES 2000, SEED 20260916)
+  5. session median (217.70) over the 546 session(s) with an added trade   (zero-filled over all 546: (217.70))
+
+  REPORTED: fails 1 (per trade (8.60) at $4.26); 2 (both halves positive); 3 (drop-top-5 symbols (132,800.23)); 4 (cluster bootstrap P=0.000 < 0.95); 5 (session median (217.70))
+
+THE VERDICT: C's added trades (registered §4)
+
+  1. 38,503 added trades   per trade (8.27)   net (318,377.46)
+  2. halves   early 18,042 (8.52)/t   late 20,461 (8.04)/t
+  3. drop-top-5 symbols (332,318.82)
+  4. cluster bootstrap P(total > 0) = 0.000 [(343,446.68), (292,528.54)] over 3,152 symbols  (RESAMPLES 2000, SEED 20260916)
+  5. session median (616.80) over the 546 session(s) with an added trade   (zero-filled over all 546: (616.80))
+
+  NOTHING: fails 1 (per trade (8.27) at $4.26); 2 (both halves positive); 3 (drop-top-5 symbols (332,318.82)); 4 (cluster bootstrap P=0.000 < 0.95); 5 (session median (616.80))
+
+PRE-MARKET ENTRIES ONLY B HAS -- the engine's last-bar rule, not the rule under test
+
+  219 entries before 09:30 that A' does not book, worth (1,915.67) at $4.26
+  (an entry on the final in-session bar has no bar left to manage on, so the
+   09:30 arm books nothing for it; extending the window gives it one)
+
+CARRIED TRADES: B against A' -- reported, not scored
+
+  8,347 pre-market entries in both books; 774 exited at a different time once 09:30 stopped flattening
+  P/L change 369.20
+
+PRE-MARKET ENTRIES ONLY C HAS -- the engine's last-bar rule, not the rule under test
+
+  226 entries before 09:30 that A' does not book, worth (1,954.92) at $4.26
+  (an entry on the final in-session bar has no bar left to manage on, so the
+   09:30 arm books nothing for it; extending the window gives it one)
+
+CARRIED TRADES: C against A' -- reported, not scored
+
+  8,346 pre-market entries in both books; 773 exited at a different time once 09:30 stopped flattening
+  P/L change 343.20
+
+WHAT THIS IS NOT
+
+  NOT OUT OF SAMPLE. holdout.json has not been spent.
+  NOT A CAP MODEL. Each symbol-day runs alone; live, 29% of buy attempts
+  were refused by the concurrency cap.
+  NOT A LIVE PARITY RUN. The trader still stops at 09:30 and has no
+  RTH/POST screen; this is a backtest of the rule, nothing more.
+  NOT A MEASURED RTH THRESHOLD. The screen's volume clause after 09:30
+  carries the 09:30 capture (amendment B).
+
+--- HOUR-OF-ENTRY TABLE (computed from mc5_full_day_trades.csv, arm C, $4.26) ---
+
+hour   trades   per trade
+04:00   1,427     (5.60)
+05:00     880     (7.38)
+06:00   1,083     (7.89)
+07:00   1,916    (10.51)
+08:00   2,111     (8.06)
+09:00   4,350     (7.10)
+10:00   5,162     (5.55)
+11:00   3,824     (6.80)
+12:00   3,710     (6.47)
+13:00   4,198     (7.09)
+14:00   4,405     (9.22)
+15:00   5,661    (11.09)
+16:00   3,652    (11.39)
+17:00   2,202    (10.74)
+18:00   1,468     (9.06)
+19:00   1,026     (7.97)
+
+block     trades   gross    @4.26    @8.92    win%   bars
+PRE        8,572  (5.05)   (8.31)  (12.97)  23.3%    4.2
+RTH       30,155  (4.42)   (7.68)  (12.34)  25.7%   10.5
+POST       8,348  (7.13)  (10.39)  (15.05)  21.0%    5.9

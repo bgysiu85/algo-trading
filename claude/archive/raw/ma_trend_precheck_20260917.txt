@@ -1,0 +1,57 @@
+MA-TREND GATE 2.1 -- FREE PRE-CHECK FOR AN INTERIOR OPTIMUM
+generated 2026-09-17 (reading only; no new run, no new data)
+source: var/reports/entry_split_mcl.txt (2026-09-14 15:30), common/entry_features.py
+
+QUESTION
+  Does any trend-family feature show a middle-is-best profile that the
+  directional reading in entry_split would have missed?
+
+POPULATION
+  MCL, 551 sessions, 3,955 trades, 4 buckets (quartiles) per feature.
+  label = dip-then-run; base rate 29.2%; P/L per trade at $4.26 friction.
+
+TREND FAMILY (entry_features.py line 173: vwap_dist, ma20_dist, ma20_slope)
+                     Q1       Q2       Q3       Q4     shape
+  ma20_slope  rate  36.3%    32.4%    24.7%    23.6%   monotone, both halves
+              P/L  (9.95)  (11.16)  (11.82)   (9.13)   interior TROUGH
+  ma20_dist   rate  38.1%    32.2%    24.9%    21.8%   monotone, both halves
+              P/L (10.85)  (10.41)  (11.89)   (8.93)   best at edge (Q4)
+  vwap_dist   rate  28.9%    34.1%    29.4%    24.5%   Q2 bump, unconfirmed
+              P/L (10.16)   (9.82)  (11.86)  (10.22)   Q2 best by 0.34
+  extension   rate  32.0%    31.1%    27.4%    26.4%   monotone-ish
+  (same idea  P/L (10.82)  (11.30)  (11.90)   (8.05)   interior TROUGH
+   per spec 3.4)
+
+READING
+  1. The two features that ARE MA-TREND's premise -- ma20_slope and
+     ma20_dist -- show NO interior peak on either line. The rate is
+     monotone in both halves. The money on ma20_slope is U-shaped: the
+     middle quartiles are the WORST, the opposite of the hypothesis.
+  2. The only interior bump in the family is vwap_dist Q2. It is not an
+     MA-TREND component, its P/L edge is $0.34/trade, and interior bumps
+     appear on 5 of 22 features' rate lines -- fewer than the ~11 that
+     pure noise would place in a middle bucket. It is not evidence.
+  3. Every bucket of every feature loses money (88 of 88).
+
+WHAT THIS CHECK CANNOT SEE (stated so the verdict is not over-read)
+  a. Quantity mismatch. ma20_slope here is RAW percent over 3 bars.
+     The spec's slope20_n is over 5 bars and divided by per-bar sigma.
+     On $2-20 names raw slope is largely a volatility proxy, so the
+     two can rank trades differently.
+  b. Population mismatch. MCL entries, pre-market 04:00-09:30, already
+     selected by MCL's own momentum rule. MA-TREND is RTH retracements.
+  c. Resolution. Quartiles, not quintiles; a narrow band can hide
+     inside a quartile.
+  d. Label. Dip-then-run rate is a proxy; the P/L line is the money.
+
+VERDICT
+  NO INTERIOR PEAK in the trend family on the closest existing
+  measurement. By the spec's rule (3.2, 10.1) and the brief (2.1):
+  STOP. Nothing further in MA-TREND is built.
+
+  The only legitimate way back in is a REGISTERED quintile profile of
+  slope20_n and ext_n on RTH bars -- which needs gate 2.2 (08:00 defect)
+  and gate 2.3 (full-day ohlcv-1m) first. Those two have other
+  consumers (entry_place ema200_dist, ORB's RVOL rule). If they get
+  done for those reasons, the profile becomes cheap; it is not a reason
+  to do them.

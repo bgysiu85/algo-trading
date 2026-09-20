@@ -1,0 +1,115 @@
+# generated 2026-09-17 15:18:11 AUS Eastern Standard Time
+# common.cold_veto pairs=var/state/screen_pairs_pit.json dataset=XNAS.BASIC sessions=551 symbol_days=6170 cut=2025-08-07 qty=100 veto_from=07:00
+
+H-B4: NO NEW ENTRIES AFTER 07:00 ON A SESSION THAT READS COLD AT 07:00
+
+  registered  docs/research/REGISTERED_cold_veto.md
+  551 sessions   6,170 symbol-days   halves cut at 2025-08-07
+  100 shares   commission in, friction per round trip   elapsed 76.4s on 8 worker(s)
+
+POPULATION CHECK
+
+  MCL trades here     3,955
+  published count     3,955   matches
+
+THE 07:00 READING, BY SESSION (registration §1)
+
+  sessions run 551   vetoed (cold) 363 (65.9%)
+    cold by count (< 5 names visible at 07:00)  297
+    cold by composite (<= prior lower tercile)          66
+    warm                                                 127
+    inert (rated, fewer than 60 prior composites) 61
+
+  names visible at 07:00: median 4, p10 2, p90 9
+
+THE BOOKS
+
+  MCL
+    at $1.00  trades  3,955   net  (28,705.62)   per trade   (7.26)   per symbol-day  (4.65)
+    at $4.26  trades  3,955   net  (41,598.92)   per trade  (10.52)   per symbol-day  (6.74)
+    at $8.92  trades  3,955   net  (60,029.22)   per trade  (15.18)   per symbol-day  (9.73)
+    halves @ $4.26    early 1,664  (10.68)/t (17,772.96)   late 2,291  (10.40)/t (23,825.96)
+    drop top 3 @ $4.26  (43,469.18)   win rate 22.2%
+
+  MCL-veto
+    at $1.00  trades  2,719   net  (17,830.40)   per trade   (6.56)   per symbol-day  (2.89)
+    at $4.26  trades  2,719   net  (26,694.34)   per trade   (9.82)   per symbol-day  (4.33)
+    at $8.92  trades  2,719   net  (39,364.88)   per trade  (14.48)   per symbol-day  (6.38)
+    halves @ $4.26    early 1,063   (8.96)/t  (9,529.23)   late 1,656  (10.37)/t (17,165.11)
+    drop top 3 @ $4.26  (28,564.60)   win rate 22.8%
+
+  MC5
+    at $1.00  trades  6,883   net  (70,465.05)   per trade  (10.24)   per symbol-day (11.42)
+    at $4.26  trades  6,883   net  (92,903.63)   per trade  (13.50)   per symbol-day (15.06)
+    at $8.92  trades  6,883   net (124,978.41)   per trade  (18.16)   per symbol-day (20.26)
+    halves @ $4.26    early 2,977  (14.89)/t (44,318.73)   late 3,906  (12.44)/t (48,584.90)
+    drop top 3 @ $4.26  (99,624.56)   win rate 21.2%
+
+  MC5-veto
+    at $1.00  trades  4,551   net  (42,554.27)   per trade   (9.35)   per symbol-day  (6.90)
+    at $4.26  trades  4,551   net  (57,390.53)   per trade  (12.61)   per symbol-day  (9.30)
+    at $8.92  trades  4,551   net  (78,598.19)   per trade  (17.27)   per symbol-day (12.74)
+    halves @ $4.26    early 1,801  (13.80)/t (24,852.88)   late 2,750  (11.83)/t (32,537.65)
+    drop top 3 @ $4.26  (64,111.46)   win rate 21.0%
+
+COULD MCL-veto HAVE BOUND? (entries at or after 07:00 are the only ones a clock veto can refuse)
+
+  baseline entries 3,955   where the gate could refuse 2,430 (61.4%)
+  baseline entries by clock and session:  after 07:00 on a cold session:1,236  after 07:00 on a warm session:1,194  before 07:00:1,525
+
+THE VERDICT: MCL-veto against MCL (registered readings 1-5, $4.26)
+
+  1. per trade +0.70 (margin 4.26)   per symbol-day +2.42
+  2. early half  per trade +1.72  per symbol-day +1.34     late half  per trade +0.03  per symbol-day +1.08
+  3. drop-top-3 level  MCL-veto (28,564.60)  MCL (43,469.18)     drop-top-3 delta 14,115.10
+  4. cluster bootstrap on the delta  P(total > 0) = 1.000  [11,955.06, 17,836.61]  over 1,231 symbols
+  5. abstention control: 1,236 of 3,955 trades removed at random, 2000 draws
+       per trade      random p05 -0.78  p50 +0.02  p95 +0.74   the gate +0.70
+       per symbol-day random p05 +1.76  p50 +2.12  p95 +2.43   the gate +2.42
+
+  NOTHING: fails 1 (per trade >= 4.26 and per symbol-day > 0); 5 (abstention control: per trade +0.70 does not beat random removal's p95 +0.74)
+
+  cost: 2 of MCL's top-10 trades at $4.26 are absent from MCL-veto
+    EPSM   2025-10-01  08:12 ET      407.93
+    ARTL   2025-06-30  09:17 ET      357.91
+  cascade: 0 MCL-veto entries the baseline does not contain
+
+WHAT MCL-veto REFUSED OF MCL (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            1,236   net  (14,904.58)   per trade  (12.06)
+    losses avoided     976    (23,842.92)
+    winners lost       260       8,938.34
+
+COULD MC5-veto HAVE BOUND? (entries at or after 07:00 are the only ones a clock veto can refuse)
+
+  baseline entries 6,883   where the gate could refuse 4,561 (66.3%)
+  baseline entries by clock and session:  after 07:00 on a cold session:2,332  after 07:00 on a warm session:2,229  before 07:00:2,322
+
+THE VERDICT: MC5-veto against MC5 (registered readings 1-5, $4.26)
+
+  1. per trade +0.89 (margin 4.26)   per symbol-day +5.76
+  2. early half  per trade +1.09  per symbol-day +3.15     late half  per trade +0.61  per symbol-day +2.60
+  3. drop-top-3 level  MC5-veto (64,111.46)  MC5 (99,624.56)     drop-top-3 delta 34,145.16
+  4. cluster bootstrap on the delta  P(total > 0) = 1.000  [30,410.51, 40,561.51]  over 1,496 symbols
+  5. abstention control: 2,332 of 6,883 trades removed at random, 2000 draws
+       per trade      random p05 -1.21  p50 +0.13  p95 +1.03   the gate +0.89
+       per symbol-day random p05 +4.21  p50 +5.20  p95 +5.86   the gate +5.76
+
+  NOTHING: fails 1 (per trade >= 4.26 and per symbol-day > 0); 5 (abstention control: per trade +0.89 does not beat random removal's p95 +1.03)
+
+  cost: 2 of MC5's top-10 trades at $4.26 are absent from MC5-veto
+    BTCT   2024-11-13  09:05 ET      520.35
+    ROLR   2026-01-14  08:20 ET      420.85
+  cascade: 0 MC5-veto entries the baseline does not contain
+
+WHAT MC5-veto REFUSED OF MC5 (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            2,332   net  (35,513.10)   per trade  (15.23)
+    losses avoided   1,830    (55,025.47)
+    winners lost       502      19,512.37
+
+WHAT THIS IS NOT
+
+  NOT OUT OF SAMPLE. holdout.json has not been touched.
+  NOT A CAP MODEL. Each symbol-day runs alone (registration §5).
+  NOT A SEARCH. One N decides; the reported cell was declared before the run.

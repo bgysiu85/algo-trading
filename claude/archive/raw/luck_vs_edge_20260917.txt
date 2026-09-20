@@ -1,0 +1,115 @@
+# generated 2026-09-17 15:40:39 AUS Eastern Standard Time
+# common.luck_vs_edge trades=var/reports/first_entry_skip_trades.csv readings=var/reports/cold_veto_readings.csv dataset=XNAS.BASIC sessions=551 cut=2025-08-07 trend_x=0.5
+
+PART A: LUCK OR EDGE? MCL AND MC5 BY SESSION REGIME ON THE POINT-IN-TIME BOOKS
+
+  registered  docs/research/REGISTERED_luck_vs_edge.md
+  551 sessions   6,170 symbol-days   halves cut at 2025-08-07   100 shares   friction per round trip
+  regime from the daily archive: median 11,324 symbols per session
+  elapsed 19.9s on 8 worker(s) (the trend flag; nothing else re-ran)
+
+THE TREND-DAY FLAG (registration §1: leader's move from first open to last close before 09:30)
+
+  leader move: p10 +26%  p25 +44%  median +78%  p75 +138%  p90 +222%   threshold 50%
+  trend days 382 of 551
+
+SESSIONS BY LABEL
+
+  same-day regime (the ceiling): hot 182  mixed 182  cold 187  unlabelled 0
+  lagged regime (actionable):    hot 182  mixed 182  cold 186
+  07:00 reading (H-B4):          warm 127  cold 66  count 297  inert 61
+
+BY SAME-DAY REGIME -- THE CEILING, not knowable at 04:00
+
+  MCL
+  bucket   sessions traded trades   net $1.00   net $4.26   net $8.92   per/t  per/sess  per/trd  pos%      med  drop3/s  early/s   late/s
+  hot           182    178  1,596 (10,219.31) (15,422.27) (22,859.63)  (9.66)   (84.74)  (86.64)  16.3  (87.06)  (94.18)  (70.04)  (94.58)
+  mixed         182    180  1,329 (10,844.76) (15,177.30) (21,370.44) (11.42)   (83.39)  (84.32)  12.8  (74.74)  (88.13)  (66.76) (103.67)
+  cold          187    183  1,030  (7,641.55) (10,999.35) (15,799.15) (10.68)   (58.82)  (60.11)  13.7  (58.23)  (63.63)  (58.66)  (59.01)
+
+BY LAGGED REGIME -- yesterday's reading, actionable
+
+  MCL   (4 trade(s) on unlabelled dates dropped, not bucketed)
+  bucket   sessions traded trades   net $1.00   net $4.26   net $8.92   per/t  per/sess  per/trd  pos%      med  drop3/s  early/s   late/s
+  hot           182    178  1,589 (10,257.37) (15,437.51) (22,842.25)  (9.72)   (84.82)  (86.73)  13.5  (74.25)  (93.97)  (69.91)  (94.81)
+  mixed         182    182  1,364 (10,517.24) (14,963.88) (21,320.12) (10.97)   (82.22)  (82.22)  14.8  (77.08)  (87.43)  (70.20)  (96.88)
+  cold          186    180    998  (7,866.73) (11,120.21) (15,770.89) (11.14)   (59.79)  (61.78)  14.4  (54.85)  (64.53)  (55.17)  (65.27)
+
+BY TREND DAY -- leader held >= 50% into the open (known at 09:30, not before)
+
+  MCL
+  bucket   sessions traded trades   net $1.00   net $4.26   net $8.92   per/t  per/sess  per/trd  pos%      med  drop3/s  early/s   late/s
+  trend         382    377  3,023 (19,330.11) (29,185.09) (43,272.27)  (9.65)   (76.40)  (77.41)  15.9  (68.80)  (80.90)  (63.30)  (91.25)
+  not           169    164    932  (9,375.51) (12,413.83) (16,756.95) (13.32)   (73.45)  (75.69)  10.4  (63.27)  (77.89)  (68.36)  (77.23)
+
+BY THE 07:00 READING -- H-B4's proxy, actionable at 07:00
+
+  MCL
+  bucket   sessions traded trades   net $1.00   net $4.26   net $8.92   per/t  per/sess  per/trd  pos%      med  drop3/s  early/s   late/s
+  warm          127    126  1,431  (9,416.70) (14,081.76) (20,750.22)  (9.84)  (110.88) (111.76)  12.7 (109.38) (124.03)  (89.09) (114.25)
+  cold           66     66    586  (3,648.24)  (5,558.60)  (8,289.36)  (9.49)   (84.22)  (84.22)  15.2  (81.38)  (97.92)  (97.85)  (80.21)
+  count         297    288  1,400 (12,349.85) (16,913.85) (23,437.85) (12.08)   (56.95)  (58.73)  13.9  (49.88)  (59.90)  (53.55)  (62.33)
+  inert          61     61    538  (3,290.83)  (5,044.71)  (7,551.79)  (9.38)   (82.70)  (82.70)  18.0  (91.52)  (90.20)  (82.70)     0.00
+
+THE READING: MCL on same-day regime's 'hot' bucket ($4.26, per session over ALL sessions in the bucket)
+
+  1. H = (84.74) per session over 182 sessions   halves (70.04) / (94.58)   drop-top-3 sessions (94.18)
+     -> NO EDGE EVEN ON THE PAYING SESSIONS -- no regime gate, however good, rescues this book
+  2. not read (reading 1 failed); for context L = (70.94) per session, observed hot share 33.0%
+
+THE READING: MCL on trend day's 'trend' bucket ($4.26, per session over ALL sessions in the bucket)
+
+  1. H = (76.40) per session over 382 sessions   halves (63.30) / (91.25)   drop-top-3 sessions (80.90)
+     -> NO EDGE EVEN ON THE PAYING SESSIONS -- no regime gate, however good, rescues this book
+  2. not read (reading 1 failed); for context L = (73.45) per session, observed hot share 69.3%
+
+BY SAME-DAY REGIME -- THE CEILING, not knowable at 04:00
+
+  MC5
+  bucket   sessions traded trades   net $1.00   net $4.26   net $8.92   per/t  per/sess  per/trd  pos%      med  drop3/s  early/s   late/s
+  hot           182    181  2,872 (29,077.53) (38,440.25) (51,823.77) (13.38)  (211.21) (212.38)  15.5 (178.24) (217.88) (198.62) (219.65)
+  mixed         182    182  2,333 (23,655.17) (31,260.75) (42,132.53) (13.40)  (171.76) (171.76)  12.6 (179.63) (203.30) (189.87) (149.68)
+  cold          187    185  1,678 (17,732.35) (23,202.63) (31,022.11) (13.83)  (124.08) (125.42)  14.6 (103.92) (128.45) (106.21) (145.52)
+
+BY LAGGED REGIME -- yesterday's reading, actionable
+
+  MC5   (5 trade(s) on unlabelled dates dropped, not bucketed)
+  bucket   sessions traded trades   net $1.00   net $4.26   net $8.92   per/t  per/sess  per/trd  pos%      med  drop3/s  early/s   late/s
+  hot           182    181  2,820 (31,314.61) (40,507.81) (53,649.01) (14.36)  (222.57) (223.80)  13.3 (198.87) (229.57) (178.36) (252.18)
+  mixed         182    182  2,357 (21,475.17) (29,158.99) (40,142.61) (12.37)  (160.21) (160.21)  14.8 (153.83) (190.64) (195.33) (117.39)
+  cold          186    184  1,701 (17,626.13) (23,171.39) (31,098.05) (13.62)  (124.58) (125.93)  14.7  (94.57) (130.51) (115.84) (134.96)
+
+BY TREND DAY -- leader held >= 50% into the open (known at 09:30, not before)
+
+  MC5
+  bucket   sessions traded trades   net $1.00   net $4.26   net $8.92   per/t  per/sess  per/trd  pos%      med  drop3/s  early/s   late/s
+  trend         382    382  5,441 (49,651.39) (67,389.05) (92,744.11) (12.39)  (176.41) (176.41)  16.5 (163.38) (192.76) (175.97) (176.91)
+  not           169    166  1,442 (20,813.66) (25,514.58) (32,234.30) (17.69)  (150.97) (153.70)   9.0 (110.66) (152.51) (119.41) (174.41)
+
+BY THE 07:00 READING -- H-B4's proxy, actionable at 07:00
+
+  MC5
+  bucket   sessions traded trades   net $1.00   net $4.26   net $8.92   per/t  per/sess  per/trd  pos%      med  drop3/s  early/s   late/s
+  warm          127    127  2,584 (23,524.28) (31,948.12) (43,989.56) (12.36)  (251.56) (251.56)  12.6 (288.94) (299.25) (344.03) (237.27)
+  cold           66     66    948  (9,171.17) (12,261.65) (16,679.33) (12.93)  (185.78) (185.78)  12.1 (175.99) (193.10) (167.69) (191.10)
+  count         297    294  2,376 (24,527.76) (32,273.52) (43,345.68) (13.58)  (108.67) (109.77)  16.3  (96.99) (112.71) (107.33) (110.77)
+  inert          61     61    975 (13,241.84) (16,420.34) (20,963.84) (16.84)  (269.19) (269.19)   9.8 (236.88) (272.09) (269.19)     0.00
+
+THE READING: MC5 on same-day regime's 'hot' bucket ($4.26, per session over ALL sessions in the bucket)
+
+  1. H = (211.21) per session over 182 sessions   halves (198.62) / (219.65)   drop-top-3 sessions (217.88)
+     -> NO EDGE EVEN ON THE PAYING SESSIONS -- no regime gate, however good, rescues this book
+  2. not read (reading 1 failed); for context L = (147.60) per session, observed hot share 33.0%
+
+THE READING: MC5 on trend day's 'trend' bucket ($4.26, per session over ALL sessions in the bucket)
+
+  1. H = (176.41) per session over 382 sessions   halves (175.97) / (176.91)   drop-top-3 sessions (192.76)
+     -> NO EDGE EVEN ON THE PAYING SESSIONS -- no regime gate, however good, rescues this book
+  2. not read (reading 1 failed); for context L = (150.97) per session, observed hot share 69.3%
+
+WHAT THIS IS NOT
+
+  NOT OUT OF SAMPLE. MCL was fitted on this calendar.
+  NOT A GATE. The same-day and trend labels are known after the fact; the lagged
+  and 07:00 tables are what a gate would have seen and are read elsewhere.
+  NOT A3. The live 09-09..09-16 sessions are not in the archive (registration §4).

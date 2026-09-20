@@ -1,0 +1,394 @@
+# generated 2026-09-19 17:41:59 AUS Eastern Standard Time
+# common.pullback_cell pairs=var/state/screen_pairs_pit_itch_v2.json dataset=XNAS.ITCH sessions=550 symbol_days=6411 cut=2025-08-07 qty=100 D=0.05 C=0.03 registered=docs/research/REGISTERED_pullback_cell.md
+
+H-P2: THE PULLBACK CELL -- AT THE SESSION HIGH AND NOT EXTENDED
+
+  registered  docs/research/REGISTERED_pullback_cell.md
+  universe    var/state/screen_pairs_pit_itch_v2.json   bars XNAS.ITCH
+  550 sessions   6,411 symbol-days   halves cut at 2025-08-07
+  100 shares   commission in, friction per round trip   elapsed 173.4s on 8 worker(s)
+
+POPULATION CHECK
+
+  MCL trades here     3,908
+  published count     3,908   matches
+
+  rule: dist_from_high >= -5% AND ret_5m <= +3%; NaN never admits.
+  reported: each half alone; the cell at (3%, +1%) and (10%, +5%). Never scored.
+
+THE BOOKS
+
+  MCL
+    at $1.00  trades  3,908   net  (22,323.04)   per trade   (5.71)   per symbol-day  (3.48)
+    at $4.26  trades  3,908   net  (35,063.12)   per trade   (8.97)   per symbol-day  (5.47)
+    at $8.92  trades  3,908   net  (53,274.40)   per trade  (13.63)   per symbol-day  (8.31)
+    halves @ $4.26    early 1,753   (8.94)/t (15,674.95)   late 2,155   (9.00)/t (19,388.17)
+    drop top 3 @ $4.26  (37,384.33)   win rate 23.0%
+
+  MCL-cell
+    at $1.00  trades    409   net   (2,512.77)   per trade   (6.14)   per symbol-day  (0.39)
+    at $4.26  trades    409   net   (3,846.11)   per trade   (9.40)   per symbol-day  (0.60)
+    at $8.92  trades    409   net   (5,752.05)   per trade  (14.06)   per symbol-day  (0.90)
+    halves @ $4.26    early   158   (9.93)/t  (1,569.62)   late   251   (9.07)/t  (2,276.49)
+    drop top 3 @ $4.26   (4,245.13)   win rate 28.1%
+
+  MCL-dist
+    at $1.00  trades  1,562   net   (8,069.46)   per trade   (5.17)   per symbol-day  (1.26)
+    at $4.26  trades  1,562   net  (13,161.58)   per trade   (8.43)   per symbol-day  (2.05)
+    at $8.92  trades  1,562   net  (20,440.50)   per trade  (13.09)   per symbol-day  (3.19)
+    halves @ $4.26    early   697   (8.46)/t  (5,893.45)   late   865   (8.40)/t  (7,268.13)
+    drop top 3 @ $4.26  (14,597.58)   win rate 25.9%
+
+  MCL-calm
+    at $1.00  trades  1,140   net   (6,539.08)   per trade   (5.74)   per symbol-day  (1.02)
+    at $4.26  trades  1,140   net  (10,255.48)   per trade   (9.00)   per symbol-day  (1.60)
+    at $8.92  trades  1,140   net  (15,567.88)   per trade  (13.66)   per symbol-day  (2.43)
+    halves @ $4.26    early   498   (9.52)/t  (4,740.99)   late   642   (8.59)/t  (5,514.49)
+    drop top 3 @ $4.26  (10,767.63)   win rate 25.0%
+
+  MCL-tight
+    at $1.00  trades     89   net     (287.42)   per trade   (3.23)   per symbol-day  (0.04)
+    at $4.26  trades     89   net     (577.56)   per trade   (6.49)   per symbol-day  (0.09)
+    at $8.92  trades     89   net     (992.30)   per trade  (11.15)   per symbol-day  (0.15)
+    halves @ $4.26    early    22     1.51/t       33.12   late    67   (9.11)/t    (610.68)
+    drop top 3 @ $4.26     (810.77)   win rate 29.2%
+
+  MCL-loose
+    at $1.00  trades  1,010   net   (6,163.80)   per trade   (6.10)   per symbol-day  (0.96)
+    at $4.26  trades  1,010   net   (9,456.40)   per trade   (9.36)   per symbol-day  (1.48)
+    at $8.92  trades  1,010   net  (14,163.00)   per trade  (14.02)   per symbol-day  (2.21)
+    halves @ $4.26    early   443  (10.22)/t  (4,525.95)   late   567   (8.70)/t  (4,930.45)
+    drop top 3 @ $4.26  (10,198.85)   win rate 25.1%
+
+  MC5
+    at $1.00  trades  6,462   net  (34,297.95)   per trade   (5.31)   per symbol-day  (5.35)
+    at $4.26  trades  6,462   net  (55,364.07)   per trade   (8.57)   per symbol-day  (8.64)
+    at $8.92  trades  6,462   net  (85,476.99)   per trade  (13.23)   per symbol-day (13.33)
+    halves @ $4.26    early 2,901   (8.70)/t (25,247.05)   late 3,561   (8.46)/t (30,117.02)
+    drop top 3 @ $4.26  (62,632.98)   win rate 23.0%
+
+  MC5-cell
+    at $1.00  trades    855   net   (5,912.66)   per trade   (6.92)   per symbol-day  (0.92)
+    at $4.26  trades    855   net   (8,699.96)   per trade  (10.18)   per symbol-day  (1.36)
+    at $8.92  trades    855   net  (12,684.26)   per trade  (14.84)   per symbol-day  (1.98)
+    halves @ $4.26    early   349   (9.36)/t  (3,265.20)   late   506  (10.74)/t  (5,434.76)
+    drop top 3 @ $4.26   (9,634.19)   win rate 24.8%
+
+  MC5-dist
+    at $1.00  trades  2,188   net  (11,684.39)   per trade   (5.34)   per symbol-day  (1.82)
+    at $4.26  trades  2,188   net  (18,817.27)   per trade   (8.60)   per symbol-day  (2.94)
+    at $8.92  trades  2,188   net  (29,013.35)   per trade  (13.26)   per symbol-day  (4.53)
+    halves @ $4.26    early   988  (10.07)/t  (9,944.93)   late 1,200   (7.39)/t  (8,872.34)
+    drop top 3 @ $4.26  (25,310.42)   win rate 23.4%
+
+  MC5-calm
+    at $1.00  trades  3,881   net  (23,001.98)   per trade   (5.93)   per symbol-day  (3.59)
+    at $4.26  trades  3,881   net  (35,654.04)   per trade   (9.19)   per symbol-day  (5.56)
+    at $8.92  trades  3,881   net  (53,739.50)   per trade  (13.85)   per symbol-day  (8.38)
+    halves @ $4.26    early 1,711   (8.22)/t (14,058.56)   late 2,170   (9.95)/t (21,595.48)
+    drop top 3 @ $4.26  (37,975.08)   win rate 23.2%
+
+  MC5-tight
+    at $1.00  trades    270   net     (868.79)   per trade   (3.22)   per symbol-day  (0.14)
+    at $4.26  trades    270   net   (1,748.99)   per trade   (6.48)   per symbol-day  (0.27)
+    at $8.92  trades    270   net   (3,007.19)   per trade  (11.14)   per symbol-day  (0.47)
+    halves @ $4.26    early    96   (9.53)/t    (914.53)   late   174   (4.80)/t    (834.46)
+    drop top 3 @ $4.26   (2,196.04)   win rate 27.4%
+
+  MC5-loose
+    at $1.00  trades  2,120   net  (11,152.12)   per trade   (5.26)   per symbol-day  (1.74)
+    at $4.26  trades  2,120   net  (18,063.32)   per trade   (8.52)   per symbol-day  (2.82)
+    at $8.92  trades  2,120   net  (27,942.52)   per trade  (13.18)   per symbol-day  (4.36)
+    halves @ $4.26    early   902   (8.00)/t  (7,212.61)   late 1,218   (8.91)/t (10,850.71)
+    drop top 3 @ $4.26  (19,711.57)   win rate 25.2%
+
+COULD MCL-cell HAVE BOUND? (every baseline entry, classified by the gate at its entry bar (book-ordinal, not scored))
+
+  baseline entries 3,908   where the gate could refuse 3,908 (100.0%)
+  1 = admitted, 0 = refused:  0:3,546  1:362
+
+THE VERDICT: MCL-cell against MCL (registered readings 1-5, $4.26)
+
+  1. per trade -0.43 (margin 4.26)   per symbol-day +4.87
+  2. early half  per trade -0.99  per symbol-day +2.20     late half  per trade -0.07  per symbol-day +2.67
+  3. drop-top-3 level  MCL-cell (4,245.13)  MCL (37,384.33)     drop-top-3 delta 30,529.80
+  4. cluster bootstrap on the delta  P(total > 0) = 1.000  [25,204.59, 36,350.01]  over 1,177 symbols
+  5. abstention control: 3,499 of 3,908 trades removed at random, 2000 draws
+       per trade      random p05 -3.05  p50 -0.17  p95 +3.40   the gate -0.43
+       per symbol-day random p05 +4.70  p50 +4.89  p95 +5.11   the gate +4.87
+
+  REFUSED: the two denominators disagree: per trade -0.43, per symbol-day +4.87
+
+  cost: 10 of MCL's top-10 trades at $4.26 are absent from MCL-cell
+    QMMM   2025-09-09  09:17 ET    1,341.32
+    OCTO   2025-09-08  08:33 ET      502.34
+    UPC    2026-06-29  08:50 ET      477.55
+    SQFT   2025-07-14  07:18 ET      468.34
+    UPC    2025-10-08  06:55 ET      401.36
+    WBUY   2025-05-09  07:24 ET      398.55
+    TTRX   2025-10-09  07:43 ET      382.48
+    WSHP   2026-04-16  07:54 ET      310.64
+    XCUR   2024-11-22  09:15 ET      302.34
+    GLTO   2025-10-07  06:42 ET      269.34
+  cascade: 47 MCL-cell entries the baseline does not contain
+
+WHAT MCL-cell REFUSED OF MCL (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            3,546   net  (31,987.02)   per trade   (9.02)
+    losses avoided   2,755    (61,662.21)
+    winners lost       791      29,675.19
+
+COULD MC5-cell HAVE BOUND? (every baseline entry, classified by the gate at its entry bar (book-ordinal, not scored))
+
+  baseline entries 6,462   where the gate could refuse 6,462 (100.0%)
+  1 = admitted, 0 = refused:  0:5,858  1:604
+
+THE VERDICT: MC5-cell against MC5 (registered readings 1-5, $4.26)
+
+  1. per trade -1.61 (margin 4.26)   per symbol-day +7.28
+  2. early half  per trade -0.65  per symbol-day +3.43     late half  per trade -2.28  per symbol-day +3.85
+  3. drop-top-3 level  MC5-cell (9,634.19)  MC5 (62,632.98)     drop-top-3 delta 45,753.30
+  4. cluster bootstrap on the delta  P(total > 0) = 1.000  [31,769.25, 58,002.07]  over 1,447 symbols
+  5. abstention control: 5,607 of 6,462 trades removed at random, 2000 draws
+       per trade      random p05 -3.31  p50 -0.55  p95 +5.73   the gate -1.61
+       per symbol-day random p05 +7.05  p50 +7.42  p95 +8.26   the gate +7.28
+
+  REFUSED: the two denominators disagree: per trade -1.61, per symbol-day +7.28
+
+  cost: 9 of MC5's top-10 trades at $4.26 are absent from MC5-cell
+    UVIX   2026-07-01  04:20 ET    5,437.25
+    NKTR   2025-06-24  05:05 ET    1,191.33
+    AEHL   2025-09-10  06:20 ET      640.33
+    WHLR   2024-09-06  04:05 ET      619.35
+    NPT    2026-02-03  08:00 ET      599.35
+    ADXN   2026-08-21  04:15 ET      537.36
+    WVVIP  2026-08-25  05:35 ET      534.33
+    MBX    2025-09-22  07:50 ET      493.34
+    LHAI   2025-07-25  05:50 ET      448.85
+  cascade: 260 MC5-cell entries the baseline does not contain
+
+WHAT MC5-cell REFUSED OF MC5 (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            5,858   net  (49,638.39)   per trade   (8.47)
+    losses avoided   4,523   (118,193.52)
+    winners lost     1,335      68,555.13
+
+COULD MCL-dist HAVE BOUND? (every baseline entry, classified by the gate at its entry bar (book-ordinal, not scored))
+
+  baseline entries 3,908   where the gate could refuse 3,908 (100.0%)
+  1 = admitted, 0 = refused:  0:2,472  1:1,436
+
+REPORTED, NOT REGISTERED: MCL-dist against MCL
+
+  would read NOTHING: fails 1 (per trade >= 4.26 and per symbol-day > 0); 5 (abstention control: per trade +0.55 does not beat random removal's p95 +1.38)
+  per trade +0.55   per symbol-day +3.42   boot P 1.000   removed 2,346   random p95 per trade +1.38
+
+WHAT MCL-dist REFUSED OF MCL (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            2,472   net  (22,954.68)   per trade   (9.29)
+    losses avoided   1,953    (42,690.35)
+    winners lost       519      19,735.67
+
+COULD MCL-calm HAVE BOUND? (every baseline entry, classified by the gate at its entry bar (book-ordinal, not scored))
+
+  baseline entries 3,908   where the gate could refuse 3,908 (100.0%)
+  1 = admitted, 0 = refused:  0:2,855  1:1,053
+
+REPORTED, NOT REGISTERED: MCL-calm against MCL
+
+  would read REFUSED: the two denominators disagree: per trade -0.02, per symbol-day +3.87
+  per trade -0.02   per symbol-day +3.87   boot P 1.000   removed 2,768   random p95 per trade +1.93
+
+WHAT MCL-calm REFUSED OF MCL (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            2,855   net  (25,787.37)   per trade   (9.03)
+    losses avoided   2,222    (51,335.65)
+    winners lost       633      25,548.28
+
+COULD MCL-tight HAVE BOUND? (every baseline entry, classified by the gate at its entry bar (book-ordinal, not scored))
+
+  baseline entries 3,908   where the gate could refuse 3,908 (100.0%)
+  1 = admitted, 0 = refused:  0:3,839  1:69
+
+REPORTED, NOT REGISTERED: MCL-tight against MCL
+
+  would read NOTHING: fails 1 (per trade >= 4.26 and per symbol-day > 0); 2 (both halves, both denominators); 5 (abstention control: per trade +2.48 does not beat random removal's p95 +8.70)
+  per trade +2.48   per symbol-day +5.38   boot P 1.000   removed 3,819   random p95 per trade +8.70
+
+WHAT MCL-tight REFUSED OF MCL (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            3,839   net  (34,504.26)   per trade   (8.99)
+    losses avoided   2,960    (66,648.85)
+    winners lost       879      32,144.59
+
+COULD MCL-loose HAVE BOUND? (every baseline entry, classified by the gate at its entry bar (book-ordinal, not scored))
+
+  baseline entries 3,908   where the gate could refuse 3,908 (100.0%)
+  1 = admitted, 0 = refused:  0:2,950  1:958
+
+REPORTED, NOT REGISTERED: MCL-loose against MCL
+
+  would read REFUSED: the two denominators disagree: per trade -0.39, per symbol-day +3.99
+  per trade -0.39   per symbol-day +3.99   boot P 1.000   removed 2,898   random p95 per trade +1.99
+
+WHAT MCL-loose REFUSED OF MCL (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            2,950   net  (26,196.86)   per trade   (8.88)
+    losses avoided   2,296    (51,703.33)
+    winners lost       654      25,506.47
+
+COULD MC5-dist HAVE BOUND? (every baseline entry, classified by the gate at its entry bar (book-ordinal, not scored))
+
+  baseline entries 6,462   where the gate could refuse 6,462 (100.0%)
+  1 = admitted, 0 = refused:  0:4,873  1:1,589
+
+REPORTED, NOT REGISTERED: MC5-dist against MC5
+
+  would read REFUSED: the two denominators disagree: per trade -0.03, per symbol-day +5.70
+  per trade -0.03   per symbol-day +5.70   boot P 1.000   removed 4,274   random p95 per trade +2.63
+
+WHAT MC5-dist REFUSED OF MC5 (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            4,873   net  (43,343.15)   per trade   (8.89)
+    losses avoided   3,761    (95,731.29)
+    winners lost     1,112      52,388.14
+
+COULD MC5-calm HAVE BOUND? (every baseline entry, classified by the gate at its entry bar (book-ordinal, not scored))
+
+  baseline entries 6,462   where the gate could refuse 6,462 (100.0%)
+  1 = admitted, 0 = refused:  0:3,123  1:3,339
+
+REPORTED, NOT REGISTERED: MC5-calm against MC5
+
+  would read REFUSED: the two denominators disagree: per trade -0.62, per symbol-day +3.07
+  per trade -0.62   per symbol-day +3.07   boot P 0.994   removed 2,581   random p95 per trade +1.26
+
+WHAT MC5-calm REFUSED OF MC5 (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            3,123   net  (25,306.06)   per trade   (8.10)
+    losses avoided   2,422    (68,455.93)
+    winners lost       701      43,149.87
+
+COULD MC5-tight HAVE BOUND? (every baseline entry, classified by the gate at its entry bar (book-ordinal, not scored))
+
+  baseline entries 6,462   where the gate could refuse 6,462 (100.0%)
+  1 = admitted, 0 = refused:  0:6,309  1:153
+
+REPORTED, NOT REGISTERED: MC5-tight against MC5
+
+  would read NOTHING: fails 1 (per trade >= 4.26 and per symbol-day > 0); 2 (both halves, both denominators); 5 (abstention control: per trade +2.09 does not beat random removal's p95 +6.85)
+  per trade +2.09   per symbol-day +8.36   boot P 1.000   removed 6,192   random p95 per trade +6.85
+
+WHAT MC5-tight REFUSED OF MC5 (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            6,309   net  (54,404.77)   per trade   (8.62)
+    losses avoided   4,866   (126,619.10)
+    winners lost     1,443      72,214.33
+
+COULD MC5-loose HAVE BOUND? (every baseline entry, classified by the gate at its entry bar (book-ordinal, not scored))
+
+  baseline entries 6,462   where the gate could refuse 6,462 (100.0%)
+  1 = admitted, 0 = refused:  0:4,745  1:1,717
+
+REPORTED, NOT REGISTERED: MC5-loose against MC5
+
+  would read NOTHING: fails 1 (per trade >= 4.26 and per symbol-day > 0); 2 (both halves, both denominators); 5 (abstention control: per trade +0.05 does not beat random removal's p95 +2.58)
+  per trade +0.05   per symbol-day +5.82   boot P 1.000   removed 4,342   random p95 per trade +2.58
+
+WHAT MC5-loose REFUSED OF MC5 (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            4,745   net  (40,837.46)   per trade   (8.61)
+    losses avoided   3,695    (99,040.39)
+    winners lost     1,050      58,202.93
+
+WHAT THIS IS NOT
+
+  NOT OUT OF SAMPLE. holdout.json has not been touched.
+  NOT A CAP MODEL. Each symbol-day runs alone (registration §5).
+  NOT A SEARCH. One N decides; the reported cell was declared before the run.
+
+THE MECHANISM, READ BACK AS A MEASUREMENT (§2)
+
+  The cell was chosen because its entries die on the next bar a quarter
+  as often. The kept book's one-bar share must read under 6% (MCL) /
+  22% (MC5) -- registration §2 -- or the deployed gate is not selecting
+  the cell the pre-flight measured, and the result says so first.
+
+  MCL
+    MCL          12.6%   (492 of 3,908)
+    MCL-cell      2.9%   (12 of 409)   -9.7pp   <- HOLDS
+    MCL-dist     13.1%   (205 of 1,562)   +0.5pp
+    MCL-calm      4.4%   (50 of 1,140)   -8.2pp
+    MCL-tight     1.1%   (1 of 89)  -11.5pp
+    MCL-loose     5.0%   (50 of 1,010)   -7.6pp
+
+  MC5
+    MC5          37.3%   (2,412 of 6,462)
+    MC5-cell     16.3%   (139 of 855)  -21.1pp   <- HOLDS
+    MC5-dist     34.7%   (760 of 2,188)   -2.6pp
+    MC5-calm     28.1%   (1,091 of 3,881)   -9.2pp
+    MC5-tight    11.9%   (32 of 270)  -25.5pp
+    MC5-loose    21.6%   (458 of 2,120)  -15.7pp
+
+WHAT EACH REFUSED TRADE WAS WORTH, AND WHAT THE KEPT BOOK IS WORTH
+
+  marginal = (tot(cell) - tot(base)) / (n(cell) - n(base)) at $4.26. A gate
+  refusing trades WORSE than the book's average is selecting; one refusing
+  trades better than it is abstaining into its own average. The kept
+  book's own per trade is printed at all three frictions.
+
+  MCL
+  book          trades   removed   marginal       $1.00      $4.26      $8.92
+  MCL            3,908         -          -       -5.71      -8.97     -13.63
+  MCL-cell         409    -3,499      -8.92       -6.14      -9.40     -14.06
+  MCL-dist       1,562    -2,346      -9.34       -5.17      -8.43     -13.09
+  MCL-calm       1,140    -2,768      -8.96       -5.74      -9.00     -13.66
+  MCL-tight         89    -3,819      -9.03       -3.23      -6.49     -11.15
+  MCL-loose      1,010    -2,898      -8.84       -6.10      -9.36     -14.02
+
+  MC5
+  book          trades   removed   marginal       $1.00      $4.26      $8.92
+  MC5            6,462         -          -       -5.31      -8.57     -13.23
+  MC5-cell         855    -5,607      -8.32       -6.92     -10.18     -14.84
+  MC5-dist       2,188    -4,274      -8.55       -5.34      -8.60     -13.26
+  MC5-calm       3,881    -2,581      -7.64       -5.93      -9.19     -13.85
+  MC5-tight        270    -6,192      -8.66       -3.22      -6.48     -11.14
+  MC5-loose      2,120    -4,342      -8.59       -5.26      -8.52     -13.18
+
+WHAT THE KEPT BOOK LOOKS LIKE TO A TRADER (§2)
+
+  550 sessions in the run; the live trader has 3 slots.
+
+  book          trades   trades/session   sessions with a trade   NaN-only refusals
+  MCL            3,908             7.11          540 of 550
+  MCL-cell         409             0.74          253 of 550        5 of 3,546 refused (0.1%)
+  MCL-dist       1,562             2.84          488 of 550
+  MCL-calm       1,140             2.07          449 of 550
+  MCL-tight         89             0.16           77 of 550        3 of 3,839 refused (0.1%)
+  MCL-loose      1,010             1.84          429 of 550        9 of 2,950 refused (0.3%)
+  MC5            6,462            11.75          546 of 550
+  MC5-cell         855             1.55          381 of 550        24 of 5,858 refused (0.4%)
+  MC5-dist       2,188             3.98          511 of 550
+  MC5-calm       3,881             7.06          538 of 550
+  MC5-tight        270             0.49          190 of 550        21 of 6,309 refused (0.3%)
+  MC5-loose      2,120             3.85          504 of 550        37 of 4,745 refused (0.8%)
+
+THE CONJUNCTION AGAINST ITS PARTS (P6, reported)
+
+  per-trade delta against the baseline at $4.26, and random removal's p95
+  at each book's own removal count. If the cell does not beat the distance
+  half alone on MCL, the calm condition adds nothing (registration §3).
+
+  MCL
+    MCL-dist    n  1,562   per trade   +0.55   random p95  +1.38
+    MCL-calm    n  1,140   per trade   -0.02   random p95  +1.93
+    MCL-cell    n    409   per trade   -0.43   random p95  +3.40
+    MCL-tight   n     89   per trade   +2.48   random p95  +8.70
+    MCL-loose   n  1,010   per trade   -0.39   random p95  +1.99
+
+  MC5
+    MC5-dist    n  2,188   per trade   -0.03   random p95  +2.63
+    MC5-calm    n  3,881   per trade   -0.62   random p95  +1.26
+    MC5-cell    n    855   per trade   -1.61   random p95  +5.73
+    MC5-tight   n    270   per trade   +2.09   random p95  +6.85
+    MC5-loose   n  2,120   per trade   +0.05   random p95  +2.58
