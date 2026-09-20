@@ -1,5 +1,7 @@
 # Handover: TSMOM, end of 2026-09-18
 
+> **Superseded as the starting point by `claude/handover_tsmom_engine_20260920.md`** (engine build, AT-41/AT-42). This doc is kept as history.
+
 **From:** the TSMOM chat, which has owned the line since 2026-09-17.
 **State:** registered, tooled, tested. **No backtest code. No result. One gate
 open and one unverified fact.**
