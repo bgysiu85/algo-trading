@@ -65,7 +65,11 @@ def read_manifest(archive: Path) -> dict:
 
 def _dbn_df(path: Path) -> pd.DataFrame:
     import databento as db            # imported here so the engine and its tests need no databento
-    return db.DBNStore.from_file(str(path)).to_df()
+    # from_file leaves the handle open (a ResourceWarning per file, ~2,500 of
+    # them over the calendar); read the bytes and close the file here.
+    with open(path, "rb") as fh:
+        data = fh.read()
+    return db.DBNStore.from_bytes(data).to_df()
 
 
 def load_bars(archive: Path, root: str) -> tuple[pd.DataFrame, dict]:
