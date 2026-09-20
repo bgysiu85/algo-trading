@@ -1,0 +1,58 @@
+# generated 2026-09-09 14:34:19 UTC
+# common.price_grid  cache=bar_cache
+
+PRICE GRID -- do highs and levels sit at half and whole dollars?
+
+  373 cached sessions, 1-minute bars, integer cents
+  real grid    .00 and .50
+  placebo grid .25 and .75 -- same spacing, same bars, no claim
+
+  The placebo is the control. Price is not uniformly distributed, so
+  'close to a round number' happens without any grid at all. Only the
+  DIFFERENCE between the two columns is evidence.
+
+  population                 n  <=1c real   placebo  <=2c real   placebo  mean real   placebo
+  all closes           425,975      11.2%      5.7%      14.7%      8.5%      12.02     12.98
+  bar highs            425,975      11.4%      5.7%      14.9%      8.6%      12.00     13.00
+  session extremes         746      14.1%      4.8%      17.6%      8.0%      11.90     13.10
+  repeat levels         24,424      11.2%      6.1%      14.8%      9.1%      12.00     13.00
+
+CLAIM 1 -- is there a grid at all?
+
+  Ordinary closes sit within a cent of .00/.50 11.2% of the time, against 5.7% for .25/.75.
+  Lift +5.5 points, a factor of 2.0.
+
+  YES. The tape respects half and whole dollars.
+
+CLAIM 2 -- are flat tops MORE gridded than ordinary prices?
+
+  repeat levels       11.2% vs the 11.2% baseline   excess -0.0 pts
+  session extremes    14.1% vs the 11.2% baseline   excess +2.9 pts
+
+  NO. Repeat-tagged levels are no more likely to sit on a
+  round number than any other price on the tape. The grid is
+  real and flat tops do not preferentially live on it, so
+  Warrior 2 §3's shortcut does not hold: detecting flat tops
+  remains a pattern-matching problem.
+
+  Warrior 2 §4 -- the standalone half-dollar entry -- is NOT
+  killed by this. It rests on claim 1, which passed. What
+  fails is the stronger claim that the two are the same
+  thing.
+
+  Worth noting separately: the day's HIGH and LOW do cluster beyond
+  the baseline. Where a move stops is gridded even where consolidation
+  is not -- which is a claim about targets and exits rather than entries,
+  and nothing in the Warrior set makes it.
+
+WHAT THIS DOES NOT SHOW
+
+  Whether a level, once identified, is worth trading. Clustering is
+  a fact about where prices pause; it says nothing about what
+  happens after one breaks. That is a separate measurement and it
+  needs the strategy, not just the bars.
+
+  These are IB bars and they are SPLIT-ADJUSTED. An adjusted price
+  is not the price anyone traded at, so a real grid effect would be
+  smeared by the adjustment factor -- which biases this test TOWARD
+  finding nothing. Re-run on bar_cache_xnas before believing a null.

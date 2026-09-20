@@ -1,0 +1,142 @@
+# generated 2026-09-13 01:31:25 UTC
+# common.run_census  source=cache adverse=5.0%
+
+HOW OFTEN DOES THE TAPE RUN, AND HOW MUCH IS IN IT?
+
+  source: cache   window 04:00-09:30 ET
+  407 symbol-day(s) over 89 session(s)
+  96,707 bars censused
+  dip tolerated on the way: 5.0%  (MCL's own trail, not a number chosen here)
+  elapsed 8.1s
+
+  82 symbol-day(s) NOT censused, by reason:
+          33  no bars
+          24  under $1
+          14  short
+          11  reverse-split price
+
+  `reverse-split price` is a DATA defect, not a thin name: the
+  tape is adjusted backwards, so a $2 stock that later did a
+  1-for-100 arrives at $200 and its dollars are fiction while its
+  percentages are sound. Excluded rather than silently priced.
+
+THE GRID  (every cell, none chosen)
+
+  a run = close rises R% within N bars, having never dipped 5.0% first
+
+  R \ N                  5            10            15            30
+  ------------------------------------------------------------------
+    3.0%             5,903         5,863         5,714         5,454
+    5.0%             3,294         3,518         3,539         3,472
+    8.0%             1,777         1,986         2,055         2,093
+   12.0%               977         1,153         1,218         1,279
+
+  the same counts as RUNS PER SESSION
+
+  R \ N                  5            10            15            30
+  ------------------------------------------------------------------
+    3.0%             66.33         65.88         64.20         61.28
+    5.0%             37.01         39.53         39.76         39.01
+    8.0%             19.97         22.31         23.09         23.52
+   12.0%             10.98         12.96         13.69         14.37
+
+
+THE BASE RATE  (what any entry signal has to beat)
+
+  runs per 1,000 bars censused. A signal firing on 5% of bars to
+  catch a shape that starts on 0.5% of them is 90% wrong before
+  anyone looks at an indicator.
+
+  R \ N                  5            10            15            30
+  ------------------------------------------------------------------
+    3.0%             61.04         60.63         59.09         56.40
+    5.0%             34.06         36.38         36.60         35.90
+    8.0%             18.38         20.54         21.25         21.64
+   12.0%             10.10         11.92         12.59         13.23
+
+
+WHAT IS IN ONE RUN  (per 100 shares, at the run's own price)
+
+  the ORACLE's gross: entered at the start bar's close, sold at
+  the completing bar's close, with the future known. No friction, no
+  slippage, no concurrency, and no rule that could have found it.
+
+  cell               runs     median        p75   median k   CEILING total
+  ------------------------------------------------------------------------
+  3% in 5           5,903      28.00      76.50          3      948,898.93
+  3% in 10          5,863      28.00      76.00          3      947,948.94
+  3% in 15          5,714      28.00      75.00          3      933,318.45
+  3% in 30          5,454      28.93      77.00          3      907,929.30
+  5% in 5           3,294      44.42     116.12          3      814,087.31
+  5% in 10          3,518      42.89     117.00          5      852,030.36
+  5% in 15          3,539      43.00     115.00          5      852,451.52
+  5% in 30          3,472      42.49     115.00          5      834,477.63
+  8% in 5           1,777      63.00     170.78          4      635,244.99
+  8% in 10          1,986      61.00     167.75          5      699,332.25
+  8% in 15          2,055      60.82     165.12          6      710,037.45
+  8% in 30          2,093      60.25     165.00          7      725,290.60
+  12% in 5            977      99.00     226.00          4      471,289.43
+  12% in 10         1,153      97.00     234.00          6      553,693.27
+  12% in 15         1,218      95.00     225.00          8      570,445.96
+  12% in 30         1,279      95.00     230.86          9      591,197.04
+
+
+HOW TOP-HEAVY IS THAT CEILING?
+
+  share of each cell's total carried by its biggest runs. A total is
+  the wrong summary for a distribution this skewed: if a twentieth of
+  the runs carry half the money, then no rule that catches the
+  TYPICAL run gets anything like the headline -- it has to catch the
+  specific few, which is a much harder thing and a different one.
+
+  cell              top 1%    top 5%   top 25%      median x n
+  --------------------------------------------------------------
+  3% in 5            28.5%     59.6%     88.3%      165,284.00
+  3% in 10           28.4%     59.9%     88.4%      164,164.00
+  3% in 15           28.6%     60.1%     88.6%      159,992.00
+  3% in 30           28.6%     60.3%     88.6%      157,811.49
+  5% in 5            24.9%     57.2%     88.1%      146,319.48
+  5% in 10           25.7%     57.4%     88.0%      150,887.02
+  5% in 15           25.6%     57.8%     88.1%      152,177.00
+  5% in 30           25.8%     58.0%     88.1%      147,525.28
+  8% in 5            22.3%     55.6%     87.7%      111,951.00
+  8% in 10           22.3%     56.5%     88.0%      121,146.00
+  8% in 15           22.3%     56.0%     87.8%      124,985.10
+  8% in 30           21.7%     55.9%     87.9%      126,103.25
+  12% in 5           18.6%     53.9%     86.9%       96,723.00
+  12% in 10          19.1%     54.4%     87.0%      111,841.00
+  12% in 15          19.8%     54.3%     87.0%      115,710.00
+  12% in 30          19.2%     53.9%     86.8%      121,505.00
+
+
+WHEN THEY START  (the 8% in 15 cell, nearest TNON's own
+  +11.7% in 13 -- shown because it is nearest, not because it is best)
+
+  04:00-05:00 ET      481  #########
+  05:00-06:00 ET      255  #####
+  06:00-07:00 ET      336  #######
+  07:00-08:00 ET      433  ########
+  08:00-09:00 ET      431  ########
+  09:00-09:30 ET      119  ##
+
+
+WHAT THIS IS NOT
+
+  NOT A STRATEGY, and not a backtest of one. Every run here was
+  found by reading the bars AFTER the start. The dollar column is
+  an oracle's -- the most that could ever be taken out of this
+  window -- and exists to be divided into, not reported as a result.
+
+  Not a claim that any of it is reachable. Nothing here says a rule
+  can find these bars in advance; that is the NEXT question, and it
+  is answered by comparing the run starts against the bars that look
+  like run starts and do not run. Without that denominator any
+  condition derived from these rows is fitted to them.
+
+  Not a chosen cell. The whole grid is printed. Picking the cell
+  with the best-looking number after seeing this table is the same
+  selection the feature study refused, one level up.
+
+  Not free of the universe. These are the symbols the screen already
+  selected, on the sessions that were pulled -- a run in a name the
+  screen never surfaced is invisible here.

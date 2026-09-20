@@ -1,0 +1,53 @@
+# Day Trade Dash 'Running Up' -- what 40 observed alerts say about the trigger
+# Source: 'day trade dash - running up sample.xlsx', captured 2026-09-18 by Ben.
+# OBSERVED BEHAVIOUR ONLY. The formula is not recoverable from alerts that FIRED:
+# there are no negatives here, so every threshold below is a BOUND, never a value.
+
+40 alerts, 9 symbols, 16:58 - 18:29 (after-hours)
+
+1. IT IS A STATE, NOT A ONE-SHOT EVENT.
+   DLXY   13 alerts over  35.2 min
+   DAIC    8 alerts over  11.0 min
+   SSM     7 alerts over  20.1 min
+   ABTS    5 alerts over   3.8 min
+   IPDN    2 alerts over   0.3 min
+   DTSS    2 alerts over   0.3 min
+   -> the gate form is a CONDITION CHECKED AT THE SIGNAL BAR, not an event window.
+
+2. IT RE-FIRES EVEN WHEN PRICE TICKED DOWN SINCE THE LAST ALERT.
+   DLXY    +0.00% between consecutive alerts
+   DLXY    -5.43% between consecutive alerts
+   DLXY    -2.46% between consecutive alerts
+   DAIC    +0.00% between consecutive alerts
+   DAIC    -1.97% between consecutive alerts
+   ABTS    -2.70% between consecutive alerts
+   ABTS    +0.00% between consecutive alerts
+   -> the trigger is a rolling window, NOT 'higher than the last alert'.
+
+3. IT FIRES ON NAMES DEEPLY DOWN ON THE DAY.
+   DLXY   gap  -49.78%   change-from-close as low as  -52.01%
+   -> 'running up' is about the RECENT move, not the day's direction.
+      Gap and change-from-close are display columns, not trigger inputs.
+
+4. THE DAILY RVOL IS NOT THE TRIGGER.
+   SSM    daily-rate RVOL   0.37-  1.01   5-min RVOL      1,942-     3,248
+   DLXY   daily-rate RVOL   1.19-  1.47   5-min RVOL        600-     2,289
+   XRTX   daily-rate RVOL   4.83-  4.83   5-min RVOL      6,303-     6,303
+   IPDN   daily-rate RVOL   0.41-  0.44   5-min RVOL      2,144-     2,827
+   KXIN   daily-rate RVOL  49.44- 49.44   5-min RVOL        271-       271
+   DAIC   daily-rate RVOL  17.43- 17.52   5-min RVOL        527-     1,324
+   DTSS   daily-rate RVOL  87.70- 87.70   5-min RVOL        810-       888
+   ABTS   daily-rate RVOL   3.23- 15.09   5-min RVOL     77,605-   422,846
+   GIPR   daily-rate RVOL   2.36-  2.36   5-min RVOL      2,404-     2,404
+   -> SSM fired at daily RVOL 0.37 (BELOW normal) on 5-min RVOL 1,942.
+      The short-window burst is the signal; the daily rate is not.
+
+5. SUB-MINUTE EVALUATION, NO FIXED COOLDOWN.
+   gap between consecutive alerts on one symbol: min 4s, median 63s, max 927s
+   -> their scanner reads ticks. A 1-minute-bar backtest APPROXIMATES it.
+
+6. THE ONLY THRESHOLD BOUND THE SAMPLE SUPPORTS.
+   lowest 5-min RVOL that still fired: 271.47
+   highest:                            422,845.74
+   A bound from positives alone. No negatives were observed, so the actual
+   threshold cannot be pinned -- and their baseline is not ours anyway.

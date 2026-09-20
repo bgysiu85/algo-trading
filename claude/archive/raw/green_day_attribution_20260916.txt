@@ -1,0 +1,102 @@
+GREEN DAY ATTRIBUTION — paper session 2026-09-16 (04:00–09:30 ET)
+Question: was the first green day the market, or the execution changes promoted that morning?
+Written 2026-09-17 (Sydney). Read-only analysis; production untouched.
+
+ANSWER
+The market, specifically the names on the watchlist. Not the execution changes.
+Of the $374 swing against a normal day, about $344 came from how far prices moved between
+signal and exit. About $30 came from cheaper execution legs, and none of that ran through
+code that changed. The one time new execution code engaged, it caused the MEDS ghost position.
+
+SOURCES
+  fills     D:\Trading\var\fills\mcl_fills_2026MMDD.csv (all sessions 09-02 → 09-16)
+  watchlist D:\Trading\var\archive\watchlist_2026MMDD.txt
+  code      D:\TradingProd tags prod-20260914d (ran 09-14, 09-15) → prod-20260916b (ran 09-16)
+  daily bars TradingView (via tvremix) — open vs prior close for each watchlist name
+  Not available: IB executions (Gateway cleared), Databento 09-16 file (not yet pulled),
+                 IBKR connector (erroring). So no bar-level replay of 09-16.
+
+1. THE DAY
+  19 round trips, net 212.95 (fill log; MEDS 06:16 position excluded, exit price unknown)
+  win rate 52.6% (prior 09-09..09-15: 17.4%)
+  Top 3 trades = 272.87, more than the whole day:
+    FTFT MCL 08:47 → window_close 09:30  +100.62
+    FTFT MC5 08:55 → window_close 09:30   +86.62
+    MEDS MC5 06:11 → trailing_stop 06:12  +85.63
+  Excluding those three: (59.92) over 16 = (3.75)/trade
+  By symbol: FTFT +160.87, MEDS +121.78, NAMI +13.15, RETO (23.74), VEEA (59.11)
+  VEEA's (72.74) is the two 04:00 stale-bar entries — a defect still present on 09-16.
+
+2. DECOMPOSITION OF EVERY ROUND TRIP (per share, from the fill log)
+  pnl/share = market move  (exit reference − signal close)
+            + entry leg    (signal close − entry fill)
+            + exit leg     (exit fill − exit reference)
+            − commission   (1.37 per round trip)
+
+  $/trade (x100 shares)   market   entry    exit   comm    net
+  2026-09-09                (1.41)  (2.67)  (6.25)  (1.38) (11.71)
+  2026-09-10                (6.18)   1.05   (3.69)  (1.37) (10.19)
+  2026-09-11                (0.26)   4.16   (5.80)  (1.37)  (3.27)
+  2026-09-14                (4.10)   4.35  (15.80)  (1.37) (16.92)
+  2026-09-15                (5.10)  (0.82)  (2.45)  (1.37)  (9.74)
+  2026-09-16                15.18    2.48   (5.08)  (1.37)  11.21
+  09-09..09-15 (n=115)      (2.92)   2.42   (6.60)  (1.37)  (8.48)
+
+  Swing vs the prior average, 19 trades:
+    market component   (15.18 + 2.92) x 19 = +344
+    execution legs     (−2.60 + 4.18) x 19 =  +30
+    total                                  = +374  (212.95 − (161.12))
+
+  Execution legs on 09-16 are normal:
+    trailing-stop exit slippage median  (0.0263)/sh  vs prior (0.0295)
+    entry spread at order, median        0.391%      vs prior 0.382%
+  The better exit MEAN (0.059 vs 0.082) is the absence of a CRBP-style tail, not new code:
+  no recorded exit on 09-16 was abandoned, clamped or retried.
+
+  Bootstrap: drawing 19 trades at random from the 115 prior trades gives net >= 212.95 in
+  0.045% of 20,000 draws. The trades themselves were different, not a lucky draw from the
+  old distribution.
+
+3. WHAT WAS PROMOTED, AND WHETHER IT ENGAGED ON 09-16
+  971e88a  exit abandons & re-prices when its limit is through the market
+           ENGAGED ONCE: MEDS 06:17:07. Lost fill → ghost position → 850+ unfillable sells,
+           slot blocked, 9 entries refused by the cap. No recorded trade benefited.
+  9fa812a  IB price band read from rejection → 0 rejections on 09-16, never used
+           ref_drift_pct column, trader-written CONFIG row → logging only
+  5cbe8a7  bad ticker no longer stalls watchlist reload → PSNYW refused cleanly at 04:00:06.
+           On 09-15 (old code) every non-PSNYW name still traded, so no measurable effect.
+  55615ef  portal partial-fill pairing → UI only
+  9d58397  backtest entry-price hook → no live effect
+  NOT yet promoted on 09-16: stale-bar gate, trail seed from fill, ghost-position fixes.
+  Under the old code the 19 recorded round trips would have been identical. The only
+  difference is MEDS 06:16–09:30: old code would have waited 20 s per attempt (likely a
+  slightly worse fill), but no ghost and no 9 blocked entries. Net sign unknown, small.
+
+4. THE MARKET — WHAT WAS DIFFERENT
+  Broad small caps did NOT help: IWM opened 285.63, closed 283.92 on 09-16 (down).
+  The watchlist's names did. Gap = RTH open vs prior close (the move by the end of our window):
+    09-10  TNON +72, PCLA +23, CULP +17, TPET +16, FTFT +7, GDHG +0   (5 names not fetched)
+    09-11  TNON +54, ACVA +45, FTFT +38, LBGJ +34, AENT +32, PCLA +29, SXTC +16, XRTX +14
+    09-14  BMGL +76*, SCNI +40, ELMT +39, BMM +21, ARMP +15, FTFT +15, RUM +7, BNC +5,
+           DRCT +2, LBGJ +0, ACVA +0, CRBP (2), AENT (6), TNON (6), PCLA (23)
+    09-15  VEEA +89, MYSZ +43, PSNYW +33, VRA +19, BDRX +15, TNON +14, NAMI +8
+    09-16  MEDS +149, RETO +61, FTFT +22, NAMI +19, VEEA (4), MYSZ (19)
+    * BMGL vs 09-10 close (no 09-11 bar)
+  09-16 had the strongest runner of any session (MEDS +149%, 1.62 → 4.035 → high 12.31)
+  and two names over +50%. The winners came from exactly those trends: FTFT held into the
+  open as it ran (RTH high 9.74), MEDS caught on repeated re-entries up the move.
+  Gap size alone does not predict a green day (09-11 had six names over +20% and lost),
+  so this is about trend persistence in the top names, which gaps only partly capture.
+
+5. HOW SURE
+  One session, 19 trades, 3 trades carried it. Strong that execution changes were NOT the
+  cause (the code paths are checkable and did not engage on any recorded trade). Moderate
+  that it was the opportunity set: every measure points that way, but "market" here means
+  a few names trending hard, which the strategy cannot choose and cannot count on.
+
+  What would firm it up:
+  - Pull Databento 2026-09-16_0400_0930 and replay MCL/MC5 unchanged on the watchlist.
+    A green backtest on the same day confirms the market reading independently of live fills.
+  - Get the MEDS exit fill from IB's statement and add it to the day.
+  - Watch the next sessions: a real execution improvement would show in the exit leg on
+    ordinary days, not only on days with a +149% runner.

@@ -1,0 +1,94 @@
+  (2 session(s) skipped: too short for full warm-up)
+373 sessions, holdout split 2026-03-20, net liq $4,131.89
+
+1. FLAT SIZE -- the control. Size is a near-pure multiplier, so
+   these are what any pyramid has to beat, not the 100-share row.
+  configuration                                net   per tr     drop5    per $ maxsh max notional
+  flat 100 shares from entry             $   1,567 $   3.16 $    -304   0.483%   100 $   1,966
+  flat 150 shares from entry             $   2,350 $   4.74 $    -456   0.483%   150 $   2,949
+  flat 200 shares from entry             $   3,134 $   6.32 $    -608   0.483%   200 $   3,932
+  flat 300 shares from entry             $   4,701 $   9.48 $    -912   0.483%   300 $   5,898  <-- exceeds account
+  flat 400 shares from entry             $   6,268 $  12.64 $  -1,216   0.483%   400 $   7,864  <-- exceeds account
+
+2. PYRAMID -- enter 100, add on a pullback that reclaims its peak
+  configuration                                net   per tr     drop5    per $ maxsh max notional
+  100 +50 on -1% dip, max 1 adds         $   2,199 $   4.43 $    -117   0.581%   150 $   2,949
+  100 +50 on -1% dip, max 2 adds         $   2,232 $   4.50 $    -260   0.552%   200 $   3,822
+  100 +50 on -1% dip, max inf adds       $   2,203 $   4.44 $    -551   0.502%   600 $   8,592  <-- exceeds account
+  100 +100 on -1% dip, max 1 adds        $   2,887 $   5.82 $      72   0.667%   200 $   3,932
+  100 +100 on -1% dip, max 2 adds        $   2,981 $   6.01 $    -231   0.615%   300 $   5,733  <-- exceeds account
+  100 +100 on -1% dip, max inf adds      $   2,951 $   5.95 $    -854   0.533%  1100 $  15,752  <-- exceeds account
+  100 +200 on -1% dip, max 1 adds        $   4,208 $   8.48 $     273   0.778%   300 $   5,898  <-- exceeds account
+  100 +200 on -1% dip, max 2 adds        $   4,396 $   8.86 $    -415   0.681%   500 $   9,555  <-- exceeds account
+  100 +200 on -1% dip, max inf adds      $   4,335 $   8.74 $  -1,791   0.554%  2100 $  30,072  <-- exceeds account
+  100 +50 on -2% dip, max 1 adds         $   2,192 $   4.42 $     -71   0.591%   150 $   2,949
+  100 +50 on -2% dip, max 2 adds         $   2,100 $   4.23 $    -318   0.537%   200 $   3,822
+  100 +50 on -2% dip, max inf adds       $   1,869 $   3.77 $    -579   0.459%   350 $   5,004  <-- exceeds account
+  100 +100 on -2% dip, max 1 adds        $   2,866 $   5.78 $      81   0.685%   200 $   3,932
+  100 +100 on -2% dip, max 2 adds        $   2,701 $   5.45 $    -380   0.590%   300 $   5,733  <-- exceeds account
+  100 +100 on -2% dip, max inf adds      $   2,252 $   4.54 $    -892   0.459%   600 $   8,340  <-- exceeds account
+  100 +200 on -2% dip, max 1 adds        $   4,166 $   8.40 $     228   0.813%   300 $   5,898  <-- exceeds account
+  100 +200 on -2% dip, max 2 adds        $   3,836 $   7.73 $    -713   0.649%   500 $   9,555  <-- exceeds account
+  100 +200 on -2% dip, max inf adds      $   2,937 $   5.92 $  -1,736   0.447%  1100 $  15,012  <-- exceeds account
+  100 +50 on -2.5% dip, max 1 adds       $   1,941 $   3.91 $    -274   0.533%   150 $   2,866
+  100 +50 on -2.5% dip, max 2 adds       $   1,804 $   3.64 $    -446   0.475%   200 $   3,336
+  100 +50 on -2.5% dip, max inf adds     $   1,624 $   3.27 $    -611   0.419%   300 $   4,296  <-- exceeds account
+  100 +100 on -2.5% dip, max 1 adds      $   2,356 $   4.75 $    -374   0.583%   200 $   3,822
+  100 +100 on -2.5% dip, max 2 adds      $   2,098 $   4.23 $    -704   0.482%   300 $   5,004  <-- exceeds account
+  100 +100 on -2.5% dip, max inf adds    $   1,745 $   3.52 $  -1,029   0.386%   500 $   7,160  <-- exceeds account
+  100 +200 on -2.5% dip, max 1 adds      $   3,145 $   6.34 $    -682   0.650%   300 $   5,733  <-- exceeds account
+  100 +200 on -2.5% dip, max 2 adds      $   2,630 $   5.30 $  -1,361   0.482%   500 $   8,340  <-- exceeds account
+  100 +200 on -2.5% dip, max inf adds    $   1,923 $   3.88 $  -2,109   0.332%   900 $  12,888  <-- exceeds account
+  100 +50 on -3% dip, max 1 adds         $   1,751 $   3.53 $    -447   0.489%   150 $   2,866
+  100 +50 on -3% dip, max 2 adds         $   1,540 $   3.10 $    -657   0.417%   200 $   3,336
+  100 +50 on -3% dip, max inf adds       $   1,441 $   2.90 $    -721   0.388%   250 $   3,580
+  100 +100 on -3% dip, max 1 adds        $   1,972 $   3.98 $    -726   0.502%   200 $   3,822
+  100 +100 on -3% dip, max 2 adds        $   1,559 $   3.14 $  -1,138   0.376%   300 $   5,004  <-- exceeds account
+  100 +100 on -3% dip, max inf adds      $   1,362 $   2.75 $  -1,263   0.325%   400 $   5,728  <-- exceeds account
+  100 +200 on -3% dip, max 1 adds        $   2,377 $   4.79 $  -1,384   0.515%   300 $   5,733  <-- exceeds account
+  100 +200 on -3% dip, max 2 adds        $   1,551 $   3.13 $  -2,209   0.307%   500 $   8,340  <-- exceeds account
+  100 +200 on -3% dip, max inf adds      $   1,157 $   2.33 $  -2,460   0.225%   700 $  10,024  <-- exceeds account
+  100 +50 on -4% dip, max 1 adds         $   1,344 $   2.71 $    -516   0.390%   150 $   2,502
+  100 +50 on -4% dip, max 2 adds         $   1,205 $   2.43 $    -625   0.346%   200 $   3,336
+  100 +50 on -4% dip, max inf adds       $   1,205 $   2.43 $    -625   0.346%   200 $   3,336
+  100 +100 on -4% dip, max 1 adds        $   1,141 $   2.30 $    -788   0.313%   200 $   3,336
+  100 +100 on -4% dip, max 2 adds        $     868 $   1.75 $  -1,004   0.233%   300 $   5,004  <-- exceeds account
+  100 +100 on -4% dip, max inf adds      $     868 $   1.75 $  -1,004   0.233%   300 $   5,004  <-- exceeds account
+  100 +200 on -4% dip, max 1 adds        $     716 $   1.44 $  -1,381   0.176%   300 $   5,004  <-- exceeds account
+  100 +200 on -4% dip, max 2 adds        $     168 $   0.34 $  -1,805   0.040%   500 $   8,340  <-- exceeds account
+  100 +200 on -4% dip, max inf adds      $     168 $   0.34 $  -1,805   0.040%   500 $   8,340  <-- exceeds account
+
+3. THE COMPARISON THAT MATTERS
+   Each pyramid against the FLAT size closest to what it builds to.
+  configuration                                net   per tr     drop5    per $ maxsh max notional
+  pyramid 100 +100 @-2.5% x1             $   2,356 $   4.75 $    -374   0.583%   200 $   3,822
+     control: flat 200                   $   3,134 $   6.32 $    -608   0.483%   200 $   3,932
+   -> pyramid earns 0.583% per $ vs 0.483% flat: BETTER
+
+  pyramid 100 +100 @-2.5% x2             $   2,098 $   4.23 $    -704   0.482%   300 $   5,004  <-- exceeds account
+     control: flat 300                   $   4,701 $   9.48 $    -912   0.483%   300 $   5,898  <-- exceeds account
+   -> pyramid earns 0.482% per $ vs 0.483% flat: WORSE
+
+  pyramid 100 +100 @-2% x1               $   2,866 $   5.78 $      81   0.685%   200 $   3,932
+     control: flat 200                   $   3,134 $   6.32 $    -608   0.483%   200 $   3,932
+   -> pyramid earns 0.685% per $ vs 0.483% flat: BETTER
+
+  pyramid 100 +100 @-1% x1               $   2,887 $   5.82 $      72   0.667%   200 $   3,932
+     control: flat 200                   $   3,134 $   6.32 $    -608   0.483%   200 $   3,932
+   -> pyramid earns 0.667% per $ vs 0.483% flat: BETTER
+
+  pyramid 100 +50 @-2.5% x1              $   1,941 $   3.91 $    -274   0.533%   150 $   2,866
+     control: flat 150                   $   2,350 $   4.74 $    -456   0.483%   150 $   2,949
+   -> pyramid earns 0.533% per $ vs 0.483% flat: BETTER
+
+  pyramid 100 +200 @-2.5% x1             $   3,145 $   6.34 $    -682   0.650%   300 $   5,733  <-- exceeds account
+     control: flat 300                   $   4,701 $   9.48 $    -912   0.483%   300 $   5,898  <-- exceeds account
+   -> pyramid earns 0.650% per $ vs 0.483% flat: BETTER
+
+4. HOLDOUT on the best pyramid by return per dollar
+   {'entry_shares': 100, 'pyramid_qty': 200, 'pyramid_pullback_pct': 2.0, 'max_adds': 1}
+  configuration                                net   per tr     drop5    per $ maxsh max notional
+  early half                             $   1,361 $   7.69 $    -823   0.772%   300 $   5,733  <-- exceeds account
+  late  half                             $   2,805 $   8.79 $    -832   0.834%   300 $   5,898  <-- exceeds account
+  early, flat 300 control                $   1,096 $   6.19 $  -2,392   0.330%   300 $   5,733  <-- exceeds account
+  late,  flat 300 control                $   3,605 $  11.30 $  -1,510   0.563%   300 $   5,898  <-- exceeds account

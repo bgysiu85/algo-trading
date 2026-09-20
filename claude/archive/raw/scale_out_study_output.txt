@@ -1,0 +1,194 @@
+  (2 session(s) skipped: too short for full warm-up)
+
+=== TRAIL 5%  baseline $1,567  $3.16/trade  496 trades ===
+  regime / partial x portion              real    per-trade        drop5      vs base   max size  cycles
+  NEUTRAL  p0.5% x20%                $      885  $  1.79/tr  drop5 $   1,443       -682  maxq   100  cyc   374
+  NEUTRAL  p0.5% x50%                $      371  $  0.75/tr  drop5 $   1,467     -1,196  maxq   100  cyc   374
+  NEUTRAL  p0.5% x75%                $      -58  $ -0.12/tr  drop5 $   1,487     -1,625  maxq   100  cyc   374
+  NEUTRAL  p1% x20%                  $      697  $  1.41/tr  drop5 $   1,292       -870  maxq   100  cyc   320
+  NEUTRAL  p1% x50%                  $     -158  $ -0.32/tr  drop5 $   1,036     -1,725  maxq   100  cyc   320
+  NEUTRAL  p1% x75%                  $     -870  $ -1.75/tr  drop5 $     819     -2,437  maxq   100  cyc   320
+  NEUTRAL  p2.5% x20%                $      508  $  1.02/tr  drop5 $     984     -1,059  maxq   100  cyc   181
+  NEUTRAL  p2.5% x50%                $     -795  $ -1.60/tr  drop5 $     123     -2,362  maxq   100  cyc   181
+  NEUTRAL  p2.5% x75%                $   -1,880  $ -3.79/tr  drop5 $    -626     -3,447  maxq   100  cyc   181
+  NEUTRAL  p5% x20%                  $    1,567  $  3.16/tr  drop5 $   1,707         +0  maxq   100  cyc     0
+  NEUTRAL  p5% x50%                  $    1,567  $  3.16/tr  drop5 $   1,707         +0  maxq   100  cyc     0
+  NEUTRAL  p5% x75%                  $    1,567  $  3.16/tr  drop5 $   1,707         +0  maxq   100  cyc     0
+  CAPPED2x p0.5% x20%                $    2,466  $  4.97/tr  drop5 $   2,630       +899  maxq   200  cyc   374
+  CAPPED2x p0.5% x50%                $    1,290  $  2.60/tr  drop5 $   2,350       -277  maxq   200  cyc   374
+  CAPPED2x p0.5% x75%                $      369  $  0.74/tr  drop5 $   1,985     -1,198  maxq   134  cyc   374
+  CAPPED2x p1% x20%                  $    1,673  $  3.37/tr  drop5 $   2,188       +106  maxq   200  cyc   320
+  CAPPED2x p1% x50%                  $      305  $  0.62/tr  drop5 $   1,669     -1,262  maxq   200  cyc   320
+  CAPPED2x p1% x75%                  $     -697  $ -1.41/tr  drop5 $   1,135     -2,264  maxq   134  cyc   320
+  CAPPED2x p2.5% x20%                $      946  $  1.91/tr  drop5 $   1,238       -621  maxq   200  cyc   181
+  CAPPED2x p2.5% x50%                $     -769  $ -1.55/tr  drop5 $     173     -2,336  maxq   194  cyc   181
+  CAPPED2x p2.5% x75%                $   -1,900  $ -3.83/tr  drop5 $    -623     -3,467  maxq   134  cyc   181
+  CAPPED2x p5% x20%                  $    1,567  $  3.16/tr  drop5 $   1,707         +0  maxq   100  cyc     0
+  CAPPED2x p5% x50%                  $    1,567  $  3.16/tr  drop5 $   1,707         +0  maxq   100  cyc     0
+  CAPPED2x p5% x75%                  $    1,567  $  3.16/tr  drop5 $   1,707         +0  maxq   100  cyc     0
+
+=== TRAIL 8%  baseline $3,644  $8.12/trade  449 trades ===
+  regime / partial x portion              real    per-trade        drop5      vs base   max size  cycles
+  NEUTRAL  p0.5% x20%                $    3,286  $  7.32/tr  drop5 $   2,861       -358  maxq   100  cyc   603
+  NEUTRAL  p0.5% x50%                $    3,524  $  7.85/tr  drop5 $   4,008       -120  maxq   100  cyc   603
+  NEUTRAL  p0.5% x75%                $    3,722  $  8.29/tr  drop5 $   4,921        +79  maxq   100  cyc   603
+  NEUTRAL  p1% x20%                  $    2,870  $  6.39/tr  drop5 $   2,424       -774  maxq   100  cyc   545
+  NEUTRAL  p1% x50%                  $    2,422  $  5.39/tr  drop5 $   2,857     -1,222  maxq   100  cyc   545
+  NEUTRAL  p1% x75%                  $    2,048  $  4.56/tr  drop5 $   3,218     -1,595  maxq   100  cyc   545
+  NEUTRAL  p2.5% x20%                $    2,313  $  5.15/tr  drop5 $   1,692     -1,330  maxq   100  cyc   382
+  NEUTRAL  p2.5% x50%                $      852  $  1.90/tr  drop5 $     854     -2,792  maxq   100  cyc   382
+  NEUTRAL  p2.5% x75%                $     -366  $ -0.81/tr  drop5 $     155     -4,010  maxq   100  cyc   382
+  NEUTRAL  p5% x20%                  $    2,638  $  5.88/tr  drop5 $   1,922     -1,005  maxq   100  cyc   139
+  NEUTRAL  p5% x50%                  $    1,390  $  3.10/tr  drop5 $   1,157     -2,254  maxq   100  cyc   139
+  NEUTRAL  p5% x75%                  $      350  $  0.78/tr  drop5 $     365     -3,294  maxq   100  cyc   139
+  CAPPED2x p0.5% x20%                $    7,839  $ 17.46/tr  drop5 $   6,151     +4,195  maxq   200  cyc   603
+  CAPPED2x p0.5% x50%                $    7,050  $ 15.70/tr  drop5 $   7,101     +3,406  maxq   200  cyc   603
+  CAPPED2x p0.5% x75%                $    5,351  $ 11.92/tr  drop5 $   6,469     +1,707  maxq   134  cyc   603
+  CAPPED2x p1% x20%                  $    6,563  $ 14.62/tr  drop5 $   4,855     +2,919  maxq   200  cyc   545
+  CAPPED2x p1% x50%                  $    4,979  $ 11.09/tr  drop5 $   5,003     +1,336  maxq   200  cyc   545
+  CAPPED2x p1% x75%                  $    3,166  $  7.05/tr  drop5 $   4,251       -478  maxq   134  cyc   545
+  CAPPED2x p2.5% x20%                $    5,414  $ 12.06/tr  drop5 $   3,369     +1,771  maxq   200  cyc   382
+  CAPPED2x p2.5% x50%                $    2,623  $  5.84/tr  drop5 $   1,838     -1,021  maxq   200  cyc   382
+  CAPPED2x p2.5% x75%                $      337  $  0.75/tr  drop5 $     563     -3,306  maxq   134  cyc   382
+  CAPPED2x p5% x20%                  $    4,790  $ 10.67/tr  drop5 $   2,511     +1,146  maxq   200  cyc   139
+  CAPPED2x p5% x50%                  $    2,663  $  5.93/tr  drop5 $   1,510       -981  maxq   194  cyc   139
+  CAPPED2x p5% x75%                  $      861  $  1.92/tr  drop5 $     564     -2,782  maxq   134  cyc   139
+
+=== TRAIL 10%  baseline $4,680  $10.99/trade  426 trades ===
+  regime / partial x portion              real    per-trade        drop5      vs base   max size  cycles
+  NEUTRAL  p0.5% x20%                $    4,663  $ 10.94/tr  drop5 $   4,187        -17  maxq   100  cyc   736
+  NEUTRAL  p0.5% x50%                $    5,559  $ 13.05/tr  drop5 $   5,948       +879  maxq   100  cyc   736
+  NEUTRAL  p0.5% x75%                $    6,307  $ 14.80/tr  drop5 $   7,414     +1,627  maxq   100  cyc   736
+  NEUTRAL  p1% x20%                  $    4,144  $  9.73/tr  drop5 $   3,690       -536  maxq   100  cyc   677
+  NEUTRAL  p1% x50%                  $    4,201  $  9.86/tr  drop5 $   4,647       -479  maxq   100  cyc   677
+  NEUTRAL  p1% x75%                  $    4,249  $  9.97/tr  drop5 $   5,440       -431  maxq   100  cyc   677
+  NEUTRAL  p2.5% x20%                $    3,264  $  7.66/tr  drop5 $   2,718     -1,416  maxq   100  cyc   504
+  NEUTRAL  p2.5% x50%                $    1,811  $  4.25/tr  drop5 $   2,005     -2,869  maxq   100  cyc   504
+  NEUTRAL  p2.5% x75%                $      601  $  1.41/tr  drop5 $   1,410     -4,079  maxq   100  cyc   504
+  NEUTRAL  p5% x20%                  $    3,328  $  7.81/tr  drop5 $   2,633     -1,352  maxq   100  cyc   227
+  NEUTRAL  p5% x50%                  $    1,670  $  3.92/tr  drop5 $   1,488     -3,010  maxq   100  cyc   227
+  NEUTRAL  p5% x75%                  $      288  $  0.68/tr  drop5 $     534     -4,392  maxq   100  cyc   227
+  CAPPED2x p0.5% x20%                $   10,082  $ 23.67/tr  drop5 $   8,346     +5,402  maxq   200  cyc   736
+  CAPPED2x p0.5% x50%                $   10,215  $ 23.98/tr  drop5 $  10,105     +5,535  maxq   200  cyc   736
+  CAPPED2x p0.5% x75%                $    8,535  $ 20.04/tr  drop5 $   9,559     +3,855  maxq   134  cyc   736
+  CAPPED2x p1% x20%                  $    8,584  $ 20.15/tr  drop5 $   6,922     +3,904  maxq   200  cyc   677
+  CAPPED2x p1% x50%                  $    7,687  $ 18.05/tr  drop5 $   7,656     +3,007  maxq   200  cyc   677
+  CAPPED2x p1% x75%                  $    5,866  $ 13.77/tr  drop5 $   6,995     +1,186  maxq   134  cyc   677
+  CAPPED2x p2.5% x20%                $    6,822  $ 16.01/tr  drop5 $   5,144     +2,141  maxq   200  cyc   504
+  CAPPED2x p2.5% x50%                $    3,923  $  9.21/tr  drop5 $   3,599       -757  maxq   200  cyc   504
+  CAPPED2x p2.5% x75%                $    1,464  $  3.44/tr  drop5 $   2,160     -3,216  maxq   134  cyc   504
+  CAPPED2x p5% x20%                  $    5,777  $ 13.56/tr  drop5 $   3,584     +1,097  maxq   200  cyc   227
+  CAPPED2x p5% x50%                  $    3,080  $  7.23/tr  drop5 $   1,953     -1,600  maxq   199  cyc   227
+  CAPPED2x p5% x75%                  $      836  $  1.96/tr  drop5 $     736     -3,844  maxq   134  cyc   227
+
+=== TRAIL 15%  baseline $6,873  $17.99/trade  382 trades ===
+  regime / partial x portion              real    per-trade        drop5      vs base   max size  cycles
+  NEUTRAL  p0.5% x20%                $    7,944  $ 20.80/tr  drop5 $   4,745     +1,071  maxq   100  cyc   930
+  NEUTRAL  p0.5% x50%                $   10,679  $ 27.95/tr  drop5 $   8,226     +3,806  maxq   100  cyc   930
+  NEUTRAL  p0.5% x75%                $   12,958  $ 33.92/tr  drop5 $  11,128     +6,085  maxq   100  cyc   930
+  NEUTRAL  p1% x20%                  $    7,291  $ 19.09/tr  drop5 $   4,163       +417  maxq   100  cyc   870
+  NEUTRAL  p1% x50%                  $    8,982  $ 23.51/tr  drop5 $   6,711     +2,108  maxq   100  cyc   870
+  NEUTRAL  p1% x75%                  $   10,391  $ 27.20/tr  drop5 $   8,828     +3,518  maxq   100  cyc   870
+  NEUTRAL  p2.5% x20%                $    5,877  $ 15.39/tr  drop5 $   2,848       -996  maxq   100  cyc   685
+  NEUTRAL  p2.5% x50%                $    5,248  $ 13.74/tr  drop5 $   3,234     -1,625  maxq   100  cyc   685
+  NEUTRAL  p2.5% x75%                $    4,723  $ 12.36/tr  drop5 $   3,473     -2,150  maxq   100  cyc   685
+  NEUTRAL  p5% x20%                  $    5,351  $ 14.01/tr  drop5 $   2,314     -1,522  maxq   100  cyc   378
+  NEUTRAL  p5% x50%                  $    3,608  $  9.45/tr  drop5 $   1,566     -3,265  maxq   100  cyc   378
+  NEUTRAL  p5% x75%                  $    2,156  $  5.64/tr  drop5 $     942     -4,717  maxq   100  cyc   378
+  CAPPED2x p0.5% x20%                $   16,079  $ 42.09/tr  drop5 $   9,160     +9,206  maxq   200  cyc   930
+  CAPPED2x p0.5% x50%                $   19,339  $ 50.63/tr  drop5 $  13,888    +12,466  maxq   200  cyc   930
+  CAPPED2x p0.5% x75%                $   17,169  $ 44.94/tr  drop5 $  14,312    +10,296  maxq   134  cyc   930
+  CAPPED2x p1% x20%                  $   14,364  $ 37.60/tr  drop5 $   7,617     +7,491  maxq   200  cyc   870
+  CAPPED2x p1% x50%                  $   16,117  $ 42.19/tr  drop5 $  10,971     +9,244  maxq   200  cyc   870
+  CAPPED2x p1% x75%                  $   13,828  $ 36.20/tr  drop5 $  11,325     +6,955  maxq   134  cyc   870
+  CAPPED2x p2.5% x20%                $   11,045  $ 28.91/tr  drop5 $   4,738     +4,172  maxq   200  cyc   685
+  CAPPED2x p2.5% x50%                $    9,449  $ 24.74/tr  drop5 $   4,997     +2,576  maxq   200  cyc   685
+  CAPPED2x p2.5% x75%                $    6,658  $ 17.43/tr  drop5 $   4,677       -216  maxq   134  cyc   685
+  CAPPED2x p5% x20%                  $    9,082  $ 23.78/tr  drop5 $   2,754     +2,209  maxq   200  cyc   378
+  CAPPED2x p5% x50%                  $    6,164  $ 16.14/tr  drop5 $   1,852       -709  maxq   200  cyc   378
+  CAPPED2x p5% x75%                  $    3,232  $  8.46/tr  drop5 $   1,244     -3,641  maxq   134  cyc   378
+
+=== THE UNCAPPED GRID WINNER, with its size requirement ===
+  all    trail15 p0.5 x20 +150              $   29,365  $ 76.87/tr  drop5 $  11,528    +22,492  maxq   734  cyc   930
+  early  trail15 p0.5 x20 +150              $   20,051  $140.21/tr  drop5 $     777    +15,038  maxq   734  cyc   380
+  late   trail15 p0.5 x20 +150              $    9,315  $ 38.97/tr  drop5 $   4,614     +7,454  maxq   716  cyc   550
+
+  Same cell with the position capped at 2x entry size:
+  all    trail15 p0.5 x20 +150 cap200       $   16,828  $ 44.05/tr  drop5 $   9,796     +9,955  maxq   200  cyc   930
+  early  trail15 p0.5 x20 +150 cap200       $   10,355  $ 72.41/tr  drop5 $   1,826     +5,343  maxq   200  cyc   380
+  late   trail15 p0.5 x20 +150 cap200       $    6,473  $ 27.08/tr  drop5 $   3,941     +4,612  maxq   200  cyc   550
+  (2 session(s) skipped: too short for full warm-up)
+373 sessions, holdout split 2026-03-20, 10,000 bootstrap resamples
+
+TRAIL 5%  sell 20% at -0.5%, size held CONSTANT   (496 -> 496 trades)
+  base $    1,567   cand $      885   delta $     -682
+  95% CI [$    -950, $    -418]   P(delta>0) = 0.0%
+  delta after dropping the best  1 symbol: $     -711
+  delta after dropping the best  3 symbols: $     -762
+  delta after dropping the best  5 symbols: $     -788
+  early half $     -210     late half $     -471     SIGN FLIPS
+
+TRAIL 5%  sell 75% at -0.5%, size held CONSTANT   (496 -> 496 trades)
+  base $    1,567   cand $      -58   delta $   -1,625
+  95% CI [$  -2,553, $    -722]   P(delta>0) = 0.0%
+  delta after dropping the best  1 symbol: $   -1,744
+  delta after dropping the best  3 symbols: $   -1,937
+  delta after dropping the best  5 symbols: $   -2,040
+  early half $     -460     late half $   -1,165     SIGN FLIPS
+
+TRAIL 15%  sell 75% at -0.5%, size held CONSTANT   (382 -> 382 trades)
+  base $    6,873   cand $   12,958   delta $   +6,085
+  95% CI [$  +3,458, $  +8,933]   P(delta>0) = 100.0%
+  delta after dropping the best  1 symbol: $   +5,404
+  delta after dropping the best  3 symbols: $   +4,618
+  delta after dropping the best  5 symbols: $   +3,971
+  early half $   +1,386     late half $   +4,699     both positive
+
+TRAIL 15%  sell 75% at -1%, size held CONSTANT   (382 -> 382 trades)
+  base $    6,873   cand $   10,391   delta $   +3,518
+  95% CI [$  +1,045, $  +6,160]   P(delta>0) = 99.8%
+  delta after dropping the best  1 symbol: $   +2,903
+  delta after dropping the best  3 symbols: $   +2,266
+  delta after dropping the best  5 symbols: $   +1,707
+  early half $     +377     late half $   +3,141     both positive
+
+TRAIL 10%  sell 75% at -0.5%, size held CONSTANT   (426 -> 426 trades)
+  base $    4,680   cand $    6,307   delta $   +1,627
+  95% CI [$    +122, $  +3,134]   P(delta>0) = 98.3%
+  delta after dropping the best  1 symbol: $   +1,419
+  delta after dropping the best  3 symbols: $   +1,034
+  delta after dropping the best  5 symbols: $     +773
+  early half $     +305     late half $   +1,322     both positive
+
+  (2 session(s) skipped: too short for full warm-up)
+4,900 cells from var/reports/scale_grid_peak.csv
+
+IN-SAMPLE BEST (by real net, after measured slippage)
+  trail 15.0%  partial 0.5%  portion 20.0%  rebuy 150
+  382 trades  real $29,365  $76.87/trade  drop5 $11,528
+  baseline at the SAME trail: $6,873  $17.99/trade over 382 trades
+  boundary params: ['trail', 'partial', 'portion', 'rebuy']  (4/4 pinned)
+  cells beating their OWN-TRAIL baseline: 1,803/4,900 (37%)
+
+HOLDOUT  (choose on dates < 2026-03-20, score on >= 2026-03-20)
+  chosen: trail 15.0%  partial 0.5%  portion 20.0%  rebuy 150
+  early  $20,051  vs baseline $5,012   -> edge $+15,038
+  late   $9,315  vs baseline $1,861   -> edge $+7,454
+  the LATE line is the only one that was not chosen on
+
+AT THE SHIPPED 5% TRAIL -- what the mechanic itself is worth
+  baseline                     $    1,567  $  3.16/trade  drop5 $    3,680
+  p0.5  x20  % +150 sh         $    3,472  $  7.00/trade  drop5 $    3,174  (+1,905)
+  p0.5  x30  % +150 sh         $    3,006  $  6.06/trade  drop5 $    3,210  (+1,439)
+  p0.5  x20  % +125 sh         $    2,998  $  6.04/trade  drop5 $    2,872  (+1,431)
+  p0.5  x30  % +125 sh         $    2,555  $  5.15/trade  drop5 $    2,878  (+988)
+  p0.5  x40  % +150 sh         $    2,548  $  5.14/trade  drop5 $    3,170  (+981)
+  p0.5  x20  % +100 sh         $    2,521  $  5.08/trade  drop5 $    2,569  (+954)
+  p1.0  x20  % +150 sh         $    2,335  $  4.71/trade  drop5 $    2,479  (+768)
+  p0.5  x40  % +125 sh         $    2,121  $  4.28/trade  drop5 $    2,819  (+554)
+  331/350 cells at this trail are NO BETTER than doing nothing
+
+DECOMPOSITION of the in-sample best, one change at a time
+  baseline, 5% trail, no scale-out           $    1,567
+  ...then trail 15.0%                        $    6,873   +5,306
+  ...then scale-out at the best cell         $   29,365   +22,492

@@ -1,0 +1,57 @@
+# generated 2026-09-18 17:35:40 AUS Eastern Standard Time
+# common.screen_day  archive=E:\Databento/XNAS.ITCH  cadence=60s  capture_ladder=var/reports/itch_capture.json cut=2026-03-30
+
+THE LIVE SCREEN, SIMULATED FORWARD THROUGH THE WHOLE DAY
+
+  registered  docs/research/REGISTERED_mc5_full_day.md
+  549 sessions, cadence 60s, 04:00-20:00 ET, XNAS.ITCH
+  clauses imported from tv_screener: change >= 20%, price in [2.00, 25.00], volume >= 100,000
+  top 40 by change at each tick; a name is never dropped
+  elapsed 1264.6s
+
+THE BLOCKS
+
+  block  window        change measured against   volume from
+  PRE    04:00-09:30   the prior regular close    04:00
+  RTH    09:30-16:00   the prior regular close    09:30
+  POST   16:00-20:00   TODAY's regular close      16:00
+
+  THE VOLUME THRESHOLD AFTER 09:30 IS CARRIED, NOT MEASURED.
+  itch_capture measured 04:30-09:30 only; RTH and POST screen at the
+  09:30 step. Too low a capture means too EASY a threshold and too big
+  a universe after 09:30 -- conservative for this study, and stated
+  rather than hidden.
+
+THE UNIVERSE
+
+  23,235 symbol-days over 549 sessions
+    first seen in PRE     6,403   27.6%
+    first seen in RTH    14,695   63.2%
+    first seen in POST    2,137    9.2%
+  per session  min 14  p50 40  max 97
+  sessions with none: 0
+
+THE CONTROL: THE PRE BLOCK IS screen_sim
+
+  330 ticks compared, 0 disagreement(s)
+  the PRE block reproduces screen_sim tick for tick on the session checked
+
+  6 date(s) dropped for missing a window slice:
+    2026-09-10, 2026-09-11, 2026-09-14, 2026-09-15, 2026-09-16, 2026-09-17
+
+  1 date(s) had no prior-close row at all
+
+THE PRIOR CLOSE THIS RAN AGAINST
+
+  daily=476,654  repaired=5,861,645
+  *** THESE CLOSES WERE ACCEPTED BELOW THE PRE-REGISTERED BAR ***
+      construction auction_else_last  scored 19/24 on every discriminating row
+      by listing venue: AMEX 0/3  NASDAQ 17/19  NYSE 2/2
+      AMEX: NOT ONE ROW MATCHED. Names listed there carry the old defect in full.
+      Every figure downstream of this inherits that residual.
+
+--- NOTE (not part of the emitted report) ---
+
+Output universe file: var/state/screen_pairs_pit_itch_day.json (4.85 MB).
+The study mc5_full_day ran 546 of these 549 sessions -- it also needs the
+pre-market slice for arm A, and the v2 universe for arms A/A'/B.

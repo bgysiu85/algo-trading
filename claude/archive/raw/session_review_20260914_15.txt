@@ -1,0 +1,253 @@
+SESSION REVIEW -- 2026-09-14 and 2026-09-15
+Source: var/fills/mcl_fills_20260914.csv, mcl_fills_20260915.csv
+        var/archive/watchlist_2026091[45].txt, watchlist_blocked_20260914.txt
+        E:\Databento\XNAS.BASIC\ohlcv-1m\2026-09-14_0400_0930.dbn.zst
+Written 2026-09-15 17:35 ET.
+
+These are REAL FILLS. Every figure below is all-in: the spread and the
+slippage are inside the fill prices and a $1.37 round-trip commission is
+already deducted from trade_pnl. No friction assumption is used anywhere in
+this document, which makes it the only evidence in the project that does not
+depend on one.
+
+
+1. THE TWO SESSIONS
+-------------------
+
+    2026-09-14   64 order rows   40 filled   20 round trips     (338.43)
+    2026-09-15   39 order rows   38 filled   19 round trips     (185.01)
+    ------------------------------------------------------------------
+    two days                                 39 round trips     (523.44)
+                                                per trade        (13.42)
+                                                5 winners, 34 losers
+
+    2026-09-14   MCL   n= 8   (294.97)   per (36.87)   win 12%   hold 12.2m
+                 MC5   n=12    (43.46)   per  (3.62)   win 25%   hold 20.1m
+    2026-09-15   MCL   n= 7    (51.58)   per  (7.37)   win 14%   hold 13.2m
+                 MC5   n=12   (133.43)   per (11.12)   win  0%   hold  5.5m
+
+  The 09-14 MCL figure is one trade. See section 2.
+
+  WITHOUT that trade the two days are (282.07) over 38 round trips =
+  (7.42)/trade, against (6.87)/trade over the previous six sessions. So the
+  headline deterioration is NOT a regime change. It is one fill.
+
+
+2. ONE TRADE IS 46% OF THE TWO-DAY LOSS
+----------------------------------------
+
+CRBP, 2026-09-14, MCL. Bought 9.16, sold 6.76, (241.37) in 42 seconds.
+
+The log, verbatim, with the quote the system had in hand on each row:
+
+    07:02:05  BUY   entry_signal   ref 9.75   bid 9.11 / ask 9.35   spread 2.57%
+              limit 9.37 -> FILLED 9.16 in 3.15s
+    07:02:10  SELL  trailing_stop  ref 9.2625 bid 9.08 / ask 9.16   spread 0.87%
+              limit 9.06 -> NO_FILL_CANCELLED
+    07:02:31  SELL  trailing_stop  ref 9.2625 bid 5.28 / ask 6.87   spread 23.14%
+              limit 5.26 -> REJECTED  (IBKR: limit more aggressive than 6.31944)
+    07:02:32  SELL  trailing_stop             bid 5.54 / ask 6.61   spread 16.19%
+              limit 5.52 -> REJECTED  (IBKR: limit more aggressive than 6.26316)
+    07:02:33  SELL  trailing_stop             bid 6.06 / ask 6.61   spread  8.32%
+              limit 6.04 -> REJECTED
+    07:02:34  SELL  trailing_stop             bid 6.29 / ask 6.61   spread  4.84%
+              limit 6.27 -> FILLED 6.76       pnl (241.37)   hold 0.7m
+
+And the tape, from the archive, one-minute bars:
+
+              open     high      low    close     volume
+    06:59   8.8200   9.0825   8.8200   8.9800     10,354
+    07:00   8.9800   9.9100   8.9800   9.7500    116,100   <- the signal bar
+    07:01   9.7500   9.8000   9.0700   9.2000    103,250
+    07:02   9.2000   9.4700   5.5678   6.9795    129,658   <- bought AND sold here
+    07:03   6.9900   8.1300   6.8151   7.9900     83,486
+    07:04   8.0800   9.0758   7.7400   8.6396     76,000
+    07:06   8.6100   9.6100   8.5610   9.5600     93,614
+
+  CRBP fell from 9.47 to 5.5678 inside one minute and closed that same minute
+  back at 6.98. Four minutes later it was at 9.56 -- above where the strategy
+  bought it. The position was opened into the top of a flush and closed at the
+  bottom of the same flush.
+
+Three separate mechanical failures are visible, and none of them is a
+strategy question:
+
+  (a) THE ORDER WAS SENT INTO A QUOTE THAT HAD ALREADY LEFT THE REFERENCE.
+      The decision was priced off 9.75. The bid on the same log row was 9.11
+      -- 6.6% lower. The system had that number in its hand at the moment it
+      sent the order and nothing looked at it.
+
+      Worse, the fill is RECORDED AS GOOD: slippage_vs_ref = +0.59, a 59-cent
+      favourable fill. The execution-quality metric scored the worst trade in
+      the book as one of the best fills of the day. That is the project's
+      recurring shape again -- a control whose output is indistinguishable
+      from the failure it is meant to detect.
+
+  (b) THE TRAILING STOP CANNOT CHASE A COLLAPSE.
+      The stop is a LIMIT order priced just under the current bid. In a fast
+      fall the bid moves faster than the loop, so the first attempt was stale
+      (9.06 against a bid that had gone) and the next three were priced BELOW
+      what IBKR would accept. Five attempts, 24 seconds, during a 42% drop.
+      Every other exit on both days filled on the first attempt.
+
+  (c) THE BROKER'S REJECTION MESSAGE IS NOT READ.
+      "We cannot accept an order at a limit price at or more aggressive than
+      6.31944" -- IBKR states the acceptable bound in the rejection text. The
+      retry ignored it and sent 5.52, then 6.04. Three round trips to the
+      broker were spent re-learning a number it had already supplied.
+
+  Note also: CRBP signalled twice more, at 07:15 and 07:33, and BOTH were
+  blocked by the concurrency cap. The cap saved money -- by arrival order,
+  not by judgement.
+
+
+3. IS "THE REFERENCE HAS ALREADY MOVED" A USABLE FILTER? NO.
+-------------------------------------------------------------
+
+The obvious response to 2(a) is to refuse entries whose quote has drifted from
+the signal close. That was tested across the whole live book before writing it
+down: 138 paired round trips, drift = (mid at order / signal close - 1).
+
+    Q1  drift [ (8.59%) .. (1.91%)]  n=34   net (414.47)   per (12.19)  win 12%
+    Q2  drift [ (1.63%) .. (0.24%)]  n=35   net    23.40   per    0.67  win 26%
+    Q3  drift [ (0.24%) ..   0.44% ]  n=34   net (321.94)   per  (9.47)  win 15%
+    Q4  drift [   0.46% ..  10.54% ]  n=35   net (490.12)   per (14.00)  win 14%
+
+  NOT MONOTONE, and the only positive bucket is an interior one -- which is
+  what noise looks like. Removing the single CRBP trade takes Q1 from (12.19)
+  to (5.54), so nearly the whole Q1 effect IS that one trade.
+
+  VERDICT: drift does not separate outcomes in this book. It belongs as a RISK
+  CONTROL on order placement -- do not send a buy into a quote 6%+ below the
+  reference -- not as an entry filter. Those are different claims and only the
+  first is supported.
+
+  Median drift is (0.24%); p10 (5.39%); p90 2.13%.
+
+
+4. 2026-09-15 WAS THE CLEANEST EXECUTION SESSION ON RECORD, AND STILL LOST
+---------------------------------------------------------------------------
+
+    concurrency-cap rejects        0     (09-14: 12, 09-10: 30, 09-11: 13)
+    broker rejections              0     (09-14: 3)
+    orders needing a 2nd attempt   0     (09-14: 2 exits, one of them 5 tries)
+    median spread at order     0.289%    (09-14: 0.755%, 09-11: 0.404%)
+    median seconds to fill       0.52    (unchanged across every session)
+    trailing-stop slippage    (0.0150)   median   (09-11: (0.0563))
+
+  Every one of the 19 round trips filled first time. MC5 went 0 for 12.
+  Nothing about execution explains (185.01); the entries were simply wrong.
+
+Exit mechanic, both days, per share against reference:
+
+    gradient_reversal   n= 9   median  0.0000   mean (0.0025)
+    trailing_stop       n=26   median (0.0190)   mean (0.1235)
+    window_close        n= 4   median (0.0850)   mean (0.0975)
+
+  A signal exit still fills at the reference and a stop still fills through
+  it -- the third independent confirmation. The gap between the trailing
+  stop's median (0.0190) and its mean (0.1235) is CRBP on its own: the stop's
+  typical cost is small and its TAIL is not, which is exactly what a median
+  alone conceals.
+
+  window_close remains the most expensive exit in the system.
+
+
+5. BEN'S 21 LABELLED SAMPLES MEET THE ALGORITHM ON THE SAME DAY
+----------------------------------------------------------------
+
+Nine of the 21 screenshots are from 2026-09-14. All five of their symbols
+(SCNI, CRBP, DRCT, ARMP, BMGL) were on that morning's 16-name watchlist -- the
+screen found every name he was watching. What the algorithm did with them:
+
+    his sample            his label            the algorithm
+    ---------------------------------------------------------------------
+    SCNI 06:57   took and lost     signalled 07:00, BLOCKED by cap;
+                                   entered 08:58 instead, (5.37)
+    CRBP 07:03   took              entered 07:02:05, out 07:02:34, (241.37)
+    CRBP 07:19   pass              signalled 07:15, BLOCKED by cap
+    DRCT 07:22   pass              no signal
+    DRCT 07:28   took and lost     no signal
+    CRBP 07:32   took and lost     signalled 07:33, BLOCKED by cap
+                 "bought at peak"
+    ARMP 07:57   pass              no signal  <-- agreement
+    BMGL 08:15   took              entered 09:02, (15.38)
+    BMGL 08:21   took              as above
+
+  TWO THINGS STAND OUT.
+
+  On the two CRBP bars Ben himself marked as bad -- one an explicit pass, one
+  "bought at peak" -- THE ALGORITHM WANTED TO BUY, and only the concurrency
+  cap stopped it. He and the strategy disagree in the same direction twice, on
+  the same name, within twenty minutes.
+
+  On ARMP 07:57 -- his pass on a vertical move with MFI at 100 -- the
+  strategy produced no signal at all. They agree there.
+
+  This is one session and nine bars; it settles nothing. What it does is
+  confirm the labelled set is about the SAME DECISIONS the strategy is making,
+  on the same names, at the same minutes. That is what makes the placement
+  instrument worth running rather than an exercise in a different problem.
+
+
+6. THE RUNNING LIVE RECORD
+---------------------------
+
+    date        trades       net        MCL        MC5   cap   rej
+    2026-09-02       2     (1.00)         --         --     0     4
+    2026-09-03      19   (163.60)         --         --     0     2
+    2026-09-08       2    (63.74)         --         --     0     0
+    2026-09-09       6    (70.26)    (70.26)         --     3     0
+    2026-09-10      22   (224.18)    (57.24)   (166.94)    30    10
+    2026-09-11      48   (156.91)      46.12   (203.03)    13     0
+    2026-09-14      20   (338.43)   (294.97)    (43.46)    12     8
+    2026-09-15      19   (185.01)    (51.58)   (133.43)     0     0
+    -----------------------------------------------------------------
+    total          138  (1,203.13)                         58    24
+
+    per trade   (8.72)      win rate 16.7%
+    first 6 sessions   n=99   (679.69)   per (6.87)   win 18.2%
+    last 2 sessions    n=39   (523.44)   per (13.42)  win 12.8%
+
+  The concurrency cap has now rejected 58 buy attempts against 138 completed
+  round trips. No backtest in this project models that at all.
+
+
+7. WHAT TO DO
+--------------
+
+Ranked by what the evidence here actually supports.
+
+  1. READ THE BROKER'S PRICE BAND OUT OF THE REJECTION AND USE IT. IBKR states
+     the acceptable limit in the text of the rejection. Three of 09-14's eight
+     failed orders were re-sends that ignored a bound the broker had already
+     given. Cheap, mechanical, no strategy question.
+
+  2. A STOP THAT CANNOT FILL IS NOT A STOP. The 5% trail behaved correctly on
+     50 of 51 exits across these two days and failed on the one occasion it
+     mattered. Either the stop leg becomes marketable once price is through
+     the level by some margin, or the trail's measured cost has to carry the
+     tail it does not currently show. Do not change TRAIL_PCT -- that lever is
+     closed; this is about the ORDER TYPE, which is section 2.5 of
+     intraday_candidates_20260915.md and was already ranked.
+
+  3. STOP SCORING FILLS BY slippage_vs_ref ALONE. It called (241.37) a
+     59-cent favourable fill. A buy filling far BELOW its reference is a
+     warning that the reference is stale, not a bargain. The metric needs a
+     sign-aware companion -- drift at order time -- reported beside it.
+
+  4. RANK, DO NOT LET ARRIVAL ORDER DECIDE. 58 cap rejections, and on 09-14
+     the cap's accidental choices were better than the strategy's deliberate
+     ones. This is item 3 in the proposed PROGRAM_INDEX §7 insert and the
+     live record keeps arguing for it.
+
+  5. Run the placement instrument. Section 5 establishes the labelled set is
+     about the same decisions the live system is making.
+
+WHAT THIS DOES NOT SUPPORT
+
+  - It does not support a regime-change reading. Ex-CRBP the two days are
+    (7.42)/trade against a (6.87) baseline.
+  - It does not support a drift entry filter. Section 3, explicitly tested.
+  - n=39 over two sessions, and 16.7% win rate over 138 trades total. The
+    sample is SESSIONS, and there are eight of them.

@@ -1,0 +1,61 @@
+  (2 session(s) skipped: too short for full warm-up)
+==============================================================================
+PART 1 -- what actually happens after a 5% trailing-stop exit
+==============================================================================
+
+ALL trailing-stop exits: 474 trailing-stop exits
+   bars  high > exit  median max   mean max  $ left (hindsight)  close > exit
+      1          76%       1.96%      4.64% $            16,090           54%
+      2          80%       2.82%      6.57% $            21,331           52%
+      3          83%       3.85%      7.91% $            24,812           50%
+      5          86%       4.50%     13.81% $            35,888           49%
+     10          88%       6.57%     17.28% $            45,191           49%
+
+  of those, the ones that exited at a LOSS: 255 trailing-stop exits
+   bars  high > exit  median max   mean max  $ left (hindsight)  close > exit
+      1          79%       1.66%      4.61% $             7,024           54%
+      2          85%       2.45%      6.54% $             9,810           57%
+      3          86%       3.19%      8.01% $            12,034           53%
+      5          90%       3.85%     17.57% $            20,543           49%
+     10          91%       5.28%     20.44% $            23,774           51%
+
+  of those, the ones that exited in PROFIT: 219 trailing-stop exits
+   bars  high > exit  median max   mean max  $ left (hindsight)  close > exit
+      1          72%       2.25%      4.68% $             9,066           53%
+      2          75%       3.58%      6.61% $            11,521           47%
+      3          78%       4.27%      7.79% $            12,778           47%
+      5          81%       5.32%      9.57% $            15,345           49%
+     10          85%       7.84%     13.74% $            21,417           47%
+
+NULL: the same measurement from random in-trade bars: 474 trailing-stop exits
+   bars  high > exit  median max   mean max  $ left (hindsight)  close > exit
+      1          62%       0.30%      1.10% $             3,805           37%
+      2          70%       0.48%      1.61% $             5,279           40%
+      3          75%       0.64%      2.24% $             7,508           39%
+      5          80%       0.93%      3.19% $            10,941           44%
+     10          85%       1.47%      5.22% $            16,913           49%
+
+==============================================================================
+PART 2 -- do rules that avoid the give-back earn more?
+==============================================================================
+
+  baseline: 5% intrabar trail, 496 trades, $1,567, drop5 $-304
+
+  rule                                 trades        net     delta             95% CI  P(>0)  drop5 of delta
+
+  -- the cheap way to concede room: just widen the trail --
+  6% intrabar trail                    479 tr  $   1,603       +36  [ -1,107, +1,518]  48.3%      -973
+  7% intrabar trail                    467 tr  $   1,572        +5  [ -1,790, +2,059]  47.7%    -1,645
+  8% intrabar trail                    449 tr  $   3,643    +2,077  [   -871, +5,747]  90.3%      -898
+  10% intrabar trail                   426 tr  $   4,680    +3,113  [   -293, +6,908]  96.3%      +222
+
+  -- ignore the wick: require a CLOSE below the level --
+  5% trail, on the close               480 tr  $   3,318    +1,751  [ -1,699, +5,716]  82.2%    -1,178
+  6% trail, on the close               460 tr  $   3,700    +2,134  [ -1,548, +6,223]  85.6%      -820
+  8% trail, on the close               427 tr  $   6,722    +5,155  [   -235,+12,121]  96.7%      +617
+
+  -- breach, then confirm N bars later --
+  5% trail, confirm after 1 bar(s)     464 tr  $   3,067    +1,500  [ -2,324, +5,723]  76.2%    -1,485
+  5% trail, confirm after 2 bar(s)     451 tr  $   8,637    +7,071  [ -1,752,+21,753]  88.8%      -823
+  5% trail, confirm after 3 bar(s)     442 tr  $   8,802    +7,236  [   -272,+19,026]  96.7%      +299
+  5% trail, confirm after 5 bar(s)     425 tr  $   9,867    +8,300  [   +820,+20,220]  99.0%    +1,255

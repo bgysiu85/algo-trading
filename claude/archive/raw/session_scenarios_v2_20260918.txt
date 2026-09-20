@@ -1,0 +1,759 @@
+# generated 2026-09-18 10:05:38 AUS Eastern Standard Time
+# common.session_scenarios pairs=var/state/screen_pairs_pit_itch_v2.json dataset=XNAS.ITCH sessions=550 symbol_days=6411 cut=2025-08-07 qty=100 price_floor=5.0 giveback=0.5 arm=40.0
+
+THE FIVE SCENARIOS: A $5 ENTRY FLOOR, AND THE 50% SESSION GIVE-BACK CAP
+
+  registered  docs/research/REGISTERED_price_floor.md (scenario 1)
+              docs/research/REGISTERED_giveback_cap.md (scenarios 2-5, + amendment A)
+  universe    var/state/screen_pairs_pit_itch_v2.json   bars XNAS.ITCH
+  550 sessions   6,411 symbol-days   halves cut at 2025-08-07
+  100 shares   commission in, friction per round trip   elapsed 50.6s on 8 worker(s)
+
+POPULATION CHECK
+
+  MCL trades here     3,908
+  published count     3,908   matches
+
+======================================================================
+AT $1.00 A ROUND TRIP
+
+THE BOOKS
+
+  MCL
+    at $1.00  trades  3,908   net  (22,323.04)   per trade   (5.71)   per symbol-day  (3.48)
+    at $4.26  trades  3,908   net  (35,063.12)   per trade   (8.97)   per symbol-day  (5.47)
+    at $8.92  trades  3,908   net  (53,274.40)   per trade  (13.63)   per symbol-day  (8.31)
+    halves @ $4.26    early 1,753   (8.94)/t (15,674.95)   late 2,155   (9.00)/t (19,388.17)
+    drop top 3 @ $4.26  (37,384.33)   win rate 23.0%
+
+  MCL  scenario 1
+    at $1.00  trades  1,742   net  (10,296.45)   per trade   (5.91)   per symbol-day  (1.61)
+    at $4.26  trades  1,742   net  (15,975.37)   per trade   (9.17)   per symbol-day  (2.49)
+    at $8.92  trades  1,742   net  (24,093.09)   per trade  (13.83)   per symbol-day  (3.76)
+    halves @ $4.26    early   737   (9.13)/t  (6,725.13)   late 1,005   (9.20)/t  (9,250.24)
+    drop top 3 @ $4.26  (18,296.58)   win rate 28.3%
+
+  MCL  scenario 2
+    at $1.00  trades  3,188   net  (19,136.12)   per trade   (6.00)   per symbol-day  (2.98)
+    at $4.26  trades  3,188   net  (29,529.00)   per trade   (9.26)   per symbol-day  (4.61)
+    at $8.92  trades  3,188   net  (44,385.08)   per trade  (13.92)   per symbol-day  (6.92)
+    halves @ $4.26    early 1,479   (8.99)/t (13,299.17)   late 1,709   (9.50)/t (16,229.83)
+    drop top 3 @ $4.26  (30,806.46)   win rate 23.3%
+
+  MCL  scenario 3
+    at $1.00  trades  3,554   net  (20,909.88)   per trade   (5.88)   per symbol-day  (3.26)
+    at $4.26  trades  3,554   net  (32,495.92)   per trade   (9.14)   per symbol-day  (5.07)
+    at $8.92  trades  3,554   net  (49,057.56)   per trade  (13.80)   per symbol-day  (7.65)
+    halves @ $4.26    early 1,661   (8.62)/t (14,315.49)   late 1,893   (9.60)/t (18,180.43)
+    drop top 3 @ $4.26  (33,843.17)   win rate 23.0%
+
+  MCL  scenario 4
+    at $1.00  trades  1,441   net   (9,164.33)   per trade   (6.36)   per symbol-day  (1.43)
+    at $4.26  trades  1,441   net  (13,861.99)   per trade   (9.62)   per symbol-day  (2.16)
+    at $8.92  trades  1,441   net  (20,577.05)   per trade  (14.28)   per symbol-day  (3.21)
+    halves @ $4.26    early   631   (8.67)/t  (5,468.35)   late   810  (10.36)/t  (8,393.64)
+    drop top 3 @ $4.26  (15,209.24)   win rate 28.7%
+
+  MCL  scenario 5
+    at $1.00  trades  1,608   net  (10,160.99)   per trade   (6.32)   per symbol-day  (1.58)
+    at $4.26  trades  1,608   net  (15,403.07)   per trade   (9.58)   per symbol-day  (2.40)
+    at $8.92  trades  1,608   net  (22,896.35)   per trade  (14.24)   per symbol-day  (3.57)
+    halves @ $4.26    early   694   (8.97)/t  (6,227.67)   late   914  (10.04)/t  (9,175.40)
+    drop top 3 @ $4.26  (16,851.30)   win rate 28.6%
+
+  MC5
+    at $1.00  trades  6,462   net  (34,297.95)   per trade   (5.31)   per symbol-day  (5.35)
+    at $4.26  trades  6,462   net  (55,364.07)   per trade   (8.57)   per symbol-day  (8.64)
+    at $8.92  trades  6,462   net  (85,476.99)   per trade  (13.23)   per symbol-day (13.33)
+    halves @ $4.26    early 2,901   (8.70)/t (25,247.05)   late 3,561   (8.46)/t (30,117.02)
+    drop top 3 @ $4.26  (62,632.98)   win rate 23.0%
+
+  MC5  scenario 1
+    at $1.00  trades  2,758   net  (12,069.74)   per trade   (4.38)   per symbol-day  (1.88)
+    at $4.26  trades  2,758   net  (21,060.82)   per trade   (7.64)   per symbol-day  (3.29)
+    at $8.92  trades  2,758   net  (33,913.10)   per trade  (12.30)   per symbol-day  (5.29)
+    halves @ $4.26    early 1,138   (8.82)/t (10,033.17)   late 1,620   (6.81)/t (11,027.65)
+    drop top 3 @ $4.26  (28,329.73)   win rate 27.3%
+
+  MC5  scenario 2
+    at $1.00  trades  5,340   net  (25,539.20)   per trade   (4.78)   per symbol-day  (3.98)
+    at $4.26  trades  5,340   net  (42,947.60)   per trade   (8.04)   per symbol-day  (6.70)
+    at $8.92  trades  5,340   net  (67,832.00)   per trade  (12.70)   per symbol-day (10.58)
+    halves @ $4.26    early 2,456   (8.51)/t (20,910.97)   late 2,884   (7.64)/t (22,036.63)
+    drop top 3 @ $4.26  (50,216.51)   win rate 23.0%
+
+  MC5  scenario 3
+    at $1.00  trades  5,629   net  (26,098.66)   per trade   (4.64)   per symbol-day  (4.07)
+    at $4.26  trades  5,629   net  (44,449.20)   per trade   (7.90)   per symbol-day  (6.93)
+    at $8.92  trades  5,629   net  (70,680.34)   per trade  (12.56)   per symbol-day (11.02)
+    halves @ $4.26    early 2,562   (8.33)/t (21,346.82)   late 3,067   (7.53)/t (23,102.38)
+    drop top 3 @ $4.26  (51,718.11)   win rate 23.3%
+
+  MC5  scenario 4
+    at $1.00  trades  2,334   net   (6,970.66)   per trade   (2.99)   per symbol-day  (1.09)
+    at $4.26  trades  2,334   net  (14,579.50)   per trade   (6.25)   per symbol-day  (2.27)
+    at $8.92  trades  2,334   net  (25,455.94)   per trade  (10.91)   per symbol-day  (3.97)
+    halves @ $4.26    early   983   (7.90)/t  (7,761.47)   late 1,351   (5.05)/t  (6,818.03)
+    drop top 3 @ $4.26  (21,848.41)   win rate 27.6%
+
+  MC5  scenario 5
+    at $1.00  trades  2,492   net   (7,841.07)   per trade   (3.15)   per symbol-day  (1.22)
+    at $4.26  trades  2,492   net  (15,964.99)   per trade   (6.41)   per symbol-day  (2.49)
+    at $8.92  trades  2,492   net  (27,577.71)   per trade  (11.07)   per symbol-day  (4.30)
+    halves @ $4.26    early 1,042   (8.21)/t  (8,556.52)   late 1,450   (5.11)/t  (7,408.47)
+    drop top 3 @ $4.26  (23,233.90)   win rate 27.8%
+
+----------------------------------------------------------------------
+SCENARIO 1: a $5 entry floor
+
+  MCL  per trade -0.20   per symbol-day +1.88   entries refused +2,166 (signal-ordinal: not a subset of the baseline)
+  MC5  per trade +0.93   per symbol-day +3.47   entries refused +3,704 (signal-ordinal: not a subset of the baseline)
+
+----------------------------------------------------------------------
+SCENARIO 2: stop the SESSION after a 50% give-back
+
+  scope session   give-back 50%   arm 40.00
+  armed 179   fired 121   trades removed 1,842 of 10,370
+  removed per trade (6.49)   kept per trade (5.24)
+  one-bar trades: 30.9% of removed, 27.4% of kept
+  fire time (ET hour): 04:00 9  05:00 25  06:00 21  07:00 34  08:00 26  09:00 6
+    (§5: if the removed trades are worse only because they are late, this is the time-of-day filter under another name -- and that is closed)
+
+  MCL against the baseline (H-S4's six readings)
+  1. per remaining trade -0.29   per symbol-day +0.50      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: NO
+  3. early half -0.05   late half -0.50
+  4. drop-top-3 delta 2,708.66   drop-top-5 delta 2,455.09
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 0.958  over 540 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -0.72  p50 -0.36  p95 +0.13   the cap -0.29
+     [not scored, amendment A4] matched-COUNT random removal, 720 trades, 2,000 draws: p05 -0.56  p50 +0.01  p95 +0.52   the cap -0.29
+     trades removed: the cap 720, the control 566 on average  -> the control removes FEWER, so this test is NOT conservative
+  NOTHING: fails 1, 2, 3, 6 of the six
+
+  MC5 against the baseline (H-S4's six readings)
+  1. per remaining trade +0.53   per symbol-day +1.37      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: yes
+  3. early half +0.19   late half +0.82
+  4. drop-top-3 delta 8,191.56   drop-top-5 delta 7,888.03
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 1.000  over 546 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -0.11  p50 +0.21  p95 +0.50   the cap +0.53
+     [not scored, amendment A4] matched-COUNT random removal, 1,122 trades, 2,000 draws: p05 -0.97  p50 +0.10  p95 +0.59   the cap +0.53
+     trades removed: the cap 1,122, the control 965 on average  -> the control removes FEWER, so this test is NOT conservative
+  PASSES
+
+----------------------------------------------------------------------
+SCENARIO 3: stop the STRATEGY after a 50% give-back
+
+  scope strategy   give-back 50%   arm 40.00
+  armed 267   fired 156   trades removed 1,187 of 10,370
+  removed per trade (8.10)   kept per trade (5.12)
+  one-bar trades: 34.3% of removed, 27.2% of kept
+  fire time (ET hour): 04:00 9  05:00 25  06:00 29  07:00 40  08:00 42  09:00 11
+    (§5: if the removed trades are worse only because they are late, this is the time-of-day filter under another name -- and that is closed)
+
+  MCL against the baseline (H-S4's six readings)
+  1. per remaining trade -0.17   per symbol-day +0.22      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: NO
+  3. early half +0.32   late half -0.61
+  4. drop-top-3 delta 851.79   drop-top-5 delta 670.38
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 0.816  over 540 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -0.52  p50 -0.28  p95 +0.13   the cap -0.17
+     [not scored, amendment A4] matched-COUNT random removal, 354 trades, 2,000 draws: p05 -0.40  p50 +0.02  p95 +0.33   the cap -0.17
+     trades removed: the cap 354, the control 365 on average  -> the control removes MORE, so this test is conservative
+  NOTHING: fails 1, 2, 3, 5, 6 of the six
+
+  MC5 against the baseline (H-S4's six readings)
+  1. per remaining trade +0.67   per symbol-day +1.28      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: yes
+  3. early half +0.37   late half +0.92
+  4. drop-top-3 delta 7,649.08   drop-top-5 delta 7,345.55
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 1.000  over 546 sessions
+  6. random cut, same sessions: 10,000 draws  p05 +0.04  p50 +0.32  p95 +0.57   the cap +0.67
+     [not scored, amendment A4] matched-COUNT random removal, 833 trades, 2,000 draws: p05 -0.87  p50 +0.09  p95 +0.48   the cap +0.67
+     trades removed: the cap 833, the control 800 on average  -> the control removes FEWER, so this test is NOT conservative
+  PASSES
+
+----------------------------------------------------------------------
+SCENARIO 4: the $5 floor AND the session cap
+
+  scope session   give-back 50%   arm 40.00
+  armed 163   fired 96   trades removed 725 of 4,500
+  removed per trade (8.59)   kept per trade (4.27)
+  one-bar trades: 29.2% of removed, 25.7% of kept
+  fire time (ET hour): 04:00 6  05:00 16  06:00 12  07:00 29  08:00 26  09:00 7
+    (§5: if the removed trades are worse only because they are late, this is the time-of-day filter under another name -- and that is closed)
+
+  MCL against scenario 1 (H-S4's six readings) -- what the cap adds ON TOP OF the floor (A7), and the SCORED reading for this scenario
+  1. per remaining trade -0.45   per symbol-day +0.18      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: NO
+  3. early half +0.46   late half -1.16
+  4. drop-top-3 delta 692.00   drop-top-5 delta 477.09
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 0.785  over 461 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -1.57  p50 -0.86  p95 +0.20   the cap -0.45
+     [not scored, amendment A4] matched-COUNT random removal, 301 trades, 2,000 draws: p05 -1.21  p50 +0.05  p95 +1.03   the cap -0.45
+     trades removed: the cap 301, the control 271 on average  -> the control removes FEWER, so this test is NOT conservative
+  NOTHING: fails 1, 2, 3, 5, 6 of the six
+
+  MCL against the baseline -- floor AND cap together. DESCRIPTIVE, NOT SCORED
+    per trade -0.65   per symbol-day +2.05   trades 3,908 -> 1,441
+    (the delta carries the floor; the control above does not, so the six are read against scenario 1)
+
+  MC5 against scenario 1 (H-S4's six readings) -- what the cap adds ON TOP OF the floor (A7), and the SCORED reading for this scenario
+  1. per remaining trade +1.39   per symbol-day +0.80      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: yes
+  3. early half +0.92   late half +1.76
+  4. drop-top-3 delta 4,534.01   drop-top-5 delta 4,212.44
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 1.000  over 503 sessions
+  6. random cut, same sessions: 10,000 draws  p05 +0.51  p50 +1.05  p95 +1.62   the cap +1.39
+     [not scored, amendment A4] matched-COUNT random removal, 424 trades, 2,000 draws: p05 -2.15  p50 +0.23  p95 +1.22   the cap +1.39
+     trades removed: the cap 424, the control 426 on average  -> the control removes MORE, so this test is conservative
+  NOTHING: fails 6 of the six
+
+  MC5 against the baseline -- floor AND cap together. DESCRIPTIVE, NOT SCORED
+    per trade +2.32   per symbol-day +4.26   trades 6,462 -> 2,334
+    (the delta carries the floor; the control above does not, so the six are read against scenario 1)
+
+----------------------------------------------------------------------
+SCENARIO 5: the $5 floor AND the strategy cap
+
+  scope strategy   give-back 50%   arm 40.00
+  armed 227   fired 103   trades removed 400 of 4,500
+  removed per trade (10.91)   kept per trade (4.39)
+  one-bar trades: 33.2% of removed, 25.6% of kept
+  fire time (ET hour): 04:00 5  05:00 13  06:00 16  07:00 31  08:00 30  09:00 8
+    (§5: if the removed trades are worse only because they are late, this is the time-of-day filter under another name -- and that is closed)
+
+  MCL against scenario 1 (H-S4's six readings) -- what the cap adds ON TOP OF the floor (A7), and the SCORED reading for this scenario
+  1. per remaining trade -0.41   per symbol-day +0.02      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: NO
+  3. early half +0.15   late half -0.83
+  4. drop-top-3 delta (281.47)   drop-top-5 delta (453.22)
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 0.590  over 461 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -0.79  p50 -0.40  p95 +0.49   the cap -0.41
+     [not scored, amendment A4] matched-COUNT random removal, 134 trades, 2,000 draws: p05 -0.80  p50 +0.04  p95 +0.63   the cap -0.41
+     trades removed: the cap 134, the control 147 on average  -> the control removes MORE, so this test is conservative
+  NOTHING: fails 1, 2, 3, 4, 5, 6 of the six
+
+  MCL against the baseline -- floor AND cap together. DESCRIPTIVE, NOT SCORED
+    per trade -0.61   per symbol-day +1.90   trades 3,908 -> 1,608
+    (the delta carries the floor; the control above does not, so the six are read against scenario 1)
+
+  MC5 against scenario 1 (H-S4's six readings) -- what the cap adds ON TOP OF the floor (A7), and the SCORED reading for this scenario
+  1. per remaining trade +1.23   per symbol-day +0.66      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: yes
+  3. early half +0.60   late half +1.70
+  4. drop-top-3 delta 3,712.05   drop-top-5 delta 3,439.36
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 1.000  over 503 sessions
+  6. random cut, same sessions: 10,000 draws  p05 +0.62  p50 +1.03  p95 +1.43   the cap +1.23
+     [not scored, amendment A4] matched-COUNT random removal, 266 trades, 2,000 draws: p05 -1.99  p50 +0.18  p95 +0.89   the cap +1.23
+     trades removed: the cap 266, the control 288 on average  -> the control removes MORE, so this test is conservative
+  NOTHING: fails 6 of the six
+
+  MC5 against the baseline -- floor AND cap together. DESCRIPTIVE, NOT SCORED
+    per trade +2.16   per symbol-day +4.13   trades 6,462 -> 2,492
+    (the delta carries the floor; the control above does not, so the six are read against scenario 1)
+
+======================================================================
+AT $4.26 A ROUND TRIP
+
+THE BOOKS
+
+  MCL
+    at $1.00  trades  3,908   net  (22,323.04)   per trade   (5.71)   per symbol-day  (3.48)
+    at $4.26  trades  3,908   net  (35,063.12)   per trade   (8.97)   per symbol-day  (5.47)
+    at $8.92  trades  3,908   net  (53,274.40)   per trade  (13.63)   per symbol-day  (8.31)
+    halves @ $4.26    early 1,753   (8.94)/t (15,674.95)   late 2,155   (9.00)/t (19,388.17)
+    drop top 3 @ $4.26  (37,384.33)   win rate 23.0%
+
+  MCL  scenario 1
+    at $1.00  trades  1,742   net  (10,296.45)   per trade   (5.91)   per symbol-day  (1.61)
+    at $4.26  trades  1,742   net  (15,975.37)   per trade   (9.17)   per symbol-day  (2.49)
+    at $8.92  trades  1,742   net  (24,093.09)   per trade  (13.83)   per symbol-day  (3.76)
+    halves @ $4.26    early   737   (9.13)/t  (6,725.13)   late 1,005   (9.20)/t  (9,250.24)
+    drop top 3 @ $4.26  (18,296.58)   win rate 28.3%
+
+  MCL  scenario 2
+    at $1.00  trades  3,241   net  (19,645.61)   per trade   (6.06)   per symbol-day  (3.06)
+    at $4.26  trades  3,241   net  (30,211.27)   per trade   (9.32)   per symbol-day  (4.71)
+    at $8.92  trades  3,241   net  (45,314.33)   per trade  (13.98)   per symbol-day  (7.07)
+    halves @ $4.26    early 1,520   (8.86)/t (13,470.75)   late 1,721   (9.73)/t (16,740.52)
+    drop top 3 @ $4.26  (31,488.73)   win rate 23.2%
+
+  MCL  scenario 3
+    at $1.00  trades  3,587   net  (21,064.76)   per trade   (5.87)   per symbol-day  (3.29)
+    at $4.26  trades  3,587   net  (32,758.38)   per trade   (9.13)   per symbol-day  (5.11)
+    at $8.92  trades  3,587   net  (49,473.80)   per trade  (13.79)   per symbol-day  (7.72)
+    halves @ $4.26    early 1,672   (8.67)/t (14,491.58)   late 1,915   (9.54)/t (18,266.80)
+    drop top 3 @ $4.26  (34,105.63)   win rate 23.0%
+
+  MCL  scenario 4
+    at $1.00  trades  1,474   net   (9,431.62)   per trade   (6.40)   per symbol-day  (1.47)
+    at $4.26  trades  1,474   net  (14,236.86)   per trade   (9.66)   per symbol-day  (2.22)
+    at $8.92  trades  1,474   net  (21,105.70)   per trade  (14.32)   per symbol-day  (3.29)
+    halves @ $4.26    early   640   (8.52)/t  (5,455.53)   late   834  (10.53)/t  (8,781.33)
+    drop top 3 @ $4.26  (15,584.11)   win rate 28.8%
+
+  MCL  scenario 5
+    at $1.00  trades  1,619   net   (9,767.41)   per trade   (6.03)   per symbol-day  (1.52)
+    at $4.26  trades  1,619   net  (15,045.35)   per trade   (9.29)   per symbol-day  (2.35)
+    at $8.92  trades  1,619   net  (22,589.89)   per trade  (13.95)   per symbol-day  (3.52)
+    halves @ $4.26    early   701   (8.84)/t  (6,194.49)   late   918   (9.64)/t  (8,850.86)
+    drop top 3 @ $4.26  (16,493.58)   win rate 28.8%
+
+  MC5
+    at $1.00  trades  6,462   net  (34,297.95)   per trade   (5.31)   per symbol-day  (5.35)
+    at $4.26  trades  6,462   net  (55,364.07)   per trade   (8.57)   per symbol-day  (8.64)
+    at $8.92  trades  6,462   net  (85,476.99)   per trade  (13.23)   per symbol-day (13.33)
+    halves @ $4.26    early 2,901   (8.70)/t (25,247.05)   late 3,561   (8.46)/t (30,117.02)
+    drop top 3 @ $4.26  (62,632.98)   win rate 23.0%
+
+  MC5  scenario 1
+    at $1.00  trades  2,758   net  (12,069.74)   per trade   (4.38)   per symbol-day  (1.88)
+    at $4.26  trades  2,758   net  (21,060.82)   per trade   (7.64)   per symbol-day  (3.29)
+    at $8.92  trades  2,758   net  (33,913.10)   per trade  (12.30)   per symbol-day  (5.29)
+    halves @ $4.26    early 1,138   (8.82)/t (10,033.17)   late 1,620   (6.81)/t (11,027.65)
+    drop top 3 @ $4.26  (28,329.73)   win rate 27.3%
+
+  MC5  scenario 2
+    at $1.00  trades  5,440   net  (24,631.48)   per trade   (4.53)   per symbol-day  (3.84)
+    at $4.26  trades  5,440   net  (42,365.88)   per trade   (7.79)   per symbol-day  (6.61)
+    at $8.92  trades  5,440   net  (67,716.28)   per trade  (12.45)   per symbol-day (10.56)
+    halves @ $4.26    early 2,533   (8.52)/t (21,569.37)   late 2,907   (7.15)/t (20,796.51)
+    drop top 3 @ $4.26  (49,634.79)   win rate 23.2%
+
+  MC5  scenario 3
+    at $1.00  trades  5,658   net  (26,197.87)   per trade   (4.63)   per symbol-day  (4.09)
+    at $4.26  trades  5,658   net  (44,642.95)   per trade   (7.89)   per symbol-day  (6.96)
+    at $8.92  trades  5,658   net  (71,009.23)   per trade  (12.55)   per symbol-day (11.08)
+    halves @ $4.26    early 2,607   (8.29)/t (21,609.33)   late 3,051   (7.55)/t (23,033.62)
+    drop top 3 @ $4.26  (51,911.86)   win rate 23.4%
+
+  MC5  scenario 4
+    at $1.00  trades  2,367   net   (6,605.18)   per trade   (2.79)   per symbol-day  (1.03)
+    at $4.26  trades  2,367   net  (14,321.60)   per trade   (6.05)   per symbol-day  (2.23)
+    at $8.92  trades  2,367   net  (25,351.82)   per trade  (10.71)   per symbol-day  (3.95)
+    halves @ $4.26    early   994   (8.12)/t  (8,070.61)   late 1,373   (4.55)/t  (6,250.99)
+    drop top 3 @ $4.26  (21,590.51)   win rate 27.8%
+
+  MC5  scenario 5
+    at $1.00  trades  2,505   net   (8,000.48)   per trade   (3.19)   per symbol-day  (1.25)
+    at $4.26  trades  2,505   net  (16,166.78)   per trade   (6.45)   per symbol-day  (2.52)
+    at $8.92  trades  2,505   net  (27,840.08)   per trade  (11.11)   per symbol-day  (4.34)
+    halves @ $4.26    early 1,049   (8.24)/t  (8,647.76)   late 1,456   (5.16)/t  (7,519.02)
+    drop top 3 @ $4.26  (23,435.69)   win rate 27.9%
+
+----------------------------------------------------------------------
+SCENARIO 1: a $5 entry floor
+
+  MCL  per trade -0.20   per symbol-day +2.98   entries refused +2,166 (signal-ordinal: not a subset of the baseline)
+  MC5  per trade +0.93   per symbol-day +5.35   entries refused +3,704 (signal-ordinal: not a subset of the baseline)
+
+----------------------------------------------------------------------
+SCENARIO 2: stop the SESSION after a 50% give-back
+
+  scope session   give-back 50%   arm 40.00
+  armed 151   fired 108   trades removed 1,689 of 10,370
+  removed per trade (10.57)   kept per trade (8.36)
+  one-bar trades: 30.8% of removed, 27.5% of kept
+  fire time (ET hour): 04:00 10  05:00 22  06:00 19  07:00 31  08:00 22  09:00 4
+    (§5: if the removed trades are worse only because they are late, this is the time-of-day filter under another name -- and that is closed)
+
+  MCL against the baseline (H-S4's six readings)
+  1. per remaining trade -0.35   per symbol-day +0.76      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: NO
+  3. early half +0.08   late half -0.73
+  4. drop-top-3 delta 4,446.38   drop-top-5 delta 4,217.73
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 0.993  over 540 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -0.81  p50 -0.45  p95 +0.01   the cap -0.35
+     [not scored, amendment A4] matched-COUNT random removal, 667 trades, 2,000 draws: p05 -0.56  p50 +0.00  p95 +0.48   the cap -0.35
+     trades removed: the cap 667, the control 522 on average  -> the control removes FEWER, so this test is NOT conservative
+  NOTHING: fails 1, 2, 3, 6 of the six
+
+  MC5 against the baseline (H-S4's six readings)
+  1. per remaining trade +0.78   per symbol-day +2.03      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: yes
+  3. early half +0.19   late half +1.30
+  4. drop-top-3 delta 12,437.37   drop-top-5 delta 12,127.85
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 1.000  over 546 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -0.08  p50 +0.23  p95 +0.51   the cap +0.78
+     [not scored, amendment A4] matched-COUNT random removal, 1,022 trades, 2,000 draws: p05 -0.98  p50 +0.10  p95 +0.57   the cap +0.78
+     trades removed: the cap 1,022, the control 880 on average  -> the control removes FEWER, so this test is NOT conservative
+  PASSES
+
+----------------------------------------------------------------------
+SCENARIO 3: stop the STRATEGY after a 50% give-back
+
+  scope strategy   give-back 50%   arm 40.00
+  armed 234   fired 144   trades removed 1,125 of 10,370
+  removed per trade (11.58)   kept per trade (8.37)
+  one-bar trades: 34.7% of removed, 27.2% of kept
+  fire time (ET hour): 04:00 10  05:00 24  06:00 24  07:00 42  08:00 34  09:00 10
+    (§5: if the removed trades are worse only because they are late, this is the time-of-day filter under another name -- and that is closed)
+
+  MCL against the baseline (H-S4's six readings)
+  1. per remaining trade -0.16   per symbol-day +0.36      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: NO
+  3. early half +0.27   late half -0.54
+  4. drop-top-3 delta 1,710.77   drop-top-5 delta 1,523.51
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 0.921  over 540 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -0.52  p50 -0.30  p95 +0.09   the cap -0.16
+     [not scored, amendment A4] matched-COUNT random removal, 321 trades, 2,000 draws: p05 -0.38  p50 +0.02  p95 +0.32   the cap -0.16
+     trades removed: the cap 321, the control 300 on average  -> the control removes FEWER, so this test is NOT conservative
+  NOTHING: fails 1, 2, 3, 5, 6 of the six
+
+  MC5 against the baseline (H-S4's six readings)
+  1. per remaining trade +0.68   per symbol-day +1.67      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: yes
+  3. early half +0.41   late half +0.91
+  4. drop-top-3 delta 10,141.57   drop-top-5 delta 9,821.74
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 1.000  over 546 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -0.02  p50 +0.26  p95 +0.51   the cap +0.68
+     [not scored, amendment A4] matched-COUNT random removal, 804 trades, 2,000 draws: p05 -0.89  p50 +0.08  p95 +0.47   the cap +0.68
+     trades removed: the cap 804, the control 756 on average  -> the control removes FEWER, so this test is NOT conservative
+  PASSES
+
+----------------------------------------------------------------------
+SCENARIO 4: the $5 floor AND the session cap
+
+  scope session   give-back 50%   arm 40.00
+  armed 147   fired 86   trades removed 659 of 4,500
+  removed per trade (12.86)   kept per trade (7.44)
+  one-bar trades: 29.7% of removed, 25.7% of kept
+  fire time (ET hour): 04:00 6  05:00 15  06:00 13  07:00 24  08:00 22  09:00 6
+    (§5: if the removed trades are worse only because they are late, this is the time-of-day filter under another name -- and that is closed)
+
+  MCL against scenario 1 (H-S4's six readings) -- what the cap adds ON TOP OF the floor (A7), and the SCORED reading for this scenario
+  1. per remaining trade -0.49   per symbol-day +0.27      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: NO
+  3. early half +0.60   late half -1.32
+  4. drop-top-3 delta 1,333.04   drop-top-5 delta 1,106.32
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 0.873  over 461 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -1.42  p50 -0.76  p95 +0.23   the cap -0.49
+     [not scored, amendment A4] matched-COUNT random removal, 268 trades, 2,000 draws: p05 -1.06  p50 +0.07  p95 +1.00   the cap -0.49
+     trades removed: the cap 268, the control 231 on average  -> the control removes FEWER, so this test is NOT conservative
+  NOTHING: fails 1, 2, 3, 5, 6 of the six
+
+  MCL against the baseline -- floor AND cap together. DESCRIPTIVE, NOT SCORED
+    per trade -0.69   per symbol-day +3.25   trades 3,908 -> 1,474
+    (the delta carries the floor; the control above does not, so the six are read against scenario 1)
+
+  MC5 against scenario 1 (H-S4's six readings) -- what the cap adds ON TOP OF the floor (A7), and the SCORED reading for this scenario
+  1. per remaining trade +1.59   per symbol-day +1.05      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: yes
+  3. early half +0.70   late half +2.25
+  4. drop-top-3 delta 6,138.29   drop-top-5 delta 5,803.68
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 1.000  over 503 sessions
+  6. random cut, same sessions: 10,000 draws  p05 +0.56  p50 +1.11  p95 +1.66   the cap +1.59
+     [not scored, amendment A4] matched-COUNT random removal, 391 trades, 2,000 draws: p05 -2.16  p50 +0.21  p95 +1.17   the cap +1.59
+     trades removed: the cap 391, the control 385 on average  -> the control removes FEWER, so this test is NOT conservative
+  NOTHING: fails 6 of the six
+
+  MC5 against the baseline -- floor AND cap together. DESCRIPTIVE, NOT SCORED
+    per trade +2.52   per symbol-day +6.40   trades 6,462 -> 2,367
+    (the delta carries the floor; the control above does not, so the six are read against scenario 1)
+
+----------------------------------------------------------------------
+SCENARIO 5: the $5 floor AND the strategy cap
+
+  scope strategy   give-back 50%   arm 40.00
+  armed 202   fired 92   trades removed 376 of 4,500
+  removed per trade (15.49)   kept per trade (7.57)
+  one-bar trades: 32.4% of removed, 25.8% of kept
+  fire time (ET hour): 04:00 6  05:00 11  06:00 15  07:00 29  08:00 25  09:00 6
+    (§5: if the removed trades are worse only because they are late, this is the time-of-day filter under another name -- and that is closed)
+
+  MCL against scenario 1 (H-S4's six readings) -- what the cap adds ON TOP OF the floor (A7), and the SCORED reading for this scenario
+  1. per remaining trade -0.12   per symbol-day +0.15      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: NO
+  3. early half +0.29   late half -0.44
+  4. drop-top-3 delta 483.75   drop-top-5 delta 302.22
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 0.774  over 461 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -0.51  p50 -0.15  p95 +0.75   the cap -0.12
+     [not scored, amendment A4] matched-COUNT random removal, 123 trades, 2,000 draws: p05 -0.81  p50 +0.04  p95 +0.59   the cap -0.12
+     trades removed: the cap 123, the control 128 on average  -> the control removes MORE, so this test is conservative
+  NOTHING: fails 1, 2, 3, 5, 6 of the six
+
+  MCL against the baseline -- floor AND cap together. DESCRIPTIVE, NOT SCORED
+    per trade -0.32   per symbol-day +3.12   trades 3,908 -> 1,619
+    (the delta carries the floor; the control above does not, so the six are read against scenario 1)
+
+  MC5 against scenario 1 (H-S4's six readings) -- what the cap adds ON TOP OF the floor (A7), and the SCORED reading for this scenario
+  1. per remaining trade +1.18   per symbol-day +0.76      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: yes
+  3. early half +0.57   late half +1.64
+  4. drop-top-3 delta 4,354.60   drop-top-5 delta 4,067.99
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 1.000  over 503 sessions
+  6. random cut, same sessions: 10,000 draws  p05 +0.44  p50 +0.86  p95 +1.28   the cap +1.18
+     [not scored, amendment A4] matched-COUNT random removal, 265 trades, 2,000 draws: p05 -1.97  p50 +0.18  p95 +0.91   the cap +1.18
+     trades removed: the cap 265, the control 276 on average  -> the control removes MORE, so this test is conservative
+  NOTHING: fails 6 of the six
+
+  MC5 against the baseline -- floor AND cap together. DESCRIPTIVE, NOT SCORED
+    per trade +1.84   per symbol-day +8.90   trades 6,462 -> 2,493
+    (the delta carries the floor; the control above does not, so the six are read against scenario 1)
+
+======================================================================
+AT $8.92 A ROUND TRIP
+
+THE BOOKS
+
+  MCL
+    at $1.00  trades  3,908   net  (22,323.04)   per trade   (5.71)   per symbol-day  (3.48)
+    at $4.26  trades  3,908   net  (35,063.12)   per trade   (8.97)   per symbol-day  (5.47)
+    at $8.92  trades  3,908   net  (53,274.40)   per trade  (13.63)   per symbol-day  (8.31)
+    halves @ $4.26    early 1,753   (8.94)/t (15,674.95)   late 2,155   (9.00)/t (19,388.17)
+    drop top 3 @ $4.26  (37,384.33)   win rate 23.0%
+
+  MCL  scenario 1
+    at $1.00  trades  1,742   net  (10,296.45)   per trade   (5.91)   per symbol-day  (1.61)
+    at $4.26  trades  1,742   net  (15,975.37)   per trade   (9.17)   per symbol-day  (2.49)
+    at $8.92  trades  1,742   net  (24,093.09)   per trade  (13.83)   per symbol-day  (3.76)
+    halves @ $4.26    early   737   (9.13)/t  (6,725.13)   late 1,005   (9.20)/t  (9,250.24)
+    drop top 3 @ $4.26  (18,296.58)   win rate 28.3%
+
+  MCL  scenario 2
+    at $1.00  trades  3,306   net  (19,976.41)   per trade   (6.04)   per symbol-day  (3.12)
+    at $4.26  trades  3,306   net  (30,753.97)   per trade   (9.30)   per symbol-day  (4.80)
+    at $8.92  trades  3,306   net  (46,159.93)   per trade  (13.96)   per symbol-day  (7.20)
+    halves @ $4.26    early 1,571   (8.67)/t (13,615.93)   late 1,735   (9.88)/t (17,138.04)
+    drop top 3 @ $4.26  (32,031.43)   win rate 23.3%
+
+  MCL  scenario 3
+    at $1.00  trades  3,619   net  (19,423.97)   per trade   (5.37)   per symbol-day  (3.03)
+    at $4.26  trades  3,619   net  (31,221.91)   per trade   (8.63)   per symbol-day  (4.87)
+    at $8.92  trades  3,619   net  (48,086.45)   per trade  (13.29)   per symbol-day  (7.50)
+    halves @ $4.26    early 1,677   (8.59)/t (14,400.92)   late 1,942   (8.66)/t (16,820.99)
+    drop top 3 @ $4.26  (33,543.12)   win rate 22.9%
+
+  MCL  scenario 4
+    at $1.00  trades  1,496   net   (9,863.15)   per trade   (6.59)   per symbol-day  (1.54)
+    at $4.26  trades  1,496   net  (14,740.11)   per trade   (9.85)   per symbol-day  (2.30)
+    at $8.92  trades  1,496   net  (21,711.47)   per trade  (14.51)   per symbol-day  (3.39)
+    halves @ $4.26    early   650   (8.28)/t  (5,380.40)   late   846  (11.06)/t  (9,359.71)
+    drop top 3 @ $4.26  (16,087.36)   win rate 28.7%
+
+  MCL  scenario 5
+    at $1.00  trades  1,626   net  (10,015.40)   per trade   (6.16)   per symbol-day  (1.56)
+    at $4.26  trades  1,626   net  (15,316.16)   per trade   (9.42)   per symbol-day  (2.39)
+    at $8.92  trades  1,626   net  (22,893.32)   per trade  (14.08)   per symbol-day  (3.57)
+    halves @ $4.26    early   703   (8.78)/t  (6,174.64)   late   923   (9.90)/t  (9,141.52)
+    drop top 3 @ $4.26  (16,764.39)   win rate 28.8%
+
+  MC5
+    at $1.00  trades  6,462   net  (34,297.95)   per trade   (5.31)   per symbol-day  (5.35)
+    at $4.26  trades  6,462   net  (55,364.07)   per trade   (8.57)   per symbol-day  (8.64)
+    at $8.92  trades  6,462   net  (85,476.99)   per trade  (13.23)   per symbol-day (13.33)
+    halves @ $4.26    early 2,901   (8.70)/t (25,247.05)   late 3,561   (8.46)/t (30,117.02)
+    drop top 3 @ $4.26  (62,632.98)   win rate 23.0%
+
+  MC5  scenario 1
+    at $1.00  trades  2,758   net  (12,069.74)   per trade   (4.38)   per symbol-day  (1.88)
+    at $4.26  trades  2,758   net  (21,060.82)   per trade   (7.64)   per symbol-day  (3.29)
+    at $8.92  trades  2,758   net  (33,913.10)   per trade  (12.30)   per symbol-day  (5.29)
+    halves @ $4.26    early 1,138   (8.82)/t (10,033.17)   late 1,620   (6.81)/t (11,027.65)
+    drop top 3 @ $4.26  (28,329.73)   win rate 27.3%
+
+  MC5  scenario 2
+    at $1.00  trades  5,548   net  (25,225.03)   per trade   (4.55)   per symbol-day  (3.93)
+    at $4.26  trades  5,548   net  (43,311.51)   per trade   (7.81)   per symbol-day  (6.76)
+    at $8.92  trades  5,548   net  (69,165.19)   per trade  (12.47)   per symbol-day (10.79)
+    halves @ $4.26    early 2,615   (8.40)/t (21,976.86)   late 2,933   (7.27)/t (21,334.65)
+    drop top 3 @ $4.26  (50,580.42)   win rate 23.2%
+
+  MC5  scenario 3
+    at $1.00  trades  5,710   net  (26,892.54)   per trade   (4.71)   per symbol-day  (4.19)
+    at $4.26  trades  5,710   net  (45,507.14)   per trade   (7.97)   per symbol-day  (7.10)
+    at $8.92  trades  5,710   net  (72,115.74)   per trade  (12.63)   per symbol-day (11.25)
+    halves @ $4.26    early 2,649   (8.57)/t (22,710.91)   late 3,061   (7.45)/t (22,796.23)
+    drop top 3 @ $4.26  (52,776.05)   win rate 23.2%
+
+  MC5  scenario 4
+    at $1.00  trades  2,409   net   (7,083.88)   per trade   (2.94)   per symbol-day  (1.10)
+    at $4.26  trades  2,409   net  (14,937.22)   per trade   (6.20)   per symbol-day  (2.33)
+    at $8.92  trades  2,409   net  (26,163.16)   per trade  (10.86)   per symbol-day  (4.08)
+    halves @ $4.26    early 1,012   (8.30)/t  (8,396.31)   late 1,397   (4.68)/t  (6,540.91)
+    drop top 3 @ $4.26  (22,206.13)   win rate 27.9%
+
+  MC5  scenario 5
+    at $1.00  trades  2,493   net   (8,656.07)   per trade   (3.47)   per symbol-day  (1.35)
+    at $4.26  trades  2,493   net  (16,783.25)   per trade   (6.73)   per symbol-day  (2.62)
+    at $8.92  trades  2,493   net  (28,400.63)   per trade  (11.39)   per symbol-day  (4.43)
+    halves @ $4.26    early 1,046   (8.78)/t  (9,186.76)   late 1,447   (5.25)/t  (7,596.49)
+    drop top 3 @ $4.26  (24,052.16)   win rate 27.7%
+
+----------------------------------------------------------------------
+SCENARIO 1: a $5 entry floor
+
+  MCL  per trade -0.20   per symbol-day +4.55   entries refused +2,166 (signal-ordinal: not a subset of the baseline)
+  MC5  per trade +0.93   per symbol-day +8.04   entries refused +3,704 (signal-ordinal: not a subset of the baseline)
+
+----------------------------------------------------------------------
+SCENARIO 2: stop the SESSION after a 50% give-back
+
+  scope session   give-back 50%   arm 40.00
+  armed 123   fired 96   trades removed 1,516 of 10,370
+  removed per trade (15.45)   kept per trade (13.03)
+  one-bar trades: 30.3% of removed, 27.6% of kept
+  fire time (ET hour): 04:00 9  05:00 20  06:00 19  07:00 24  08:00 21  09:00 3
+    (§5: if the removed trades are worse only because they are late, this is the time-of-day filter under another name -- and that is closed)
+
+  MCL against the baseline (H-S4's six readings)
+  1. per remaining trade -0.33   per symbol-day +1.11      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: NO
+  3. early half +0.27   late half -0.88
+  4. drop-top-3 delta 6,662.23   drop-top-5 delta 6,413.21
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 0.999  over 540 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -0.91  p50 -0.56  p95 -0.10   the cap -0.33
+     [not scored, amendment A4] matched-COUNT random removal, 602 trades, 2,000 draws: p05 -0.51  p50 +0.02  p95 +0.45   the cap -0.33
+     trades removed: the cap 602, the control 470 on average  -> the control removes FEWER, so this test is NOT conservative
+  NOTHING: fails 1, 2, 3, 6 of the six
+
+  MC5 against the baseline (H-S4's six readings)
+  1. per remaining trade +0.76   per symbol-day +2.54      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: yes
+  3. early half +0.30   late half +1.18
+  4. drop-top-3 delta 15,695.34   drop-top-5 delta 15,352.21
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 1.000  over 546 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -0.26  p50 +0.06  p95 +0.33   the cap +0.76
+     [not scored, amendment A4] matched-COUNT random removal, 914 trades, 2,000 draws: p05 -0.90  p50 +0.11  p95 +0.50   the cap +0.76
+     trades removed: the cap 914, the control 794 on average  -> the control removes FEWER, so this test is NOT conservative
+  PASSES
+
+----------------------------------------------------------------------
+SCENARIO 3: stop the STRATEGY after a 50% give-back
+
+  scope strategy   give-back 50%   arm 40.00
+  armed 196   fired 134   trades removed 1,041 of 10,370
+  removed per trade (17.82)   kept per trade (12.88)
+  one-bar trades: 34.4% of removed, 27.3% of kept
+  fire time (ET hour): 04:00 6  05:00 27  06:00 20  07:00 41  08:00 31  09:00 9
+    (§5: if the removed trades are worse only because they are late, this is the time-of-day filter under another name -- and that is closed)
+
+  MCL against the baseline (H-S4's six readings)
+  1. per remaining trade +0.34   per symbol-day +0.81      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: yes
+  3. early half +0.35   late half +0.34
+  4. drop-top-3 delta 4,643.93   drop-top-5 delta 4,438.03
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 1.000  over 540 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -0.14  p50 +0.06  p95 +0.26   the cap +0.34
+     [not scored, amendment A4] matched-COUNT random removal, 289 trades, 2,000 draws: p05 -0.35  p50 +0.01  p95 +0.30   the cap +0.34
+     trades removed: the cap 289, the control 270 on average  -> the control removes FEWER, so this test is NOT conservative
+  PASSES
+
+  MC5 against the baseline (H-S4's six readings)
+  1. per remaining trade +0.60   per symbol-day +2.08      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: yes
+  3. early half +0.13   late half +1.01
+  4. drop-top-3 delta 12,798.34   drop-top-5 delta 12,473.18
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 1.000  over 546 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -0.22  p50 +0.07  p95 +0.33   the cap +0.60
+     [not scored, amendment A4] matched-COUNT random removal, 752 trades, 2,000 draws: p05 -0.87  p50 +0.07  p95 +0.47   the cap +0.60
+     trades removed: the cap 752, the control 676 on average  -> the control removes FEWER, so this test is NOT conservative
+  PASSES
+
+----------------------------------------------------------------------
+SCENARIO 4: the $5 floor AND the session cap
+
+  scope session   give-back 50%   arm 40.00
+  armed 125   fired 75   trades removed 595 of 4,500
+  removed per trade (17.03)   kept per trade (12.26)
+  one-bar trades: 30.4% of removed, 25.7% of kept
+  fire time (ET hour): 04:00 7  05:00 10  06:00 15  07:00 24  08:00 16  09:00 3
+    (§5: if the removed trades are worse only because they are late, this is the time-of-day filter under another name -- and that is closed)
+
+  MCL against scenario 1 (H-S4's six readings) -- what the cap adds ON TOP OF the floor (A7), and the SCORED reading for this scenario
+  1. per remaining trade -0.68   per symbol-day +0.37      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: NO
+  3. early half +0.85   late half -1.86
+  4. drop-top-3 delta 1,929.38   drop-top-5 delta 1,680.61
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 0.920  over 461 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -1.70  p50 -1.06  p95 -0.04   the cap -0.68
+     [not scored, amendment A4] matched-COUNT random removal, 246 trades, 2,000 draws: p05 -1.09  p50 +0.04  p95 +0.95   the cap -0.68
+     trades removed: the cap 246, the control 206 on average  -> the control removes FEWER, so this test is NOT conservative
+  NOTHING: fails 1, 2, 3, 5, 6 of the six
+
+  MCL against the baseline -- floor AND cap together. DESCRIPTIVE, NOT SCORED
+    per trade -0.88   per symbol-day +4.92   trades 3,908 -> 1,496
+    (the delta carries the floor; the control above does not, so the six are read against scenario 1)
+
+  MC5 against scenario 1 (H-S4's six readings) -- what the cap adds ON TOP OF the floor (A7), and the SCORED reading for this scenario
+  1. per remaining trade +1.44   per symbol-day +1.21      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: yes
+  3. early half +0.52   late half +2.13
+  4. drop-top-3 delta 7,097.75   drop-top-5 delta 6,744.50
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 1.000  over 503 sessions
+  6. random cut, same sessions: 10,000 draws  p05 +0.23  p50 +0.77  p95 +1.29   the cap +1.44
+     [not scored, amendment A4] matched-COUNT random removal, 349 trades, 2,000 draws: p05 -2.12  p50 +0.21  p95 +1.07   the cap +1.44
+     trades removed: the cap 349, the control 334 on average  -> the control removes FEWER, so this test is NOT conservative
+  PASSES
+
+  MC5 against the baseline -- floor AND cap together. DESCRIPTIVE, NOT SCORED
+    per trade +2.37   per symbol-day +9.25   trades 6,462 -> 2,409
+    (the delta carries the floor; the control above does not, so the six are read against scenario 1)
+
+----------------------------------------------------------------------
+SCENARIO 5: the $5 floor AND the strategy cap
+
+  scope strategy   give-back 50%   arm 40.00
+  armed 173   fired 91   trades removed 381 of 4,500
+  removed per trade (17.62)   kept per trade (12.45)
+  one-bar trades: 32.8% of removed, 25.7% of kept
+  fire time (ET hour): 04:00 5  05:00 10  06:00 13  07:00 30  08:00 28  09:00 5
+    (§5: if the removed trades are worse only because they are late, this is the time-of-day filter under another name -- and that is closed)
+
+  MCL against scenario 1 (H-S4's six readings) -- what the cap adds ON TOP OF the floor (A7), and the SCORED reading for this scenario
+  1. per remaining trade -0.25   per symbol-day +0.19      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: NO
+  3. early half +0.34   late half -0.70
+  4. drop-top-3 delta 808.36   drop-top-5 delta 622.85
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 0.814  over 461 sessions
+  6. random cut, same sessions: 10,000 draws  p05 -0.67  p50 -0.29  p95 +0.59   the cap -0.25
+     [not scored, amendment A4] matched-COUNT random removal, 116 trades, 2,000 draws: p05 -0.75  p50 +0.03  p95 +0.56   the cap -0.25
+     trades removed: the cap 116, the control 117 on average  -> the control removes MORE, so this test is conservative
+  NOTHING: fails 1, 2, 3, 5, 6 of the six
+
+  MCL against the baseline -- floor AND cap together. DESCRIPTIVE, NOT SCORED
+    per trade -0.45   per symbol-day +4.74   trades 3,908 -> 1,626
+    (the delta carries the floor; the control above does not, so the six are read against scenario 1)
+
+  MC5 against scenario 1 (H-S4's six readings) -- what the cap adds ON TOP OF the floor (A7), and the SCORED reading for this scenario
+  1. per remaining trade +0.90   per symbol-day +0.86      [not scored: the project's $4.26 margin -> does not clear]
+  2. denominators agree: yes
+  3. early half +0.03   late half +1.56
+  4. drop-top-3 delta 4,939.44   drop-top-5 delta 4,619.22
+  5. cluster bootstrap on the delta, BY SESSION  P(total > 0) = 1.000  over 503 sessions
+  6. random cut, same sessions: 10,000 draws  p05 +0.13  p50 +0.57  p95 +0.99   the cap +0.90
+     [not scored, amendment A4] matched-COUNT random removal, 265 trades, 2,000 draws: p05 -1.97  p50 +0.18  p95 +0.91   the cap +0.90
+     trades removed: the cap 265, the control 276 on average  -> the control removes MORE, so this test is conservative
+  NOTHING: fails 6 of the six
+
+  MC5 against the baseline -- floor AND cap together. DESCRIPTIVE, NOT SCORED
+    per trade +1.84   per symbol-day +8.90   trades 6,462 -> 2,493
+    (the delta carries the floor; the control above does not, so the six are read against scenario 1)
+
+======================================================================
+SCENARIO 1, THE REGISTERED VERDICT (REGISTERED_price_floor §4)
+
+  the gate standard at 4.26: margin, both denominators,
+  both halves, drop-top-3 on level and delta, cluster bootstrap, and the
+  abstention control -- the same six every B-series gate was read on.
+
+  MCL-pf5 against MCL
+    per trade -0.20   per symbol-day +2.98
+    REFUSED: the two denominators disagree: per trade -0.20, per symbol-day +2.98
+
+  MC5-pf5 against MC5
+    per trade +0.93   per symbol-day +5.35
+    NOTHING: fails 1 (per trade >= 4.26 and per symbol-day > 0); 2 (both halves, both denominators); 5 (abstention control: per trade +0.93 does not beat random removal's p95 +1.97)
+
+
+WHAT THIS IS NOT
+
+  NOT OUT OF SAMPLE. holdout.json has not been touched.
+  NOT A CAP MODEL. Each symbol-day runs alone; the concurrency cap that
+  rejected 29% of live buy attempts is not modelled, and a give-back stop
+  frees slots this cannot price (PROGRAM_INDEX §7 item 15).
+  NOT LIVE. strategy_adapter's price_min is unchanged and the trader has
+  no give-back rule; shipping either is its own change with its own parity
+  test, which the last three live/backtest splits earned.
+  NOT A SEARCH. One floor, one give-back, both named before the run.

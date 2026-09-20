@@ -1,0 +1,65 @@
+# generated 2026-09-09 11:17:04 UTC
+# common.consolidation_study  cache=bar_cache
+
+CONSOLIDATION FILTER -- measured before anything was built
+
+  373 cached sessions, MCL live config, 100 shares flat, cap 2
+  Bollinger 20/2 on 1m closes, slope over 5 bars. Pinned, not swept.
+  Halves split at 2026-03-20, chosen once. Drop-top-3 within each bucket.
+
+  NOT out of sample: holdout.json splits the screened universe, not
+  this cache, and MCL was fitted over this whole period.
+
+A. IS A SLOT ACTUALLY SCARCE?
+
+   trades 479   denied by the cap 9   denied for capital 0
+   with NO cap at all: 485 trades
+   net  capped $     270   uncapped $     162   <- lifting the cap is WORSE, so a freed slot is worth nothing
+   hold minutes  p10 1  p50 2  p90 24  p99 159  max 238
+   exits {'trailing_stop': 456, 'window_close': 23}
+
+B. BANDWIDTH AT THE ENTRY BAR  (479 of 479 trades had 25 prior bars)
+
+   by LEVEL, quintiles [0.0633, 0.1043, 0.162, 0.2631]
+      bucket                n       net  per trade  drop top 3  med hold
+      < 0.0633             95$      273$      2.87$       -286        15
+      0.0633 - 0.1043      97$     -502$     -5.18$       -935         4
+      0.1043 - 0.162       95$       46$      0.49$       -570         2
+      0.162 - 0.2631       96$      160$      1.66$       -460         2
+      >= 0.2631            96$      293$      3.06$       -706         2
+
+   by SLOPE -- negative is NARROWING, which the proposal skips
+      bucket                n       net  per trade  drop top 3  med hold
+      < -0.005             68$      686$     10.09$          1         3
+      -0.005 - 0           22$      -14$     -0.64$       -281         9
+      0 - 0.005            38$     -103$     -2.71$       -352         6
+      >= 0.005            351$     -299$     -0.85$     -1,304         2
+
+C. BOTH HALVES on the rule as proposed, split 2026-03-20
+
+   early narrowing (would SKIP)   n=  35 $      73 ($   2.09/trade, drop-top-3 $    -346)
+   early widening  (would KEEP)   n= 139 $    -321 ($  -2.31/trade, drop-top-3 $    -886)
+   late  narrowing (would SKIP)   n=  55 $     599 ($  10.89/trade, drop-top-3 $     -12)
+   late  widening  (would KEEP)   n= 250 $     -81 ($  -0.32/trade, drop-top-3 $  -1,086)
+
+   A rule is supported only if it helps in BOTH halves AND survives
+   drop-top-3. Read those two columns before the headline number.
+
+D. WHAT THE HOLD TIMES ACTUALLY DID
+
+      bucket                n       net  per trade  drop top 3  med hold     early      late
+      0-5m                316$   -1,935$     -6.12$     -2,940         2$     -736$   -1,200
+      5-15m                99$    1,337$     13.50$        765         7$      482$      854
+      15-30m               25$       11$      0.44$       -303        21$      113$     -102
+      30-60m               22$      240$     10.90$        -73        34$        9$      231
+      60-120m              12$      177$     14.76$        -90        88$      -85$      262
+      120m+                 5$      440$     88.10$        -32       194$      -32$      472
+
+   Hold time is known only AFTER the trade, so this is a
+   description and not a filter. It says where to look, not what
+   to do.
+
+E. ARE THE QUICK STOP-OUTS THE WIDENING ENTRIES?
+
+   held <5m  n= 316  widening at entry  78.2%   median level 0.1756
+   held >=5m n= 163  widening at entry  63.8%   median level 0.0635

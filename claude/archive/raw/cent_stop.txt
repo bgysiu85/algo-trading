@@ -1,0 +1,77 @@
+# generated 2026-09-10 01:35:27 UTC
+# common.cent_stop_study  cache=bar_cache
+
+FIXED-CENT STOPS vs THE 5% TRAIL
+
+  373 cached sessions, MCL live config, 100 shares flat
+  net after tiered commission and $4.26/RT friction
+  halves split at 2026-03-20. Drop-top-3 within each variant.
+
+  15c is PINNED as the primary — his stated most-used value, chosen
+  before running and not because it won. 10c and 20c are a boundary
+  check on the ends of his range, not a menu.
+
+  15c is 7.50% at $2   3.00% at $5   1.50% at $10   0.75% at $20
+
+  variant          trades       net     per   win%  drop top 3      early      late
+  5% trail            485$      161$   0.33  34.0%$       -923$     -248$      410
+  10c stop            546$   -2,171$  -3.98  23.8%$     -2,900$     -749$   -1,422
+  15c stop            525$     -917$  -1.75  28.4%$     -1,709$     -413$     -503
+  20c stop            512$     -411$  -0.80  31.4%$     -1,198$      -92$     -318
+
+BY ENTRY PRICE — where a fixed distance and a percentage diverge
+
+  5% trail
+      band             n       net      per   win%
+      $2-4           171$     -665$   -3.89  30.4%
+      $4-7           152$     -253$   -1.67  30.9%
+      $7-12          100$      540$    5.40  40.0%
+      $12-20          62$      539$    8.70  41.9%
+
+  10c stop
+      band             n       net      per   win%
+      $2-4           181$     -961$   -5.31  24.3%
+      $4-7           170$     -968$   -5.70  25.3%
+      $7-12          118$     -498$   -4.22  19.5%
+      $12-20          77$      256$    3.32  26.0%
+
+  15c stop
+      band             n       net      per   win%
+      $2-4           173$     -897$   -5.18  30.6%
+      $4-7           161$     -302$   -1.88  29.2%
+      $7-12          116$      -73$   -0.63  25.9%
+      $12-20          75$      355$    4.73  25.3%
+
+  20c stop
+      band             n       net      per   win%
+      $2-4           163$     -352$   -2.16  36.2%
+      $4-7           159$     -290$   -1.82  30.2%
+      $7-12          115$     -254$   -2.21  26.1%
+      $12-20          75$      486$    6.48  32.0%
+
+VERDICT on 15c against the 5% trail
+
+  net -1,078   early -165   late -913
+  win rate 28.4% vs 34.0%
+  trades   525 vs 485
+
+  The cent stop is WORSE. The percentage trail stays, and
+  the rest of the Warrior set — targets, share count, the
+  2:1 ratio, all of which scale from the stop — has to be
+  read against a percentage stop rather than his.
+
+  BOUNDARY CHECK FAILED: 20c stop is the best cell and it
+  sits at an edge of his stated range, so the range is in
+  the wrong place and none of the three should be adopted.
+
+WHAT THIS IS NOT
+
+  It is not his stop. His is min(pullback low, 10-20c) — a
+  structure stop with a cents CAP, and it does not trail. This
+  swaps one variable in MCL's trailing stop and holds everything
+  else, which is the only way to attribute the difference to
+  cents-versus-percent rather than to four changes at once.
+
+  Nothing here is out of sample. MCL's parameters were fitted on
+  these sessions, so a cent stop that wins has not been shown to
+  generalise — only to beat a rule that was tuned here.

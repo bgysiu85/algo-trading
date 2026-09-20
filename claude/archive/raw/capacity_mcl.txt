@@ -1,0 +1,73 @@
+# generated 2026-09-08 12:03:51 UTC
+# common.capacity  cache=bar_cache/3d_to_2000  bar=1m  equity_pct=40
+
+CAPACITY -- how large an order the traded minutes can absorb
+
+  trades measured   555   (neither fill minute found in cache: 0)
+  trades            /mnt/user-data/uploads/Trading/var/reports/backtest_trades_mcl.csv
+  strategy bar      1 minute(s)
+
+  Volume is measured. Impact is NOT modelled. The participation caps
+  below are conventions; the report prices them so the choice is
+  explicit.
+
+TAPE CAPTURE -- the control on everything below
+
+  cache volume / daily-bar volume, over 214 traded sessions
+    p10 0.157   p50 0.831   p90 0.919
+
+  Every share and dollar figure below is scaled by this. At p50 0.83 the
+  cache carries 83% of the consolidated tape, so true capacity is about
+  1.2x what is printed. The correction is NOT applied -- apply it yourself,
+  or re-run on a fuller tape.
+
+THE MINUTES WE ACTUALLY TRADE IN
+
+  entry minute, shares       p10       5,928  p50      71,016  p90     505,251
+  exit minute, shares        p10       3,652  p50      69,367  p90     479,828
+  binding side, shares       p10       2,423  p50      49,950  p90     360,021
+
+  entry minute, dollars      p10      32,692  p50     408,418  p90   2,283,650
+  exit minute, dollars       p10      20,410  p50     385,189  p90   1,961,618
+
+  the EXIT minute is the thinner of the two on 360 of 555 trades
+
+WHAT SIZE FITS, AT EACH PARTICIPATION CAP
+
+  shares and dollars a single position could take on the BINDING
+  minute, and the account that position implies at 40% of equity
+
+  cap 1% of the minute
+      shares                 p10          24  p50         500  p90       3,600
+      position dollars       p10         163  p50       2,852  p90      15,471
+      implied account        p10         406  p50       7,130  p90      38,676
+      the 100-share position already exceeds this cap on 134 of 555 trades
+
+  cap 5% of the minute
+      shares                 p10         121  p50       2,498  p90      18,001
+      position dollars       p10         813  p50      14,261  p90      77,353
+      implied account        p10       2,032  p50      35,651  p90     193,382
+      the 100-share position already exceeds this cap on 48 of 555 trades
+
+  cap 10% of the minute
+      shares                 p10         242  p50       4,995  p90      36,002
+      position dollars       p10       1,625  p50      28,521  p90     154,706
+      implied account        p10       4,063  p50      71,303  p90     386,764
+      the 100-share position already exceeds this cap on 25 of 555 trades
+
+READ IT THIS WAY
+
+  The p10 row is the number that matters if the strategy has to be
+  able to take MOST of its trades: at that account size, a tenth of
+  them are already too big for the minute they fill in. The p50 row
+  is the size at which half of them are.
+
+  Nothing here says the edge survives to that size -- it says the
+  TAPE does not, which binds first and binds regardless of which
+  strategy eventually has an edge. A capacity ceiling is a property
+  of the universe, not of the rules.
+
+  What would make this sharper, in order: a fuller tape (the capture
+  ratio above), quote depth rather than trade volume at the fill
+  minute, and a measured impact curve from Ben's own larger fills.
+  None of the three is assumed here.

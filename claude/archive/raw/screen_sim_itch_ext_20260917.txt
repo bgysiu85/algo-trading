@@ -1,0 +1,77 @@
+# generated 2026-09-18 16:28:54 AUS Eastern Standard Time
+# common.screen_sim  archive=E:\Databento/XNAS.ITCH  cadence=60s  capture_ladder=var/reports/itch_capture.json cut=2026-03-30  prior_close=repaired
+
+THE LIVE SCREEN, SIMULATED FORWARD
+
+  8 sessions, cadence 60s, 04:00-09:30 ET
+  clauses imported from tv_screener: change >= 20%, price in [2.00, 25.00], volume >= 100,000
+  volume threshold scaled by a capture LADDER (per ET half-hour, per regime):
+    before  04:30 22,490  05:00 23,890  05:30 24,520  06:00 24,710  06:30 25,190  07:00 25,620  07:30 24,400  08:00 23,900  08:30 13,800  09:00 14,150  09:30 15,340
+    after   04:30 1,980  05:00 4,250  05:30 5,280  06:00 6,750  06:30 8,050  07:00 9,010  07:30 8,700  08:00 8,990  08:30 9,670  09:00 10,370  09:30 11,140
+  top 40 by pre-market change, ties by symbol
+  elapsed 3.2s
+
+THE PRIOR CLOSE THIS RAN AGAINST
+
+  mode: repaired
+  daily=476,654  repaired=5,861,645
+  repaired coverage: 92.5% of 6,338,299 prior closes
+  construction: auction_else_last
+  *** THESE CLOSES WERE ACCEPTED BELOW THE PRE-REGISTERED BAR ***
+      construction auction_else_last  scored 19/24 on every discriminating row
+      by listing venue: AMEX 0/3  NASDAQ 17/19  NYSE 2/2
+      AMEX: NOT ONE ROW MATCHED. Names listed there carry the old defect in full.
+      Every figure downstream of this inherits that residual.
+
+  OF THE NAMES THAT ACTUALLY REACHED THE UNIVERSE:
+  repaired=76
+  0 of 76 (0.0%) were selected against a close that is not the repaired one.
+  Each row in the universe file carries `prior_source`, so
+  this can be filtered downstream without re-running.
+
+THE UNIVERSE
+
+  symbol-days                 76
+  per session   mean          9.5
+                median        10
+                p90           16
+                max           16
+  sessions with none          0
+  SESSIONS SKIPPED, no prior close  0
+
+WHEN A NAME FIRST CLEARS THE SCREEN
+
+  This is the entry floor. A name first seen at 07:20 could not
+  have been traded at 04:00, and a universe file without this
+  column re-introduces the look-ahead this exercise removes.
+
+    04:00       36    47.4%  ########################################
+    05:00        7     9.2%  #######
+    06:00        7     9.2%  #######
+    07:00       12    15.8%  #############
+    08:00       10    13.2%  ###########
+    09:00        4     5.3%  ####
+
+THE FAST PATH AGAINST `screen_at`
+
+  ticks compared   11
+  disagreements    0
+
+  Exact, at every sampled tick. The accumulated path is
+  `screen_at` with the grouping done once.
+
+WHAT THIS IS NOT
+
+  Not TradingView's data. It reproduces their COLUMNS from one
+  Databento dataset at a measured 55.2% capture, so even a perfect
+  reimplementation ranks a slightly different list. It answers
+  'is the +$4.72 a look-ahead artefact' and not 'would this exact
+  watchlist have appeared on Ben's screen that morning'.
+
+  Not a result. It is a UNIVERSE. The measurement is H0 and MCL run
+  on it, against the +$4.72 / -$9.81 brackets.
+
+  Not float-filtered or RVOL-filtered. Neither is in the shipped
+  screen's FILTERS -- `screen.py`'s stage2 applies an RVOL clause the
+  live screen does not have, which is one of the drifts this
+  replaces.

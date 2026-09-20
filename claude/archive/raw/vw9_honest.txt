@@ -1,0 +1,11 @@
+  VW9 (5m, trail_atr, VWAP exit off)         tr       net      per     drop3     drop5     syms      RTH
+  mixed, optimistic (as published)          407$    7,118$   17.49$   -5,610$   -6,441  46/150 $  -2,287
+  Setup B only, optimistic (as published)    97$    1,284$   13.23$   -1,857$   -2,225  18/58  $   1,650
+  mixed, honest fills                       407$    1,957$    4.81$   -6,068$   -6,874  44/150 $  -2,419
+  Setup B only, honest fills                 97$    1,225$   12.63$   -1,915$   -2,230  18/58  $   1,650
+
+  price floor sweep, honest fills, Setup B only:
+    floor $2                                 97$    1,225$   12.63$   -1,915$   -2,230  18/58  $   1,650
+    floor $3                                 87$    1,404$   16.14$   -1,736$   -2,051  17/51  $   1,737
+    floor $5                                 70$    1,002$   14.31$   -2,036$   -2,142  15/43  $   1,420
+    floor $7                                 50$    1,389$   27.78$   -1,649$   -1,742  11/32  $   1,622

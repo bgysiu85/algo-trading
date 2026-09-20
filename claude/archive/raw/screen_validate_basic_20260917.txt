@@ -1,0 +1,198 @@
+# generated 2026-09-18 16:32:46 AUS Eastern Standard Time
+# common.screen_validate  archive=var/archive  pairs=var/state/screen_pairs_pit_ext2.json  dataset=XNAS.BASIC  diagnose
+
+DOES THE SIMULATED SCREEN MATCH THE LIVE ONE?   [XNAS.BASIC ext2]
+
+  The check `screen_sim` never had. Its own gate was its fast path
+  against `screen_at` -- which verifies the implementation against
+  itself, not against what TradingView actually surfaced.
+
+  PRE-REGISTERED bands on the share of live names found, read from
+  the LOWER bound of a 95% Wilson interval:
+    >= 80%   the point-in-time figures describe live trading
+    50%-80%   indicative of a related universe only
+    <  50%   a DIFFERENT universe; do not quote its figures
+           as live expectations
+
+SESSIONS EXCLUDED, AND WHY
+
+  2026-09-02    6 names   hand-synced under a different screen
+  2026-09-03    8 names   hand-synced under a different screen
+
+  A hand-synced list was built under `RVOL(1D) >= 5x, float <
+  20m` -- clauses the shipped FILTERS do not have. Scoring
+  against it measures the gap between two screens and reads as
+  a simulation defect.
+
+PER SESSION, EVERY LIVE NAME
+
+  date          live   sim  found  missed  sim-only   the misses
+  2026-09-08       6     7      6       0         1   -
+  2026-09-09      13    10     10       3         0   BNC, RML, WYHG
+  2026-09-10      11     5      5       6         0   BIAF, IRD, ODD, RML, SUNE, TPET
+  2026-09-11       8     8      8       0         0   -
+  2026-09-14      16    10     10       6         0   ACVA, AENT, FTFT, LBGJ, PCLA, TNON
+  2026-09-15       7     7      7       0         0   -
+  2026-09-16       8     5      5       3         0   MYSZ, PSNYW, VEEA
+  2026-09-17      16    15     14       2         1   FTFT, ZTG
+
+  65 of 85 live names surfaced by the simulation = 76%   95% interval 66% to 84%
+
+THE 04:00 CARRY-OVER, SET ASIDE
+
+  A name COLD at 09:29 that was on the previous automated list.
+  TradingView's premarket fields hold yesterday's values until
+  today's prints, so the feed's first poll surfaces yesterday's
+  screen; the blocked files stamp those names at 04:00:0x. The
+  rule never looks at the simulation. `sim found` counts the
+  candidates the simulation surfaced anyway -- repeat runners.
+
+  date        prev         carry sim found 04:00 stamp   the names
+  2026-09-08  -                0         0           0   -
+  2026-09-09  2026-09-08       2         0           0   BNC, WYHG
+  2026-09-10  2026-09-09       5         0           0   BIAF, IRD, ODD, RML, SUNE
+  2026-09-11  2026-09-10       0         0           1   -
+  2026-09-14  2026-09-11       6         0           1   ACVA, AENT, FTFT, LBGJ, PCLA, TNON
+  2026-09-15  2026-09-14       1         1           0   TNON
+  2026-09-16  2026-09-15       4         1           1   MYSZ, NAMI, PSNYW, VEEA
+  2026-09-17  2026-09-16       4         2           1   FTFT, MEDS, RETO, ZTG
+
+PER SESSION, CARRY-OVER SET ASIDE  (the verdict's basis)
+
+  date          live   sim  found  missed  sim-only   the misses
+  2026-09-08       6     7      6       0         1   -
+  2026-09-09      11    10     10       1         0   RML
+  2026-09-10       6     5      5       1         0   TPET
+  2026-09-11       8     8      8       0         0   -
+  2026-09-14      10    10     10       0         0   -
+  2026-09-15       6     7      6       0         0   -
+  2026-09-16       4     5      4       0         0   -
+  2026-09-17      12    15     12       0         1   -
+
+THE AGREEMENT
+
+  61 of 63 live names were surfaced by the simulation = 97%
+  95% interval  89% to 99%   over 8 session(s)
+
+  THE SIMULATION REPRODUCES THE LIVE SCREEN. The point-in-time
+  figures can be read as describing live trading, and the
+  disagreement between them and the live record is about sample
+  size rather than about the universe.
+
+THE MISSES, READ OFF THE TAPE
+
+  The best each name ever looked at a tick, and the clause it
+  failed there. `PASSED` would mean the tape agrees with the live
+  screen and the simulation does not.
+
+  2026-09-09  RML     no prior close
+  2026-09-10  TPET    change never reached 20% (max +19.5% at 08:58)
+                      prior     1.82  best +19.5% at 08:58  px 2.18  vol 2,585,622 (min 55,200)
+
+THE NAMES THE LIVE FEED HAD FIRST, READ OFF THE TAPE
+
+  What the simulation's three clauses said about the name at
+  the moment the live record proves the feed already had it.
+
+  2026-09-11  TNON    at 04:00:08  no closed bar yet on this tape
+  2026-09-11  XRTX    at 04:31:02  change +14.2% < 20%
+
+WHEN, FROM THE BLOCKED STAMPS
+
+  The trader refuses a restricted name within seconds of arming
+  it, so a block stamp is an upper bound on when the name reached
+  the live file. Against the simulation's first_seen (ET):
+
+  date        name     blocked  sim first  live-sim
+  2026-09-08  QCML    09:20:19   09:07:00    +13.3m
+  2026-09-09  DPU     04:54:20   04:39:00    +15.3m
+  2026-09-09  YMAT    04:16:45   04:02:00    +14.8m
+  2026-09-10  GDHG    05:21:45   05:08:00    +13.8m
+  2026-09-10  PCLA    04:29:01   04:13:00    +16.0m
+  2026-09-11  SXTC    04:40:44   04:26:00    +14.7m
+  2026-09-14  RAYA    08:58:50   08:43:00    +15.8m
+  2026-09-16  ZTG     07:22:56   07:08:00    +14.9m
+  2026-09-17  KXIN    04:15:54   04:01:00    +14.9m
+  2026-09-17  NBIG    07:15:49   06:59:00    +16.8m
+
+  10 name(s), median live-sim +14.9 min, range +13.3 to +16.8.
+  Positive: the simulation saw the name before the live feed
+  can be shown to have had it. A list, not a rate.
+
+WHEN, FROM THE FIRST ENTRY SIGNAL
+
+  The trader signals only a name it has armed, so the first BUY
+  line is another upper bound on arrival -- looser (the entry
+  conditions must fire too) but for every traded name. What
+  matters is the SMALLEST delta: one name signalled under ten
+  minutes after the tape first qualified it rules out a fixed
+  feed delay of that size.
+
+  date        name     1st BUY  sim first  live-sim
+  2026-09-08  WYHG    08:11:03   04:09:00   +242.1m
+  2026-09-09  ACCL    06:31:01   04:01:00   +150.0m
+  2026-09-09  FGL     06:14:03   04:10:00   +124.0m
+  2026-09-09  LABT    09:01:00   05:00:00   +241.0m
+  2026-09-09  ODD     08:29:05   07:06:00    +83.1m
+  2026-09-09  SUNE    05:33:02   04:03:00    +90.0m
+  2026-09-10  CULP    08:35:05   06:11:00   +144.1m
+  2026-09-10  TNON    04:26:04   04:01:00    +25.1m
+  2026-09-11  ACVA    06:19:03   04:31:00   +108.0m
+  2026-09-11  FTFT    07:37:08   07:22:00    +15.1m
+  2026-09-11  LBGJ    04:21:01   04:01:00    +20.0m
+  2026-09-11  TNON    04:00:08   04:01:00     -0.9m
+  2026-09-11  XRTX    04:31:02   05:13:00    -42.0m
+  2026-09-14  BMGL    09:02:08   07:41:00    +81.1m
+  2026-09-14  BMM     08:00:07   07:03:00    +57.1m
+  2026-09-14  CRBP    07:02:05   04:20:00   +162.1m
+  2026-09-14  DRCT    08:16:00   07:28:00    +48.0m
+  2026-09-14  ELMT    06:43:00   05:27:00    +76.0m
+  2026-09-14  SCNI    07:00:00   04:02:00   +178.0m
+  2026-09-15  BDRX    05:29:36   04:17:00    +72.6m
+  2026-09-15  MYSZ    07:07:02   04:03:00   +184.0m
+  2026-09-15  NAMI    07:01:04   06:34:00    +27.1m
+  2026-09-15  TNON    06:31:02   06:08:00    +23.0m
+  2026-09-15  VEEA    05:38:01   04:01:00    +97.0m
+  2026-09-15  VRA     08:41:03   08:21:00    +20.1m
+  2026-09-16  FTFT    05:46:05   05:05:00    +41.1m
+  2026-09-16  MEDS    05:55:03   04:13:00   +102.0m
+  2026-09-16  NAMI    04:41:02   04:02:00    +39.0m
+  2026-09-16  RETO    05:41:02   04:01:00   +100.0m
+  2026-09-17  AEHL    07:45:05   06:59:00    +46.1m
+  2026-09-17  AEMD    08:12:04   06:31:00   +101.1m
+  2026-09-17  BIAF    08:30:09   08:06:00    +24.1m
+  2026-09-17  DAIC    04:30:03   04:02:00    +28.1m
+  2026-09-17  LRHC    08:20:00   07:04:00    +76.0m
+  2026-09-17  MEDS    04:06:02   04:03:00     +3.0m
+  2026-09-17  MKDW    08:13:00   07:41:00    +32.0m
+  2026-09-17  RETO    04:11:02   04:01:00    +10.0m
+  2026-09-17  TURB    09:25:00   08:34:00    +51.0m
+  2026-09-17  VEEA    07:42:21   07:27:00    +15.3m
+
+  39 name(s), median +57.1 min, smallest -42.0, 3 under +10 min.
+
+THE OTHER DIRECTION, WHICH IS WEAKER EVIDENCE
+
+  2 simulated name(s) were not on the live list.
+
+  date        name    best rank
+  2026-09-08  BRNX            2
+  2026-09-17  GLOO            6
+
+  This is NOT a symmetric count. The live watchlist is capped and
+  ordered by TradingView's own premarket_change, so a name the
+  simulation ranked twelfth may simply have fallen below the cut on
+  a fuller tape. It is reported because a large number would point
+  at the volume threshold or the capture ratio, and it is kept out
+  of the verdict because it cannot distinguish those from a
+  ranking difference.
+
+WHAT THIS IS NOT
+
+  Not a test of the screen's RULES. Both sides apply the same three
+  clauses; what differs is the tape underneath them and
+  TradingView's own consolidation.
+
+  Not a measure of what was tradeable. Names IBKR refused are
+  counted as screened, because the screen surfaced them and the
+  broker declined -- a different failure with a different fix.

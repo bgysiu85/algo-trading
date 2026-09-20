@@ -1,0 +1,31 @@
+SESSION START SWEEP — MCL and MC5 on the point-in-time universe
+Research chat, 2026-09-17. Read-only: filter on the existing PIT trade lists; no program logic touched.
+Source: var/reports/first_entry_skip_trades.csv, book in {MCL, MC5} — the point-in-time baselines
+        MCL 3,955 trades / MC5 6,883 trades, 550 sessions 2024-07-02 -> 2026-09-11
+net in file = commission-only (gross of friction). Ladder = net/trade minus $1.00 / $4.26 / $8.92 per 100-share RT.
+/sess(all) divides by ALL 550 sessions, traded or not (luck_vs_edge convention). d3/d5 = drop-top-N by symbol.
+
+CAVEAT: a filter on entry_et is NOT a re-run. Trades before the cut occupied concurrency slots; removing
+them would free slots for additional later trades. Those would fire at the post-cut per-trade rate, which
+is worse than baseline in every row below, so the caveat cuts AGAINST the hypothesis, not for it.
+
+
+===== MCL   mean net/trade in file = -6.26
+baseline (04:00 start)       n= 3955 sess=541/550  net=   -24,751  /trd=  -6.26  /sess(all)= -45.00  win=27.0%  d3=  -26,859 d5=  -27,645  H1= -10,817 H2= -13,934  sess+=23.5% medS= -43.19  | @1.00  -7.26 @4.26 -10.52 @8.92 -15.18
+start 05:00                  n= 3760 sess=540/550  net=   -24,517  /trd=  -6.52  /sess(all)= -44.58  win=26.7%  d3=  -26,627 d5=  -27,413  H1= -10,724 H2= -13,793  sess+=23.7% medS= -42.95  | @1.00  -7.52 @4.26 -10.78 @8.92 -15.44
+start 06:00                  n= 3230 sess=533/550  net=   -20,860  /trd=  -6.46  /sess(all)= -37.93  win=27.3%  d3=  -22,932 d5=  -23,747  H1=  -8,804 H2= -12,056  sess+=24.4% medS= -35.41  | @1.00  -7.46 @4.26 -10.72 @8.92 -15.38
+start 06:30                  n= 2897 sess=531/550  net=   -19,007  /trd=  -6.56  /sess(all)= -34.56  win=26.6%  d3=  -21,079 d5=  -21,894  H1=  -8,978 H2= -10,030  sess+=23.5% medS= -32.51  | @1.00  -7.56 @4.26 -10.82 @8.92 -15.48
+start 07:00                  n= 2430 sess=518/550  net=   -17,793  /trd=  -7.32  /sess(all)= -32.35  win=26.0%  d3=  -19,581 d5=  -20,369  H1=  -8,874 H2=  -8,918  sess+=23.7% medS= -31.13  | @1.00  -8.32 @4.26 -11.58 @8.92 -16.24
+start 07:30                  n= 1887 sess=511/550  net=   -16,046  /trd=  -8.50  /sess(all)= -29.17  win=25.0%  d3=  -17,812 d5=  -18,506  H1=  -8,430 H2=  -7,616  sess+=22.9% medS= -26.01  | @1.00  -9.50 @4.26 -12.76 @8.92 -17.42
+  --- what the cut REMOVES (the delta), 04:00-06:29:
+removed 04:00-06:29          n= 1058 sess=415/550  net=    -5,743  /trd=  -5.43  /sess(all)= -10.44  win=27.8%  d3=   -6,480 d5=   -6,831  H1=  -1,839 H2=  -3,904  sess+=30.1% medS= -15.72  | @1.00  -6.43 @4.26  -9.69 @8.92 -14.35
+
+===== MC5   mean net/trade in file = -9.24
+baseline (04:00 start)       n= 6883 sess=548/550  net=   -63,582  /trd=  -9.24  /sess(all)=-115.60  win=24.6%  d3=  -70,466 d5=  -71,363  H1= -31,750 H2= -31,832  sess+=20.3% medS=-101.43  | @1.00 -10.24 @4.26 -13.50 @8.92 -18.16
+start 05:00                  n= 5835 sess=546/550  net=   -62,309  /trd= -10.68  /sess(all)=-113.29  win=24.3%  d3=  -64,199 d5=  -65,035  H1= -29,664 H2= -32,645  sess+=21.1% medS= -90.21  | @1.00 -11.68 @4.26 -14.94 @8.92 -19.60
+start 06:00                  n= 5244 sess=546/550  net=   -58,930  /trd= -11.24  /sess(all)=-107.15  win=24.2%  d3=  -60,567 d5=  -61,337  H1= -28,999 H2= -29,931  sess+=20.9% medS= -82.22  | @1.00 -12.24 @4.26 -15.50 @8.92 -20.16
+start 06:30                  n= 4967 sess=545/550  net=   -57,477  /trd= -11.57  /sess(all)=-104.50  win=24.1%  d3=  -59,137 d5=  -59,874  H1= -28,471 H2= -29,006  sess+=21.5% medS= -80.28  | @1.00 -12.57 @4.26 -15.83 @8.92 -20.49
+start 07:00                  n= 4561 sess=545/550  net=   -56,725  /trd= -12.44  /sess(all)=-103.14  win=23.7%  d3=  -57,933 d5=  -58,629  H1= -28,680 H2= -28,045  sess+=20.9% medS= -79.87  | @1.00 -13.44 @4.26 -16.70 @8.92 -21.36
+start 07:30                  n= 3824 sess=543/550  net=   -53,662  /trd= -14.03  /sess(all)= -97.57  win=23.1%  d3=  -54,898 d5=  -55,574  H1= -27,994 H2= -25,668  sess+=18.6% medS= -75.00  | @1.00 -15.03 @4.26 -18.29 @8.92 -22.95
+  --- what the cut REMOVES (the delta), 04:00-06:29:
+removed 04:00-06:29          n= 1916 sess=467/550  net=    -6,105  /trd=  -3.19  /sess(all)= -11.10  win=26.1%  d3=  -12,583 d5=  -13,443  H1=  -3,279 H2=  -2,826  sess+=27.4% medS= -22.11  | @1.00  -4.19 @4.26  -7.45 @8.92 -12.11

@@ -1,0 +1,15 @@
+configuration                                  tr      net     per    drop1    drop3    drop5     syms      RTH
+mixed: trail_atr (as tested)                  407$   7,118$  17.49$     983$  -5,610$  -6,441  46/150 $  -2,287
+mixed: trail_pct 3%, structural stop ON       445$    -968$  -2.18$  -3,596$  -4,346$  -4,758  39/150 $     821
+mixed: trail_pct 3%, stop OFF                 445$      93$   0.21$  -2,535$  -3,279$  -3,696  40/150 $   1,222
+mixed: trail_pct 5%, structural stop ON       434$  -1,744$  -4.02$  -4,170$  -4,854$  -5,397  42/150 $     344
+mixed: trail_pct 5%, stop OFF                 432$    -711$  -1.65$  -3,137$  -3,791$  -4,336  45/150 $     558
+mixed: trail_pct 8%, structural stop ON       416$  -1,384$  -3.33$  -3,507$  -5,506$  -6,457  40/150 $       7
+mixed: trail_pct 8%, stop OFF                 410$    -225$  -0.55$  -2,347$  -4,346$  -5,309  42/150 $      76
+B-only: trail_atr (as tested)                  97$   1,284$  13.23$    -944$  -1,857$  -2,225  18/58  $   1,650
+B-only: trail_pct 3%, structural stop ON      116$     879$   7.58$  -1,621$  -1,869$  -2,031  17/58  $   2,178
+B-only: trail_pct 3%, stop OFF                116$   1,501$  12.94$    -999$  -1,234$  -1,396  17/58  $   2,362
+B-only: trail_pct 5%, structural stop ON      107$   1,121$  10.48$  -1,251$  -1,554$  -1,747  20/58  $   2,314
+B-only: trail_pct 5%, stop OFF                107$   1,668$  15.58$    -705$    -970$  -1,198  21/58  $   2,446
+B-only: trail_pct 8%, structural stop ON      101$     780$   7.73$  -1,402$  -1,748$  -1,976  18/58  $   2,044
+B-only: trail_pct 8%, stop OFF                 98$   1,308$  13.34$    -874$  -1,221$  -1,431  22/58  $   2,162

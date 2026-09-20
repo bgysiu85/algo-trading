@@ -1,0 +1,22 @@
+  (2 session(s) skipped: too short for full warm-up)
+373 sessions. Honest fills, peak from entry price, measured friction.
+
+MCL  —  capital $5,000, 60% per trade, max 2 open
+  configuration                    tr      real      per     drop3     drop5     syms      shares max notl      ret
+  unlimited (old backtest)        451$-1,920,112,125,743$-4257454824.26$-3,119,997,035,281$-3,546,921,024,803  69/169 237284461-500000000000$1,000,000,000,000-38402242514.9%
+  $5,000, max 1 position(s)       416$   -6,238$  -14.99$   -9,937$  -11,380  69/165   154-1500  $   3,000  -124.8%
+  $5,000, max 2 position(s)       479$   -6,158$  -12.86$   -9,883$  -11,236  72/174    90-1500  $   3,000  -123.2%
+    rejected: 0 for capital, 9 for the position cap
+  $5,000, max 3 position(s)       480$   -6,164$  -12.84$   -9,889$  -11,242  72/174    19-1500  $   3,000  -123.3%
+  ...compounding                  479$  -17,503$  -36.54$  -25,285$  -28,224  72/174    73-5333  $  12,231  -350.1%
+    final equity $12,161 from $5,000
+
+MC5  —  capital $5,000, 60% per trade, max 2 open
+  configuration                    tr      real      per     drop3     drop5     syms      shares max notl      ret
+  unlimited (old backtest)        672$992,406,254,350$1476795021.35$-1,525,196,846,168$-2,805,904,896,405  70/197 140346646-500000000000$1,000,000,000,00019848125087.0%
+  $5,000, max 1 position(s)       625$    3,957$    6.33$   -4,018$   -8,323  68/193   150-1500  $   3,000    79.1%
+  $5,000, max 2 position(s)       747$    2,360$    3.16$   -5,383$   -9,617  74/204    74-1500  $   3,000    47.2%
+    rejected: 0 for capital, 60 for the position cap
+  $5,000, max 3 position(s)       752$    2,335$    3.11$   -5,623$   -9,857  74/204     1-1500  $   3,000    46.7%
+  ...compounding                  747$   15,072$   20.18$  -55,169$  -70,379  71/204    43-16919 $  55,472   301.4%
+    final equity $82,403 from $5,000

@@ -1,0 +1,167 @@
+# generated 2026-09-17 09:13:39 UTC
+
+THE PRE-MARKET CHANGE THRESHOLD: 30% AGAINST 20%
+
+  registered  docs/research/REGISTERED_change_threshold.md
+  baseline universe  var/state/screen_pairs_pit_itch_chg20.json
+  variant  universe  var/state/screen_pairs_pit_itch_chg30.json
+  550 sessions in the baseline   halves cut at 2025-08-07
+  symbol-days  20%: 6,555   30%: 4,468
+  100 shares   commission in, friction per round trip   elapsed 0.2s on 1 worker(s)
+
+  DELTAS ARE PER BASELINE SYMBOL-DAY. The variant's own symbol-day
+  count is smaller by construction, so dividing by it would price a
+  smaller programme as a better one.
+
+THE UNIVERSE: chg>=30% against chg>=20%
+
+  chg>=20%     symbol-days   6,555   sessions  550
+  chg>=30%     symbol-days   4,468   sessions  550
+  kept 4,468   dropped 2,087 (31.8% of chg>=20%)   added 0
+
+  ENTRY FLOOR on the symbol-days both keep (minutes later under chg>=30%):
+    moved later 1,505 of 4,468 (33.7%)
+    median 0   p90 19   max 327
+
+    A later floor is not a smaller book. It removes the early
+    entries and turns bars the baseline was mid-trade on into
+    live signals, so the variant's trades are NOT a subset.
+
+THE BOOKS
+
+  MCL@20
+    at $1.00  trades  3,950   net  (22,119.28)   per trade   (5.60)   per symbol-day  (3.37)
+    at $4.26  trades  3,950   net  (34,996.28)   per trade   (8.86)   per symbol-day  (5.34)
+    at $8.92  trades  3,950   net  (53,403.28)   per trade  (13.52)   per symbol-day  (8.15)
+    halves @ $4.26    early 1,796   (8.71)/t (15,645.03)   late 2,154   (8.98)/t (19,351.25)
+    drop top 3 @ $4.26  (37,317.49)   win rate 23.1%
+
+  MCL@30
+    at $1.00  trades  3,092   net  (16,471.41)   per trade   (5.33)   per symbol-day  (3.69)
+    at $4.26  trades  3,092   net  (26,551.33)   per trade   (8.59)   per symbol-day  (5.94)
+    at $8.92  trades  3,092   net  (40,960.05)   per trade  (13.25)   per symbol-day  (9.17)
+    halves @ $4.26    early 1,410   (8.32)/t (11,734.88)   late 1,682   (8.81)/t (14,816.45)
+    drop top 3 @ $4.26  (28,872.54)   win rate 22.8%
+
+  MC5@20
+    at $1.00  trades  6,613   net  (34,515.94)   per trade   (5.22)   per symbol-day  (5.27)
+    at $4.26  trades  6,613   net  (56,074.32)   per trade   (8.48)   per symbol-day  (8.55)
+    at $8.92  trades  6,613   net  (86,890.90)   per trade  (13.14)   per symbol-day (13.26)
+    halves @ $4.26    early 3,065   (8.68)/t (26,594.53)   late 3,548   (8.31)/t (29,479.79)
+    drop top 3 @ $4.26  (63,419.25)   win rate 23.1%
+
+  MC5@30
+    at $1.00  trades  4,915   net  (23,358.09)   per trade   (4.75)   per symbol-day  (5.23)
+    at $4.26  trades  4,915   net  (39,380.99)   per trade   (8.01)   per symbol-day  (8.81)
+    at $8.92  trades  4,915   net  (62,284.89)   per trade  (12.67)   per symbol-day (13.94)
+    halves @ $4.26    early 2,327   (8.71)/t (20,279.20)   late 2,588   (7.38)/t (19,101.79)
+    drop top 3 @ $4.26  (46,725.92)   win rate 22.9%
+
+SELECTION AGAINST THE CLOCK: MCL@30 decomposed out of MCL@20
+
+                             trades           net  per trade
+  MCL@20 whole book           3,950   (34,996.28)     (8.86)
+  - symbol-days dropped         529    (9,659.78)    (18.26)
+  = names the screen keeps    3,421   (25,336.50)     (7.41)   SELECTION +1.45/trade
+  - lost to the floor           369      1,275.74       3.46   THE COST OF WAITING
+  + new after the floor          40         60.91       1.52
+  = MCL@30 whole book         3,092   (26,551.33)     (8.59)   NET +0.27/trade
+
+  'names the screen keeps' is NOT A TRADEABLE ARM. It prices the
+  name list alone, at the baseline's entry floor, which requires
+  knowing before the fact that a name will clear the tighter
+  clause later in the morning. It is printed to attribute the
+  result, never as a candidate.
+
+HOW MUCH OF MCL@30 IS MCL@20 (identical symbol/date/entry/ordinal)
+
+  shared   3,052 of 3,092 (98.7%)   per trade   (8.72)
+  new         40   per trade     1.52
+
+  Agreement between two different trade sets is not replication
+  (PROGRAM_INDEX §4). A low share here is the reason this is a
+  universe study and not a gate study.
+
+WHAT MCL@30 DROPPED OF MCL@20 (trades on symbol-days the tighter screen removed)
+
+  symbol-days removed  2,087
+  trades on them         529   net   (9,659.78)   per trade  (18.26)
+    losses avoided       455    (10,880.46)
+    winners lost          74       1,220.68
+
+THE VERDICT: MCL@30 against MCL@20 (registered readings 1-5, $4.26)
+
+  1. per trade +0.27 (margin 4.26)   per symbol-day +1.29
+  2. early half  per trade +0.39  per symbol-day +0.60     late half  per trade +0.18  per symbol-day +0.69
+  3. drop-top-3 level  MCL@30 (28,872.54)  MCL@20 (37,317.49)     drop-top-3 delta 8,036.48
+  4. cluster bootstrap on the delta  P(total > 0) = 1.000  [6,074.24, 10,774.77]  over 1,183 symbols
+  5. abstention control: 858 of 3,950 trades removed at random, 2000 draws
+       per trade      random p05 -0.67  p50 +0.03  p95 +0.61   the gate +0.27
+       per symbol-day random p05 +0.84  p50 +1.17  p95 +1.45   the gate +1.29
+
+  NOTHING: fails 1 (per trade >= 4.26 and per symbol-day > 0); 5 (abstention control: per trade +0.27 does not beat random removal's p95 +0.61)
+
+  cost: 2 of MCL@20's top-10 trades at $4.26 are absent from MCL@30
+    UPC    2025-10-08  06:55 ET      401.36
+    XCUR   2024-11-22  09:15 ET      302.34
+  cascade: 40 MCL@30 entries the baseline does not contain
+
+SELECTION AGAINST THE CLOCK: MC5@30 decomposed out of MC5@20
+
+                             trades           net  per trade
+  MC5@20 whole book           6,613   (56,074.32)     (8.48)
+  - symbol-days dropped       1,146   (21,667.69)    (18.91)
+  = names the screen keeps    5,467   (34,406.63)     (6.29)   SELECTION +2.19/trade
+  - lost to the floor           763      1,805.32       2.37   THE COST OF WAITING
+  + new after the floor         211    (3,169.04)    (15.02)
+  = MC5@30 whole book         4,915   (39,380.99)     (8.01)   NET +0.47/trade
+
+  'names the screen keeps' is NOT A TRADEABLE ARM. It prices the
+  name list alone, at the baseline's entry floor, which requires
+  knowing before the fact that a name will clear the tighter
+  clause later in the morning. It is printed to attribute the
+  result, never as a candidate.
+
+HOW MUCH OF MC5@30 IS MC5@20 (identical symbol/date/entry/ordinal)
+
+  shared   4,704 of 4,915 (95.7%)   per trade   (7.70)
+  new        211   per trade  (15.02)
+
+  Agreement between two different trade sets is not replication
+  (PROGRAM_INDEX §4). A low share here is the reason this is a
+  universe study and not a gate study.
+
+WHAT MC5@30 DROPPED OF MC5@20 (trades on symbol-days the tighter screen removed)
+
+  symbol-days removed  2,087
+  trades on them       1,146   net  (21,667.69)   per trade  (18.91)
+    losses avoided     1,003    (23,819.44)
+    winners lost         143       2,151.75
+
+THE VERDICT: MC5@30 against MC5@20 (registered readings 1-5, $4.26)
+
+  1. per trade +0.47 (margin 4.26)   per symbol-day +2.55
+  2. early half  per trade -0.04  per symbol-day +0.96     late half  per trade +0.93  per symbol-day +1.58
+  3. drop-top-3 level  MC5@30 (46,725.92)  MC5@20 (63,419.25)     drop-top-3 delta 16,138.96
+  4. cluster bootstrap on the delta  P(total > 0) = 1.000  [13,011.24, 20,469.91]  over 1,466 symbols
+  5. abstention control: 1,698 of 6,613 trades removed at random, 2000 draws
+       per trade      random p05 -1.14  p50 +0.13  p95 +0.83   the gate +0.47
+       per symbol-day random p05 +1.34  p50 +2.29  p95 +2.82   the gate +2.55
+
+  NOTHING: fails 1 (per trade >= 4.26 and per symbol-day > 0); 2 (both halves, both denominators); 5 (abstention control: per trade +0.47 does not beat random removal's p95 +0.83)
+
+  cost: 1 of MC5@20's top-10 trades at $4.26 are absent from MC5@30
+    BTCT   2024-11-13  09:05 ET      518.54
+  cascade: 211 MC5@30 entries the baseline does not contain
+
+WHAT THIS IS NOT
+
+  NOT OUT OF SAMPLE. holdout.json has not been touched.
+  NOT A CAP MODEL. Each symbol-day runs alone; live, 29% of buy
+    attempts were refused by the concurrency cap and a tighter
+    screen frees slots this cannot price.
+  NOT THE LIVE SCREEN. tv_screener.PREMARKET_CHANGE_MIN is unchanged;
+    this measured a threshold, it did not ship one.
+  NOT A SEARCH. One threshold decides; any ladder printed beside this
+    report is descriptive and was declared as such before the run.
+

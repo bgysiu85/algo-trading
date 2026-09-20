@@ -1,0 +1,6 @@
+  (2 session(s) skipped: too short for full warm-up)
+                                         tr       net      per     drop3     drop5     syms    early     late
+  MC5  optimistic (fill AT the trail)     794$   20,156$   25.39$   12,876$   11,401 125/206 $  13,197$   6,959
+  MC5  honest (gap-through fills)         794$     -400$   -0.50$   -2,031$   -2,794  55/206 $    -279$    -121
+  MCL  optimistic (as published)          496$    1,567$    3.16$      277$     -304  70/174 $     365$   1,202
+  MCL  honest (gap-through fills)         496$   -1,215$   -2.45$   -2,280$   -2,699  52/174 $    -843$    -372

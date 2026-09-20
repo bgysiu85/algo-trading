@@ -1,0 +1,36 @@
+374 sessions (33 without cached bars), 1 session ending 20:00 -- VW9's window
+5m, trail_atr, VWAP exit off, band on
+friction $0.0213/share transacted (MCL's, borrowed)
+
+THE COMPARISON THAT MATTERS
+                              trades    real net     per tr           drop1          drop3          drop5   profitable
+  mixed (as rejected)         407 tr  $    7,118  $  17.49/tr   drop1 $     983  drop3 $  -5,610  drop5 $  -6,441   46/150 syms
+    its Setup-B slice          86 tr  $    1,723  $  20.03/tr   drop1 $    -505  drop3 $  -1,418  drop5 $  -1,756   19/55 syms
+    its Setup-A slice         321 tr  $    5,395  $  16.81/tr   drop1 $    -740  drop3 $  -6,328  drop5 $  -7,092   48/143 syms
+  SETUP B ONLY                 97 tr  $    1,284  $  13.23/tr   drop1 $    -944  drop3 $  -1,857  drop5 $  -2,225   18/58 syms
+  Setup A only (control)      337 tr  $    4,689  $  13.92/tr   drop1 $  -1,446  drop3 $  -7,034  drop5 $  -7,797   45/143 syms
+
+  Setup B trades: 86 in the mixed run -> 97 standalone. The difference is what Setup A was crowding out.
+
+SESSION BLOCK — the reason Setup B is worth testing at all
+  §9: pre-market takes Day Limit orders only, so PRE fills are the
+  ones the model cannot support. RTH is the believable window.
+  block     trades    real net   per trade
+  PRE           36 $      -202 $     -5.61
+  RTH           54 $     1,650 $     30.56
+  POST           7 $      -164 $    -23.49
+
+VERDICT AGAINST THE BAR THAT REJECTED VW9
+  [FAIL]  drop-top-3 positive              $-1,857
+  [FAIL]  drop-top-5 positive              $-2,225
+  [FAIL]  majority of symbols profitable   18/58
+  [PASS]  RTH profitable on its own        $1,650
+
+  1/4 — Setup B fails the same way the mixed strategy did. VW9 is done.
+
+  top contributors, to see what is carrying it:
+    AEHL     $    2,228  (173.6% of net)
+    FGI      $      689  ( 53.7% of net)
+    HWH      $      224  ( 17.5% of net)
+    ELTX     $      194  ( 15.1% of net)
+    FSLY     $      175  ( 13.6% of net)

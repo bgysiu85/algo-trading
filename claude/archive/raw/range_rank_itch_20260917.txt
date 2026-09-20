@@ -1,0 +1,159 @@
+# generated 2026-09-17 23:01:15 AUS Eastern Standard Time
+# common.range_rank pairs=var\state\screen_pairs_pit_itch_v2.json dataset=XNAS.ITCH sessions=550 symbol_days=6411 cut=2025-08-07 qty=100 N=3
+
+H-B3: TAKE A SIGNAL ONLY IF THE NAME RANKS TOP-N BY SESSION RANGE AT THAT MINUTE
+
+  registered  docs/research/REGISTERED_range_rank.md
+  universe    var\state\screen_pairs_pit_itch_v2.json   bars XNAS.ITCH
+  550 sessions   6,411 symbol-days   halves cut at 2025-08-07
+  100 shares   commission in, friction per round trip   elapsed 78.0s on 8 worker(s)
+
+POPULATION CHECK
+
+  MCL trades here     3,908
+  published count     3,908   matches
+
+THE BOOKS
+
+  MCL
+    at $1.00  trades  3,908   net  (22,323.04)   per trade   (5.71)   per symbol-day  (3.48)
+    at $4.26  trades  3,908   net  (35,063.12)   per trade   (8.97)   per symbol-day  (5.47)
+    at $8.92  trades  3,908   net  (53,274.40)   per trade  (13.63)   per symbol-day  (8.31)
+    halves @ $4.26    early 1,753   (8.94)/t (15,674.95)   late 2,155   (9.00)/t (19,388.17)
+    drop top 3 @ $4.26  (37,384.33)   win rate 23.0%
+
+  MCL-top3
+    at $1.00  trades  1,632   net   (8,236.39)   per trade   (5.05)   per symbol-day  (1.28)
+    at $4.26  trades  1,632   net  (13,556.71)   per trade   (8.31)   per symbol-day  (2.11)
+    at $8.92  trades  1,632   net  (21,161.83)   per trade  (12.97)   per symbol-day  (3.30)
+    halves @ $4.26    early   862   (7.49)/t  (6,453.46)   late   770   (9.22)/t  (7,103.25)
+    drop top 3 @ $4.26  (14,925.94)   win rate 24.0%
+
+  MCL-top1
+    at $1.00  trades    505   net   (1,879.43)   per trade   (3.72)   per symbol-day  (0.29)
+    at $4.26  trades    505   net   (3,525.73)   per trade   (6.98)   per symbol-day  (0.55)
+    at $8.92  trades    505   net   (5,879.03)   per trade  (11.64)   per symbol-day  (0.92)
+    halves @ $4.26    early   308   (8.48)/t  (2,610.34)   late   197   (4.65)/t    (915.39)
+    drop top 3 @ $4.26   (4,337.06)   win rate 24.4%
+
+  MC5
+    at $1.00  trades  6,462   net  (34,297.95)   per trade   (5.31)   per symbol-day  (5.35)
+    at $4.26  trades  6,462   net  (55,364.07)   per trade   (8.57)   per symbol-day  (8.64)
+    at $8.92  trades  6,462   net  (85,476.99)   per trade  (13.23)   per symbol-day (13.33)
+    halves @ $4.26    early 2,901   (8.70)/t (25,247.05)   late 3,561   (8.46)/t (30,117.02)
+    drop top 3 @ $4.26  (62,632.98)   win rate 23.0%
+
+  MC5-top3
+    at $1.00  trades  3,597   net  (19,721.16)   per trade   (5.48)   per symbol-day  (3.08)
+    at $4.26  trades  3,597   net  (31,447.38)   per trade   (8.74)   per symbol-day  (4.91)
+    at $8.92  trades  3,597   net  (48,209.40)   per trade  (13.40)   per symbol-day  (7.52)
+    halves @ $4.26    early 1,827   (7.95)/t (14,533.62)   late 1,770   (9.56)/t (16,913.76)
+    drop top 3 @ $4.26  (33,973.39)   win rate 23.1%
+
+  MC5-top1
+    at $1.00  trades  1,689   net   (6,245.13)   per trade   (3.70)   per symbol-day  (0.97)
+    at $4.26  trades  1,689   net  (11,751.27)   per trade   (6.96)   per symbol-day  (1.83)
+    at $8.92  trades  1,689   net  (19,622.01)   per trade  (11.62)   per symbol-day  (3.06)
+    halves @ $4.26    early   898   (7.36)/t  (6,612.73)   late   791   (6.50)/t  (5,138.54)
+    drop top 3 @ $4.26  (13,944.30)   win rate 23.6%
+
+COULD MCL-top3 HAVE BOUND? (visible point-in-time names at the baseline's entry minutes)
+
+  baseline entries 3,908   where the gate could refuse 3,463 (88.6%)
+  visible names at signal:  1:44  10:241  11:190  12:186  13:184  14:146  15:132  16:98  17:69  18:74  19:53  2:144  20:36  21:20  22:21
+
+THE VERDICT: MCL-top3 against MCL (registered readings 1-5, $4.26)
+
+  1. per trade +0.67 (margin 4.26)   per symbol-day +3.35
+  2. early half  per trade +1.46  per symbol-day +1.44     late half  per trade -0.23  per symbol-day +1.92
+  3. drop-top-3 level  MCL-top3 (14,925.94)  MCL (37,384.33)     drop-top-3 delta 20,913.52
+  4. cluster bootstrap on the delta  P(total > 0) = 1.000  [16,733.23, 25,580.06]  over 1,177 symbols
+  5. abstention control: 2,276 of 3,908 trades removed at random, 2000 draws
+       per trade      random p05 -1.35  p50 +0.02  p95 +1.37   the gate +0.67
+       per symbol-day random p05 +2.84  p50 +3.19  p95 +3.53   the gate +3.35
+
+  NOTHING: fails 1 (per trade >= 4.26 and per symbol-day > 0); 2 (both halves, both denominators); 5 (abstention control: per trade +0.67 does not beat random removal's p95 +1.37)
+
+  cost: 5 of MCL's top-10 trades at $4.26 are absent from MCL-top3
+    QMMM   2025-09-09  09:17 ET    1,341.32
+    UPC    2026-06-29  08:50 ET      477.55
+    UPC    2025-10-08  06:55 ET      401.36
+    TTRX   2025-10-09  07:43 ET      382.48
+    XCUR   2024-11-22  09:15 ET      302.34
+  cascade: 9 MCL-top3 entries the baseline does not contain
+
+WHAT MCL-top3 REFUSED OF MCL (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            2,284   net  (21,665.47)   per trade   (9.49)
+    losses avoided   1,776    (39,898.42)
+    winners lost       508      18,232.95
+
+COULD MC5-top3 HAVE BOUND? (visible point-in-time names at the baseline's entry minutes)
+
+  baseline entries 6,462   where the gate could refuse 5,504 (85.2%)
+  visible names at signal:  1:127  10:395  11:357  12:313  13:260  14:223  15:195  16:145  17:111  18:83  19:71  2:313  20:55  21:32  22:35
+
+THE VERDICT: MC5-top3 against MC5 (registered readings 1-5, $4.26)
+
+  1. per trade -0.18 (margin 4.26)   per symbol-day +3.73
+  2. early half  per trade +0.75  per symbol-day +1.67     late half  per trade -1.10  per symbol-day +2.06
+  3. drop-top-3 level  MC5-top3 (33,973.39)  MC5 (62,632.98)     drop-top-3 delta 23,097.08
+  4. cluster bootstrap on the delta  P(total > 0) = 1.000  [10,312.18, 33,083.66]  over 1,447 symbols
+  5. abstention control: 2,865 of 6,462 trades removed at random, 2000 draws
+       per trade      random p05 -1.51  p50 -0.01  p95 +1.40   the gate -0.18
+       per symbol-day random p05 +2.98  p50 +3.83  p95 +4.62   the gate +3.73
+
+  REFUSED: the two denominators disagree: per trade -0.18, per symbol-day +3.73
+
+  cost: 5 of MC5's top-10 trades at $4.26 are absent from MC5-top3
+    UVIX   2026-07-01  04:20 ET    5,437.25
+    NPT    2026-02-03  08:00 ET      599.35
+    ADXN   2026-08-21  04:15 ET      537.36
+    BTCT   2024-11-13  09:05 ET      518.54
+    MBX    2025-09-22  07:50 ET      493.34
+  cascade: 72 MC5-top3 entries the baseline does not contain
+
+WHAT MC5-top3 REFUSED OF MC5 (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            2,926   net  (24,906.55)   per trade   (8.51)
+    losses avoided   2,264    (56,627.77)
+    winners lost       662      31,721.22
+
+COULD MCL-top1 HAVE BOUND? (visible point-in-time names at the baseline's entry minutes)
+
+  baseline entries 3,908   where the gate could refuse 3,864 (98.9%)
+  visible names at signal:  1:44  10:241  11:190  12:186  13:184  14:146  15:132  16:98  17:69  18:74  19:53  2:144  20:36  21:20  22:21
+
+REPORTED, NOT REGISTERED: MCL-top1 against MCL
+
+  would read NOTHING: fails 1 (per trade >= 4.26 and per symbol-day > 0); 5 (abstention control: per trade +1.99 does not beat random removal's p95 +3.25)
+  per trade +1.99   per symbol-day +4.92   boot P 1.000   removed 3,403   random p95 per trade +3.25
+
+WHAT MCL-top1 REFUSED OF MCL (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            3,409   net  (31,526.39)   per trade   (9.25)
+    losses avoided   2,631    (59,967.27)
+    winners lost       778      28,440.88
+
+COULD MC5-top1 HAVE BOUND? (visible point-in-time names at the baseline's entry minutes)
+
+  baseline entries 6,462   where the gate could refuse 6,335 (98.0%)
+  visible names at signal:  1:127  10:395  11:357  12:313  13:260  14:223  15:195  16:145  17:111  18:83  19:71  2:313  20:55  21:32  22:35
+
+REPORTED, NOT REGISTERED: MC5-top1 against MC5
+
+  would read NOTHING: fails 1 (per trade >= 4.26 and per symbol-day > 0); 5 (abstention control: per trade +1.61 does not beat random removal's p95 +3.23)
+  per trade +1.61   per symbol-day +6.80   boot P 1.000   removed 4,773   random p95 per trade +3.23
+
+WHAT MC5-top1 REFUSED OF MC5 (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            4,848   net  (42,515.73)   per trade   (8.77)
+    losses avoided   3,741    (94,563.87)
+    winners lost     1,107      52,048.14
+
+WHAT THIS IS NOT
+
+  NOT OUT OF SAMPLE. holdout.json has not been touched.
+  NOT A CAP MODEL. Each symbol-day runs alone (registration §5).
+  NOT A SEARCH. One N decides; the reported cell was declared before the run.
+

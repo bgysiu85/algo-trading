@@ -1,0 +1,62 @@
+# generated 2026-09-18 18:43:53 AUS Eastern Standard Time
+# common.tv_probe --minutes 35.0 --interval 10.0
+
+THE FEED PROBE: HOW STALE IS THE FIRST POLL, AND HOW LATE IS THE TAPE?
+
+  registered  docs/research/REGISTERED_feed_freshness.md (H-F1) §5
+  endpoint    https://scanner.tradingview.com/america/scan   market america
+  polls       197   authenticated arm: yes
+
+5.1  IS THE FEED DELAYED, AND DOES THE LOGIN CHANGE IT?
+
+     plain  DELAYED        update_mode = 'delayed_streaming_900'
+     auth   STREAMING      update_mode = 'streaming'
+
+     The endpoint honours the login: delayed anonymously, streaming
+     signed in. Option B is one Cookie header on the request tv_feed
+     already makes -- and the feed must then check this column at
+     STARTUP, because an expired cookie reverts to delayed and looks
+     identical.
+
+     Separately -- does any column DATE the row, for H-F1's gate?
+       update_time                1789689599
+       last_bar_update_time       1789690515
+       time                       1789651800
+       premarket_time             1789632000
+       premarket_volume_time      absent
+       pricescale_update_time     absent
+       -> update_time, last_bar_update_time, time, premarket_time came back with values; the freshness gate's inference can become an exact test
+
+5.2  THE ROLL, OBSERVED (unauthenticated arm)
+
+     ticker      first seen   first moved   held
+     AEHL        04:08:52     never         --
+     AEMD        04:08:52     never         --
+     BIAF        04:08:52     never         --
+     CPOP        04:43:42     never         --
+     DAIC        04:08:52     never         --
+     SSM         04:16:11     04:16:43      32s
+     VEEA        04:08:52     never         --
+
+     6 name(s) never moved inside the probe window. On the 04:00 poll those
+     are the carry-over: a row that never moves is a row that describes yesterday.
+
+5.3  AUTHENTICATED AGAINST NOT
+
+     ticker      authenticated leads by
+     CPOP        +15.1 min
+     SSM         +7.3 min
+
+     MEDIAN +11.2 minutes across 2 name(s)
+     registered prediction: 10-20 minutes. A reading near zero means the
+     delay is NOT the endpoint and the 15-minute finding needs another explanation.
+
+     returned ONLY by the authenticated arm inside the window: TCRT
+
+WHAT THIS IS NOT
+
+  NOT A CHANGE. This probe is read-only: it never takes the writer
+  lock and never writes watchlist.txt. No feed behaviour changes on
+  the strength of it without its own commit.
+  NOT A SCREEN. The row set is the shipped screen's, unmodified --
+  candidate columns are APPENDED, never substituted.

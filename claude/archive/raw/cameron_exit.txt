@@ -1,0 +1,53 @@
+# generated 2026-09-10 15:01:30 UTC
+# common.cameron_exit  cache=bar_cache
+
+CAMERON'S EXIT vs MCL's TRAIL — a 2x2
+
+  373 cached sessions, 100 shares flat
+  net after tiered commission and $4.26/RT friction
+  halves split at 2026-03-20 (derived)
+  target 10% = 2R against MCL's 5% trail, derived per warrior_0 §5.2 — NOT chosen because it wins
+  partial 50%; breakeven = stop at the entry price, trail off
+
+  His CENT targets are not tested: they were scaled to the cent stop
+  rejected on 2026-09-10, and warrior_0 §5.2 says the target has to
+  be re-posed against a percentage stop before it can be answered.
+
+  cell                 trades       net     per   win%  scratch%  avg bars  drop top 3
+  MCL today               485$      161$   0.33  34.0%      8.7%       9.9$       -923
+  stop change only        463$   -4,110$  -8.88  22.7%      9.1%      19.0$     -5,708
+  partial only            485$      422$   0.87  34.0%      8.7%       9.9$       -610
+  CAMERON                 463$   -1,580$  -3.41  34.1%      9.1%      19.0$     -2,687
+
+ATTRIBUTION — what each half of the change is worth
+
+  stop change only       -4,271   per trade -9.21   win -11.3pp
+  partial only              +261   per trade +0.54   win +0.0pp
+  CAMERON                -1,741   per trade -3.74   win +0.1pp
+
+VERDICT on the full substitution
+
+  net -1,741   per trade -3.74
+  win rate 34.1% vs 34.0%  (+0.1pp)
+  per trade by half: early -6.13   late -2.35
+
+  WORSE on this tape. Read the attribution above before
+  concluding the exit is wrong: if the partial helps and the
+  breakeven hurts, the finding is about the STOP and not about
+  taking profit, and only one of the two needs discarding.
+
+WHAT THIS IS NOT
+
+  Not his method. The 5% trail is still in force BEFORE the target,
+  because his initial stop -- min(structure, 10-20c) -- was measured
+  and rejected on 2026-09-10 and putting it back would confound this
+  test with a settled question.
+
+  Not his full exit. Rules 2 and 3 of warrior_0 §5.3 -- exit on the
+  first red close before the partial, and sell into an extension bar
+  -- are not implemented.
+
+  Not out of sample. MCL was fitted on these sessions.
+
+  Not independent evidence. MCL was derived from this source, so the
+  spec is the intent rather than a second opinion.

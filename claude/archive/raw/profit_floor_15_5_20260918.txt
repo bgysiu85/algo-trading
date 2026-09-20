@@ -1,0 +1,77 @@
+# generated 2026-09-18 09:02:54 AUS Eastern Standard Time
+# common.profit_floor_study pairs=var/state/screen_pairs_pit_itch_p50.json dataset=XNAS.ITCH sessions=551 symbol_days=6564 qty=100 pf=(15, 5)
+
+H-C3: THE PROFIT FLOOR AT ENTRY + 5 TICKS
+(the report's own title line still prints "H-C2" for both cells -- known cosmetic defect;
+ the `registered` line is what distinguishes them)
+
+  registered  docs/research/REGISTERED_profit_floor_v2.md
+  rule        arm at entry + 15 ticks, floor at entry + 5 ticks, active from the bar after arming
+  code at commit fe9cdbd   551 sessions   6,564 symbol-days   halves cut at 2025-08-07
+
+THE BOOKS
+
+  MCL         at $4.26  trades 3,960  net (34,882.52)  per trade (8.81)
+              win 23.3%  scratch 8.4%  avg winner 37.30  avg loser (22.78)  avg bars 11.1
+  MCL-floor   at $4.26  trades 4,061  net (34,643.40)  per trade (8.53)
+              win 18.7%  scratch 23.6%  avg winner 35.70  avg loser (18.73)  avg bars 9.3
+              exits: profit_floor 985  trailing_stop 2,666  window_close 410
+  MC5         at $4.26  trades 6,630  net (56,277.74)  per trade (8.49)
+  MC5-floor   at $4.26  trades 6,754  net (60,105.84)  per trade (8.90)
+              win 20.7%  scratch 13.5%  avg winner 49.52  avg loser (24.16)  avg bars 3.2
+              exits: profit_floor 937  trailing_stop 5,160  window_close 657
+
+THE VERDICT: MCL-floor against MCL
+
+  baseline: 3,960 trades, (8.81)/trade -- matches
+  1. at $4.26 per trade +0.28  per symbol-day +0.04     at $8.92 per trade +0.28  per symbol-day -0.04
+  2. early half +0.10 / -0.02     late half +0.42 / +0.06
+  3. drop-top-3-symbols delta (112.83)
+  4. cluster bootstrap P(total > 0) = 0.599 (needs >= 0.975)  [(1,777.16), 2,030.36]  over 1,183 symbols
+  5. floor exits 24.3%
+
+  REFUSED: the two denominators disagree at $8.92: per trade +0.28, per symbol-day -0.04
+
+THE MECHANISM: MCL-floor
+
+  armed 1,801 of 4,061 (44.3%)   floor exits 985 (24.3%)
+  share of floor exits that net > $0:  $1.00 72.5%   $4.26 0.0%   $8.92 0.0%
+  fills: at the floor 684   gapped below 301   of which below entry 201
+  runners cut: 88 of MCL's 524 trades that reached +10%; P/L forgone 5,889.02
+
+THE VERDICT: MC5-floor against MC5
+
+  baseline: 6,630 trades, (8.49)/trade -- matches
+  1. at $4.26 per trade -0.41  per symbol-day -0.58     at $8.92 per trade -0.41  per symbol-day -0.67
+  2. early half -0.82 / -0.46     late half -0.06 / -0.12
+  3. drop-top-3-symbols delta (4,175.30)
+  4. cluster bootstrap P(total > 0) = 0.003 (needs >= 0.975)  [(7,223.06), (966.21)]  over 1,468 symbols
+  5. floor exits 13.9%
+
+  NOTHING: fails 1, 2, 3, 4
+
+THE MECHANISM: MC5-floor
+
+  armed 2,420 of 6,754 (35.8%)   floor exits 937 (13.9%)
+  share of floor exits that net > $0:  $1.00 57.7%   $4.26 0.0%   $8.92 0.0%
+  fills: at the floor 518   gapped below 419   of which below entry 319
+  runners cut: 88 of MC5's 1,389 trades that reached +10%; P/L forgone 6,370.24
+
+THIS CELL (15, 5) AGAINST (15, 10) -- reported, not scored
+
+  MCL-floor  per trade -0.00   per symbol-day +0.05   (4,061 trades against 4,100)
+  MC5-floor  per trade -0.05   per symbol-day +0.01   (6,754 trades against 6,800)
+
+--- DECOMPOSITION (from profit_floor_15_5_trades.csv, $4.26, not in the emitted report) ---
+
+                       MCL                MC5
+  losers rescued       +9,816 (765)       +6,565 (739)
+  winners >$20 cut     (7,532) (109)      (8,306) (94)
+  small winners cut      (721) (69)         (736) (63)
+  re-entries/knock-on  (1,324)            (1,351)
+  whole book             +239             (3,828)
+
+NOTE: at +5 ticks NO floor exit can clear $4.26 -- 5 ticks less the slippage tick is
+$4.00 gross on 100 shares and commission takes about $2. The registration predicted
+10-30% (MCL) and 5-25% (MC5) positive and was wrong; it was arithmetic, not an
+empirical question. A floor must sit at least ~7 ticks above entry to be worth taking.

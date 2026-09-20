@@ -1,0 +1,63 @@
+VW9 SALVAGE TEST — can a tighter entry filter or a different exit rescue it?
+Research chat, 2026-09-17. Read-only analysis; no program logic touched.
+Source: var/reports/screened/backtest_trades_vw9_5m.csv  (1,527 trades, 724 symbols, 459 sessions)
+
+== 1. WHAT THE SCREENED RUN ACTUALLY IS ==
+  exit_mode      fixed_2r  x1527   <-- NOT trail_atr. The trail was never run on this universe.
+  setup_kind     A 1120 / B 407
+  exit reason    vwap_lost 917 (60.0%) | stop 284 (18.6%) | target_2r 265 (17.4%) | session_close 61 (4.0%)
+
+  block       n        net      /trade    win%
+  PRE       188     (1,628)     (8.66)   17.6%
+  RTH     1,313     (5,543)     (4.22)   23.2%
+  POST       26       (462)    (17.76)   15.4%
+  setup A  1,120     (5,511)     (4.92)   18.7%
+  setup B    407     (2,123)     (5.22)   32.4%
+
+  TOTAL   (7,633)   symbols 724   profitable 211 (29.1%)
+  drop-top-1  (8,792)   drop-top-3 (10,552)   drop-top-5 (12,084)
+  top 5: SQFT +1,158, ARTL +905, PTIX +855, AMIX +818, WYHG +714
+
+== 2. THE REQUIRED-PRECISION TEST ==
+  non-top-3 pool: 1,515 trades   winners +36,540   losers (47,092)   net (10,552)
+  333 winners / 1,182 losers  (22.0% win rate)
+
+  An entry filter removes trades. Let p_w = fraction of WINNER dollars it removes,
+  p_l = fraction of LOSER dollars. To make drop-top-3 non-negative:
+        p_l*|L| - p_w*W  >=  |L| - W
+
+  KEY RESULT: a filter uncorrelated with outcome has p_w = p_l = f, giving
+        new_net = (W+L)*(1-f)
+  which scales a negative number toward zero and NEVER crosses it.
+  An uncorrelated filter cannot work at ANY strength. Selectivity s = p_l/p_w must exceed 1.
+
+  Minimum removal required, by selectivity s:
+     s       p_w (winner $ removed)   p_l (loser $ removed)
+    1.10      69.1%                    76.1%
+    1.25      47.3%                    59.1%
+    1.50      30.9%                    46.4%
+    2.00      18.3%                    36.6%
+    3.00      10.1%                    30.2%
+    5.00       5.3%                    26.5%
+     inf      0.0%                     22.4%   (removes only losers)
+
+== 3. WHAT VOLUME FILTERS ACTUALLY MEASURE ON THIS UNIVERSE ==
+  entry_margins_result_20260914.md  — dollar-volume floors $5k..$1M on MCL:
+     removed trades lose the SAME as kept: (7.85)-(9.89) vs a (9.16) book;
+     the two halves disagree in direction.   => selectivity s ~= 1.0  => cannot work.
+  6,000-share volume floor (earlier):
+     removed ~$872 of WINNERS against ~$115 of losers.  => s ~= 0.13  => actively harmful.
+  VW9's own pre-flight: DV floor 'nearly inert' (S8.2); gates 'barely binding' (S8.4).
+
+== 4. THE EXIT LEVER, SIZED ==
+  Only 265 of 1,527 trades (17.4%) exit at target_2r. Those are the only ones a trail extends.
+  917 (60.0%) exit on vwap_lost, which preempts both target and trail.
+  To close (10,552) across 265 trades needs ~$40/trade on trades already exiting at 2R.
+  NOTE: the archived 'best cell' used trail_atr AND had the VWAP exit switched OFF.
+        That is two changes, and the second disables the rule the spec calls
+        'the rule the whole strategy rests on'.
+
+== 5. VERDICT ==
+  Volume filter : NO. Measured twice as uncorrelated or worse; arithmetically cannot flip a negative.
+  Trail exit    : ONE legitimate registered run. Never tested on an honest universe. Prior is poor:
+                  break-even friction on this universe is (0.70)/RT, i.e. it loses at zero cost.

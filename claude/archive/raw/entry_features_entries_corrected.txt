@@ -1,0 +1,247 @@
+# generated 2026-09-12 13:48:50 UTC
+# common.entry_features  population=entries
+
+WHAT SEPARATES THE WINNERS FROM THE LOSERS?
+
+  population: entries
+  482 entr(ies) from var/state/traded_pairs.json
+  outcome: net at $4.26/round trip
+  22 features x 4 buckets x 2 halves = 176 comparisons
+  elapsed 25.5s
+
+  35 symbol-day(s) NOT tested: no bars, or too short for warm-up
+
+THE BASE RATE  (what any feature has to beat)
+
+  trades                       482
+  mean net                    0.37
+  win rate                   34.0%
+
+EVERY FEATURE, BOTH HALVES  (nothing is ranked, nothing omitted)
+
+  vol_over_trail
+    this bar's volume / the 60-bar average. The headroom the entry had; 1.5x is where the joint window opens.
+
+    early  [1.65-3.64] n=43 (0.35) 33%  [3.74-6.96] n=44 (0.98) 39%  [7.00-20.26] n=43 (0.89) 35%  [22.16-1,253.33] n=44 (3.45) 34%
+    late   [1.85-3.68] n=77 (7.47) 27%  [3.72-7.34] n=77 (1.01) 32%  [7.44-20.81] n=77 1.07 32%  [20.84-2,936.02] n=77 12.96 42%
+
+    (3.10) early / 20.43 late   [NOTHING] the halves DISAGREE in direction
+
+  vol_multiple
+    volume / prev_vol. How far past the 3x minimum it was.
+
+    early  [3.03-3.74] n=43 1.47 28%  [3.79-4.88] n=44 (2.68) 36%  [4.88-7.98] n=43 (0.93) 40%  [8.06-656.12] n=44 (3.49) 36%
+    late   [3.00-3.58] n=77 1.83 39%  [3.60-4.94] n=77 (7.27) 30%  [4.98-8.07] n=77 (2.23) 27%  [8.08-2,485.20] n=77 13.21 38%
+
+    (4.95) early / 11.38 late   [NOTHING] the halves DISAGREE in direction
+
+  floor_margin
+    prev_vol / trail_avg. How far past the 0.5x floor.
+
+    early  [0.51-0.74] n=43 4.36 37%  [0.74-1.19] n=44 (9.22) 32%  [1.20-2.56] n=43 7.00 37%  [2.60-50.39] n=44 (7.51) 34%
+    late   [0.50-0.79] n=77 0.44 31%  [0.79-1.20] n=77 (9.09) 31%  [1.20-2.83] n=77 0.74 29%  [2.87-59.19] n=77 13.45 43%
+
+    (11.87) early / 13.01 late   [NOTHING] the halves DISAGREE in direction
+
+  macd_margin
+    macd - macd_signal. Conviction, not just the sign.
+
+    early  [0.00-0.02] n=43 3.59 44%  [0.02-0.03] n=44 (2.17) 41%  [0.03-0.06] n=43 (6.47) 21%  [0.06-0.38] n=44 (0.66) 34%
+    late   [0.00-0.01] n=77 6.77 39%  [0.01-0.03] n=77 (3.33) 31%  [0.03-0.06] n=77 (3.22) 32%  [0.06-0.57] n=77 5.31 31%
+
+    (4.25) early / (1.46) late   [NOTHING] ends agree but the smaller is under $4.26
+
+  macd_level
+    macd itself. Far above zero is a move already underway.
+
+    early  [0.00-0.04] n=43 (6.58) 40%  [0.04-0.08] n=44 7.40 34%  [0.08-0.15] n=43 (10.11) 37%  [0.15-1.32] n=44 3.27 30%
+    late   [0.00-0.03] n=77 2.84 39%  [0.03-0.07] n=77 (6.65) 21%  [0.07-0.15] n=77 (8.10) 31%  [0.15-1.54] n=77 17.45 43%
+
+    9.85 early / 14.62 late   [WEAK] ends agree and both exceed friction, but the buckets between them do not line up -- two ends differing is what noise looks like
+
+  rsi
+    RSI at entry. High is strength, or exhaustion.
+
+    early  [50.45-65.55] n=43 (3.05) 35%  [65.59-71.06] n=44 0.31 32%  [71.27-78.12] n=43 4.44 44%  [78.56-100.00] n=44 (7.31) 30%
+    late   [50.04-65.70] n=77 1.44 35%  [65.71-71.09] n=77 (4.41) 29%  [71.09-79.53] n=77 3.55 35%  [79.61-100.00] n=77 4.96 35%
+
+    (4.26) early / 3.51 late   [NOTHING] the halves DISAGREE in direction
+
+  rsi_slope
+    RSI minus RSI three bars ago.
+
+    early  [0.44-7.04] n=43 (1.44) 33%  [7.07-11.51] n=44 (1.38) 30%  [11.89-18.14] n=43 (1.59) 44%  [18.31-100.00] n=44 (1.31) 34%
+    late   [0.00-7.93] n=77 14.55 49%  [8.02-12.90] n=77 (1.29) 25%  [12.92-21.06] n=77 (9.93) 26%  [21.09-94.08] n=77 2.21 34%
+
+    0.13 early / (12.34) late   [NOTHING] the halves DISAGREE in direction
+
+  mfi
+    MFI at entry.
+
+    early  [18.45-64.89] n=43 (0.89) 35%  [65.32-76.57] n=44 4.05 39%  [76.65-86.71] n=43 2.23 30%  [87.84-99.96] n=44 (11.01) 36%
+    late   [5.68-68.60] n=77 8.36 40%  [68.63-77.87] n=77 0.27 36%  [78.07-88.59] n=77 (15.71) 18%  [88.95-99.94] n=77 12.62 39%
+
+    (10.12) early / 4.26 late   [NOTHING] the halves DISAGREE in direction
+
+  mfi_slope
+    MFI minus MFI three bars ago.
+
+    early  [0.03-6.97] n=43 (2.17) 35%  [6.99-16.37] n=44 3.84 34%  [16.52-30.16] n=43 3.55 40%  [30.86-96.48] n=44 (10.83) 32%
+    late   [0.04-8.80] n=77 13.83 49%  [8.96-17.76] n=77 (1.51) 30%  [17.90-30.61] n=77 (5.06) 30%  [30.64-99.94] n=77 (1.72) 25%
+
+    (8.66) early / (15.55) late   [WEAK] ends agree and both exceed friction, but the buckets between them do not line up -- two ends differing is what noise looks like
+
+  mins_since_open
+    minutes since 04:00 ET.
+
+    early  [0.00-120.00] n=43 9.31 44%  [122.00-201.00] n=44 (0.47) 41%  [202.00-253.00] n=43 (12.50) 23%  [254.00-328.00] n=44 (2.06) 32%
+    late   [0.00-54.00] n=77 6.56 32%  [54.00-170.00] n=77 3.03 31%  [171.00-257.00] n=77 (3.70) 42%  [257.00-328.00] n=77 (0.34) 29%
+
+    (11.37) early / (6.90) late   [WEAK] ends agree and both exceed friction, but the buckets between them do not line up -- two ends differing is what noise looks like
+
+  price
+    the entry price.
+
+    early  [1.99-3.05] n=43 (2.38) 37%  [3.22-4.58] n=44 (4.18) 30%  [4.68-7.89] n=43 2.17 33%  [8.00-19.10] n=44 (1.26) 41%
+    late   [1.99-3.30] n=77 (7.83) 22%  [3.37-5.05] n=77 0.44 32%  [5.15-8.68] n=77 0.41 38%  [8.70-19.36] n=77 12.53 42%
+
+    1.11 early / 20.36 late   [NOTHING] ends agree but the smaller is under $4.26
+
+  extension
+    close / the session's first close - 1, in percent. How much of the move had already happened.
+
+    early  [(48.67)-4.43] n=43 (4.63) 40%  [4.50-17.09] n=44 4.34 41%  [17.45-38.34] n=43 (3.94) 35%  [39.31-290.06] n=44 (1.61) 25%
+    late   [(37.61)-0.00] n=77 (8.32) 26%  [0.00-14.05] n=77 20.04 40%  [14.06-31.34] n=77 1.57 40%  [31.69-378.32] n=77 (7.75) 27%
+
+    3.03 early / 0.57 late   [NOTHING] ends agree but the smaller is under $4.26
+
+  range_pct
+    mean(high-low)/close over the last 14 bars, in percent. Recent volatility.
+
+    early  [0.00-1.43] n=43 (2.18) 42%  [1.43-2.61] n=44 0.72 39%  [2.63-5.22] n=43 (2.92) 33%  [5.36-18.93] n=44 (1.37) 27%
+    late   [0.00-1.40] n=77 13.13 43%  [1.41-2.29] n=77 (6.93) 26%  [2.29-3.90] n=77 (3.38) 34%  [3.99-20.40] n=77 2.71 31%
+
+    0.81 early / (10.42) late   [NOTHING] the halves DISAGREE in direction
+
+  dollar_vol_session
+    price x cumulative session volume, in $. Nothing in the entry rule knows whether the name was tradeable at all.
+
+    early  [11,136.93-782,774.90] n=43 2.53 42%  [790,134.00-4,547,942.00] n=44 3.24 41%  [4,851,157.74-24,755,066.10] n=43 (5.36) 30%  [25,500,245.04-481,095,757.57] n=44 (6.12) 27%
+    late   [7,789.28-1,261,692.60] n=77 13.28 48%  [1,292,542.43-9,388,078.77] n=77 3.94 32%  [9,541,730.88-34,674,653.85] n=77 (3.57) 30%  [35,198,817.40-398,532,403.43] n=77 (8.12) 23%
+
+    (8.66) early / (21.39) late   [WEAK] ends agree and both exceed friction, but the buckets between them do not line up -- two ends differing is what noise looks like
+
+  dollar_vol_bar
+    price x this bar's volume, in $.
+
+    early  [4,540.80-121,359.68] n=43 (2.23) 44%  [122,276.08-426,078.66] n=44 3.15 27%  [434,761.25-1,123,393.24] n=43 (3.99) 33%  [1,188,523.40-10,278,357.09] n=44 (2.71) 36%
+    late   [2,655.00-145,880.50] n=77 8.75 42%  [148,959.78-450,869.57] n=77 4.29 39%  [457,521.09-1,139,931.81] n=77 (5.78) 27%  [1,140,075.24-10,601,829.00] n=77 (1.73) 26%
+
+    (0.48) early / (10.48) late   [NOTHING] ends agree but the smaller is under $4.26
+
+  tape_density
+    minutes that TRADED / minutes elapsed since the session's first bar, in percent. A thin tape is a different market.
+
+    early  [2.36-37.33] n=43 (1.11) 35%  [38.10-85.38] n=44 (2.76) 43%  [85.61-100.00] n=43 (0.45) 35%  [100.00-100.00] n=44 (1.35) 27%
+    late   too few distinct values: a bucket boundary falls inside a run of identical values, so membership would be decided by list order
+
+    [NOTHING] a half could not be bucketed (reason above)
+
+  trail_over_range
+    the 5% trail distance / the mean bar range. How many typical bars of movement the stop allows before it is hit -- under ~1 the stop is inside the noise.
+
+    early  [0.31-1.00] n=43 (1.01) 28%  [1.03-2.06] n=44 (1.80) 34%  [2.07-3.50] n=43 2.79 37%  [3.50-5,110.00] n=44 (5.58) 41%
+    late   [0.29-1.33] n=76 4.43 34%  [1.37-2.30] n=77 (5.34) 30%  [2.31-3.60] n=77 (7.25) 26%  [3.63-406.00] n=77 13.01 43%
+
+    (4.57) early / 8.58 late   [NOTHING] the halves DISAGREE in direction
+
+  close_in_bar
+    (close - low) / (high - low) of the ENTRY bar. MCL fills at the close, so 1.0 is paying the top tick of a spike.
+
+    early  [0.00-0.56] n=43 4.51 47%  [0.58-0.75] n=44 (5.33) 30%  [0.75-0.90] n=43 1.56 26%  [0.91-1.00] n=44 (6.24) 39%
+    late   [0.00-0.58] n=75 9.86 37%  [0.58-0.77] n=76 (12.18) 20%  [0.77-0.90] n=76 7.39 33%  [0.91-1.00] n=76 (2.35) 39%
+
+    (10.75) early / (12.22) late   [WEAK] ends agree and both exceed friction, but the buckets between them do not line up -- two ends differing is what noise looks like
+
+  body_ratio
+    |close - open| / (high - low). Decisive bar or a wick.
+
+    early  [0.00-0.44] n=43 11.35 51%  [0.46-0.67] n=44 (11.51) 27%  [0.68-0.83] n=43 0.20 26%  [0.83-1.00] n=44 (5.41) 36%
+    late   [0.00-0.47] n=75 3.41 37%  [0.47-0.68] n=76 (2.76) 24%  [0.68-0.84] n=76 (5.06) 28%  [0.84-1.00] n=76 7.04 41%
+
+    (16.76) early / 3.63 late   [NOTHING] the halves DISAGREE in direction
+
+  vwap_dist
+    close / session VWAP - 1, in percent. Absent from the entry rule entirely.
+
+    early  [(21.33)-2.69] n=43 9.69 49%  [2.73-5.62] n=44 7.54 39%  [5.64-11.13] n=43 (19.23) 21%  [11.17-41.53] n=44 (3.86) 32%
+    late   [(39.82)-(2.10)] n=77 (8.54) 26%  [(2.08)-4.03] n=77 7.37 42%  [4.04-9.49] n=77 9.40 35%  [9.72-51.13] n=77 (2.69) 31%
+
+    (13.55) early / 5.86 late   [NOTHING] the halves DISAGREE in direction
+
+  ma20_dist
+    close / the 20-bar mean - 1, in percent.
+
+    early  [(0.13)-4.73] n=43 (8.22) 40%  [4.84-9.10] n=44 7.21 39%  [9.18-15.97] n=43 4.74 42%  [16.10-100.74] n=44 (9.45) 20%
+    late   [0.06-4.40] n=77 5.41 38%  [4.52-8.78] n=77 (4.99) 30%  [8.82-14.74] n=77 (1.28) 36%  [14.81-104.31] n=77 6.40 30%
+
+    (1.23) early / 0.99 late   [NOTHING] the halves DISAGREE in direction
+
+  ma20_slope
+    the 20-bar mean now / 3 bars ago - 1, in percent.
+
+    early  [(0.15)-0.50] n=43 (9.33) 35%  [0.50-1.01] n=44 1.53 43%  [1.05-2.14] n=43 1.53 33%  [2.19-8.26] n=44 0.46 30%
+    late   [(3.00)-0.36] n=77 2.49 38%  [0.37-0.89] n=77 (2.66) 29%  [0.89-1.85] n=77 (4.74) 31%  [1.86-10.61] n=77 10.45 36%
+
+    9.79 early / 7.96 late   [WEAK] ends agree and both exceed friction, but the buckets between them do not line up -- two ends differing is what noise looks like
+
+
+TIERS, COUNTED BY FAMILY
+
+  11 families over 22 columns. Correlated columns
+  carrying one pattern are ONE piece of evidence, not several.
+
+  CANDIDATE  0   none
+  WEAK       6   bar shape, liquidity, momentum level, momentum slope, timing, trend
+
+  NO family cleared the bar. That is a result, not a failure:
+  it says the winners and losers are not separated by anything
+  on this list, and it costs nothing -- unlike adding a
+  condition that was never there.
+
+HOW TO READ THIS, AND HOW NOT TO
+
+  176 comparisons were made. At any usual threshold several will look
+  meaningful by chance. The feature list was fixed in the module
+  BEFORE any outcome was examined, and every feature is printed,
+  including the flat ones -- reporting only what separated is the
+  selection this module exists to resist.
+
+  A feature is worth a second look ONLY if all three hold:
+    1. MONOTONE across the buckets, the same way in both halves,
+    2. an effect larger than $4.26 in BOTH halves,
+    3. bucket counts that are not tiny.
+
+  Monotonicity was added after the first run, which passed
+  `macd_level` on ends that differed while its middles ran
+  (6.58) / 7.40 / (10.11) / 3.27. Two ends differing is what noise
+  looks like; four buckets in order is much rarer.
+
+  Even then it is a HYPOTHESIS, not a condition. The next step is
+  to register it, then test it -- not to add it and re-run the
+  backtest, which is how a strategy gets fitted to its own history.
+
+WHAT THIS IS NOT
+
+  Not a model. No weights were fitted and no feature was selected.
+
+  Not out of sample. `var/state/holdout.json` was cut 2026-09-07
+  and is NOT touched here. It must not be spent on a search; only
+  on a specific hypothesis that has already survived this report.
+
+  Not causal. A feature that separates outcomes may be a proxy for
+  something else entirely -- time of day and volatility are
+  correlated with almost everything else on this list.
+
+  Not free of the universe. These entries come from the pairs file
+  named above, which the `prior_close` defect helped select.
