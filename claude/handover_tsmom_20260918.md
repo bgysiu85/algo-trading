@@ -138,6 +138,8 @@ been catching itself making all week.
 
 *Update 2026-09-19 18:15: **G3 CLEARED — Ben chose (b) MTN** (AT-3 Done). TN data (signal history for arm b) joins the AT-99 top-up. AT-43 is no longer blocked by AT-3.*
 
+*Update 2026-09-20: **AT-99 Done.** Amendment C written (REGISTERED_tsmom §0.2); top-up pulled (206/206 jobs, $0.5452) and read back. The held contract has a bar on every session in GC/SI/HG/ZN/TN except one file-boundary day (fetch §1.8). Next: **AT-41** (roll cross-check, now unblocked) and **AT-42** (engine).*
+
 *Board cards (2026-09-19): **AT-8** manifest (Ben, Next up) · **AT-3** rates arm (Ben, Waiting on Ben) · **AT-41** roll cross-check (Blocked by AT-8) · **AT-42** engine (Next up — needs no data) · **AT-43** run (Blocked by AT-3, AT-8, AT-41, AT-42) · **AT-54** repo-wide `secrets_util` rule (Build & test) · **AT-7** Databento cancel and **AT-56** PROGRAM_INDEX carry TSMOM notes.*
 
 1. **Read the manifest.** (AT-8) Confirm the pull, record the ACTUAL against the

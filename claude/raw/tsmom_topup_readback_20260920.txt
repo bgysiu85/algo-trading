@@ -1,0 +1,70 @@
+TSMOM top-up read-back, 2026-09-20 (AT-99 step 4)
+Source: E:\Databento\GLBX.MDP3 (manifest pull 2, 2026-09-19T12:26:05Z): 206/206 jobs, estimate $0.5452, late_listings {}
+
+== held contract under amendment C, looked up in the bought bars
+root  sessions  held_no_bar  pct  median_vol_held unmapped_iid      first first_misses
+  GC      5055            1 0.0%           126160         0.0% 2010-06-07 [2026-09-18]
+  SI      5055            0 0.0%            42422         0.0% 2010-06-07           []
+  HG      5055            0 0.0%            44645         0.0% 2010-06-07           []
+  ZN      5057            0 0.0%          1102168         0.0% 2010-06-07           []
+  TN      3328            0 0.0%           169136         0.0% 2016-01-11           []
+TN {'TN.c.0': ('2016-01-11', '2026-09-18', 3184, 107477), 'TN.c.1': ('2016-01-29', '2026-09-18', 1768, 17072)}
+MTN {'MTN.c.0': ('2024-03-25', '2026-09-18', 759, 282), 'MTN.c.1': ('2024-05-24', '2026-08-28', 89, 40)}
+                          raw_symbol asset                expiration  min_price_increment  unit_of_measure_qty
+ts_recv                                                                                                       
+2016-01-15 00:00:00+00:00       TNH6    TN 2016-03-21 17:01:00+00:00             0.015625             100000.0
+2016-01-15 00:00:00+00:00       TNM6    TN 2016-06-21 17:01:00+00:00             0.015625             100000.0
+2016-01-15 00:00:00+00:00       TNU6    TN 2016-09-21 17:01:00+00:00             0.015625             100000.0
+
+== script (run on Ben's machine, databento 0.86.0)
+import databento as db, pandas as pd, os, glob, collections, warnings
+warnings.filterwarnings("ignore")
+D=os.path.expanduser("~/mnt/GLBX.MDP3")
+CYCLE={"GC":[2,4,6,8,10,12],"SI":[3,5,7,9,12],"HG":[3,5,7,9,12],"ZN":[3,6,9,12],"TN":[3,6,9,12]}
+def maturities(root):
+    m={}
+    for f in sorted(glob.glob(f"{D}/definition/{root}/*.dbn.zst")):
+        d=db.DBNStore.from_file(f).to_df()
+        d=d[d.instrument_class=="F"]
+        for iid,y,mo,sym,exp in zip(d.instrument_id,d.maturity_year,d.maturity_month,d.raw_symbol,d.expiration):
+            m[int(iid)]=(int(y),int(mo),sym,exp)
+    return m
+def bars(root):
+    fs=[f"{D}/ohlcv-1d/{root}.dbn.zst"]+([f"{D}/ohlcv-1d/{root}.c2-c4.dbn.zst"] if os.path.exists(f"{D}/ohlcv-1d/{root}.c2-c4.dbn.zst") else [])
+    return pd.concat([db.DBNStore.from_file(f).to_df() for f in fs])
+out=[]
+for root,cyc in CYCLE.items():
+    mat=maturities(root); b=bars(root)
+    b["date"]=b.index.tz_convert(None).normalize() if b.index.tz is not None else b.index.normalize()
+    b["mat"]=b.instrument_id.map(lambda i: mat.get(int(i),(None,None,None,None))[:2])
+    unk=b.mat.map(lambda x:x[0] is None).mean()
+    sess=sorted(b.date.unique())
+    # first session of each month
+    first={}
+    for s in sess: first.setdefault((s.year,s.month),s)
+    idx={s:i for i,s in enumerate(sess)}
+    def held(t):
+        y,m=t.year,t.month
+        for k in range(0,30):
+            yy,mm=y+(m-1+k)//12,(m-1+k)%12+1
+            if mm not in cyc: continue
+            fs=first.get((yy,mm))
+            if fs is None: return (yy,mm)
+            if idx[t] < idx[fs]-5: return (yy,mm)
+        return None
+    by=collections.defaultdict(set)
+    vol={}
+    for d,mt,sym,v in zip(b.date,b.mat,b.symbol,b.volume):
+        by[d].add(mt); vol[(d,mt)]=v
+    miss=[];vols=[]
+    for s in sess:
+        h=held(s)
+        if h in by[s]: vols.append(vol[(s,h)])
+        else: miss.append(s)
+    out.append((root,len(sess),len(miss),f"{100*len(miss)/len(sess):.1f}%",int(pd.Series(vols).median()) if vols else 0,f"{unk:.1%}",str(sess[0].date()),[str(x.date()) for x in miss[:6]]))
+print(pd.DataFrame(out,columns=["root","sessions","held_no_bar","pct","median_vol_held","unmapped_iid","first","first_misses"]).to_string(index=False))
+for r in ["TN","MTN"]:
+    df=db.DBNStore.from_file(f"{D}/ohlcv-1d/{r}.dbn.zst").to_df()
+    print(r, df.groupby("symbol").apply(lambda g:(str(g.index.min().date()),str(g.index.max().date()),len(g),int(g.volume.median()))).to_dict())
+d=db.DBNStore.from_file(sorted(glob.glob(f"{D}/definition/TN/*"))[0]).to_df()
+print(d[d.instrument_class=="F"][["raw_symbol","asset","expiration","min_price_increment","unit_of_measure_qty"]].head(4).to_string())
