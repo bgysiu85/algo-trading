@@ -465,21 +465,30 @@ def main(argv=None) -> int:
     p.add_argument("--out", default=str(OUT_DEFAULT))
     p.add_argument("--csv", default=str(CSV_DEFAULT))
     p.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) - 1))
+    p.add_argument("--from-csv", action="store_true",
+                    help="skip the 1-second resimulation and rescore the trades "
+                         "already cached at --csv (2026-09-23: use this after a "
+                         "scoring-only fix, when the trades themselves haven't "
+                         "changed -- saves re-running the expensive resimulation)")
     a = p.parse_args(argv)
 
-    ledger = P.load_ledger(Path(a.trades))          # holdout excluded by default
-    cell = primary_cell(ledger)
-    print(f"primary cell: {len(cell):,} trades, {cell['date'].nunique():,} sessions")
-
-    if a.archive:
-        archive = Path(a.archive)
+    if a.from_csv:
+        res = pd.read_csv(a.csv)
+        print(f"loaded {len(res):,} cached trades from {a.csv} (resimulation skipped)")
     else:
-        from common.databento_fetch import default_archive
-        archive = default_archive()
+        ledger = P.load_ledger(Path(a.trades))          # holdout excluded by default
+        cell = primary_cell(ledger)
+        print(f"primary cell: {len(cell):,} trades, {cell['date'].nunique():,} sessions")
 
-    res = run(cell, archive, a.jobs, Path(a.csv).parent / "_tensec_g2")
-    Path(a.csv).parent.mkdir(parents=True, exist_ok=True)
-    res.to_csv(a.csv, index=False, encoding="utf-8", compression="gzip")
+        if a.archive:
+            archive = Path(a.archive)
+        else:
+            from common.databento_fetch import default_archive
+            archive = default_archive()
+
+        res = run(cell, archive, a.jobs, Path(a.csv).parent / "_tensec_g2")
+        Path(a.csv).parent.mkdir(parents=True, exist_ok=True)
+        res.to_csv(a.csv, index=False, encoding="utf-8", compression="gzip")
 
     gt_path = Path(a.ground_truth)
     ground_truth = (pd.read_csv(gt_path, encoding="utf-8") if gt_path.exists()
