@@ -20,7 +20,8 @@ from tests.brokers.ibkr.test_dryrun_roundtrip import FakeTicker, find_firing_ser
 
 
 class FakeFill:
-    def __init__(self, shares): self.execution = types.SimpleNamespace(shares=shares)
+    def __init__(self, shares, exec_id=None):
+        self.execution = types.SimpleNamespace(shares=shares, execId=exec_id)
 
 
 class FakeLogEntry:
@@ -32,8 +33,8 @@ class FakeTrade:
     still working at IB -- not done until cancelled -- because that is the
     only honest state a partial-with-Submitted can be in. Every other
     scripted status is terminal on arrival, as before."""
-    def __init__(self, filled, avg, status, msgs=(), qty=100):
-        self.fills = [FakeFill(filled)] if filled else []
+    def __init__(self, filled, avg, status, msgs=(), qty=100, exec_id=None):
+        self.fills = [FakeFill(filled, exec_id)] if filled else []
         self.orderStatus = types.SimpleNamespace(status=status, avgFillPrice=avg)
         self.log = [FakeLogEntry(m) for m in msgs]
         self._working = status == "Submitted" and 0 < filled < qty
@@ -122,8 +123,8 @@ async def main():
 
     # ---- 2. partial fill: remainder cancelled, position = filled qty ------
     tr, st, ib, log, out = build("partial", [
-        FakeTrade(40, 10.04, "Submitted"),          # BUY 100 -> 40 filled
-        FakeTrade(40, 9.98, "Filled"),              # SELL 40 -> all of it
+        FakeTrade(40, 10.04, "Submitted", exec_id="0001.abc.01.01"),
+        FakeTrade(40, 9.98, "Filled", exec_id="0001.abc.01.02"),
     ])
     await feed(tr, st, seq)
     log.close()
@@ -145,13 +146,26 @@ async def main():
     else:
         print(f"FAIL  exit sized wrong: {[r['qty'] for r in sells]}")
         ok = False
+    # ---- 2b. exec_id: IB's own execution id, not a row index --------------
+    buys = [r for r in rows if r["action"] == "BUY" and r["status"] == "PARTIAL_FILL"]
+    norow = [r for r in rows if r["status"] in ("REFUSED_WOULD_SHORT", "RECONCILED_FLAT")]
+    if buys and buys[0]["exec_id"] == "0001.abc.01.01":
+        print("PASS  exec_id carries IB's execution id on the filled leg")
+    else:
+        print(f"FAIL  exec_id not carried through on the fill: {buys}")
+        ok = False
+    if norow and all(r["exec_id"] == "" for r in norow):
+        print("PASS  exec_id is blank on rows with no execution behind them")
+    else:
+        print(f"FAIL  exec_id should be blank with nothing filled: {norow}")
+        ok = False
 
     # ---- 3. exit that doesn't fill must retry -----------------------------
     tr, st, ib, log, out = build("stickyexit", [
-        FakeTrade(100, 10.04, "Filled"),            # BUY fills
+        FakeTrade(100, 10.04, "Filled", exec_id="0002.abc.01.01"),   # BUY fills
         FakeTrade(0, 0.0, "Submitted"),             # first SELL: no fill
         FakeTrade(0, 0.0, "Submitted"),             # second SELL: no fill
-        FakeTrade(100, 9.90, "Filled"),             # third SELL: fills
+        FakeTrade(100, 9.90, "Filled", exec_id="0002.abc.02.01"),    # third SELL: fills
     ])
     # IB really holds the shares, so the retries are legitimate. Without this
     # the second attempt reconciles against a flat account and RELEASES the
@@ -171,6 +185,15 @@ async def main():
         print("PASS  flat once the retry filled")
     else:
         print("FAIL  still holding after a successful exit fill")
+        ok = False
+    filled_rows = [r for r in rows if r["status"] == "FILLED"]
+    ids = {r["action"]: r["exec_id"] for r in filled_rows}
+    if ids.get("BUY") == "0002.abc.01.01" and ids.get("SELL") == "0002.abc.02.01":
+        print("PASS  the entry and the exit that finally filled each carry "
+              "their own execution id, not one shared or borrowed from the "
+              "retries that filled nothing")
+    else:
+        print(f"FAIL  exec_id wrong on the round trip: {ids}")
         ok = False
 
     print("\n" + ("ALL LIVE-PATH CHECKS PASSED" if ok else "FAILURES ABOVE"))

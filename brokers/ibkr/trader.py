@@ -691,6 +691,19 @@ FIELDS = [
     # drift does not separate outcomes -- quartiles are non-monotone and the
     # whole extreme-bucket effect is that one trade.
     "ref_drift_pct",
+    # THE STABLE PER-TRADE ID. IB's own execution id -- unique and unchanging,
+    # never reused across fills, orders or sessions. Written on every row that
+    # carries a real fill (FILLED, PARTIAL_FILL, and a late/reconciled fill
+    # discovered after the fact); blank on rows with no execution behind them
+    # (REJECTED, SKIPPED_*, NO_FILL_*, RECONCILED_FLAT with nothing visible).
+    # A partial fill can be more than one execution, so this is every execId
+    # for the row's shares, comma-joined and sorted for a stable string.
+    #
+    # This replaces the row's CSV position (`f-{i:05d}` in the portal's
+    # mirror) as the candidate primary key: that index resets every day and
+    # shifts if the log is ever re-parsed differently, so it could not be one.
+    # A genuine broker id can. See claude/reporting_tab_design_20260917.md §2.
+    "exec_id",
 ]
 
 
@@ -793,6 +806,20 @@ def ref_drift(bid: float, ask: float, ref_close: float) -> float:
     if bid != bid or ask != ask or not ref_close or ref_close != ref_close:
         return float("nan")
     return ((bid + ask) / 2.0 / ref_close - 1.0) * 100.0
+
+
+def exec_ids(fills) -> str:
+    """IB's execId for each fill in `fills`, comma-joined and sorted.
+
+    Sorted so the same set of executions always produces the same string
+    regardless of the order `fills` was built in -- IB does not promise an
+    order, and a partial fill's remainder can arrive as a second execution
+    read back in either sequence.
+    """
+    ids = {f.execution.execId for f in fills
+           if getattr(f, "execution", None)
+           and getattr(f.execution, "execId", None)}
+    return ",".join(sorted(ids))
 
 
 class FillLog:
@@ -1709,6 +1736,7 @@ class MCLPaperTrader:
                            fill_price=avg, filled_qty=filled,
                            slippage_vs_ref=round(-slip, 4),
                            seconds_to_fill=round(elapsed, 2),
+                           exec_id=exec_ids(trade.fills),
                            **rt, **row)
             # Notify AFTER the log write, never before: the CSV is the record
             # of what happened and must not be delayed or skipped because a
@@ -1972,6 +2000,7 @@ class MCLPaperTrader:
                        trade_pct=round((avg / pos.entry_price - 1) * 100, 3),
                        hold_minutes=round(held_min, 1),
                        trail_pct=pos.trail_pct,
+                       exec_id=exec_ids(fills),
                        reject_reason="late fill of the order logged "
                                      "ORDER_UNKNOWN",
                        **detail)
@@ -1987,14 +2016,16 @@ class MCLPaperTrader:
         return False
 
     def _ib_exit_fill(self, st: SymbolState, since: datetime):
-        """(avg price, shares) of SELL executions in `st.symbol` since `since`,
-        from IB's own fill list, or None when there are none it can see."""
+        """(avg price, shares, exec ids) of SELL executions in `st.symbol`
+        since `since`, from IB's own fill list, or None when there are none
+        it can see."""
         try:
             fills = self.ib.fills()
         except Exception as e:                              # noqa: BLE001
             LOG.warning("could not read fills from IBKR: %s", e)
             return None
         shares, notional = 0, 0.0
+        matched = []
         for f in fills:
             ex = getattr(f, "execution", None)
             c = getattr(f, "contract", None)
@@ -2011,9 +2042,10 @@ class MCLPaperTrader:
                     pass                # naive vs aware: keep it, do not drop it
             shares += int(ex.shares)
             notional += float(ex.shares) * float(ex.price)
+            matched.append(f)
         if shares <= 0:
             return None
-        return notional / shares, shares
+        return notional / shares, shares, exec_ids(matched)
 
     def _reconcile_flat(self, st: SymbolState, pos: "Position", reason: str,
                         detail: dict, now_et: datetime | None = None) -> None:
@@ -2034,7 +2066,7 @@ class MCLPaperTrader:
                     action="SELL", qty=pos.qty, ref_kind="ib_execution",
                     trail_pct=pos.trail_pct, **detail)
         if found:
-            avg, shares = found
+            avg, shares, found_exec_ids = found
             # IB's SELLs since this entry include another strategy's exits in
             # the same name; this position can only account for its own qty.
             shares = min(shares, pos.qty)
@@ -2053,7 +2085,8 @@ class MCLPaperTrader:
                            entry_price=round(pos.entry_price, 4),
                            exit_price=round(avg, 4), trade_pnl=round(pnl, 2),
                            trade_pct=round((avg / pos.entry_price - 1) * 100, 3),
-                           hold_minutes=round(held_min, 1), **base)
+                           hold_minutes=round(held_min, 1),
+                           exec_id=found_exec_ids, **base)
         else:
             LOG.error("%s RECONCILED: IB is flat and shows no execution the "
                       "trader can see. Position released; P/L UNKNOWN -- read "
