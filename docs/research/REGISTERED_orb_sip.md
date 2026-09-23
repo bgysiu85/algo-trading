@@ -649,3 +649,351 @@ recorded as wrong.
 It does not touch the universe, the ranking, the filters, the friction levels,
 the criteria, the controls, the holdout, the resolved figure of record, or the
 verdict already recorded. It buys no data. It produces no P/L.
+
+---
+
+# AMENDMENT G — 2026-09-19, PRE-MEASUREMENT. Symbols, or days?
+
+## G.0 What G is, and the F.3 wording it corrects
+
+F.3's consequence sentence read "ORB closes permanently. No variant is
+registered." F.5 in the same amendment read that F "does not touch the universe,
+the ranking, the **filters**...". A market-context gate
+(`handover_orb_build_chat_20260918.md` §5) is a filter, so those two sentences
+conflict. **The drafting error is recorded here rather than resolved silently
+in whichever direction suits.** F measured stop width and closed stop width; a
+measurement cannot close a hypothesis it never tested. F.3's sentence is
+narrowed to its scope: **the stop-width lever is closed permanently.**
+
+G does not reopen the verdict, which stands at 1 of 7 with the holdout unspent.
+G is DESCRIPTIVE and decides one thing only: **whether §5's market-context gate
+has a mechanism worth a registration, or is dead before it gets one.**
+
+## G.1 The question
+
+The book is +4.8R across 7,239 trades and turns on five symbols — MWA +57R,
+TD +52R, NYT +51R, IONS +51R, THC +51R — with drop-top-1 at (52.1)R. A
+market-context gate turns whole SESSIONS on and off. It can therefore only
+reach that concentration if the concentration lives in **days**. If the
+carrying trades are single names doing single-name things on unrelated
+sessions, no market-wide gate can touch them, whatever its threshold.
+
+F already relocated the failure to the entry rather than the exit (winners
+reach a median 0.63R against them, losers 5.51R), which is why this is worth
+one query rather than none.
+
+## G.2 What is measured
+
+Resolved primary cell, range 5, rank <= 20, holdout withheld. The ledger is
+already on disk. **Nothing is bought, no trade is re-simulated, and no gate is
+applied** — a gate needs SPY state as a column and G adds none, precisely so
+that G cannot be read as the gate's result.
+
+- **CARRIER TRADES** — the N largest trades by net R at BASE. N is fixed at
+  **20 and 50**, both reported, neither chosen after the fact.
+- **CARRIER DAYS** — the distinct sessions those trades fall on.
+- **THE REST OF THE BOOK on a carrier day** — every other primary-cell trade
+  that session, the carrier trade itself excluded.
+
+## G.3 The primary reading, and the bar, fixed now
+
+**Mean net R of the rest of the book on carrier days, against mean net R on all
+other days.**
+
+A gate switches whole sessions, so what it can exploit is whether carrier days
+are *generally* good days, not whether one name ran.
+
+**The gate is registered only if that lift is at least +0.10R** — twice
+criterion 3's own bar, because a lift smaller than the thing being measured is
+not a mechanism. **At both N = 20 and N = 50.** A split result is a refusal,
+not a result: it means the reading depends on where the carrier line was drawn.
+
+If the bar is missed, **§5's market-context gate is retired unrun**, recorded
+against the four precedents it would have joined (`luck_vs_edge_RESULT_20260917`,
+`cold_veto_RESULT_20260917`, `spy_intraday_RESULT_20260918` H-S2, and the
+BandWidth squeeze pre-flight), and the source item is closed rather than left
+to be re-proposed.
+
+## G.4 The supporting reading
+
+**Do the carrier trades cluster on fewer sessions than chance allows?**
+
+The observed distinct-day count against a **2,000-draw permutation null**
+(SEED 20260916, the project's seed): the same number of trades drawn at random
+from the same ledger, so the null inherits the real distribution of trades per
+session rather than assuming it is flat. Reported as the observed count, the
+null's central mass, and a one-sided p.
+
+This is supporting, not deciding. Clustering without a lift is a fact about
+where the winners landed, not a mechanism a gate could trade.
+
+## G.5 Prediction, scored either way
+
+Written before the measurement: **the lift lands below +0.10R and the gate is
+retired.** The basis is the handover's own §5 prior — one symbol is worth
+(56.9)R of swing, and splitting a book that concentrated by market state yields
+two concentrated halves rather than one clean one — plus the regime-gate
+family's 0-for-4 record here. A secondary prediction, recorded so it can be
+wrong on its own: **the carrier trades do NOT cluster beyond chance.**
+
+## G.6 What G does not do
+
+It does not touch the universe, the ranking, the filters, the friction levels,
+the criteria, the controls, the holdout, the resolved figure of record, or the
+verdict. It buys no data, applies no gate, and produces no P/L for any variant.
+It cannot produce a pass, and a positive reading only earns §5 a registration —
+never an adoption.
+
+---
+
+# AMENDMENT H — 2026-09-19, PRE-RUN. The market-context gate.
+
+Earned by amendment G, proposed by `handover_orb_build_chat_20260918.md` §5,
+sourced from `source_videos_14_breitstein_20260918.md` §14.2–14.3. H registers
+the gate. It does not adopt it, and H.5's prediction is that it fails.
+
+The verdict stands at 1 of 7 and `holdout.json` is unspent. H cannot change
+either: see H.6.
+
+## H.0 What was looked at before this was written
+
+A feasibility census of the BUCKETING VARIABLE ALONE, on 62 sampled sessions:
+SPY bars present on 62 of 62, never fewer than 5 in the window, 46.8% up,
+53.2% down, 0.0% exactly flat, median absolute move $0.275. **No P/L, no
+bucket-by-outcome reading, and no ORB trade was touched.** A rule whose buckets
+might be empty or degenerate cannot be registered sight-unseen; the census
+establishes only that they are neither.
+
+SPY, QQQ, IWM and DIA are all already inside the XNAS.ITCH minute files on
+disk. **Nothing is bought.** SPY is named here and the others are not, so that
+"try QQQ instead" cannot follow a failure — see H.5.
+
+## H.1 The rule, and why it has no parameter
+
+Breitstein states market context as decisive — *"this one variable can
+single-handedly downgrade an A setup to a C or worse"* — and never
+operationalises it. The faithful operationalisation is the strategy's own rule
+applied to the index:
+
+- **Decision instant: 09:35 ET**, the end of the strategy's own 5-minute
+  opening range, at which the trigger arms. Nothing after it is read.
+- **SPY's opening-range move** = close of the 09:34 bar minus open of the 09:30
+  bar (minutes 570–574 inclusive, the same window the strategy uses on its own
+  names), XNAS.ITCH, already on disk.
+- A trade is **WITH** when its side matches the sign of that move, **AGAINST**
+  when it opposes it, **FLAT** when the move is exactly zero (0 of 62 in the
+  census; handled, not expected).
+- **The gate trades WITH and skips AGAINST.**
+
+**There is no threshold.** The magnitude of SPY's move is deliberately unused
+and will not be swept. A gate with a threshold is a grid, a grid on a book this
+concentrated is a search rather than a test, and the four failed precedents all
+had one. This rule has a single bit per session and nothing to tune.
+
+## H.2 The bar: the unrelaxed criteria, on the retained bucket
+
+The gate is **ADOPTABLE** only if the WITH bucket clears criteria 1–6 as
+written in section 4 — **criterion 1 above all**, because
+`handover_orb_build_chat_20260918.md` §2 fixed the test that a proposal
+improving the mean without improving drop-top-N has not addressed the failure.
+
+| | required of the WITH bucket |
+|---|---|
+| 1 | drop-top-3 **and** drop-top-5 both > 0 |
+| 2 | cluster bootstrap P(total > 0) >= 0.95 |
+| 3 | mean net >= +0.05R at BASE |
+| 4 | trades >= 100 |
+| 5 | both halves > 0 |
+| 6 | both sides > 0 |
+| 7 | **stays unscored**, per E.2's scope and the handover's refusal (a) |
+
+**Because 7 stays unscored, H cannot produce a ship decision.** The most it can
+earn is: criteria 1–6 clear, every control below passes, and a holdout spend is
+then *proposed to Ben as a decision* — never taken automatically, and never by
+this amendment.
+
+## H.3 The controls, all four required
+
+**(a) The shuffled-sign control. This is the one G's result makes mandatory.**
+G measured that carrier days are better days, but measured it *conditional on
+the outcome* — days were selected because they held a giant winner. A 50/50
+session split can inherit that artifact. So: randomly reassign SPY's sign
+across sessions, preserving the observed up/down proportion, **2,000 draws,
+seed 20260916**, and rescore. **The real WITH bucket's mean AND its drop-top-5
+must both exceed the 95th percentile of that null.** A gate that cannot beat a
+coin flip applied to the same sessions is a relabelling, not a rule.
+
+**(b) The side-composition control.** The strategy's direction comes from each
+stock's own opening range, so on an up day more names break up and WITH is
+correlated with long. Criterion 6 already reads long (0.028)R against short
++0.029R. **The gate's advantage must hold within side** — WITH-long against
+AGAINST-long, and WITH-short against AGAINST-short — or it is a restatement of
+the side split and is reported as one.
+
+**(c) Two denominators.** Per trade and per session. **A disagreement is a
+refusal, not a result** (PROGRAM_INDEX §4).
+
+**(d) drop-top-N on the delta, not only the level** (PROGRAM_INDEX §4 item 4).
+The WITH − AGAINST difference must survive dropping its top contributing
+symbols, or the difference is those symbols.
+
+Date-level throughout, never pooled: per (date, bucket) aggregates, because
+ORB days are market-wide by construction and the clustering trap that inverted
+the Bollinger dip-buy (pooled +0.286%/trade → date-level (0.010)%, t = (0.18))
+applies here with more force.
+
+## H.4 What is reported either way
+
+Both buckets in full, never the retained one alone: trades, mean, gross,
+friction, total, drop-top-1/3/5, win rate, bootstrap, both halves, both sides,
+and the per-session distribution. A gate is a claim about what it *discards* as
+much as what it keeps.
+
+## H.5 Prediction, scored either way, and what a failure closes
+
+**Primary: NOT ADOPTABLE. The WITH bucket fails criterion 1.**
+
+**Secondary, falsifiable on its own: the WITH bucket's mean WILL exceed the
+AGAINST bucket's, and its drop-top-5 will still be negative.** A real direction
+effect that does not fix concentration is the outcome this registration
+expects, and the two halves of that sentence are scored separately.
+
+Basis: the regime-gate family is 0 for 4 here; G established that a session
+gate would need roughly the best 4.5% of sessions (20 of 446) to make the rest
+of the book profitable, while this rule splits about 50/50; and the five
+carrier symbols will land in one bucket or the other and still dominate it.
+
+**If the parameter-free rule fails, the market-context family is RETIRED for
+ORB.** No threshold sweep, no second index, no second window, no "QQQ instead",
+no "only when SPY moves more than X". Those are the same hypothesis with a
+knob, and a knob is what this amendment exists to refuse.
+
+## H.6 What H does not do
+
+It buys no data, re-simulates no trade, and reads no bar after 09:35 for its
+bucketing. It does not touch the universe, the ranking, the filters, the
+friction levels, the criteria, the controls, the resolved figure of record, or
+the verdict. **It does not touch the holdout**, which stays locked whatever H
+reads. The volume-confirmation-on-the-break candidate from the same source
+stays separate and unregistered; a two-filter grid on this book is a search.
+
+---
+
+# AMENDMENT I — 2026-09-19, PRE-RUN. Volume confirmation on the break.
+
+The last named candidate from the source review
+(`handover_orb_build_chat_20260918.md` §5, `source_videos_14_breitstein_20260918.md`
+§14.2). H retired the market-context family; I is a different mechanism — the
+quality of the break itself, per trade, not the state of the market, per
+session — so H.5's retirement does not reach it and it gets its own test.
+
+**If I fails, ORB has no named candidate left.** The verdict stands at 1 of 7
+and `holdout.json` is unspent; I cannot change either (I.7).
+
+## I.0 What was looked at before this was written
+
+A census of the BUCKETING VARIABLE ALONE, 628 trades over 40 sampled sessions:
+usable on 99.7%, split 59.6% confirmed / 40.4% weak, zero exact ties, median
+break-to-prior volume ratio 1.30x, five prior bars available at the median.
+**No P/L and no bucket-by-outcome reading.** As in H.0, this establishes only
+that the buckets are neither empty nor degenerate.
+
+## I.1 The rule, parameter-free
+
+Breitstein: *"weak volume breakouts are far more likely to fail."* Stated as a
+warning, never defined. The faithful operationalisation is local, because
+confirmation means the break itself brought participation:
+
+- **CONFIRMED** — the breakout bar's volume is strictly greater than the median
+  volume of the five minutes immediately preceding it.
+- **WEAK** — otherwise. Exact ties count as WEAK (none in the census).
+- The gate trades CONFIRMED and skips WEAK.
+
+**No multiplier.** Not 1.5x, not 2x — a sign comparison, one bit per trade. The
+five-minute baseline is the strategy's own opening-range length, inherited
+rather than chosen; no other window is run (I.6).
+
+## I.2 THE LOOK-AHEAD, DISCLOSED: THIS IS A CEILING, NOT A STRATEGY
+
+A minute bar's volume is complete only at the end of that minute. The entry
+happens **during** it. **So the breakout bar's volume is not known at the
+moment the rule would have to fire, and I.1's primary reading uses information
+the trader does not have.**
+
+This is deliberate and it is the point:
+
+- **If the cheating version fails, the honest version cannot succeed.** A
+  filter that cannot help even when handed the future is dead, and one run
+  settles it.
+- **A pass earns nothing but a further registration.** It would mean only that
+  the mechanism is real, and the tradeable form below would then have to be
+  registered and tested on its own. **I.1 can never be adopted.**
+
+**The tradeable reading, reported beside it for information only:** the last
+COMPLETED bar's volume (minute `entry_min - 1`) against the median of the five
+before that (`entry_min - 6` .. `entry_min - 2`). Fully knowable at the entry.
+**The decision rests on the ceiling alone** — reporting both and then choosing
+whichever reads better is the two-denominator failure this program refuses.
+
+## I.3 The bar
+
+Criteria 1-6 as written in section 4, **unrelaxed**, on the CONFIRMED bucket,
+**criterion 1 above all** (`handover_orb_build_chat_20260918.md` §2: a proposal
+improving the mean without improving drop-top-N has not addressed the failure).
+Criterion 7 stays unscored per E.2's scope, so I cannot produce a ship decision.
+
+## I.4 The controls, all four required
+
+**(a) The shuffled-label null.** The same CONFIRMED/WEAK labels dealt to the
+same trades at random, preserving the observed 60/40 proportion, **2,000 draws,
+seed 20260916**. **The real bucket's mean AND drop-top-5 must both exceed the
+95th percentile.** This is a per-trade shuffle, where H's was per-session,
+because I is a per-trade filter. A gate that cannot beat a random relabelling
+of the same shape is a relabelling.
+
+**(b) The composition control.** Volume on the break is mechanically higher
+early in the session and on heavily-traded names, so CONFIRMED may be a
+time-of-day or an RVOL filter wearing volume's clothes. **Report the CONFIRMED
+share by entry-minute bucket and by RVOL rank decile.** If CONFIRMED is
+concentrated in the first minutes after the range, or in the top ranks, the
+reading is reported as that and not as volume.
+
+**(c) Two denominators.** Per trade and per symbol-day. A disagreement is a
+refusal, not a result.
+
+**(d) drop-top-N on the delta.** Per symbol, its CONFIRMED total less its WEAK
+total; the difference must survive dropping its top contributors.
+
+## I.5 Prediction, scored either way
+
+**Primary: NOT ADOPTABLE — the CONFIRMED bucket fails criterion 1**, even on
+the ceiling reading.
+
+**Secondary, separately scored: the CONFIRMED mean WILL exceed WEAK's, while
+drop-top-5 stays negative.** Recorded with the note that **the same secondary
+prediction was WRONG in amendment H** — there the direction effect did not
+exist at all. It is made again here because volume-at-the-break is a better
+documented microstructure regularity than index direction, and because a
+prediction repeated after being wrong is worth more than one quietly dropped.
+
+Basis for the primary: nothing measured so far has moved concentration; F
+localised the failure to entry selection and H found nothing there; and the
+ceiling still has to clear drop-top-5 on a book where five symbols are worth
+262R.
+
+## I.6 What a failure closes
+
+**The volume-confirmation family is retired for ORB** — no multiplier sweep
+(1.5x, 2x, 3x), no alternative baseline window, no dollar-volume restatement,
+no "confirmed on the retest instead". Those are one hypothesis with a knob.
+
+**And with it, ORB closes with no named candidate remaining.** Any future ORB
+work needs a new mechanism and new data, not another cut of this book.
+
+## I.7 What I does not do
+
+It buys no data, re-simulates no trade, and does not touch the universe, the
+ranking, the filters, the friction levels, the criteria, the controls, the
+resolved figure of record, the verdict, or the holdout. I.1's primary reading
+is a ceiling that uses unavailable information and **is never adoptable on its
+own terms**.
