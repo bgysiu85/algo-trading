@@ -32,7 +32,45 @@ to settle them with one pass each, for $0 of data.
 | # | Gate | Why it blocks |
 |---|---|---|
 | **G1** | **The 1-second pull is priced, then landed.** XNAS.ITCH `ohlcv-1s`, whole days, for every symbol-day in the primary ORB cell (§2) outside the holdout that is not already on disk. 2,888 of the 7,239 are (the entry-minute resolution set, `var/state/orb_sip_entrybar_pairs.json`); ~4,350 are not. Estimated ~1 GB by scaling the 698.1 MB of the first pull — **the vendor's number governs.** Run without `--confirm` first; if it is not $0.00 it stops for Ben. | Both arms are simulated on seconds; the trigger cannot exist without them. |
-| **G2** | **The 1-second engine reproduces the published ledger (B0 parity).** B0 (§3.1) re-simulated on 1-second bars must give (a) the same symbol-days and sides as the primary cell of `var/cache/orb_sip/trades/` for ≥ 99% of its 7,239 trades, (b) the same entry price wherever the ledger's entry did not gap, and (c) mean net R within ±0.02R of the resolved figure of record **+0.001R**. Every symbol-day whose exit reason differs is listed with its cause. | Every comparison in this study is B0 against something. If B0 on seconds is not the ledger, the engine is wrong or the ledger is, and neither result means anything. Amendment D is the precedent: the fill model once decided a result by itself. |
+| **G2** | **The 1-second engine reproduces the published ledger (B0 parity).** B0 (§3.1) re-simulated on 1-second bars must give (a) the same symbol-days and sides as the primary cell of `var/cache/orb_sip/trades/` for ≥ 99% of its 7,239 trades, (b) the same entry price wherever the ledger's entry did not gap, (c) every 18-Sep entry-minute-tie ground-truth trade reproduced exactly, (d) every genuine intra-minute gap trade clears a bad-tick screen or a reviewed allowlist, and (e) every exit-reason disagreement is accounted for by (c) or (d). **Criterion (c) was redesigned 2026-09-23 — see §0.1**; it no longer reads any aggregate R figure. Every symbol-day whose exit reason differs is listed with its cause. | Every comparison in this study is B0 against something. If B0 on seconds is not the ledger, the engine is wrong or the ledger is, and neither result means anything. Amendment D is the precedent: the fill model once decided a result by itself. |
+
+### 0.1 Amendment — G2 criterion (c) redesigned, 2026-09-23 (W12-0005)
+
+G2's criterion (c) was written as "mean net R within ±0.02R of the resolved figure of record **+0.001R**"
+(`claude/orb_sip_RESOLVED_20260918.md`). Building G2 (step 4) surfaced a real divergence between that figure and
+B0-on-seconds' own reading. **W12-0005** (2026-09-23) traced it, cross-validated it against an independent ground
+truth (`var/cache/orb_sip/entrybar_resolved.csv.gz`, the 18-Sep study's own separately-computed answer for 2,888
+entry-minute-ambiguous trades — matched exactly, 100%), and hand-spot-checked the remaining 67 genuine intra-minute
+gap trades for bad ticks (none found). **The +0.001R figure of record was wrong** — it undercounted ORB SIP's true
+cost because it only ever resolved entry-minute stop-order ties, never a genuine intra-minute price move a 1-minute
+bar cannot see at all. The corrected figure is **−0.098R**, accepted as ORB SIP's revised figure of record.
+
+Comparing B0-on-seconds against a number it has itself disproven is not a test of the engine — it is now comparing
+the more correct reading against the less correct one. Ben's decision, 2026-09-23: **redesign G2**, not retarget it
+to the corrected number, so the gate depends on no aggregate R figure at all — retargeting would still leave G2
+hostage to whichever figure is currently believed, exactly the failure mode that produced this amendment.
+
+**Criterion (c) is retired** and replaced by three checks, none of which reads an aggregate R figure:
+
+- **(c) every trade in the 18-Sep entry-minute-tie ground truth** (`entrybar_resolved.csv.gz`) **must have its entry
+  AND exit price reproduced exactly by B0-on-seconds**, at ≥ 99% rate and ≥ 99% coverage. This ground truth was built
+  by a separate, earlier study and does not depend on ORB SIP's figure of record in either direction.
+- **(d) every "genuine intra-minute gap" trade** (entry price disagrees with the ledger, not covered by (c)) **must
+  clear an automated bad-tick screen** (an isolated print that reverts within 5 seconds, on volume under 20% of the
+  preceding 30 seconds' average) **or sit on a small, dated, hand-reviewed allowlist**. Two trades are on that
+  allowlist today, both reviewed 2026-09-23: MBB (2025-03-12, a real 322-share print) and PPG (2025-04-09, a real
+  but thin 2-share print) — see `claude/w12_0005_orb_sip_recheck_RESULT_20260923.md`. Anything the screen flags that
+  is not already on the list fails the gate until someone looks at it.
+- **(e) every exit-reason disagreement between the ledger and B0-on-seconds must be accounted for by (c) or (d)** —
+  zero unexplained divergences. A trade that disagrees for some third, unrecognised reason is a gate failure, not a
+  rounding error.
+
+**Criteria (a) and (b) are unchanged.** This amendment touches the QA gate only — it does not touch B0's trigger or
+fill rule (§3.1), T1's rule (§3.2), or any of §7's scientific pass/fail criteria for H-X1/H-Q1, so it is not the kind
+of after-the-fact rule change §10 refuses: §10 bars changing the *arms'* rules after seeing a result; G2 is the
+engineering precondition that must pass before any arm is scored at all, and its broken reference is what this fixes.
+`strategy/orb/tensec_g2.py` implements the redesign; `tests/strategy/test_orb_tensec_g2.py` is its mutation-checked
+test (pure logic, synthetic data, no market data needed).
 | **G3** | **Engine tests, mutation-checked.** Hand-built cases for: the trigger needs a *completed* 10-second close strictly beyond the level; the fill is the next printed second's open, never the trigger bar's own prices; the stop is placed off the executed fill; inside the fill second the stop fills at the stop price, never at that second's open; after it, stops gap through; one entry per symbol-day; no entry at or after 15:59:00. Reverting any one of these must fail a test. | The same shape of defect has been found by tests twice here (amendment D; the MC5 four-minute window shift). |
 | **G4** | **The MBP-1 pull is priced, then landed — for H-Q1 only, after H-X1's trigger list exists.** XNAS.ITCH `mbp-1`, one window per H-X1 trade inside the MBP-1 plan window (§6.1): from 60 s before the trigger bar starts to 60 s after it ends. Run without `--confirm` first; if not $0.00 it stops for Ben. | H-Q1 reads the book at H-X1's trigger instants, which do not exist until H-X1 has run. Windowing keeps the pull to minutes per trade instead of whole days of a liquid name's quote stream. |
 | **G5** | **H-Q1's positive control passes** (§5.3). | If imbalance does not even predict the next 10 seconds of the Nasdaq mid-price at these instants, the signal as built carries nothing and the gate result is uninterpretable. |
