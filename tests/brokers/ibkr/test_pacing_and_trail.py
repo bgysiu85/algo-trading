@@ -74,6 +74,9 @@ async def main():
     tr, st, ib, log, out = build("fasttrail", [
         FakeTrade(100, 24.00, "Filled"),     # the exit fill
     ])
+    # IB holds the shares. Since W02-0014 no SELL on a position older than
+    # POSITION_PUSH_LAG_S leaves unless the account holds it.
+    ib.held["TEST"] = 100
     st.ticker = MovingTicker(23.90, 24.00)
     st.position = M.Position(symbol="TEST", qty=100, entry_price=21.14,
                              entry_time=datetime(2026, 9, 2, 4, 1, tzinfo=M.ET),

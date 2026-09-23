@@ -333,10 +333,15 @@ def test_an_unreadable_position_means_no_send():
 def test_the_first_attempt_trusts_local_state():
     """The other direction. IB's position push can lag a fill by a moment;
     refusing a legitimate FIRST exit because IB has not caught up would leave
-    a real position unmanaged. Only retries reconcile."""
+    a real position unmanaged. Only retries reconcile.
+
+    Since W02-0014 the exemption is bounded to POSITION_PUSH_LAG_S after the
+    entry, which is where the lag lives: this entry is 2s old. The same exit
+    on a position a minute old is refused -- see test_double_sell_short."""
     tr, st, ib, log, out = build("first", [Trade(filled=100, avg=3.69,
                                                 status="Filled")])
-    pos = held_position(st); pos.peak = 3.90
+    pos = held_position(st, at=datetime(2026, 9, 16, 6, 17, 5, tzinfo=ET))
+    pos.peak = 3.90
     ib.held = {}                                   # IB has not caught up
     asyncio.run(trail_exit(tr, st, ask=3.68, polls=1))
     assert len(ib.placed) == 1

@@ -146,6 +146,32 @@ CANCEL_CONFIRM_S = 3.0
 MAX_EXIT_ATTEMPTS = 5
 EXIT_RETRY_BACKOFF_S = 30.0
 
+# THE CRML SHORT, 2026-09-21 (W02-0014). MCL and MC5 each held 100 CRML at
+# 09:30, so the ACCOUNT held 200. MCL's window_close SELL went ORDER_UNKNOWN at
+# 09:30:02 and filled after the cancel wait. The re-send check above asked IB
+# what the ACCOUNT held, got MC5's 100, and sold again at 09:30:06; MC5's own
+# first-attempt exit sold 100 more at 09:30:07 without asking anyone. 300 sold
+# against 200 bought: short 100, found by Ben the next morning because the
+# startup guard refused to trade. Three rules close it, each tested in
+# tests/brokers/ibkr/test_double_sell_short.py:
+#
+#   S1  An ORDER_UNKNOWN order is remembered, and before anything is re-sent
+#       its own fills are read. A fill there IS the exit.
+#   S2  "What IB holds" means what IB holds FOR THIS STRATEGY: the account
+#       position less the shares every other strategy's book holds in the
+#       same symbol. Two books in one name must not vouch for each other.
+#   S3  No SELL leaves -- first attempt or re-send -- for more than the
+#       account holds less SELLs already working. A long-only book cannot go
+#       short, whatever its own count says.
+#
+# S3 has ONE exemption, and it is the reason first attempts used to trust
+# local state: IB's position push can lag a fresh ENTRY fill by a moment, and
+# refusing a legitimate exit then would leave a real position unmanaged. That
+# lag is a property of the first seconds after an entry, not of a position
+# fifty minutes old (MC5's CRML). So a first attempt within this many seconds
+# of its entry still trusts local state; after it, S3 applies to every SELL.
+POSITION_PUSH_LAG_S = 15.0
+
 # IBKR STATES THE ACCEPTABLE LIMIT IN THE TEXT OF THE REJECTION.
 #
 #   Error 202: Order Canceled - reason:We cannot accept an order at a limit
@@ -459,6 +485,10 @@ class SymbolState:
     # state may be wrong in either direction until the next exit reconciles
     # against IB's own position -- and nothing is sent until it has.
     unknown_order: bool = False
+    # The Trade whose outcome was unknown (S1). ib_async keeps updating it
+    # after the trader stopped waiting, so a fill that landed late shows up
+    # here -- read it before anything is re-sent.
+    unknown_trade: object = None
     # When this strategy last released a position on this symbol, ET. An
     # entry signal is taken only from a bar that OPENED at or after this --
     # see bar_after_exit.
@@ -1593,6 +1623,7 @@ class MCLPaperTrader:
                           "symbol until IB's position has been read.",
                           action, st.symbol, CANCEL_CONFIRM_S)
                 st.unknown_order = True
+                st.unknown_trade = trade
                 self.log.write(status="ORDER_UNKNOWN", filled_qty=0,
                                seconds_to_fill=round(waited, 2),
                                reject_reason="no terminal order status within "
@@ -1791,7 +1822,9 @@ class MCLPaperTrader:
 
     def _adopt_unknown_entry(self, st: SymbolState, now_et: datetime,
                              detail: dict) -> None:
-        held = self._ib_held(st)
+        # THIS strategy's share (S2): another strategy already in the name
+        # must not have its shares adopted a second time.
+        held = self._ib_held_for(st)
         if not held:
             if held is None:
                 LOG.error("%s entry outcome unknown AND IB unreadable; the "
@@ -1799,6 +1832,13 @@ class MCLPaperTrader:
                           st.symbol)
             else:
                 st.unknown_order = False       # IB says flat: nothing to adopt
+                st.unknown_trade = None
+            return
+        if held < 0:
+            LOG.error("%s IB holds less than the other strategies' books say "
+                      "(%d short of them) -- nothing to adopt", st.symbol, -held)
+            st.unknown_order = False
+            st.unknown_trade = None
             return
         cost = None
         try:
@@ -1830,6 +1870,121 @@ class MCLPaperTrader:
         except Exception as e:                              # noqa: BLE001
             LOG.error("could not read positions from IBKR: %s", e)
             return None
+
+    def _others_booked(self, st: SymbolState) -> int:
+        """Shares every OTHER strategy's book holds in `st.symbol`."""
+        return int(sum(s.position.qty for s in self.states.values()
+                       if s is not st and s.symbol == st.symbol
+                       and s.position is not None))
+
+    def _ib_held_for(self, st: SymbolState) -> int | None:
+        """Shares of `st.symbol` IB holds FOR THIS STRATEGY (S2): the account
+        position less what every other strategy's book holds in the name.
+
+        `_ib_held` alone is the account, and with MCL and MC5 both in CRML it
+        answered "100" to MCL's question when those 100 were MC5's. None when
+        IB cannot be read."""
+        held = self._ib_held(st)
+        if held is None:
+            return None
+        return held - self._others_booked(st)
+
+    def _working_sells(self, st: SymbolState) -> int:
+        """Shares still working in SELL orders on `st.symbol` at IB, per
+        ib_async's open-trade list. 0 if that cannot be read -- the position
+        check still applies."""
+        try:
+            trades = self.ib.openTrades()
+        except Exception:                                   # noqa: BLE001
+            return 0
+        n = 0
+        for t in trades or []:
+            o = getattr(t, "order", None)
+            c = getattr(t, "contract", None)
+            if o is None or getattr(c, "symbol", None) != st.symbol:
+                continue
+            if getattr(o, "action", "") != "SELL":
+                continue
+            try:
+                done = t.isDone()
+            except Exception:                               # noqa: BLE001
+                done = False
+            if done:
+                continue
+            rem = getattr(getattr(t, "orderStatus", None), "remaining", None)
+            n += int(rem if rem else getattr(o, "totalQuantity", 0) or 0)
+        return n
+
+    def _sell_room(self, st: SymbolState) -> int | None:
+        """The most any SELL on `st.symbol` may be for right now (S3): the
+        ACCOUNT position less SELLs already working. None if IB cannot be
+        read."""
+        held = self._ib_held(st)
+        if held is None:
+            return None
+        return held - self._working_sells(st)
+
+    def _resolve_unknown_exit(self, st: SymbolState, pos: "Position",
+                              reason: str, detail: dict,
+                              now_et: datetime) -> bool:
+        """Read the fills of the order that went ORDER_UNKNOWN (S1). Returns
+        True when that order turned out to have closed the whole position --
+        the caller must then send nothing.
+
+        A late fill is recorded as an ordinary FILLED exit row, so every
+        reader that pairs BUY and SELL keeps working; the note says where it
+        came from.
+        """
+        trade = st.unknown_trade
+        try:
+            fills = list(getattr(trade, "fills", []) or [])
+            filled = int(sum(f.execution.shares for f in fills))
+            done = bool(trade.isDone())
+        except Exception as e:                              # noqa: BLE001
+            LOG.warning("%s could not read the unknown order (%s)",
+                        st.symbol, e)
+            return False
+        if filled <= 0:
+            if done:
+                st.unknown_trade = None      # IB: finished, nothing filled
+            return False
+        avg = float(getattr(trade.orderStatus, "avgFillPrice", 0) or 0)
+        if not avg:
+            avg = (sum(float(f.execution.shares) * float(f.execution.price)
+                       for f in fills) / filled)
+        sold = min(filled, pos.qty)
+        comm = (order_cost(sold, pos.entry_price, False, COMMISSION_PLAN)
+                + order_cost(sold, avg, True, COMMISSION_PLAN))
+        pnl = (avg - pos.entry_price) * sold - comm
+        held_min = (datetime.now(ET) - pos.entry_time).total_seconds() / 60.0
+        self.session_pnl += pnl
+        self.session_trades += 1
+        LOG.error("%s LATE FILL: the SELL logged ORDER_UNKNOWN filled %d @ "
+                  "%.4f. Recorded as the exit; nothing re-sent. P/L %+.2f",
+                  st.symbol, sold, avg, pnl)
+        self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                       strategy=self._name_of(st), symbol=st.symbol,
+                       action="SELL", reason=reason, qty=pos.qty,
+                       ref_close=round(avg, 4), ref_kind="late_fill",
+                       status="FILLED", fill_price=round(avg, 4),
+                       filled_qty=sold, entry_price=round(pos.entry_price, 4),
+                       exit_price=round(avg, 4), trade_pnl=round(pnl, 2),
+                       trade_pct=round((avg / pos.entry_price - 1) * 100, 3),
+                       hold_minutes=round(held_min, 1),
+                       trail_pct=pos.trail_pct,
+                       reject_reason="late fill of the order logged "
+                                     "ORDER_UNKNOWN",
+                       **detail)
+        if done:
+            st.unknown_trade = None
+        if sold >= pos.qty:
+            st.position = None
+            st.unknown_order = False
+            st.unknown_trade = None
+            st.last_exit_et = now_et
+            return True
+        pos.qty -= sold                  # partial: IB check below sizes the rest
+        return False
 
     def _ib_exit_fill(self, st: SymbolState, since: datetime):
         """(avg price, shares) of SELL executions in `st.symbol` since `since`,
@@ -1880,6 +2035,9 @@ class MCLPaperTrader:
                     trail_pct=pos.trail_pct, **detail)
         if found:
             avg, shares = found
+            # IB's SELLs since this entry include another strategy's exits in
+            # the same name; this position can only account for its own qty.
+            shares = min(shares, pos.qty)
             comm = (order_cost(shares, pos.entry_price, False, COMMISSION_PLAN)
                     + order_cost(shares, avg, True, COMMISSION_PLAN))
             pnl = (avg - pos.entry_price) * shares - comm
@@ -1907,6 +2065,7 @@ class MCLPaperTrader:
                            **base)
         st.position = None
         st.unknown_order = False
+        st.unknown_trade = None
         st.last_exit_et = now_et or datetime.now(ET)
 
     @staticmethod
@@ -2021,8 +2180,13 @@ class MCLPaperTrader:
         # order whose outcome IB never confirmed, is checked against IB's own
         # number first. A long-only book must be UNABLE to sell what it does
         # not hold; MEDS proved the local count can be wrong for hours.
+        # S1: an order whose outcome was unknown may have closed this already.
+        if st.unknown_trade is not None and not self.dry_run:
+            if self._resolve_unknown_exit(st, pos, reason, detail, now_et):
+                return
         if pos.exit_attempts > 1 or st.unknown_order:
-            held = self._ib_held(st)
+            # S2: this strategy's share, not the account's.
+            held = self._ib_held_for(st)
             if held is None:
                 LOG.error("%s cannot read IB's position; NOT sending an exit "
                           "it cannot verify", st.symbol)
@@ -2064,6 +2228,32 @@ class MCLPaperTrader:
         pos.last_retry_at = time.monotonic()
 
         ref, ref_kind = self._exit_reference(pos, reason, bar_close, last_price)
+
+        # S3: never sell more than the ACCOUNT holds less SELLs still working.
+        # Exempt only a first attempt on a position IB may not have caught up
+        # with yet -- see POSITION_PUSH_LAG_S.
+        fresh = (pos.exit_attempts == 1 and not st.unknown_order
+                 and (now_et - pos.entry_time).total_seconds()
+                 < POSITION_PUSH_LAG_S)
+        if not self.dry_run and not fresh:
+            room = self._sell_room(st)
+            if room is None or room < pos.qty:
+                why = ("IB unreadable" if room is None else
+                       f"account holds {room} after working SELLs, "
+                       f"local qty {pos.qty}")
+                LOG.error("%s SELL %d REFUSED -- it would take the account "
+                          "short (%s)", st.symbol, pos.qty, why)
+                self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                               strategy=self._name_of(st), symbol=st.symbol,
+                               action="SELL", reason=reason, qty=pos.qty,
+                               filled_qty=0, status="REFUSED_WOULD_SHORT",
+                               reject_reason=why, trail_pct=pos.trail_pct,
+                               **detail)
+                # Counted as an attempt, so the next poll takes the re-send
+                # path: it asks IB for THIS strategy's share (S2) and
+                # releases the position if IB is really flat for it.
+                return
+
         res = await self.marketable_limit(st, "SELL", pos.qty, ref,
                                           reason, detail, closing=pos,
                                           ref_kind=ref_kind)
@@ -2444,6 +2634,7 @@ class MCLPaperTrader:
             await asyncio.sleep(LOOP_SLEEP_S)
 
         open_pos = [s.symbol for s in self.states.values() if s.position]
+        shorts = [] if self.dry_run else self.shorts_at_broker()
         LOG.info("=" * 60)
         LOG.info("SESSION SUMMARY%s", "  (DRY RUN — no orders placed)"
                  if self.dry_run else "")
@@ -2454,8 +2645,35 @@ class MCLPaperTrader:
                      self.session_pnl / self.session_trades)
         if open_pos:
             LOG.info("  STILL OPEN    : %s", ", ".join(open_pos))
+        if shorts:
+            LOG.error("  SHORT AT IBKR : %s", ", ".join(shorts))
         LOG.info("  fill log      : %s", self.log.path)
         LOG.info("=" * 60)
+
+    def shorts_at_broker(self) -> list[str]:
+        """Any SHORT position IB reports, as "SYM -100" strings, alerted once.
+
+        This book is long-only, so a short is always a defect -- and until
+        2026-09-21 the first anyone heard of one was the next morning, when
+        the startup guard refused to trade (W02-0014). Now the session that
+        made it says so before it exits."""
+        try:
+            short = [p for p in self.ib.positions() if p.position < 0]
+        except Exception as e:                              # noqa: BLE001
+            LOG.warning("could not read positions at session end: %s", e)
+            return []
+        out = [f"{getattr(p.contract, 'symbol', '?')} {int(p.position)}"
+               for p in short]
+        if out:
+            msg = ("SHORT AT SESSION END: " + ", ".join(out) + ". This book "
+                   "is long-only -- buy to cover in IBKR before the next "
+                   "session, or the trader will refuse to start.")
+            LOG.error(msg)
+            try:
+                self.tg.send(msg, force=True)
+            except Exception as e:                          # noqa: BLE001
+                LOG.warning("alert failed (%s)", e)
+        return out
 
     def stop(self, *_):
         LOG.info("stop requested")
