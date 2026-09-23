@@ -204,7 +204,7 @@ def test_criterion_3_and_8_and_9_and_6():
     yrs, _ = _even()
     mk = {"A": 6000.0, "B": 3000.0, "C": -1000.0}      # drop-top-2 = -1000
     m = _measure_like(yrs, mk, high=-5.0, rpv=0.5)
-    bh = _measure_like({y: 1000.0 for y in yrs}, mk, rpv=0.9)   # better per unit of vol
+    bh = _measure_like({y: 500.0 for y in yrs}, mk, rpv=0.9)    # less net, better per unit of vol
     c = {x.n: x for x in RP.criteria(m, bh, {1: 1.0, 3: 2.0, 6: 30.0, 9: 40.0, 12: 5.0, 24: 6.0}, 5.0)}
     assert not c[3].passed           # drop-top-2 negative
     assert not c[9].passed           # high friction negative
@@ -286,3 +286,51 @@ def test_skip_month_neighbour_differs_from_the_spec_and_default_is_no_skip():
     assert RP.first_live(skip) > RP.first_live(base)      # one more month of warm-up
     with pytest.raises(ValueError):
         run_book({"XX": s}, {"XX": ONE}, equity=1e6, skip_months=-1)
+
+
+def test_cluster_boot_counts_a_zero_total_as_not_positive():
+    # units +1 and -1: a 2-draw totals +2 (1/4), 0 (1/2), -2 (1/4). "> 0" is 1/4.
+    b = RP.cluster_boot(pd.Series([1.0, -1.0]), n_boot=20_000, seed=11)
+    assert b["share_pos"] == pytest.approx(0.25, abs=0.015)
+
+
+def _hand_book(daily):
+    idx = pd.bdate_range("2020-01-01", periods=len(daily))
+    z = pd.DataFrame(0.0, index=idx, columns=["XX"])
+    pnl = pd.DataFrame({"XX": daily}, index=idx)
+    from strategy.tsmom.book import BookResult
+    return BookResult(roots=["XX"], equity=1000.0,
+                      live=pd.DataFrame(True, index=idx, columns=["XX"]), signal=z,
+                      pos_frac=z, pos_int=z, pnl_frac=pnl, pnl_int=pnl,
+                      sides={(s, k): z for s in ("frac", "int") for k in ("roll", "rebalance")})
+
+
+def test_max_drawdown_is_peak_to_trough_not_distance_from_the_final_high():
+    # cum: 10, 4, 24, 20  -> worst peak-to-trough = 4 - 10 = -6
+    # (distance from the overall high 24 would give 4 - 24 = -20)
+    m = RP.measure(_hand_book([10.0, -6.0, 20.0, -4.0]), "frac")
+    assert m.max_dd == pytest.approx(-6.0)
+
+
+def test_one_lot_book_trades_markets_the_integer_book_rounds_to_zero():
+    inp = trending_root("XX", level=4000.0)
+    big = Root("XX", 1000.0, "MXX", 0.1)
+    s = _series(inp, big)
+    b = run_book({"XX": s}, {"XX": big}, equity=22_000.0)
+    assert (b.pos_int["XX"] == 0).all() and (b.pos_frac["XX"] != 0).any()
+    ol = RP.one_lot_book(b, {"XX": s}, {"XX": big})
+    assert (ol.pos_int["XX"].abs() == 1).any()
+    assert ol.pnl_int["XX"].abs().sum() > 0
+
+
+def test_skip_month_signal_is_the_k_sign_one_month_earlier_by_hand():
+    from strategy.tsmom.signal import trailing_sign
+    inp = trending_root("XX", seed=5, drift=0.0)          # no drift: the sign flips
+    s = _series(inp, ONE)
+    skip = run_book({"XX": s}, {"XX": ONE}, equity=1e6, ks=(12,), skip_months=1)
+    reb = skip.signal["XX"].dropna()
+    assert len(reb) > 20 and (reb > 0).any() and (reb < 0).any()
+    for d in reb.index:
+        i = s.index[s.index.get_loc(d) - 1]                     # information date
+        want = trailing_sign(s["cont"], pd.DatetimeIndex([i - pd.DateOffset(months=1)]), 12).iloc[0]
+        assert reb[d] == want
