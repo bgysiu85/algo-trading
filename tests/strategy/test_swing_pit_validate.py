@@ -52,7 +52,7 @@ WINDOW = (D(2016, 1, 1), D(2018, 12, 31))
 
 
 def business_days_csv(path: Path, start: D, end: D) -> None:
-    with path.open("w", newline="") as f:
+    with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(P.PRICE_FIELDS)
         d = start
@@ -102,7 +102,7 @@ def test_true_coverage_partial_when_density_is_low_but_nonzero(tmp_path):
     csvp = tmp_path / "THIN.csv"
     # Only a handful of rows scattered across the window -- real overlap,
     # but nowhere near enough to call it full coverage.
-    with csvp.open("w", newline="") as f:
+    with csvp.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(P.PRICE_FIELDS)
         for d in ("2016-02-01", "2017-02-01", "2018-02-01"):
@@ -138,7 +138,7 @@ def test_stage_validate_end_to_end(tmp_path):
 def test_write_suspects_csv_only_lists_the_true_hole(tmp_path):
     build_repo(tmp_path)
     V.write_suspects_csv(tmp_path / "suspects.csv", tmp_path, WINDOW)
-    rows = list(csv.DictReader((tmp_path / "suspects.csv").open()))
+    rows = list(csv.DictReader((tmp_path / "suspects.csv").open(encoding="utf-8")))
     codes = {r["code"] for r in rows}
     assert codes == {"GONE", "REUSE"}
     assert "GOOD" not in codes

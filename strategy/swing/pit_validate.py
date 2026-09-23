@@ -323,12 +323,12 @@ def self_test() -> list[str]:
             P.Spell("sp500", "GOOD", "Still Here Inc", dt.date(2015, 1, 1),
                     None, True, False),
         ])
-        with (out / "eod" / "REUSE.csv").open("w", newline="") as f:
+        with (out / "eod" / "REUSE.csv").open("w", newline="", encoding="utf-8") as f:
             wtr = csv.writer(f)
             wtr.writerow(P.PRICE_FIELDS)
             for d in ("2020-01-02", "2026-09-18"):
                 wtr.writerow([d, 1, 1, 1, 1, 1, 100])
-        with (out / "eod" / "GOOD.csv").open("w", newline="") as f:
+        with (out / "eod" / "GOOD.csv").open("w", newline="", encoding="utf-8") as f:
             wtr = csv.writer(f)
             wtr.writerow(P.PRICE_FIELDS)
             d = dt.date(2015, 1, 1)
@@ -343,7 +343,7 @@ def self_test() -> list[str]:
             or "suspect_reuse" in text, text
         assert "REUSE" in text
         write_suspects_csv(out / "suspects.csv", out, window)
-        rows = list(csv.DictReader((out / "suspects.csv").open()))
+        rows = list(csv.DictReader((out / "suspects.csv").open(encoding="utf-8")))
         codes = {r["code"] for r in rows}
         assert codes == {"GONE", "REUSE"}, codes
     return ["self-test passed: a reused ticker with data outside the spell "
