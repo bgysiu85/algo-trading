@@ -34,9 +34,11 @@ from __future__ import annotations
 import asyncio
 import csv
 import dataclasses
+import hashlib
 import json
 import logging
 import os
+import re
 import socket
 import time
 import urllib.error
@@ -60,6 +62,19 @@ HTTP_TIMEOUT_S = 3.0
 MAX_FILLS = 500
 MAX_NOTIFICATIONS = 100
 MAX_EVENTS = 20
+
+# The history upload wakes a free-tier Neon database that suspends after five
+# idle minutes, so the first request after a session can take a few seconds.
+# Two minutes is ample and still finite -- see
+# claude/handover_session_end_upload_20260919.md sec 3, "it is bounded".
+HISTORY_TIMEOUT_S = 120.0
+
+# The live trader's own daily fill log -- var/fills/mcl_fills_YYYYMMDD.csv,
+# named for MCL historically but shared by every strategy running in the
+# session (FIELDS' own comment: "One file, not one per strategy"). NOT a
+# rolled-aside `..._preHHMMSS.csv` from FillLog's stale-header guard, which is
+# not a session and has no date a re-upload could trust.
+_SESSION_FILE_RE = re.compile(r"^mcl_fills_(\d{8})\.csv$")
 
 # After this many consecutive failures, complain once and then stay quiet:
 # a relay that is down for an hour must not write 700 lines into the session log.
@@ -246,6 +261,9 @@ class UIBridge:
         self._seq = 0
         self.account_id = ""
         self.is_paper = False
+        # Process uptime, for the portal's health block. Monotonic so a
+        # system clock change can never make this run backwards or negative.
+        self._started_monotonic = time.monotonic()
 
     # -- construction ------------------------------------------------------
     @classmethod
@@ -440,8 +458,8 @@ class UIBridge:
             "health": {
                 "broker_connected": bool(getattr(getattr(trader, "ib", None),
                                                  "isConnected", lambda: False)()),
-                "data_stale_seconds": None,
-                "uptime_s": None,
+                "data_stale_seconds": self._data_stale_seconds(trader),
+                "uptime_s": round(time.monotonic() - self._started_monotonic, 1),
                 "last_error": None,
             },
             "events": list(self._events),
@@ -456,6 +474,25 @@ class UIBridge:
             **({"feed": feed} if (feed := FS.read(self.feed_state_path))
                else {}),
         }
+
+    @staticmethod
+    def _data_stale_seconds(trader) -> float | None:
+        """Seconds since bar data was last fetched for any watched symbol.
+
+        `bars_fetched_at` (`brokers/ibkr/trader.py`) is a per-symbol
+        `time.monotonic()` stamp, set each time that symbol's 1-minute bars
+        are (re)requested from IB. The freshest of those, across every
+        symbol the trader is watching, is how current the trader's market
+        data is. No symbols watched yet, or none ever fetched, reports
+        `None` rather than a misleading `0`.
+        """
+        stamps = [
+            ts for st in getattr(trader, "states", {}).values()
+            if (ts := getattr(st, "bars_fetched_at", 0.0))
+        ]
+        if not stamps:
+            return None
+        return round(time.monotonic() - max(stamps), 1)
 
     @staticmethod
     def _last_price(trader, st) -> float | None:
@@ -866,20 +903,104 @@ class UIBridge:
                 {"schema_version": CONTRACT_VERSION, "id": command["id"],
                  "acked_at": _utc_now(), **answer})
 
+    # -- shutdown ------------------------------------------------------------
+    # Both of these are called ONCE, from the trader's own shutdown `finally`
+    # (brokers/ibkr/trader.py main_async), after log.close() and ib.disconnect()
+    # -- never from tick()'s loop. See
+    # claude/handover_session_end_upload_20260919.md sec 1: final state push,
+    # then history upload, then --sleep-on-exit, in that order, because the
+    # push is what stops the portal showing a position the account no longer
+    # holds and the upload is what makes "the trader stopped" a fact the
+    # portal can state rather than infer from silence.
+    def push_final_state(self, trader, now_et: datetime | None = None) -> bool:
+        """The trader's last word: a synchronous, one-shot state push.
+
+        Unlike `tick()` this ignores `push_every_s` and does not go through
+        the asyncio loop, which may already be tearing down. The document
+        gains `agent.stopped_at` -- the flag
+        `claude/handover_portal_stale_position_20260918.md` item 2 asked for,
+        so the portal can say the trader stopped rather than merely that it
+        has been quiet. Never raises: a failed final push leaves the portal
+        showing what it already had, which is the pre-existing behaviour.
+        """
+        clock = now_et or datetime.now(ET)
+        try:
+            state = self.build_state(trader, clock)
+        except Exception:                                   # noqa: BLE001
+            LOG.exception("could not build the final state; the portal keeps "
+                          "whatever it last had")
+            return False
+        state["agent"]["stopped_at"] = _utc_now()
+        return self._post("/api/state", state)
+
+    def upload_history(self, trader, *, recent_days: int = 5) -> None:
+        """Re-send the last `recent_days` sessions' closed trades, each as a
+        whole-day replace to `POST /api/history`.
+
+        Re-sending is harmless (each is a whole-day replace) and is what
+        covers a shutdown that never ran -- a crash, a killed window, a power
+        cut -- at the end of the *next* session, with nothing having to
+        remember it was missed. See handover sec 3 for the properties this
+        follows; `_trade_key` is pinned against its test vector.
+
+        Never raises. A failed upload is a missing chart, not a reason to
+        skip `--sleep-on-exit` -- the same rule `push_final_state` follows.
+        """
+        log = getattr(trader, "log", None)
+        path = getattr(log, "path", None)
+        if not path:
+            return
+
+        try:
+            sessions = _session_files(Path(path).parent, recent_days)
+        except Exception:                                   # noqa: BLE001
+            LOG.exception("could not list session fill logs for the history "
+                          "upload (%s)", path)
+            return
+
+        for date_digits, file_path in sessions:
+            session_date = f"{date_digits[:4]}-{date_digits[4:6]}-{date_digits[6:]}"
+            try:
+                trades, order_outcomes = _read_session_csv(file_path, session_date)
+            except Exception:                               # noqa: BLE001
+                LOG.exception("could not read %s for the history upload",
+                              file_path)
+                continue
+
+            doc = {
+                "schema_version": CONTRACT_VERSION,
+                "sent_at": _utc_now(),
+                "agent": {"id": self.agent_id, "kind": "trader", "version": "1"},
+                "session_date": session_date,
+                "complete": True,
+                "trades": trades,
+                "order_outcomes": order_outcomes,
+            }
+            if self._post("/api/history", doc, timeout=HISTORY_TIMEOUT_S):
+                LOG.info("portal: history uploaded for %s (%d trade(s))",
+                         session_date, len(trades))
+            else:
+                LOG.warning("portal: history upload for %s did not go "
+                           "through; it will be retried at the end of the "
+                           "next session", session_date)
+
     # -- transport ---------------------------------------------------------
-    def _request(self, path: str, data: dict[str, Any] | None) -> Any:
+    def _request(self, path: str, data: dict[str, Any] | None,
+                timeout: float | None = None) -> Any:
         body = None if data is None else json.dumps(data).encode()
         req = urllib.request.Request(
             f"{self.base_url}{path}", data=body,
             headers={"Authorization": f"Bearer {self.token}",
                      "Content-Type": "application/json"},
             method="POST" if data is not None else "GET")
-        with urllib.request.urlopen(req, timeout=self.timeout_s) as res:
+        with urllib.request.urlopen(
+                req, timeout=self.timeout_s if timeout is None else timeout) as res:
             return json.loads(res.read().decode() or "{}")
 
-    def _post(self, path: str, data: dict[str, Any]) -> bool:
+    def _post(self, path: str, data: dict[str, Any],
+             timeout: float | None = None) -> bool:
         try:
-            self._request(path, data)
+            self._request(path, data, timeout=timeout)
             self._recovered()
             return True
         except Exception as e:                              # noqa: BLE001
@@ -908,6 +1029,121 @@ class UIBridge:
         if self._failures > QUIET_AFTER:
             LOG.info("portal: reachable again after %d failures", self._failures)
         self._failures = 0
+
+
+def _trade_key(session_date: str, strategy: str, symbol: str, exit_ts: str,
+               qty: float, exit_price: float) -> str:
+    """The primary key the portal's backfill already computes for 194 trades.
+
+    MUST NEVER DRIFT from `tools/fill_log.py` on the portal side: if the two
+    sides compute this differently, every whole-day upload from one side
+    deletes and re-inserts the other's rows for that date (harmless -- no
+    duplicates, the replace removes unmentioned keys -- but it makes
+    `ingested_at` meaningless and hides a real disagreement).
+
+    Pinned against the fixed test vector in
+    claude/handover_session_end_upload_20260919.md sec 3:
+    `_trade_key("2026-09-18", "MCL", "BIAF", "2026-09-18 09:30:26", 100, 11.00)
+    == "9ff0fe67a0f50bdd32e4cfb0e7d73596"`. `{qty:g}` and `{exit_price:g}`
+    matter -- "100" not "100.0" -- that formatting is what the handover calls
+    out as the part most likely to drift.
+    """
+    raw = (f"{session_date}|{strategy.upper()}|{symbol}|{exit_ts}|"
+          f"{qty:g}|{exit_price:g}")
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def _session_files(fills_dir: Path, recent_days: int) -> list[tuple[str, Path]]:
+    """(YYYYMMDD, path), oldest first, for the most recent `recent_days`
+    session files in `fills_dir` -- or [] if the directory does not exist."""
+    if recent_days <= 0 or not fills_dir.is_dir():
+        return []
+    found = [(m.group(1), p) for p in fills_dir.iterdir()
+             if (m := _SESSION_FILE_RE.match(p.name))]
+    found.sort(key=lambda t: t[0])
+    return found[-recent_days:]
+
+
+def _read_session_csv(path: Path, session_date: str
+                      ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(closed trades, order outcomes) for one day's fill log.
+
+    Mirrors UIBridge._fills_today's BUY/SELL pairing (see its comments for
+    why: partial fills, the most-recent-unmatched-BUY rule), but keeps the
+    FULL timestamp on both sides rather than truncating to a clock, because
+    the history document's trade_key and entry_ts_et need the date that
+    _fills_today deliberately drops for the live dashboard. CONFIG rows carry
+    no real symbol and are skipped entirely, as they are not orders.
+
+    order_outcomes counts every other row -- SKIPPED_*, REJECTED and the
+    like -- by (strategy, status), which never became a trade.
+    """
+    trades: list[dict[str, Any]] = []
+    outcome_counts: dict[tuple[str, str], int] = {}
+    opened_by: dict[tuple[str, str], str] = {}
+
+    with path.open(newline="", encoding="utf-8-sig") as fh:
+        for row in csv.DictReader(fh):
+            action = (row.get("action") or "").upper()
+            if action == CONFIG_ACTION:
+                continue
+            status = (row.get("status") or "").upper()
+            key = (row.get("strategy") or "", row.get("symbol") or "")
+
+            entry_ts = None
+            if status in ("FILLED", "PARTIAL_FILL"):
+                if action in ("BUY", "COVER"):
+                    opened_by.setdefault(key, row.get("ts_et") or "")
+                elif action in ("SELL", "SHORT"):
+                    entry_ts = opened_by.get(key)
+                    if status == "FILLED":
+                        opened_by.pop(key, None)
+
+            if status not in ("FILLED", "PARTIAL_FILL"):
+                strategy = row.get("strategy") or ""
+                outcome_key = (strategy, status or "UNKNOWN")
+                outcome_counts[outcome_key] = outcome_counts.get(outcome_key, 0) + 1
+                continue
+
+            if action not in ("SELL", "SHORT"):
+                # The opening leg of a round trip, not a closed trade -- and
+                # not an "outcome" either, since it filled. Its close (this
+                # session or, for a position cut off by shutdown, a later
+                # one) is the trade row.
+                continue
+
+            qty = _num(row.get("filled_qty")) or _num(row.get("qty")) or 0
+            price = _num(row.get("fill_price")) or 0.0
+            entry = _num(row.get("entry_price"))
+            net = _num(row.get("trade_pnl"))
+            gross, commission = _round_trip_costs(entry, price, qty, net)
+            strategy = row.get("strategy") or ""
+            symbol = row.get("symbol") or ""
+            exit_ts = row.get("ts_et") or ""
+            trades.append({
+                "trade_key": _trade_key(session_date, strategy, symbol,
+                                        exit_ts, qty, price),
+                "session_date": session_date,
+                "strategy": strategy,
+                "symbol": symbol,
+                "entry_ts_et": entry_ts,
+                "exit_ts_et": exit_ts,
+                "qty": qty,
+                "partial": status == "PARTIAL_FILL",
+                "entry_price": entry,
+                "exit_price": price,
+                "gross_pnl": gross,
+                "commission": commission,
+                "net_pnl": net,
+                "reason": row.get("reason") or None,
+                "hold_minutes": _num(row.get("hold_minutes")),
+                "contract_version": CONTRACT_VERSION,
+                "source": "trader",
+            })
+
+    order_outcomes = [{"strategy": s, "status": st, "count": n}
+                      for (s, st), n in sorted(outcome_counts.items())]
+    return trades, order_outcomes
 
 
 def _ack(status: str, detail: str, reason_code: str | None = None) -> dict[str, Any]:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass, field
+import time
 from datetime import datetime, time as dtime
 from pathlib import Path
 
@@ -45,6 +46,7 @@ class FakeState:
     position: FakePosition | None = None
     blocked: bool = False
     retired: bool = False
+    bars_fetched_at: float = 0.0
 
 
 @dataclass
@@ -134,6 +136,31 @@ def test_the_state_describes_the_account_and_the_session():
                               "is_paper": True, "mode": "paper"}
     assert doc["session"]["state"] == "premarket"
     assert doc["session"]["clock_et"] == "07:20:00"
+
+
+def test_uptime_grows_from_when_the_bridge_was_built():
+    b = bridge()
+    first = b.build_state(build_trader(), NOW)["health"]["uptime_s"]
+    assert first >= 0
+    time.sleep(0.05)
+    second = b.build_state(build_trader(), NOW)["health"]["uptime_s"]
+    assert second > first
+
+
+def test_data_stale_seconds_is_none_until_a_symbol_has_fetched_bars():
+    trader = build_trader()
+    doc = bridge().build_state(trader, NOW)
+    assert doc["health"]["data_stale_seconds"] is None
+
+
+def test_data_stale_seconds_reads_the_freshest_symbol():
+    trader = build_trader()
+    now = time.monotonic()
+    trader.states[("mcl", "ACVA")].bars_fetched_at = now - 90   # stale
+    trader.states[("mcl", "JLHL")].bars_fetched_at = now - 5    # fresh
+    doc = bridge().build_state(trader, NOW)
+    stale = doc["health"]["data_stale_seconds"]
+    assert 4.5 <= stale <= 6
 
 
 @pytest.mark.parametrize("clock,expected", [
@@ -1280,3 +1307,195 @@ def test_the_document_still_builds_when_the_feed_file_is_nonsense(tmp_path):
     doc = b.build_state(build_trader(), NOW)
     assert doc["account"]["account_id"] == "DUM215828"
     assert "feed" not in doc
+
+
+# -- shutdown: the final push and the history upload -------------------------
+#
+# claude/handover_session_end_upload_20260919.md and
+# claude/handover_portal_stale_position_20260918.md item 2. No relay is
+# contacted here either -- push_final_state/upload_history against a dead
+# port exercise the never-raises property the same way test_a_relay_that_is_
+# down_is_logged_a_few_times_then_left_alone does above; the document shape
+# is tested directly against the module functions that build it.
+
+def test_the_trade_key_is_pinned_against_the_portals_backfill():
+    """MUST NEVER DRIFT -- see _trade_key's docstring. This is the fixed test
+    vector from the handover, computed with the portal's own function."""
+    assert ui_bridge._trade_key(
+        "2026-09-18", "MCL", "BIAF", "2026-09-18 09:30:26", 100, 11.00
+    ) == "9ff0fe67a0f50bdd32e4cfb0e7d73596"
+
+
+def test_the_trade_key_formats_whole_numbers_without_a_decimal():
+    """100, not 100.0 -- the handover calls this out as the part most likely
+    to drift between the two repos' implementations."""
+    key_int = ui_bridge._trade_key("2026-09-18", "mcl", "BIAF",
+                                   "2026-09-18 09:30:26", 100, 11.0)
+    key_float_qty = ui_bridge._trade_key("2026-09-18", "mcl", "BIAF",
+                                         "2026-09-18 09:30:26", 100.5, 11.0)
+    assert key_int == "9ff0fe67a0f50bdd32e4cfb0e7d73596"
+    assert key_float_qty != key_int
+
+
+def test_the_strategy_name_is_upper_cased_in_the_key_but_not_in_the_row():
+    """The portal's key formula uses MCL; the fill log and the document's own
+    `strategy` field stay lowercase, matching every other reader of the CSV."""
+    lower = ui_bridge._trade_key("2026-09-18", "mcl", "BIAF",
+                                 "2026-09-18 09:30:26", 100, 11.00)
+    upper = ui_bridge._trade_key("2026-09-18", "MCL", "BIAF",
+                                 "2026-09-18 09:30:26", 100, 11.00)
+    assert lower == upper == "9ff0fe67a0f50bdd32e4cfb0e7d73596"
+
+
+def _write_session_csv(path, rows):
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=sorted({k for r in rows for k in r}))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def test_session_files_finds_only_real_sessions_newest_n(tmp_path):
+    for name in ("mcl_fills_20260910.csv", "mcl_fills_20260911.csv",
+                "mcl_fills_20260914.csv", "mcl_fills_20260914_pre180819.csv",
+                "not_a_fill_log.csv"):
+        (tmp_path / name).write_text("ts_et\n", encoding="utf-8")
+    found = ui_bridge._session_files(tmp_path, recent_days=2)
+    assert [d for d, _ in found] == ["20260911", "20260914"]
+    assert all(p.name.endswith(".csv") and "_pre" not in p.name for _, p in found)
+
+
+def test_session_files_is_empty_for_a_missing_directory(tmp_path):
+    assert ui_bridge._session_files(tmp_path / "does_not_exist", 5) == []
+
+
+def test_reading_a_session_pairs_trades_and_counts_outcomes(tmp_path):
+    path = tmp_path / "mcl_fills_20260914.csv"
+    _write_session_csv(path, [
+        {"ts_et": "2026-09-14 07:02:11", "strategy": "mcl", "symbol": "WXYZ",
+         "action": "BUY", "qty": "100", "filled_qty": "100", "fill_price": "6.55",
+         "status": "FILLED", "reason": "entry_signal", "trade_pnl": ""},
+        {"ts_et": "2026-09-14 07:09:48", "strategy": "mcl", "symbol": "WXYZ",
+         "action": "SELL", "qty": "100", "filled_qty": "100", "fill_price": "6.38",
+         "status": "FILLED", "reason": "trailing_stop", "trade_pnl": "-23.26",
+         "entry_price": "6.55", "hold_minutes": "7.6"},
+        {"ts_et": "2026-09-14 07:11:00", "strategy": "mcl", "symbol": "FTFT",
+         "action": "BUY", "qty": "100", "fill_price": "",
+         "status": "SKIPPED_CONCURRENCY_CAP", "reason": "entry_signal",
+         "trade_pnl": ""},
+        {"ts_et": "2026-09-14 09:30:00", "strategy": "mcl", "symbol": "paused",
+         "action": "CONFIG", "status": "APPLIED", "reason": "session_open"},
+    ])
+    trades, order_outcomes = ui_bridge._read_session_csv(path, "2026-09-14")
+
+    assert len(trades) == 1
+    t = trades[0]
+    assert t["symbol"] == "WXYZ" and t["strategy"] == "mcl"
+    assert t["entry_ts_et"] == "2026-09-14 07:02:11"
+    assert t["exit_ts_et"] == "2026-09-14 07:09:48"
+    assert t["net_pnl"] == -23.26 and t["hold_minutes"] == 7.6
+    assert t["partial"] is False
+    assert t["trade_key"] == ui_bridge._trade_key(
+        "2026-09-14", "mcl", "WXYZ", "2026-09-14 07:09:48", 100, 6.38)
+
+    assert order_outcomes == [
+        {"strategy": "mcl", "status": "SKIPPED_CONCURRENCY_CAP", "count": 1},
+    ]
+
+
+def test_an_unmatched_close_still_gets_an_entry_ts_of_none(tmp_path):
+    """A position adopted from a previous session, or a log rolled aside
+    mid-session: the close is still a real trade and must still be uploaded,
+    just with no known entry time."""
+    path = tmp_path / "mcl_fills_20260914.csv"
+    _write_session_csv(path, [
+        {"ts_et": "2026-09-14 07:09:48", "strategy": "mcl", "symbol": "WXYZ",
+         "action": "SELL", "qty": "100", "filled_qty": "100", "fill_price": "6.38",
+         "status": "FILLED", "reason": "trailing_stop", "trade_pnl": "-23.26"},
+    ])
+    trades, _ = ui_bridge._read_session_csv(path, "2026-09-14")
+    assert len(trades) == 1 and trades[0]["entry_ts_et"] is None
+
+
+def test_push_final_state_posts_the_document_with_a_stopped_at_flag(tmp_path):
+    b = bridge()
+    posted = {}
+    b._post = lambda path, data, timeout=None: (posted.update(path=path, data=data)
+                                                 or True)
+    assert b.push_final_state(build_trader(), NOW) is True
+    assert posted["path"] == "/api/state"
+    assert posted["data"]["agent"]["stopped_at"]
+    assert posted["data"]["account"]["account_id"] == "DUM215828"
+
+
+def test_push_final_state_never_raises_on_a_dead_relay():
+    b = bridge()
+    b.base_url = "http://127.0.0.1:9"
+    assert b.push_final_state(build_trader()) is False
+
+
+def test_push_final_state_never_raises_when_building_the_state_fails(caplog):
+    b = bridge()
+    trader = build_trader()
+    trader.strategies = property(lambda self: 1 / 0)   # any exploding access
+    assert b.push_final_state(trader, NOW) is False
+
+
+def test_upload_history_does_nothing_without_a_log_path():
+    b = bridge()
+    trader = build_trader()               # no tmp_path -> trader.log.path is None
+    b.upload_history(trader)              # must not raise
+
+
+def test_upload_history_posts_one_document_per_recent_session(tmp_path):
+    path = tmp_path / "mcl_fills_20260914.csv"
+    _write_session_csv(path, [
+        {"ts_et": "2026-09-14 07:02:11", "strategy": "mcl", "symbol": "WXYZ",
+         "action": "BUY", "qty": "100", "filled_qty": "100", "fill_price": "6.55",
+         "status": "FILLED", "reason": "entry_signal", "trade_pnl": ""},
+        {"ts_et": "2026-09-14 07:09:48", "strategy": "mcl", "symbol": "WXYZ",
+         "action": "SELL", "qty": "100", "filled_qty": "100", "fill_price": "6.38",
+         "status": "FILLED", "reason": "trailing_stop", "trade_pnl": "-23.26"},
+    ])
+    trader = build_trader()
+    trader.log = FakeLog(path)
+
+    b = bridge()
+    posts = []
+    b._post = lambda p, data, timeout=None: (posts.append((p, data, timeout))
+                                             or True)
+    b.upload_history(trader, recent_days=5)
+
+    assert len(posts) == 1
+    p, doc, timeout = posts[0]
+    assert p == "/api/history"
+    assert timeout == ui_bridge.HISTORY_TIMEOUT_S
+    assert doc["session_date"] == "2026-09-14"
+    assert doc["complete"] is True
+    assert len(doc["trades"]) == 1
+    assert doc["schema_version"] == ui_bridge.CONTRACT_VERSION
+
+
+def test_upload_history_never_raises_on_a_dead_relay(tmp_path):
+    path = tmp_path / "mcl_fills_20260914.csv"
+    _write_session_csv(path, [
+        {"ts_et": "2026-09-14 07:02:11", "strategy": "mcl", "symbol": "WXYZ",
+         "action": "BUY", "qty": "100", "filled_qty": "100", "fill_price": "6.55",
+         "status": "FILLED", "reason": "entry_signal", "trade_pnl": ""},
+    ])
+    trader = build_trader()
+    trader.log = FakeLog(path)
+    b = bridge()
+    b.base_url = "http://127.0.0.1:9"
+    b.upload_history(trader)                # must not raise
+
+
+def test_upload_history_never_raises_when_a_session_file_cannot_be_read(tmp_path):
+    """A file that vanishes or is unreadable between listing and reading must
+    not take the shutdown path down with it."""
+    path = tmp_path / "mcl_fills_20260914.csv"
+    path.mkdir()               # a directory where a file was expected
+    trader = build_trader()
+    trader.log = FakeLog(tmp_path / "mcl_fills_20260915.csv")
+    (tmp_path / "mcl_fills_20260915.csv").write_text("ts_et\n", encoding="utf-8")
+    b = bridge()
+    b.upload_history(trader)                # must not raise despite the bad file

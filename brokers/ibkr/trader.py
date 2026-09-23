@@ -2836,6 +2836,20 @@ async def main_async(args):
                        no_summary=args.no_summary)
         if not args.no_archive:
             trader.archive_watchlist(force=args.force_archive)
+        # THE PORTAL'S LAST WORD, before the machine can sleep.
+        # claude/handover_session_end_upload_20260919.md sec 1: final state
+        # push, then history upload, then --sleep-on-exit -- in that order,
+        # because the push is what stops the portal showing a position the
+        # account no longer holds, and the upload is what makes "the trader
+        # stopped" a fact rather than an inference from silence
+        # (claude/handover_portal_stale_position_20260918.md item 2). Placed
+        # here, after log.close() and ib.disconnect(), so the fill log is
+        # complete and nothing here can touch the broker -- same reasoning as
+        # finish_session() above. Neither call can raise; a failed push or
+        # upload must never skip --sleep-on-exit.
+        if trader.ui is not None:
+            trader.ui.push_final_state(trader)
+            trader.ui.upload_history(trader)
         if args.sleep_on_exit:
             flat = not any(s.position for s in trader.states.values())
             suspend_machine(args.sleep_delay_min, flat)
