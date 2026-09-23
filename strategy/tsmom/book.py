@@ -106,12 +106,17 @@ def _sides(old: np.ndarray, new: np.ndarray, rolled: np.ndarray):
 
 def run_book(series: dict[str, pd.DataFrame], roots: dict[str, Root], *,
              equity: float, ks=ENSEMBLE_KS, tranche_days=TRANCHE_DAYS,
-             signal_mode: str = "tsmom") -> BookResult:
+             signal_mode: str = "tsmom", skip_months: int = 0) -> BookResult:
     """`series`: root name -> roll.held_series frame on that root's own sessions.
     `signal_mode`: "tsmom" (the registered spec) or "long" (the equal-weight,
-    same-vol-scaled buy-and-hold benchmark of section 3 item 7)."""
+    same-vol-scaled buy-and-hold benchmark of section 3 item 7).
+    `skip_months`: 0 is the registered spec (no skip, spec section 1.1 [P]).
+    1 is the skip-month NEIGHBOUR the section 2 table keeps as reported only:
+    the window ends `skip_months` calendar months before the information date."""
     if signal_mode not in ("tsmom", "long"):
         raise ValueError(signal_mode)
+    if skip_months < 0:
+        raise ValueError(skip_months)
     names = [n for n in roots if n in series]
     if set(names) != set(roots):
         raise KeyError(f"no series for {sorted(set(roots) - set(series))}")
@@ -138,7 +143,8 @@ def run_book(series: dict[str, pd.DataFrame], roots: dict[str, Root], *,
         px_i[1:, j] = raw.to_numpy()[:-1]
         if signal_mode == "tsmom":
             cont = f["cont"].reindex(master).ffill()
-            s = ensemble_sign(cont, info, ks).to_numpy()
+            ends = info - pd.DateOffset(months=skip_months) if skip_months else info
+            s = ensemble_sign(cont, pd.DatetimeIndex(ends), ks).to_numpy()
         else:
             s = np.where(cnt.to_numpy() > 0, 1.0, np.nan)
             s = np.r_[np.nan, s[:-1]]

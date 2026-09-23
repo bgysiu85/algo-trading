@@ -235,6 +235,78 @@ independent witness of the exchange calendar; perfect agreement is close to
 guaranteed by construction. The check proves the loader maps contracts and
 expiries without error. It does not prove the vendor's expiries are right.
 
+
+## 0.4 Amendment E — PRE-RUN, 2026-09-23: how the report reads §3, §4 and §5 (W06-0005)
+
+**Written with `strategy/tsmom/report.py` and committed BEFORE the report's first
+run on the archive. No return, P/L or cost had been computed on real data when
+this was written.** It changes no rule, threshold or number in §2 or §4. It fixes
+the fourteen places where §3–§5 needed a reading to become code, so each is a
+commit rather than a choice made after a result.
+
+1. **The verdict book.** §4 is read on ONE book: arm (b) MTN (G3), the k ∈ {3,6,9,12}
+   ensemble, five tranches, **fractional** sizing at **E = $22,129**. Fractional P/L
+   and costs are both linear in E, so E sets the dollar scale and nothing else.
+   Arms (a) ZN and (c) none are scored the same way and printed beside it,
+   unranked (§3 item 13); they do not feed the verdict.
+2. **Integer books** at $22,129 / $100,000 / $500,000 are §5's capacity measurement,
+   reported with the same money columns and **not scored**. If the $22,129 integer
+   book's net at mid has the opposite sign to the fractional book's, the report
+   says so on the verdict line and that is the headline (§5).
+3. **The window.** Training side only (every root through `split_months`). A book's
+   P/L window starts at the **first session any market is live**, not the first
+   bar, so warm-up zeros do not dilute per-year figures.
+4. **Halves (criterion 2)** split at the median month of the verdict book's active
+   months, by `tsmom_holdout.describe` (the one implementation). Not swept.
+5. **drop-top-N (criterion 3, item 4)** subtracts the N largest net-contributing
+   markets' P/L from the total. The book is **not** re-sized without them.
+6. **Cluster bootstraps (criteria 4, 5).** Each resample draws as many units as
+   there are (markets, or calendar years including the partial first year), with
+   replacement, each unit's whole net travelling with it. 2,000 resamples, seed
+   20260923. The statistic is the share of resamples with total net > 0.
+7. **Concentration (criterion 7)** = the largest single year's (market's) net ÷ total
+   net. When total net ≤ 0 the criterion is **not read and does not pass**.
+8. **Criterion 8** compares the ensemble with the **median of the six single-k books**
+   k ∈ {1,3,6,9,12,24} (median of six = mean of the 3rd and 4th), all at mid, over
+   the **common window** from the first session on which all seven books are live
+   (k=24 enters a year after the others). Equal to the median is "not beaten".
+9. **Buy-and-hold (item 7, criterion 6)** is `run_book(signal_mode="long")`: long every
+   live market, same sizing, tranches and costs. "Return per unit of realised
+   volatility" = annualised mean ÷ annualised std of daily net at mid (×261, ×√261).
+10. **Realised portfolio volatility (item 8)** = std of daily net at mid × √261 ÷ E,
+    read against MOP's realised ~12%. The 40% is the ex-ante target **per position**;
+    each market's realised position vol on its E/N capital share is printed beside it.
+11. **Cap subsets (§5)** are spec §3's one-lot tables, computed from free data on
+    2026-09-17 before anything was bought: **10% → MNG, M6E, M6A, M6B, MJY;
+    15% → M2K, M6E, M6A, M6B, MJY.** Each is run at $22,129 as its own equal-weight
+    vol-targeted integer book **and** as the one-lot book of spec §3 (±1 vehicle
+    contract in the sign of the net sleeve target). They are **not re-chosen** from
+    this run's realised volatilities; that would be picking markets from the data.
+12. **Rebalance-day grid (item 10)** = 21 books with one sleeve rebalanced on trading
+    day d = 1…21; a month with fewer than d sessions has no rebalance that month.
+13. **Neighbours, reported only:** k = 12 alone (MOP's headline cell — the replication
+    control) and k = 12 with a one-month skip (§2 table). `run_book` gains
+    `skip_months` (default 0 = the registered spec, pinned by a test).
+14. **Markets with fewer than 60 live months** are printed with "NOT READ" and no
+    per-market verdict. They stay in the book.
+
+## 0.5 POST-RUN note, 2026-09-23: the training-side result (W06-0005)
+
+**Not an amendment: nothing above is changed by it.** Result doc:
+`claude/tsmom_training_RESULT_20260923.md`; raw: `claude/raw/tsmom_report_training_20260923.txt`.
+
+- **Verdict: NOT CARRIED FORWARD, 6/9.** Net $9,343 at mid on $22,129 fractional
+  (2011-06 .. 2021-12). Fails criterion 4 (bootstrap by market 93.7%), 5 (bootstrap by
+  year 88.6%) and 7 (2014 = 54% of net). 2013–2015 net $12,201; the other years ($2,858).
+  **The holdout is not spent.**
+- **A defect amendment C's diagnostic found:** FX (6E/6A/6B/6J) is on the plain
+  front-month rule, and from 2017-03 that holds CME **serial months** (a few hundred
+  contracts a day vs ~140,000 in the quarterly). Estimated effect on net about ($390)
+  over the run; it does not change the verdict. A quarterly-FX rerun would be a new
+  registered hypothesis (§9 budget), not an edit here, and needs FX `c.2`/`c.3` bars.
+- **§10's prediction** was wrong in the specifics (criterion 7 failed on a year, not on
+  gold and crude) and right that the book would not clear the bar.
+
 ---
 
 ## 1. The hypothesis, in one sentence
