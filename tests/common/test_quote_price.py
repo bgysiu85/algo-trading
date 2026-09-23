@@ -169,3 +169,19 @@ def test_full_and_confirm_need_one_named_tape():
         Q.parse(["--full"])
     with pytest.raises(SystemExit):
         Q.parse(["--confirm", "--dataset", "XNAS.ITCH"])
+
+
+def test_mbp10_is_accepted_like_any_other_schema_no_special_casing(tmp_path):
+    """W02-0013 step 7 needs XNAS.ITCH mbp-10 for the live H-L2 pull.
+    quote_price is schema-agnostic already (CANDIDATES is only the sample
+    menu; --full/--confirm take any --dataset/--schema pair) -- this locks
+    that in rather than trusting it stays true by accident."""
+    p = write_csv(tmp_path, rows())
+    c = Client(Meta(usd=0.0))
+    args = ["--entries", str(p), "--dataset", "XNAS.ITCH", "--schema", "mbp-10",
+            "--confirm", "--archive", str(tmp_path / "a"),
+            "--report", str(tmp_path / "r.txt")]
+    assert Q.main(args, client=c, today=date(2026, 9, 19)) == 0
+    assert len(c.timeseries.calls) == 2
+    f = tmp_path / "a" / "XNAS.ITCH" / "mbp-10" / "windows" / "2026-09-18" / "AEHL.dbn.zst"
+    assert f.exists()
