@@ -41,6 +41,13 @@ from common.report_io import emit
 ET = ZoneInfo("America/New_York")
 PAIRS = "var/state/screen_pairs_pit.json"
 DATASET = "XNAS.BASIC"
+SCHEMA = "cbbo-1s"          # quote source, fixed in REGISTERED_spread_gate.md §3
+# cbbo-1s emits a consolidated snapshot every second by construction, so a
+# quote should exist within a second or two of any bar-close timestamp.
+# 5s (not quote_fill.py's 1,800s, which matches sparse trade PRINTS against
+# a per-date tbbo/tcbbo tape) keeps a stale quote from silently standing in
+# across a real gap in coverage.
+TOLERANCE_S = 5
 REGISTERED = "docs/research/REGISTERED_spread_gate.md"
 
 # Gate thresholds (registered PRE-RUN in REGISTERED_spread_gate.md §2)
@@ -84,50 +91,86 @@ def trade_row(t, symbol: str, day: str, ordinal: int) -> dict:
     }
 
 
-def compute_spread(df: pd.DataFrame) -> np.ndarray:
-    """Compute bid-ask spread % from real quotes (cbbo-1s).
+def quote_window_path(archive: Path, day: str, symbol: str) -> Path:
+    """Where step 3's pull put this symbol-day's quotes.
 
-    The spread is measured as: spread% = (ask - bid) / mid
-
-    Quotes are sourced from XNAS.BASIC/cbbo-1s, pulled and confirmed in step 3.
-    For each entry, the spread is looked up from the quote table at the entry time.
-    If no quote is available, the spread is marked as np.nan (treated as refusal in make_gate).
-
-    Returns a numpy array aligned with df's index.
+    Mirrors common.quote_price.window_path exactly -- ONE FILE PER
+    (day, symbol), not the per-calendar-date archive that
+    common.friction_quotes.quotes_for_date reads (that layout belongs to a
+    different pull, common/quote_fill.py's tcbbo trade-with-quote tape, and
+    does not apply to the window pull done for this registration).
     """
-    # df has been built from dbn records with quote data embedded.
-    # Look for 'spread_pct' column if it exists (added by quote_price pull).
-    # Fallback: compute from ask/bid if columns are present.
+    return archive / DATASET / SCHEMA / "windows" / day / f"{symbol}.dbn.zst"
 
-    if "spread_pct" in df.columns:
-        # Quote data was loaded and spread pre-computed
-        spread = df["spread_pct"].astype(float).fillna(np.nan).values
-    elif "ask" in df.columns and "bid" in df.columns:
-        # Compute from raw ask/bid
-        ask = df["ask"].astype(float)
-        bid = df["bid"].astype(float)
-        mid = (ask + bid) / 2.0
-        spread = ((ask - bid) / mid).fillna(np.nan).clip(lower=0).values
-    else:
-        # No quote columns on df at all. This is NOT "no quotes for this
-        # bar" (which is a legitimate np.nan / SKIPPED_SPREAD case) -- it
-        # means nothing ever loaded real quotes onto `df` in the first
-        # place, so every bar would silently read as unpriceable and the
-        # spread-gated books would refuse 100% of entries without saying
-        # why. REGISTERED_spread_gate.md G1: the full XNAS.BASIC/cbbo-1s
-        # quote pull has not landed, and this module has no join step for
-        # it yet (see common.friction_quotes.quotes_for_date +
-        # common.quote_fill.run_day for the pattern). Fail loudly instead
-        # of returning a result that looks like a real 100% refusal rate.
-        raise RuntimeError(
-            "compute_spread: df has no spread_pct/ask/bid columns -- real "
-            "quotes were never loaded onto this frame. Do not treat this "
-            "as 'refuse everything'; the quote pull + merge step (G1 in "
-            "REGISTERED_spread_gate.md) has not been wired into "
-            "entry_gates.py yet. See docs/research/REGISTERED_spread_gate.md."
+
+def load_quote_window(archive: Path, day: str, symbol: str) -> pd.DataFrame:
+    """This symbol-day's real top-of-book quotes, sorted by time.
+
+    Empty (not an error) when the window file is absent or has no rows --
+    that is a legitimate "no quote" case, handled by compute_spread as
+    np.nan and by make_gate as a refusal. A PRESENT file with the wrong
+    columns is not: that means the cbbo-1s schema's field names do not
+    match what this function assumes, which is a mapping bug, not a
+    missing-quote fact about the market -- so it raises instead of
+    silently returning nothing, the same discipline
+    common.friction_quotes.quotes_for_date already applies to tcbbo.
+    """
+    from common.dbn_io import read_dbn
+
+    p = quote_window_path(archive, day, symbol)
+    if not p.exists() or p.stat().st_size == 0:
+        return pd.DataFrame(columns=["ts", "bid", "ask"])
+    out = read_dbn(p)
+    if out.empty:
+        return pd.DataFrame(columns=["ts", "bid", "ask"])
+    out = out.reset_index()
+    tcol = "ts_recv" if "ts_recv" in out.columns else "ts_event"
+    keep = [tcol, "bid_px_00", "ask_px_00"]
+    missing = [c for c in keep if c not in out.columns]
+    if missing:
+        raise ValueError(
+            f"{p.name}: cbbo-1s window is missing {missing}. Columns "
+            f"present: {sorted(out.columns)}. This is the first real read "
+            "of this schema's output by entry_gates.py -- if the field "
+            "names differ from the tcbbo/cmbp-1 shape "
+            "common.friction_quotes.quotes_for_date already parses, this "
+            "loader needs updating to match, not a silent empty return."
         )
+    out = out[keep].rename(
+        columns={tcol: "ts", "bid_px_00": "bid", "ask_px_00": "ask"})
+    out = out[(out["bid"] > 0) & (out["ask"] > 0) & (out["ask"] >= out["bid"])]
+    out["ts"] = pd.to_datetime(out["ts"], utc=True)
+    return out.sort_values("ts").reset_index(drop=True)
 
-    return spread
+
+def compute_spread(df: pd.DataFrame, quotes: pd.DataFrame) -> np.ndarray:
+    """Bid-ask spread % at each of df's bar timestamps, from real quotes.
+
+    spread% = (ask - bid) / mid, taken from the quote standing at or before
+    each bar's own timestamp (direction="backward", the same "last record
+    at or before the close IS the quote at the close" rule
+    common/quote_price.py registers for how the window itself was priced),
+    within TOLERANCE_S. A bar with no quote inside that tolerance -- an
+    empty `quotes` frame, or a gap wider than TOLERANCE_S -- reads np.nan,
+    which make_gate treats as a refusal, never as an allow.
+
+    Returns a numpy array aligned with df's index (one value per bar).
+    """
+    bars = pd.DataFrame({"ts": pd.to_datetime(df.index, utc=True)})
+    if quotes.empty:
+        return np.full(len(bars), np.nan)
+
+    q = quotes.copy()
+    q["mid"] = (q["bid"] + q["ask"]) / 2.0
+    q["spread_pct"] = (q["ask"] - q["bid"]) / q["mid"]
+
+    m = pd.merge_asof(
+        bars.reset_index().sort_values("ts"),
+        q[["ts", "spread_pct"]].sort_values("ts"),
+        on="ts", direction="backward",
+        tolerance=pd.Timedelta(seconds=TOLERANCE_S),
+    ).sort_values("index")
+    return m["spread_pct"].to_numpy()
 
 
 def make_gate(spec: tuple | None, spread_arr: np.ndarray) -> np.ndarray:
@@ -161,18 +204,18 @@ def make_gate(spec: tuple | None, spread_arr: np.ndarray) -> np.ndarray:
 
 def run_day(args: tuple) -> tuple:
     """Run one session across all gated and baseline books.
-    
+
     Args:
-        args: (paths list, day str, universe list)
-    
+        args: (paths list, day str, universe list, archive Path)
+
     Returns:
         (day, result dict, error string)
     """
     from common.dbn_io import read_dbn
     from common.pit_h0 import first_seen_time
     from common.pit_strategy import build_frame, engine
-    
-    paths, day, universe = args
+
+    paths, day, universe, archive = args
     engines = {name: engine(name) for name in ("mcl", "mc5")}
     parts = []
     
@@ -205,8 +248,9 @@ def run_day(args: tuple) -> tuple:
         df = df.sort_index(kind="mergesort")
         floor = first_seen_time(rec)
 
-        # Compute spread once per symbol-day (from real quotes)
-        spread_arr = compute_spread(df)
+        # Compute spread once per symbol-day, from step 3's real quote pull
+        quotes = load_quote_window(archive, day, rec["symbol"])
+        spread_arr = compute_spread(df, quotes)
 
         # ALL OR NONE: if any book raises, drop from all
         try:
@@ -273,6 +317,11 @@ def main():
 
     archive = default_archive()
     tasks, by_date = G.build_tasks(PAIRS, archive, DATASET, args.limit)
+    # Same archive root serves the ohlcv-1m bars (build_tasks, above) and the
+    # cbbo-1s quote windows step 3 pulled (load_quote_window) -- one archive,
+    # two dataset/schema subtrees under it. Thread it into each task so
+    # run_day can read a symbol-day's quotes without a second CLI argument.
+    tasks = [(pp, d, u, archive) for pp, d, u in tasks]
     jobs = G.jobs_from(args.jobs)
     
     print(f"Spread gate study: {len(tasks)} sessions, {jobs} workers")
