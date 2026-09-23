@@ -591,6 +591,15 @@ def expand_paths(patterns) -> list[Path]:
     return sorted(set(out))
 
 
+# MC5's live path ran the gradient-reversal exit unconditionally from
+# shipping (2026-09-10) through the session below inclusive, while every
+# published MC5 backtest ran apex OFF -- see
+# claude/archive/handover_mc5_apex_live_split_20260917.md and W02-0001. The
+# fix landed for the following session, prod-20260918, the first apex-OFF
+# live session.
+MC5_APEX_ON_LAST_SESSION = _date("2026-09-17")
+
+
 def load_paper_fills(conn, paths) -> tuple[int, list[str]]:
     """The live trader's own fill logs -- var/fills/*_fills_YYYYMMDD.csv.
 
@@ -626,13 +635,18 @@ def load_paper_fills(conn, paths) -> tuple[int, list[str]]:
                 continue
             d = ts.date()
             seen.add(d)
+            strategy = (r.get("strategy") or "MCL")[:24]
+            # See MC5_APEX_ON_LAST_SESSION above. None (not False) for every
+            # non-MC5 strategy -- this column asserts nothing about MCL.
+            apex = (d <= MC5_APEX_ON_LAST_SESSION) if strategy == "MC5" else None
             rows.append({
                 "session_date": d, "ts_et": ts,
-                "strategy": (r.get("strategy") or "MCL")[:24],
+                "strategy": strategy,
                 "symbol": (r.get("symbol") or "")[:24],
                 "action": (r.get("action") or "")[:8],
                 "status": (r.get("status") or "")[:32],
                 "reason": (r.get("reason") or "")[:32],
+                "apex": apex,
                 "ref_close": _f(r.get("ref_close")),
                 "ref_kind": (r.get("ref_kind") or "")[:24],
                 "bid": _f(r.get("bid")), "ask": _f(r.get("ask")),

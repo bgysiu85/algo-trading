@@ -63,6 +63,37 @@ def count(conn):
     return conn.execute(select(func.count()).select_from(D.paper_fill)).scalar()
 
 
+# --- the apex flag (W02-0001) -----------------------------------------------
+
+def test_mc5_gradient_reversal_window_is_tagged_apex_on(tmp_path, conn):
+    """MC5's live path ran the gradient-reversal exit unconditionally from
+    shipping (2026-09-10) through 2026-09-17, while every published MC5
+    backtest ran apex OFF -- claude/archive/handover_mc5_apex_live_split_20260917.md.
+    A row on that window must come back apex=True; the first fixed session,
+    2026-09-18, must come back apex=False."""
+    p1 = fills_csv(tmp_path, [row("2026-09-17 10:00:00", strategy="MC5",
+                                   action="SELL", reason="gradient_reversal")],
+                  name="mc5_fills_20260917.csv")
+    p2 = fills_csv(tmp_path, [row("2026-09-18 10:00:00", strategy="MC5",
+                                   action="SELL", reason="trailing_stop")],
+                  name="mc5_fills_20260918.csv")
+    L.load_paper_fills(conn, [p1, p2])
+    got = {r.session_date: r.apex for r in conn.execute(
+        select(D.paper_fill.c.session_date, D.paper_fill.c.apex)).all()}
+    assert got[date(2026, 9, 17)] is True
+    assert got[date(2026, 9, 18)] is False
+
+
+def test_non_mc5_rows_are_not_tagged(tmp_path, conn):
+    """The defect and the fix were both MC5's evaluate_last_bar. MCL is
+    untouched, so its rows must not carry an apex verdict this column was
+    never measured for -- NULL, not False."""
+    p = fills_csv(tmp_path, [row("2026-09-11 10:00:00", strategy="MCL")])
+    L.load_paper_fills(conn, [p])
+    apex = conn.execute(select(D.paper_fill.c.apex)).scalar()
+    assert apex is None
+
+
 # --- the table exists and has a way in --------------------------------------
 
 def test_the_table_has_a_loader_flag():

@@ -514,6 +514,24 @@ paper_fill = Table(
     Column("status", String(32), primary_key=True),
 
     Column("reason", String(32)),
+    # MC5 ONLY. NULL for every other strategy -- MCL's own apex exit was
+    # switched off on 2026-09-05, before this window, and giving it a False
+    # here would assert a fact about MCL this column was never measured for.
+    #
+    # True for every MC5 row with session_date <= 2026-09-17: from shipping
+    # (2026-09-10) until the evaluate_last_bar fix, MC5's live path ignored
+    # USE_APEX_EXIT and took the gradient-reversal exit unconditionally, while
+    # every published MC5 backtest ran apex OFF -- see
+    # claude/archive/handover_mc5_apex_live_split_20260917.md and
+    # strategy/mc5/mc5.py's evaluate_last_bar docstring. False from
+    # 2026-09-18 (prod-20260918), the first session after the fix. Without
+    # this flag those live rows and the shipped strategy are two different
+    # rule sets sharing one label, and W02-0002's live-vs-backtest comparison
+    # cannot tell them apart. Set by load_paper_fills; backfilled onto
+    # existing rows by an --add-columns ALTER (see db.addable_columns), so
+    # rows loaded before this column existed pick it up on their next
+    # --paper-fills load rather than sitting NULL forever.
+    Column("apex", Boolean),
     # The price the order was measured against, and WHICH price that is. Rows
     # written before 2026-09-09 used the ENTRY price as the reference on every
     # fast-path exit, so their slippage_vs_ref is the trade's whole per-share
