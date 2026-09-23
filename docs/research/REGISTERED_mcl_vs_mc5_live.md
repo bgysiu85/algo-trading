@@ -199,3 +199,19 @@ component carries it, and that component is the next item.
 ## 6. Amendments
 
 None yet. PRE-RUN / POST-RUN marked when they come.
+
+### A. POST-RUN, 2026-09-23 — one extra reading, reported and never scored
+
+After the run, the "other feed offset" sensitivity (§1) read MC5 BETTER. It
+puts +0 on the delayed sessions and +15 on the real-time ones, which models no
+regime that existed. The reading that does mean something going forward is
+**+0 on every session**: the live feed is now real time, so that is what these
+sessions would have looked like under today's feed. It is added here after
+the fact, so it is reported beside the registered books with its drop-top-N
+figures and is **not** scored against P1–P6.
+
+Also recorded after the run: the registered MC5 apex-OFF execution figure
+((16.38)/trade over 15 matches) rests on one match, VEEE 2026-09-21. The live
+entry was 08:35:06 and the sim entry 08:40, so they are probably different
+signal bars. The report shows it without that match. The join rule itself is
+unchanged.
