@@ -1,0 +1,65 @@
+W12-0005 -- ORB SIP FIGURE-OF-RECORD RECHECK -- RAW OUTPUT (2026-09-23)
+Status: NOT a final result. One $0 diagnostic still needs to run on Ben's
+machine (strategy/orb/tensec_g2_diag.py) before this is a genuine finding
+or a data-vendor artifact.
+
+SOURCE: strategy/orb/tensec_g2.py, run by Ben against E:\Databento.
+Full console output: var/reports/tensec_g2_parity.txt (on D:\Trading).
+
+HEADLINE NUMBERS (7,239 trades, $100 risk/trade, BASE friction)
+
+                              Published ledger   Full 1-sec resim   "Resolved" (18 Sep)
+  mean net R/trade                  -0.3497R         -0.0978R            +0.0010R
+  mean gross R/trade                +0.0026R         +0.2528R            +0.3510R
+  win rate                            11.9%            14.2%               14.6%
+  gross $                            $1,908         $183,023                 --
+  cost (friction) $               $(255,060)       $(253,852)                --
+  net $                           $(253,152)        $(70,830)          ~+$480 (+4.8R)
+
+The "published ledger" column above is the raw, un-resolved registered
+reading currently cached in var/cache/orb_sip/trades/ -- NOT the +0.001R
+"figure of record", which only exists after the 18-Sep entry-minute
+correction is applied on top of it.
+
+VALIDATION AGAINST INDEPENDENT GROUND TRUTH
+For the 2,888 trades where entry itself was ambiguous at 1-minute
+resolution, the new engine's entry price matches
+var/cache/orb_sip/entrybar_resolved.csv.gz (the 18-Sep study's own
+independently-computed ground truth) EXACTLY in all 2,888 cases:
+  entry_first    993/993   (100%)
+  stop_first   1,602/1,602 (100%)
+  same_second    293/293   (100%)
+Of the 1,602 stop_first trades (correctly NOT charged a stop at entry),
+1,413 (88%) are found to be genuinely stopped out later in the day anyway
+-- consistent with the 18-Sep study's own finding ("81.2% re-reach the
+same stop a minute or two later").
+
+LARGEST OPEN DIVERGENCES (outside the validated 2,888 -- needs the diagnostic)
+  symbol  date         side   ledger says            seconds say         R swing
+  PPG     2025-04-09   long   session_end +28.4R      stop      (1.1)R   (29.5)R
+  GLW     2025-01-29   short  session_end +24.0R      stop      (1.3)R   (25.2)R
+  DXC     2026-02-03   short  session_end +22.2R      stop      (1.8)R   (24.1)R
+  BJ      2025-03-06   long   session_end +15.6R      stop      (1.2)R   (16.8)R
+All four: very tight stops (r well under 0.5% of price), on volatile days.
+None are in the validated entry-minute-ambiguous set, so sip.py's own
+minute-bar walk should have caught the same low if it is real.
+
+WHAT SETTLES IT
+strategy/orb/tensec_g2_diag.py (committed 78ed3aa): for the 40 largest-
+divergence symbol-days, folds the already-purchased ohlcv-1s bars into
+clock-aligned one-minute buckets and compares low/high against Databento's
+own published ohlcv-1m bar for the same minute. Agreement -> the dip is
+real, one-minute bars just couldn't see it. Disagreement -> the two
+Databento schemas do not aggregate the identical set of prints, and G2's
+comparison needs redesigning, not the engine.
+
+Command (Ben, needs E:\Databento + full .venv):
+  Set-Location D:\Trading
+  .\.venv\Scripts\python.exe -m strategy.orb.tensec_g2_diag
+
+SOURCE FILES
+  strategy/orb/tensec_engine.py, tensec_g2.py, tensec_g2_diag.py (84b06b3, 78ed3aa)
+  var/cache/orb_sip/entrybar_resolved.csv.gz (ground truth, 18 Sep study)
+  var/reports/tensec_g2_parity.txt, var/cache/orb_sip/tensec_g2_trades.csv.gz
+  docs/research/REGISTERED_10sec.md section 2 (population, unchanged)
+  claude/orb_sip_RESOLVED_20260918.md (the 18-Sep figure of record)
