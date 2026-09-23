@@ -9,14 +9,15 @@ GATES
 -----
 1. Spread gate: refuse entry when quoted bid-ask spread >= 2.0%.
    - Live evidence: 13 trades, -$601.87 net, -$46.30 per trade.
-   - Backtest cannot see actual quotes; uses bar close + 1-tick spread surrogate.
+   - Backtest uses high-low / close as spread surrogate from ohlcv-1m.
 
 2. Signal-bar volume gate: refuse entry when signal bar volume < 2,000 shares.
    - Live evidence: 12 trades, -$214.48 net, -$17.87 per trade.
-   - Backtest can score this; volume is in ohlcv-1m.
+   - Backtest measures volume from ohlcv-1m directly.
 
 Both gates are applied AFTER the signal, BEFORE the order, on entries only.
 Measurement runs on published MCL and MC5 engines over point-in-time universe.
+The gate is the entry_gate boolean mask passed to backtest_session.
 """
 from __future__ import annotations
 
@@ -43,9 +44,9 @@ REGISTERED = "docs/research/REGISTERED_entry_gates.md"
 
 # Gate thresholds (registered PRE-RUN)
 SPREAD_THRESHOLD = 0.02  # 2.0%
-VOLUME_THRESHOLD = 2000  # shares, 5-minute bar
+VOLUME_THRESHOLD = 2000  # shares, 1-minute bar
 
-# Book naming
+# Book naming: baseline + each gate + both together
 BOOKS = (
     ("MCL", "mcl", None),
     ("MCL-spread", "mcl", ("spread", SPREAD_THRESHOLD)),
@@ -91,82 +92,67 @@ def trade_row(t, symbol: str, day: str, ordinal: int) -> dict:
     }
 
 
-def compute_spread(df: pd.DataFrame) -> pd.Series:
-    """Compute bid-ask spread % from close price and 1-tick movement.
+def compute_spread(df: pd.DataFrame) -> np.ndarray:
+    """Compute bid-ask spread % from high-low / close.
     
     On point-in-time ohlcv-1m data, the spread is estimated as:
-    spread% = (high - low) / close, which approximates the quoted spread
-    from bar open to close (includes execution slippage, not pure quotes).
+    spread% = (high - low) / close
     
-    Returns a Series with the same index as df.
+    This approximates the quoted spread from bar open to close
+    (includes execution slippage, not pure quotes).
+    
+    Returns a numpy array aligned with df's index.
     """
     close = df["close"].astype(float)
     high = df["high"].astype(float)
     low = df["low"].astype(float)
     # Spread as (high - low) / close; clip at 0 for degenerate bars
-    spread = ((high - low) / close).fillna(0).clip(lower=0)
+    spread = ((high - low) / close).fillna(0).clip(lower=0).values
     return spread
 
 
-def compute_signal_bar_volume(df: pd.DataFrame) -> pd.Series:
-    """Extract signal bar volume from the engine's internal state.
+def compute_volume(df: pd.DataFrame) -> np.ndarray:
+    """Extract volume from ohlcv-1m data.
     
-    The engine's backtest_session returns the signal bar's OHLCV when
-    called with explicit indexing. We return the volume in shares.
-    
-    For now, use a placeholder: this will be set by the engine hook.
+    Returns a numpy array of volumes aligned with df's index.
     """
-    # Volume from ohlcv-1m data
-    return df.get("volume", pd.Series(0, index=df.index)).astype(float)
+    vol = df["volume"].astype(float).fillna(0).values
+    return vol
 
 
-def gate_for(
-    df: pd.DataFrame,
-    spec: tuple | None,
-    spread_series: pd.Series | None = None,
-    volume_series: pd.Series | None = None,
-) -> pd.Series:
-    """Generate a gate Series (True = allow entry, False = refuse).
+def make_gate(spec: tuple | None, spread_arr: np.ndarray, vol_arr: np.ndarray) -> np.ndarray:
+    """Generate a gate array (True = allow entry, False = refuse).
     
     Args:
-        df: price data with 1-minute index
         spec: tuple like ("spread", 0.02) or ("volume", 2000) or ("both", 0.02, 2000)
-        spread_series: pre-computed spread % series (computed if None)
-        volume_series: pre-computed volume series (computed if None)
+        spread_arr: pre-computed spread % array
+        vol_arr: pre-computed volume array
     
     Returns:
-        Boolean Series: True to allow, False to refuse.
+        Boolean numpy array: True to allow entry, False to refuse.
     """
     if spec is None:
         # Baseline: allow all
-        return pd.Series(True, index=df.index)
+        return np.ones(len(spread_arr), dtype=bool)
     
     kind = spec[0]
     
     if kind == "spread":
         threshold = spec[1]
-        if spread_series is None:
-            spread_series = compute_spread(df)
         # Refuse if spread >= threshold
-        return (spread_series < threshold)
+        return spread_arr < threshold
     
     elif kind == "volume":
         threshold = spec[1]
-        if volume_series is None:
-            volume_series = compute_signal_bar_volume(df)
         # Refuse if volume < threshold
-        return (volume_series >= threshold)
+        return vol_arr >= threshold
     
     elif kind == "both":
         spread_thresh = spec[1]
         volume_thresh = spec[2]
-        if spread_series is None:
-            spread_series = compute_spread(df)
-        if volume_series is None:
-            volume_series = compute_signal_bar_volume(df)
-        # Refuse if EITHER gate fires
-        spread_gate = (spread_series < spread_thresh)
-        volume_gate = (volume_series >= volume_thresh)
+        # Refuse if EITHER gate fires (AND of both allows)
+        spread_gate = (spread_arr < spread_thresh)
+        volume_gate = (vol_arr >= volume_thresh)
         return (spread_gate & volume_gate)
     
     else:
@@ -220,15 +206,15 @@ def run_day(args: tuple) -> tuple:
         floor = first_seen_time(rec)
         
         # Compute gates once per symbol-day
-        spread_series = compute_spread(df)
-        volume_series = compute_signal_bar_volume(df)
+        spread_arr = compute_spread(df)
+        vol_arr = compute_volume(df)
         
         # ALL OR NONE: if any book raises, drop from all
         try:
             got = {}
             for name, eng, spec in BOOKS:
                 mod, extra = engines[eng]
-                gate_mask = gate_for(df, spec, spread_series, volume_series)
+                gate_mask = make_gate(spec, spread_arr, vol_arr)
                 # Run with entry_gate parameter
                 got[name] = mod.backtest_session(
                     df,
@@ -236,7 +222,7 @@ def run_day(args: tuple) -> tuple:
                     ET,
                     entry_shares=QTY,
                     not_before=floor,
-                    entry_gate=gate_mask.values if hasattr(gate_mask, "values") else gate_mask,
+                    entry_gate=gate_mask,
                     **extra,
                 )
         except Exception as e:  # noqa: BLE001
@@ -322,33 +308,66 @@ def main():
     G.write_csv(args.csv, all_books)
     print(f"  CSV: {args.csv}")
     
-    # Render verdict
-    cut = min(max(by_date), all_books["MCL"][0]["date"]) if all_books["MCL"] else ""
-    if cut:
-        # Regenerate cut at the median session
-        sorted_days = sorted(by_date)
-        cut = sorted_days[len(sorted_days) // 2]
+    # Compute verdict on paired books
+    refused = {}
+    binding = {}
+    run_days = sorted(by_date.keys())
+    cut = run_days[len(run_days) // 2] if len(run_days) >= 2 else (run_days[0] if run_days else "")
     
+    for bname, gname in PAIRED:
+        # Get refused rows (trades in baseline but not in gated)
+        baseline_set = {(r["symbol"], r["date"], r["entry_et"]) for r in all_books[bname]}
+        gated_set = {(r["symbol"], r["date"], r["entry_et"]) for r in all_books[gname]}
+        refused_keys = baseline_set - gated_set
+        refused[gname] = [r for r in all_books[bname] if (r["symbol"], r["date"], r["entry_et"]) in refused_keys]
+        
+        # Get binding info (how many could have been refused)
+        binding[gname] = (len(refused[gname]), len(all_books[bname]), {})
+    
+    # Render verdict
     lines = G.render(
+        "ENTRY GATES STUDY: SPREAD AND VOLUME",
+        REGISTERED,
         all_books,
         PAIRED,
-        cut,
+        [],  # reported
         symdays,
-        binding={},
-        reported=[],
+        len(error_days),
+        run_days,
+        elapsed,
+        jobs,
+        refused,
+        binding,
+        error_days,
         preamble=[
-            "ENTRY GATES STUDY",
             "",
             f"Spread gate: refuse if spread >= {SPREAD_THRESHOLD:.1%}",
-            f"Volume gate: refuse if signal bar volume < {VOLUME_THRESHOLD:,} shares",
+            f"Volume gate: refuse if 1-minute bar volume < {VOLUME_THRESHOLD:,} shares",
             "",
         ],
+        universe=PAIRS,
+        dataset=DATASET,
     )
     
     txt_path = Path(args.csv).with_suffix(".txt")
     txt_path.write_text("\n".join(lines), encoding="utf-8")
     print(f"  Result: {txt_path}")
     print(f"  Elapsed: {elapsed:.1f}s")
+    
+    # Write metadata
+    G.write_meta(
+        args.csv,
+        run_days,
+        symdays,
+        cut,
+        {
+            "registered": REGISTERED,
+            "spread_threshold": SPREAD_THRESHOLD,
+            "volume_threshold": VOLUME_THRESHOLD,
+            "dataset": DATASET,
+            "pairs": PAIRS,
+        },
+    )
 
 
 if __name__ == "__main__":
