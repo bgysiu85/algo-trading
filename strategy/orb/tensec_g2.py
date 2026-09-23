@@ -211,25 +211,66 @@ def classify_reason_diff(reason_diff: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
 
 def score_ground_truth(scored: pd.DataFrame, ground_truth: pd.DataFrame) -> dict:
     """Criterion (c): every trade the 18-Sep study independently verified
-    must have its entry AND exit price reproduced exactly by B0-on-seconds.
-    This is the strongest available check because ground_truth was built by
-    a completely separate study and does not depend on any aggregate R
-    figure -- unlike the retired criterion (c), it cannot be invalidated by
-    a correction to ORB SIP's own figure of record."""
+    must have its entry price reproduced exactly by B0-on-seconds, and its
+    exit price too WHEREVER ground truth actually supplies one.
+
+    entrybar_resolved.csv.gz carries three verdicts (2026-09-23 fix): for
+    `entry_first` and `same_second` (1,286 of 2,888) the 18-Sep study fully
+    resolved the exit, so exit price is checked exactly like entry. For
+    `stop_first` (1,602 of 2,888) that study deliberately did NOT continue
+    the walk to a final exit -- computing that continuation is what this
+    engine exists to do -- so sec_exit_px is NaN there BY DESIGN, not a
+    missing answer to score against. Treating a NaN ground-truth exit as a
+    mismatch (the first version of this fix did) manufactured a 1,602-trade
+    "failure" out of an intentional gap in the source data, not a real one.
+    A NaN ground-truth exit is therefore treated as "not applicable", never
+    as a pass or a fail on its own -- only entry price is required there.
+    """
     key = ["symbol", "date"]
     if ground_truth.empty:
-        return dict(n=0, ok=0, rate=1.0, coverage=1.0, mismatches=ground_truth)
+        return dict(n=0, ok=0, rate=1.0, coverage=1.0, exit_checked=0, mismatches=ground_truth)
     m = scored.merge(ground_truth, on=key, how="inner", suffixes=("", "_gt"))
     entry_ok = np.isclose(m["sec_entry_px"].to_numpy(float),
-                           m["sec_entry_px_gt"].to_numpy(float))
-    exit_ok = np.isclose(m["sec_exit_px"].to_numpy(float),
-                          m["sec_exit_px_gt"].to_numpy(float))
+                          m["sec_entry_px_gt"].to_numpy(float))
+    gt_exit = m["sec_exit_px_gt"].to_numpy(float)
+    has_exit_gt = ~np.isnan(gt_exit)
+    exit_ok = np.where(has_exit_gt,
+                        np.isclose(m["sec_exit_px"].to_numpy(float), gt_exit),
+                        True)   # no exit answer in ground truth -- not applicable, not a fail
     ok_mask = entry_ok & exit_ok
     n = len(m)
     return dict(n=n, ok=int(ok_mask.sum()),
                 rate=(ok_mask.mean() if n else 1.0),
                 coverage=(n / len(ground_truth) if len(ground_truth) else 1.0),
+                exit_checked=int(has_exit_gt.sum()),
                 mismatches=m[~ok_mask])
+
+
+def find_gap_population(scored: pd.DataFrame, ground_truth: pd.DataFrame) -> pd.DataFrame:
+    """Criterion (d)'s population: every matched trade whose entry price
+    disagrees with the ledger and is NOT explained by the ground-truth
+    entry-minute-tie population (criterion c) -- ALL of them, not just the
+    subset that also happens to flip the final exit reason.
+
+    W12-0005's original spot-check only covered the 67 trades where entry
+    mismatch also flipped the exit reason (`classify_reason_diff`'s `gap`).
+    Criterion (b)'s own ~23% fail rate on "ungapped" ledger entries shows
+    the real population is much larger (~1,300+): most of it never flips
+    the final outcome, but every one of them is the same "a 1-minute bar
+    can't see this" mechanism and deserves the same bad-tick screen, not
+    just the ones that happened to be sampled by hand before."""
+    if ground_truth.empty:
+        gt_keys = set()
+    else:
+        gt_keys = set(map(tuple, ground_truth[["symbol", "date"]]
+                           .itertuples(index=False, name=None)))
+    entry_mismatch = ~np.isclose(scored["sec_entry_px"].to_numpy(float),
+                                  scored["ledger_entry_px"].to_numpy(float))
+    if gt_keys:
+        in_gt = scored[["symbol", "date"]].apply(tuple, axis=1).isin(gt_keys).to_numpy()
+    else:
+        in_gt = np.zeros(len(scored), dtype=bool)
+    return scored[entry_mismatch & ~in_gt]
 
 
 def is_bad_tick(row) -> bool:
@@ -281,22 +322,50 @@ def score(res: pd.DataFrame, ground_truth: pd.DataFrame) -> dict:
     scored = res[matched].copy()
 
     gt_sc = score_ground_truth(scored, ground_truth)
+    gap_pool = find_gap_population(scored, ground_truth)
+    gap_sc = score_gap_bucket(gap_pool, BADTICK_REVIEWED)
+
+    # criterion (e) reads the exit-REASON-disagreement population (whether
+    # the trade's final outcome differs at all, not just its fill price) and
+    # checks every one of those is accounted for -- covered by (c) because
+    # it's a ground-truth row (regardless of whether its entry price happens
+    # to match the LEDGER too -- ground truth's own population is not
+    # limited to ledger-price ties, see the IBM/DAR/... cases W12-0005's
+    # narrower tie/gap split missed), or covered by (d) because it's in the
+    # broader gap population above -- never neither, and the two coverage
+    # sets are disjoint by construction (gap_pool already excludes anything
+    # in ground truth). The tie/gap split from classify_reason_diff is kept
+    # only for the human-readable counts in the report below; it must not
+    # be used to decide coverage, since it is partitioned by ledger-price
+    # match while (c)'s and (d)'s coverage sets are partitioned by
+    # ground-truth membership -- the two partitions do not line up.
     reason_diff = scored[scored["sec_exit_reason"] != scored["ledger_exit_reason"]]
     tie, gap = classify_reason_diff(reason_diff)
-    gap_sc = score_gap_bucket(gap, BADTICK_REVIEWED)
-    explained = len(tie) + len(gap)
+    gt_keys = (set(map(tuple, ground_truth[["symbol", "date"]]
+                        .itertuples(index=False, name=None)))
+               if not ground_truth.empty else set())
+    gap_key = set(map(tuple, gap_pool[["symbol", "date"]].itertuples(index=False, name=None)))
+    rd_keys = reason_diff[["symbol", "date"]].apply(tuple, axis=1)
+    covered_by_c = rd_keys.isin(gt_keys)
+    covered_by_d = rd_keys.isin(gap_key)
+    covered = covered_by_c | covered_by_d
+    explained_c = int(covered_by_c.sum())
+    explained_d = int((covered_by_d & ~covered_by_c).sum())
+    unexplained = reason_diff[~covered.to_numpy()]
+    gate_e = bool(covered.all()) if len(reason_diff) else True
 
     gate_a = match_rate >= MATCH_GATE
     gate_b = (entry_ok == entry_n)
     gate_c = gt_sc["rate"] >= TIE_GATE and gt_sc["coverage"] >= TIE_GATE
     gate_d = gap_sc["clean"]
-    gate_e = explained == len(reason_diff)
 
     return dict(n=n, match_rate=match_rate, matched=int(matched.sum()),
                entry_ok=entry_ok, entry_n=entry_n,
                entry_rate=entry_ok / entry_n if entry_n else 1.0,
-               gt=gt_sc, tie_n=len(tie), gap=gap_sc,
+               gt=gt_sc, tie_n=len(tie), gap_n=len(gap), gap=gap_sc,
                reason_diff=reason_diff,
+               explained_c=explained_c, explained_d=explained_d,
+               unexplained=unexplained,
                gate_a=gate_a, gate_b=gate_b, gate_c=gate_c,
                gate_d=gate_d, gate_e=gate_e)
 
@@ -322,13 +391,17 @@ def render(res: pd.DataFrame, sc: dict) -> list[str]:
         f"  ground-truth trades (entrybar_resolved.csv.gz)   {len(gt['mismatches']) + gt['ok']:,}",
         f"  found among this run's matched trades            {gt['n']:,}   "
         f"({gt['coverage']:.2%} coverage)",
-        f"  entry AND exit price match exactly               {gt['ok']:,}   "
+        f"  of those, ground truth also supplies an exit     {gt['exit_checked']:,}   "
+        "(the rest is `stop_first`: 18-Sep never continued the walk -- entry only)",
+        f"  entry (all) AND exit (where supplied) match exactly   {gt['ok']:,}   "
         f"({gt['rate']:.2%})",
         f"  gate (>= {TIE_GATE:.0%} rate and coverage)         "
         f"{'PASS' if sc['gate_c'] else 'FAIL'}", "",
-        "CRITERION (d) -- genuine intra-minute gap trades, bad-tick screen", "",
-        f"  genuine-gap trades (entry price disagrees, not in ground truth)   "
+        "CRITERION (d) -- every entry-price-disagreeing trade, bad-tick screen", "",
+        f"  gap population (entry price disagrees, not in ground truth)   "
         f"{sc['gap']['n']:,}",
+        "  (broader than the 67 W12-0005 spot-checked by hand -- every trade",
+        "   with this mechanism, not just the ones that also flip the exit reason)",
         f"  flagged by the automated screen                                   "
         f"{sc['gap']['flagged']:,}",
         f"  flagged and NOT on the reviewed allowlist                         "
@@ -336,26 +409,43 @@ def render(res: pd.DataFrame, sc: dict) -> list[str]:
         f"  gate (zero unreviewed flags)   {'PASS' if sc['gate_d'] else 'FAIL'}", "",
         "CRITERION (e) -- every exit-reason disagreement is accounted for", "",
         f"  exit-reason disagreements               {len(sc['reason_diff']):,}",
-        f"  explained (tie {sc['tie_n']:,} + gap {sc['gap']['n']:,})            "
-        f"{sc['tie_n'] + sc['gap']['n']:,}",
-        f"  gate (fully accounted for)     {'PASS' if sc['gate_e'] else 'FAIL'}", "",
+        f"  covered by (c), a ground-truth row                {sc['explained_c']:,}",
+        f"  covered by (d) only, the bad-tick screen           {sc['explained_d']:,}",
+        f"  unexplained by either                              {len(sc['unexplained']):,}",
+        f"  gate (zero unexplained)     {'PASS' if sc['gate_e'] else 'FAIL'}", "",
         f"OVERALL: {'G2 PASSES' if overall else 'G2 FAILS -- do not score H-X1 or H-Q1'}",
         "",
     ]
+    LISTING_CAP = 50
     if sc["gap"]["unreviewed"]:
         L.append("GENUINE-GAP TRADES FLAGGED, NOT YET REVIEWED (criterion d):")
-        for row in sc["gap"]["rows"].itertuples():
+        for row in sc["gap"]["rows"].head(LISTING_CAP).itertuples():
             L.append(f"    {row.symbol:<8} {row.date}  entry={row.sec_entry_px:.4f}"
                       f"  vol={row.sec_entry_volume:.0f} vs baseline "
                       f"{row.sec_entry_vol_baseline:.1f}")
+        if sc["gap"]["unreviewed"] > LISTING_CAP:
+            L.append(f"    ... and {sc['gap']['unreviewed'] - LISTING_CAP:,} more")
         L.append("")
     if len(gt["mismatches"]):
         L.append(f"{len(gt['mismatches']):,} ground-truth trade(s) NOT reproduced exactly "
-                  "(criterion c):")
-        for row in gt["mismatches"].itertuples():
+                  "(criterion c; gt_exit=nan means 18-Sep left that exit unresolved by design "
+                  "-- only the entry mismatch there is a real failure):")
+        for row in gt["mismatches"].head(LISTING_CAP).itertuples():
+            gt_exit = "n/a" if pd.isna(row.sec_exit_px_gt) else f"{row.sec_exit_px_gt:.4f}"
             L.append(f"    {row.symbol:<8} {row.date}  "
                       f"sec_entry={row.sec_entry_px:.4f} gt_entry={row.sec_entry_px_gt:.4f}"
-                      f"  sec_exit={row.sec_exit_px:.4f} gt_exit={row.sec_exit_px_gt:.4f}")
+                      f"  sec_exit={row.sec_exit_px:.4f} gt_exit={gt_exit}")
+        if len(gt["mismatches"]) > LISTING_CAP:
+            L.append(f"    ... and {len(gt['mismatches']) - LISTING_CAP:,} more")
+        L.append("")
+    if len(sc["unexplained"]):
+        L.append(f"{len(sc['unexplained']):,} exit-reason disagreement(s) covered by NEITHER "
+                  "(c) nor (d) (criterion e):")
+        for row in sc["unexplained"].head(LISTING_CAP).itertuples():
+            L.append(f"    {row.symbol:<8} {row.date}  "
+                      f"sec_exit_reason={row.sec_exit_reason} ledger_exit_reason={row.ledger_exit_reason}")
+        if len(sc["unexplained"]) > LISTING_CAP:
+            L.append(f"    ... and {len(sc['unexplained']) - LISTING_CAP:,} more")
         L.append("")
     not_matched = res[res["why"] != E.OK]
     if len(not_matched):
