@@ -305,6 +305,26 @@ EMPTY_WARN_S = 120          # how often to repeat the 'watching nothing' warning
 # the same time. If that loop is ever made concurrent, this needs a reservation.
 MAX_CONCURRENT_POSITIONS = 2
 
+# WHAT THE CAP COUNTS -- added 2026-09-23 (W02-0014), Ben, in his words: "adjust
+# the trader mechanics to allow each strategy a max position of 3, rather than
+# a total pool of 3 ... it seems like MC5 is dragging down MCL."
+#
+#   account   (the default, unchanged) -- one pool shared by every strategy in
+#             the process. The earlier strategy in --strategy order takes the
+#             last free slot.
+#   strategy  -- each strategy has its OWN pool of max_positions. With two
+#             strategies at cap 3 that is up to 6 positions at once, and MC5
+#             can no longer crowd MCL out (or the reverse).
+#
+# The account-level worry the shared pool was written for still holds and is
+# why the default did not move: size_for() bills every position against the
+# full startup equity. At 100 shares and the $2-20 band a position is at most
+# $2,000 of notional, so 6 open is at most $12,000 against ~$22k net liq --
+# inside the account, but no longer "at most 3 x". Chosen per session, on the
+# command line, and written into the CONFIG row and every declined-entry row.
+CAP_SCOPES = ("account", "strategy")
+DEFAULT_CAP_SCOPE = "account"
+
 LOG = logging.getLogger("mcl")
 
 
@@ -804,7 +824,8 @@ class FillLog:
 class MCLPaperTrader:
     def __init__(self, ib: IB, watchlist: Path, log: FillLog, dry_run: bool,
                  tg: "notify.Notifier | None" = None, strategies=None,
-                 max_positions: int | None = None):
+                 max_positions: int | None = None,
+                 cap_scope: str | None = None):
         self.ib = ib
         # The cap is an INSTANCE value, not the module constant, so a session
         # can run at a different size without editing a constant that the dry
@@ -819,6 +840,16 @@ class MCLPaperTrader:
         # (a way to run flat and still record signals), not "use the default".
         self.max_positions = (MAX_CONCURRENT_POSITIONS if max_positions is None
                               else max_positions)
+        # What the cap counts: every strategy's positions ("account") or only
+        # the signalling strategy's own ("strategy"). See CAP_SCOPES. An
+        # unknown value is REFUSED rather than defaulted -- a typo that quietly
+        # fell back to the shared pool would be a session run under a cap
+        # nobody chose, with a log that says otherwise.
+        scope = DEFAULT_CAP_SCOPE if cap_scope is None else cap_scope
+        if scope not in CAP_SCOPES:
+            raise ValueError(f"cap_scope must be one of {CAP_SCOPES}, "
+                             f"got {cap_scope!r}")
+        self.cap_scope = scope
         # Default to a DISABLED notifier rather than resolving credentials
         # here. Constructing one per test, or per dry run, must not touch
         # 1Password or spawn a thread; main() passes a live one in.
@@ -1259,6 +1290,7 @@ class MCLPaperTrader:
         cfg = (f"trail_pct={trails} "
                f"paused={self.paused} "
                f"max_positions={self.max_positions} "
+               f"cap_scope={getattr(self, 'cap_scope', DEFAULT_CAP_SCOPE)} "
                f"strategies={'+'.join(a.name for a in self.strategies)} "
                f"disabled={','.join(sorted(self.disabled_strategies)) or '-'} "
                f"dry_run={self.dry_run} "
@@ -2203,23 +2235,32 @@ class MCLPaperTrader:
         # caps of two on an account sized for two -- and the account is shared,
         # so the second strategy would be spending buying power the first
         # already committed.
-        open_now = sum(1 for s in self.states.values() if s.position is not None)
+        # With cap_scope "strategy" only the signalling strategy's own
+        # positions count; with "account" (the default) every strategy's do.
+        per_strategy = getattr(self, "cap_scope", DEFAULT_CAP_SCOPE) == "strategy"
+        mine = self._name_of(st)
+        counted = [s for s in self.states.values()
+                   if s.position is not None
+                   and (not per_strategy or self._name_of(s) == mine)]
+        open_now = len(counted)
         if open_now >= self.max_positions:
             LOG.info("%s %s entry signal declined — %d position(s) already open "
-                     "(cap %d): %s", st.strategy.name, st.symbol, open_now,
+                     "(cap %d %s): %s", st.strategy.name, st.symbol, open_now,
                      self.max_positions,
+                     f"for {mine}" if per_strategy else "across all strategies",
                      ", ".join(sorted(
-                         f"{s.strategy.name}:{s.symbol}"
-                         for s in self.states.values()
-                         if s.position is not None)))
+                         f"{s.strategy.name}:{s.symbol}" for s in counted)))
             self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
                            strategy=self._name_of(st),
                            symbol=st.symbol, action="BUY",
                            reason="entry_signal", ref_close=round(sig.close, 4),
                            ref_kind="signal_close",
                            status="SKIPPED_CONCURRENCY_CAP",
-                           reject_reason=f"{open_now} open, cap "
-                                         f"{self.max_positions}",
+                           reject_reason=(
+                               f"{open_now} open for {mine}, cap "
+                               f"{self.max_positions} per strategy"
+                               if per_strategy else
+                               f"{open_now} open, cap {self.max_positions}"),
                            **detail)
             return
 
@@ -2470,7 +2511,8 @@ async def main_async(args):
     strategies = SA.build_all(getattr(args, "strategy", ["mcl"]))
     trader = MCLPaperTrader(ib, wl, log, args.dry_run, tg=tg,
                             strategies=strategies,
-                            max_positions=getattr(args, "max_positions", None))
+                            max_positions=getattr(args, "max_positions", None),
+                            cap_scope=getattr(args, "cap_scope", None))
     # The portal, when one is configured. Attached AFTER the DU check above,
     # so a bridge can never exist on a session that failed it.
     trader.ui = ui_bridge.UIBridge.from_env(dry_run=bool(args.dry_run))
@@ -2498,8 +2540,11 @@ async def main_async(args):
 
     # Read the cap back OFF THE TRADER rather than off the constant or the
     # argument. Those can drift from what is running; this cannot.
-    LOG.info("strategies: %s (one book, cap %d across all of them)%s",
+    LOG.info("strategies: %s (one book, cap %d %s)%s",
              ", ".join(a.name for a in strategies), trader.max_positions,
+             "across all of them" if trader.cap_scope == "account"
+             else (f"PER STRATEGY -- up to "
+                   f"{trader.max_positions * len(strategies)} open in total"),
              "" if trader.max_positions == MAX_CONCURRENT_POSITIONS
              else f"  [OVERRIDDEN from the default "
                   f"{MAX_CONCURRENT_POSITIONS}]")
@@ -2686,8 +2731,14 @@ def build_parser() -> argparse.ArgumentParser:
                         "anything and tells you what is held; adopt rebuilds "
                         "the positions from today's fill log and manages them, "
                         "and aborts unless EVERY one can be reconstructed.")
+    p.add_argument("--cap-scope", choices=CAP_SCOPES, default=None,
+                   help="what --max-positions counts: 'account' (default) = "
+                        "one pool shared by every strategy; 'strategy' = each "
+                        "strategy gets its own pool of --max-positions, so "
+                        "MCL and MC5 at 3 can hold up to 6 between them.")
     p.add_argument("--max-positions", type=int, default=None,
-                   help="open positions allowed ACROSS ALL strategies "
+                   help="open positions allowed ACROSS ALL strategies, or per "
+                        "strategy with --cap-scope strategy "
                         f"(default {MAX_CONCURRENT_POSITIONS}). Raising this "
                         "makes the session's trades not directly comparable "
                         "with previous ones, so it is recorded in the startup "

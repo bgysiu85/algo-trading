@@ -117,7 +117,8 @@ def open_positions(states) -> int:
     return sum(1 for s in states if s.position is not None)
 
 
-def replay(sessions, strategies, on_step=None, max_positions=None):
+def replay(sessions, strategies, on_step=None, max_positions=None,
+           cap_scope=None):
     """Step every session minute by minute. Returns (decisions, breaches).
 
     `decisions` is one row per fill-log entry that represents an action, keyed
@@ -133,7 +134,8 @@ def replay(sessions, strategies, on_step=None, max_positions=None):
         tr = T.MCLPaperTrader(_NoBroker(), Path("var/watchlist.txt"), log,
                               dry_run=True, tg=T.notify.Notifier(),
                               strategies=adapters,
-                              max_positions=max_positions)
+                              max_positions=max_positions,
+                              cap_scope=cap_scope)
         tr.equity = 22_290.96
         feed = tr.feed_for(symbol)
         feed.contract = object()
@@ -171,6 +173,12 @@ def replay(sessions, strategies, on_step=None, max_positions=None):
             for st in states:
                 asyncio.run(tr.step_symbol(st, now_et))
             open_now = open_positions(tr.states.values())
+            if tr.cap_scope == "strategy":
+                # Per-strategy pools: the breach is any ONE strategy above
+                # its own cap, not the total.
+                open_now = max(Counter(
+                    s.strategy.name for s in tr.states.values()
+                    if s.position is not None).values(), default=0)
             # Against tr.max_positions, NOT the module constant. At cap 3 the
             # constant would flag every legitimate third position as a breach
             # -- a detector failing in the alarming direction, which is how a
@@ -227,12 +235,13 @@ def compare(alone: list, together: list, name: str):
 
 
 def render(strategies, n_sessions, joint, breaches, reasons,
-           solo=None, name="MCL", cap=None) -> list[str]:
+           solo=None, name="MCL", cap=None, cap_scope=None) -> list[str]:
     cap = T.MAX_CONCURRENT_POSITIONS if cap is None else cap
     L = ["DRY SESSION -- the real trader, recorded bars, no broker", "",
          f"  strategies   {', '.join(strategies)}",
          f"  sessions     {n_sessions}",
-         f"  cap          {cap} across all strategies"
+         f"  cap          {cap} "
+         + ("per strategy" if cap_scope == "strategy" else "across all strategies")
          + ("" if cap == T.MAX_CONCURRENT_POSITIONS
             else f"   [OVERRIDDEN from the default "
                  f"{T.MAX_CONCURRENT_POSITIONS}]"),
@@ -309,6 +318,8 @@ def main(argv=None) -> int:
                          "default. Set it to whatever the live session will "
                          "run at -- a dry run at a different cap is not a "
                          "rehearsal of that session.")
+    ap.add_argument("--cap-scope", choices=T.CAP_SCOPES, default=None,
+                    help="what the cap counts; match the live session")
     ap.add_argument("--out", default="var/reports/dry_session.txt")
     a = ap.parse_args(argv)
 
@@ -317,19 +328,21 @@ def main(argv=None) -> int:
         sys.exit(f"no sessions in {a.cache}")
 
     joint, breaches, reasons = replay(sessions, a.strategy,
-                                      max_positions=a.max_positions)
+                                      max_positions=a.max_positions,
+                                      cap_scope=a.cap_scope)
     solo = None
     if a.compare_with and a.compare_with in a.strategy and len(a.strategy) > 1:
         # The SOLO run must use the SAME cap. Comparing a capped
         # joint run against an uncapped solo one would attribute the
         # cap's effect to the added strategy.
         solo, _b, _r = replay(sessions, [a.compare_with],
-                              max_positions=a.max_positions)
+                              max_positions=a.max_positions,
+                              cap_scope=a.cap_scope)
 
     name = SA.build(a.compare_with).name if a.compare_with else "MCL"
     emit("\n".join(render(a.strategy, len(sessions), joint, breaches,
                           reasons, solo, name,
-                          cap=a.max_positions)), a.out,
+                          cap=a.max_positions, cap_scope=a.cap_scope)), a.out,
          header=f"common.dry_session  cache={a.cache}  "
                 f"strategies={','.join(a.strategy)}  sessions={len(sessions)}")
     return 1 if breaches else 0

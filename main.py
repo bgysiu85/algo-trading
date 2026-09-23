@@ -166,12 +166,15 @@ def _confirmed(wanted: list[str], forwarded: list[str]) -> bool:
 
     port = _flag_value(forwarded, "--port", "4002 (default)")
     cap = _flag_value(forwarded, "--max-positions", "trader default")
+    scope = _flag_value(forwarded, "--cap-scope", "account")
     print()
     print("  ORDERS WILL BE PLACED")
     print()
     print(f"  Strategies : {', '.join(wanted)}")
     print(f"  Port       : {port}   (paper only -- live ports are refused)")
-    print(f"  Position cap: {cap} across ALL strategies")
+    print(f"  Position cap: {cap} "
+          + ("PER STRATEGY (each strategy has its own pool)"
+             if scope == "strategy" else "across ALL strategies"))
     print()
     print("  The trailing stop lives in this process, not at IBKR.")
     print("  If this window closes with a position open, that position is")

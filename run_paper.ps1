@@ -6,6 +6,8 @@
 #                                    if you do, the second one refuses.
 #   .\run_paper.ps1 -Strategy mcl,mc5 -MaxPositions 3
 #                                    two strategies, one book, cap 3
+#   .\run_paper.ps1 -Strategy "mcl,mc5" -MaxPositions 3 -CapScope strategy
+#                                    each strategy gets its OWN cap of 3
 #   .\run_paper.ps1 -SleepWhenDone   sleep the PC ~20 min after the 09:30 close
 #   .\run_paper.ps1 -NoArchive       keep the watchlist instead of clearing it
 #
@@ -27,6 +29,7 @@ param(
     [int]$Port = 4002,
     [string]$Strategy = "mcl",       # comma-separated for more than one: "mcl,mc5"
     [int]$MaxPositions = 0,          # 0 = leave the trader's default alone
+    [string]$CapScope = "",          # "" = trader default (account); "strategy" = cap per strategy
     [int]$TelegramBatchMin = 0       # 0 = send immediately
 )
 
@@ -78,6 +81,7 @@ Write-Host ""
 $argsList = @("main.py", "--mode", "paper", "--strategy", "$Strategy",
               "--watchlist", ".\var\watchlist.txt", "--port", "$Port")
 if ($MaxPositions -gt 0)    { $argsList += @("--max-positions", "$MaxPositions") }
+if ($CapScope -ne "")        { $argsList += @("--cap-scope", "$CapScope") }
 if ($TelegramBatchMin -gt 0) { $argsList += @("--telegram-batch-min", "$TelegramBatchMin") }
 if ($NoArchive)      { $argsList += "--no-archive" }
 if ($SleepWhenDone)  {
