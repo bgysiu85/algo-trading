@@ -290,6 +290,23 @@ commit rather than a choice made after a result.
 14. **Markets with fewer than 60 live months** are printed with "NOT READ" and no
     per-market verdict. They stay in the book.
 
+## 0.5 POST-RUN note, 2026-09-23: the training-side result (W06-0005)
+
+**Not an amendment: nothing above is changed by it.** Result doc:
+`claude/tsmom_training_RESULT_20260923.md`; raw: `claude/raw/tsmom_report_training_20260923.txt`.
+
+- **Verdict: NOT CARRIED FORWARD, 6/9.** Net $9,343 at mid on $22,129 fractional
+  (2011-06 .. 2021-12). Fails criterion 4 (bootstrap by market 93.7%), 5 (bootstrap by
+  year 88.6%) and 7 (2014 = 54% of net). 2013–2015 net $12,201; the other years ($2,858).
+  **The holdout is not spent.**
+- **A defect amendment C's diagnostic found:** FX (6E/6A/6B/6J) is on the plain
+  front-month rule, and from 2017-03 that holds CME **serial months** (a few hundred
+  contracts a day vs ~140,000 in the quarterly). Estimated effect on net about ($390)
+  over the run; it does not change the verdict. A quarterly-FX rerun would be a new
+  registered hypothesis (§9 budget), not an edit here, and needs FX `c.2`/`c.3` bars.
+- **§10's prediction** was wrong in the specifics (criterion 7 failed on a year, not on
+  gold and crude) and right that the book would not clear the bar.
+
 ---
 
 ## 1. The hypothesis, in one sentence

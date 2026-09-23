@@ -1,0 +1,218 @@
+# generated 2026-09-23 17:21:42 AEST
+# archive /home/claude/Databento/GLBX.MDP3; dataset GLBX.MDP3
+
+TSMOM -- REGISTERED_tsmom section 3 report, TRAINING SIDE ONLY
+==============================================================================
+dataset GLBX.MDP3 (read from the archive manifest); pulls: 2
+holdout: LOCKED from 2022-01-01; every root cut by split_months before any series was built. Ledger: UNSPENT
+verdict book: arm b_MTN (G3), ensemble k=(3, 6, 9, 12), tranches (1, 5, 9, 13, 17), FRACTIONAL sizing at E = $22,129
+window: 2011-06-10 .. 2021-12-31 (10.56 years, from the first session any market is live)
+money: USD; negatives in brackets. Gross is never the headline.
+
+SECTION 4 -- THE BAR (all nine, or the strategy is not carried forward)
+------------------------------------------------------------------------------
+  1. [PASS] Positive after costs at mid friction ($1.25/side)
+        $9,343
+  2. [PASS] Both halves positive at mid (split 2016-09, not swept)
+        $8,624 / $719
+  3. [PASS] drop-top-1 and drop-top-2 by market still positive
+        $6,240 / $3,260
+  4. [FAIL] Cluster bootstrap by market: total > 0 in >= 95%
+        93.7% of 2000
+  5. [FAIL] Cluster bootstrap by year: total > 0 in >= 95%
+        88.6% of 2000
+  6. [PASS] Beats buy-and-hold at mid, on net AND net per unit of realised vol
+        $9,343 vs $(16,647); 0.28 vs -0.33
+  7. [FAIL] No single year and no single market > 50% of net
+        top year 2014 54%; top market ES 33%
+  8. [PASS] Ensemble not beaten by the median single-k spec (common window)
+        $9,447 vs median $7,127
+  9. [PASS] Still positive at high friction ($2.50/side)
+        $7,937
+  VERDICT: NOT CARRIED FORWARD (6/9 pass)
+  Section 5 sign check: integer book at $22,129 nets $17,626 at mid vs fractional $9,343 -- same sign.
+
+ITEMS 1 & 3 -- NET AT THREE FRICTIONS, EVERY CALENDAR YEAR (verdict book)
+------------------------------------------------------------------------------
+  year       gross     net low     net mid    net high    cost mid
+  2011         326         310         285         243          42
+  2012     (3,039)     (3,074)     (3,128)     (3,216)          89
+  2013       3,402       3,362       3,302       3,201         100
+  2014       5,194       5,149       5,082       4,970         112
+  2015       3,931       3,886       3,817       3,704         113
+  2016     (1,657)     (1,699)     (1,761)     (1,865)         104
+  2017       (563)       (624)       (716)       (869)         153
+  2018         216         137          17       (183)         200
+  2019       (500)       (576)       (689)       (878)         189
+  2020       2,019       1,958       1,868       1,717         151
+  2021       1,420       1,359       1,267       1,113         154
+ TOTAL      10,749      10,187       9,343       7,937       1,406
+   /yr       1,018         965         885         752
+  net mid per year =    4.0% of $22,129; worst peak-to-trough (mid) $(5,960) = (26.9)% of equity
+
+ITEM 2 -- HALVES (split at 2016-09, the median active month; not swept)
+------------------------------------------------------------------------------
+  first half  $      8,624    second half  $        719    (net, mid)
+
+PER MARKET (verdict book, net at mid) -- and ITEM 4, drop-top-N by market
+------------------------------------------------------------------------------
+  mkt vehicle live mo      gross    net mid   share sides/yr pos vol  note
+   ES     MES     127      3,180      3,103     33%      5.8     39%  
+  RTY     M2K      42    (2,086)    (2,106)   (23)%      1.5     31%  NOT READ: 42 < 60 months
+   GC     MGC     127      (157)      (224)    (2)%      5.1     34%  
+   SI     SIL     127    (1,557)    (1,583)   (17)%      2.0     32%  
+   HG     MHG     127        182         98      1%      6.4     33%  
+   CL     MCL     127      1,759      1,649     18%      8.3     34%  
+   NG     MNG     127      3,179      2,979     32%     15.2     39%  
+   6E     M6E     127      2,322      2,161     23%     12.1     33%  
+   6A     M6A     127      (406)      (635)    (7)%     17.4     33%  
+   6B     M6B     127         18      (195)    (2)%     16.1     31%  
+   6J     MJY     127      3,030      2,864     31%     12.6     33%  
+   TN     MTN      60      1,285      1,231     13%      4.1     33%  
+  drop-top-1 (ES): $6,240
+  drop-top-2 (ES, NG): $3,260
+  drop-top-3 (ES, NG, 6J): $396
+  'pos vol' = realised vol of the market's P/L on its equal-weight capital share; the ex-ante target is 40% x |mean sign|.
+
+ITEMS 5 & 6 -- CLUSTER BOOTSTRAPS (2000 resamples, seed 20260923, net at mid)
+------------------------------------------------------------------------------
+  by market  units  12  total > 0 in 93.7%   5th $(534)  median $9,259  95th $19,145
+  by year    units  11  total > 0 in 88.6%   5th $(3,471)  median $9,389  95th $22,560
+
+ITEM 7 -- BENCHMARKS, same markets, same vol scaling, same tranches and costs
+------------------------------------------------------------------------------
+book                                   net mid     net/yr  ret/vol  real vol
+TSMOM ensemble (verdict book)            9,343        885     0.28     14.2%
+buy-and-hold (long every market)      (16,647)    (1,576)    -0.33     21.6%
+cash                                         0          0     0.00      0.0%
+
+ITEM 8 -- REALISED PORTFOLIO VOLATILITY (net at mid) vs MOP's ~12%
+------------------------------------------------------------------------------
+  fractional, verdict book:   14.2%
+  integer at $   22,129:     13.5%
+  integer at $  100,000:     14.0%
+  integer at $  500,000:     14.2%
+
+ITEM 9 -- TURNOVER, vehicle contract-sides per year
+------------------------------------------------------------------------------
+book                          rebalance     roll  cost mid/yr
+fractional                         30.9     75.6          133
+integer $22,129                    29.2     67.8          121
+integer $100,000                  138.0    339.6          597
+integer $500,000                  696.8   1708.9        3,007
+
+ITEM 10 -- REBALANCE-DAY GRID: one sleeve on day d (net at mid, same window)
+------------------------------------------------------------------------------
+  d1     9,001   d2    10,429   d3    10,727   d4    11,418
+  d5    11,884   d6     8,905   d7     8,928   d8     8,188
+  d9    10,371   d10    7,767   d11    7,638   d12    7,541
+  d13    6,896   d14    6,535   d15    8,845   d16    7,794
+  d17    8,403   d18   13,083   d19    9,716   d20   12,369
+  d21    9,101
+  tranched spec $9,343: beats 62% of the 21 single days; range $6,535 .. $13,083; median $8,928
+
+ITEM 11 -- LOOKBACK GRID k in {1,3,6,9,12,24}, single-k books (net at mid)
+------------------------------------------------------------------------------
+  common window from 2012-06-08 (all seven books live)
+cell                     own start     own net    own /yr  common net
+k=1                     2011-06-10       7,194        681       8,357
+k=3                     2011-06-10       3,759        356       2,422
+k=6                     2011-06-10      14,209      1,346      14,840
+k=9                     2011-06-10      11,734      1,111      13,470
+k=12                    2011-06-10       6,442        610       5,897
+k=24                    2012-06-08       4,373        457       4,373
+ENSEMBLE {3,6,9,12}     2011-06-10       9,343        885       9,447
+  the ensemble beat 67% of single-k specs (common window)
+  neighbours, reported only: k=12 alone is MOP's headline cell (above); k=12 with a one-month skip nets $72 from 2011-07-08
+  k = 36 and 48 EXCLUDED (registered): with data from mid-2010 and the holdout at 2022, a 48-month lookback spends four of eleven in-sample years on warm-up.
+
+ITEM 13 -- THE THREE RATES ARMS, SIDE BY SIDE, UNRANKED (registry order)
+------------------------------------------------------------------------------
+arm         net low    net mid   net high    B&H mid ret/vol   int $22k  criteria
+a_ZN         10,718      9,928      8,611   (13,118)    0.31     13,377  8/9 PPPP.PPPP
+b_MTN        10,187      9,343      7,937   (16,647)    0.28     17,626  6/9 PPP..P.PP
+c_none        9,058      8,202      6,777   (17,982)    0.24     17,953  5/9 P.P..P.PP
+  b_MTN is the arm that would be traded (G3, chosen before any return); this table does not move it.
+
+SECTION 5 -- CAPACITY (measured, not scored)
+------------------------------------------------------------------------------
+book                      net low    net mid   net high real vol     max DD mkts held
+fractional @ $22,129       10,187      9,343      7,937    14.2%    (5,960)        12
+integer @ $22,129          18,394     17,626     16,346    13.5%    (3,920)        11
+integer @ $100,000         41,881     38,099     31,795    14.0%   (24,321)        12
+integer @ $500,000        238,978    219,925    188,170    14.2%  (132,604)        12
+
+  the price of granularity, per market: net at mid, fractional scaled to E vs integer at E
+  mkt  frac $22k   int $22k frac $100k  int $100k frac $500k  int $500k % sess held@22k
+   ES      3,103      3,192     14,024     14,545     70,122     69,750            48%
+  RTY    (2,106)    (1,633)    (9,516)    (8,490)   (47,579)   (47,878)             4%
+   GC      (224)    (1,534)    (1,013)      (900)    (5,066)    (3,173)            10%
+   SI    (1,583)          0    (7,152)   (12,914)   (35,758)   (32,331)             0%
+   HG         98          9        442      2,484      2,208      2,756            30%
+   CL      1,649      4,966      7,453      6,353     37,266     36,602            12%
+   NG      2,979      4,182     13,463     12,837     67,313     68,890            50%
+   6E      2,161      3,558      9,767     11,216     48,837     50,084            59%
+   6A      (635)      (683)    (2,871)    (5,151)   (14,357)   (14,751)            74%
+   6B      (195)        129      (882)    (1,012)    (4,412)    (4,029)            75%
+   6J      2,864      4,246     12,944     14,503     64,718     65,606            56%
+   TN      1,231      1,195      5,563      4,627     27,814     28,398            26%
+
+  cap subsets at $22,129 (spec section 3's one-lot tables, fixed 2026-09-17, NOT re-chosen here)
+subset                            book              net mid   net high real vol     max DD
+10%: MNG,M6E,M6A,M6B,MJY          vol-targeted       12,878     10,720    18.8%    (6,936)
+                                  one-lot             5,315      4,007    12.7%    (5,702)
+15%: M2K,M6E,M6A,M6B,MJY          vol-targeted        6,529      4,557    20.7%   (10,532)
+                                  one-lot             (199)    (1,228)    12.6%   (11,183)
+
+ITEM 12 -- COVERAGE, TRAINING SIDE (same pass as the P/L)
+------------------------------------------------------------------------------
+      sessions       first        last  held_stale_sessions  rolls      enters  locked_sessions_set_aside
+root                                                                                                     
+ES        2994  2010-06-07  2021-12-31                    0     47  2011-06-09                       1226
+RTY       1164  2017-07-10  2021-12-31                    0     18  2018-07-11                       1226
+GC        2998  2010-06-07  2021-12-31                    0     69  2011-06-09                       1225
+SI        2998  2010-06-07  2021-12-31                    0     58  2011-06-09                       1225
+HG        2998  2010-06-07  2021-12-31                    0     58  2011-06-09                       1225
+CL        2999  2010-06-07  2021-12-31                    0    139  2011-06-09                       1224
+NG        2999  2010-06-07  2021-12-31                    0    139  2011-06-09                       1224
+6E        2993  2010-06-07  2021-12-31                    1     84  2011-06-09                       1226
+6A        2992  2010-06-07  2021-12-31                    5     84  2011-06-09                       1221
+6B        2992  2010-06-07  2021-12-31                    2     84  2011-06-09                       1224
+6J        2991  2010-06-07  2021-12-31                    1     84  2011-06-09                       1225
+ZN        2999  2010-06-07  2021-12-31                    0     46  2011-06-09                       1226
+TN        1552  2016-01-11  2021-12-31                    0     24  2017-01-11                       1227
+
+AMENDMENT C DIAGNOSTIC -- held contract's share of root volume on roll sessions (selects nothing)
+------------------------------------------------------------------------------
+ root  rolls  median  10th pct    min
+   ES     47     64%       51%     5%
+  RTY     18     55%       49%    40%
+   GC     69     20%        2%     1%
+   SI     58     20%       14%     8%
+   HG     58     33%       26%    20%
+   CL    139     25%       15%    10%
+   NG    139     38%       31%    22%
+   6E     84     17%        0%     0%
+   6A     84     17%        0%     0%
+   6B     84     19%        0%     0%
+   6J     84     20%        0%     0%
+   ZN     46     11%        5%     1%
+   TN     24     17%       11%     8%
+
+LOAD NOTES (archive.py)
+------------------------------------------------------------------------------
+    ES: 8438 bar rows, 0 unmapped, 1659 Sunday rows dropped, 0 expiry revisions
+   RTY: 4711 bar rows, 0 unmapped, 782 Sunday rows dropped, 0 expiry revisions
+    GC: 19984 bar rows, 0 unmapped, 3348 Sunday rows dropped, 0 expiry revisions
+    SI: 19177 bar rows, 0 unmapped, 2637 Sunday rows dropped, 0 expiry revisions
+    HG: 20873 bar rows, 0 unmapped, 2538 Sunday rows dropped, 0 expiry revisions
+    CL: 8446 bar rows, 0 unmapped, 1666 Sunday rows dropped, 0 expiry revisions
+    NG: 8446 bar rows, 0 unmapped, 1664 Sunday rows dropped, 0 expiry revisions
+    6E: 8427 bar rows, 0 unmapped, 1440 Sunday rows dropped, 1 expiry revisions
+    6A: 8377 bar rows, 0 unmapped, 1271 Sunday rows dropped, 1 expiry revisions
+    6B: 8392 bar rows, 0 unmapped, 1172 Sunday rows dropped, 1 expiry revisions
+    6J: 8398 bar rows, 0 unmapped, 1342 Sunday rows dropped, 1 expiry revisions
+    ZN: 8294 bar rows, 0 unmapped, 1368 Sunday rows dropped, 1 expiry revisions
+    TN: 4266 bar rows, 0 unmapped, 686 Sunday rows dropped, 0 expiry revisions
+
+Nothing above is ranked. The grids are the distribution the registered spec sits in, not a menu (section 7).
