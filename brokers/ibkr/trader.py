@@ -305,7 +305,7 @@ EMPTY_WARN_S = 120          # how often to repeat the 'watching nothing' warning
 # the same time. If that loop is ever made concurrent, this needs a reservation.
 MAX_CONCURRENT_POSITIONS = 2
 
-# WHAT THE CAP COUNTS -- added 2026-09-23 (W02-0014), Ben, in his words: "adjust
+# WHAT THE CAP COUNTS -- added 2026-09-23 (W02-0015), Ben, in his words: "adjust
 # the trader mechanics to allow each strategy a max position of 3, rather than
 # a total pool of 3 ... it seems like MC5 is dragging down MCL."
 #

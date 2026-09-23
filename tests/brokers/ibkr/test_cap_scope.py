@@ -1,4 +1,4 @@
-"""--cap-scope: what the position cap counts (W02-0014, 2026-09-23).
+"""--cap-scope: what the position cap counts (W02-0015, 2026-09-23).
 
 Ben: "allow each strategy a max position of 3, rather than a total pool of 3
 ... it seems like MC5 is dragging down MCL." With `cap_scope="strategy"` each
