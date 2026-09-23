@@ -4,7 +4,7 @@
 #                                    TradingView watchlist feed IN THIS PROCESS
 #                                    -- do not also run .\run_tv_feed.ps1, and
 #                                    if you do, the second one refuses.
-#   .\run_paper.ps1 -Strategy mcl,mc5 -MaxPositions 3
+#   .\run_paper.ps1 -Strategy "mcl,mc5" -MaxPositions 3
 #                                    two strategies, one book, cap 3
 #   .\run_paper.ps1 -Strategy "mcl,mc5" -MaxPositions 3 -CapScope strategy
 #                                    each strategy gets its OWN cap of 3

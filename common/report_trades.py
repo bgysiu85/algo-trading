@@ -29,6 +29,7 @@ import argparse
 import asyncio
 import sys
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 try:
     from ib_async import IB, ExecutionFilter
@@ -41,14 +42,22 @@ LIVE_PORTS = {7496: "TWS LIVE", 4001: "IB Gateway LIVE"}
 HOST = "127.0.0.1"
 VIEWER_CLIENT_ID = 77          # distinct from the trader's id
 
+# Every timestamp on this screen is shown in one zone — US market time —
+# instead of the previous mix (IB executions in UTC, header in local
+# Sydney time). ET matches the ledger/fill-log timestamps Ben already
+# reads, so nothing needs converting by hand to cross-check them.
+DISPLAY_TZ = ZoneInfo("America/New_York")
+DISPLAY_TZ_LABEL = "ET"
+
 
 def hr(title: str) -> None:
     print(f"\n=== {title} " + "=" * max(0, 60 - len(title)))
 
 
 async def snapshot(ib: IB) -> None:
+    now_et = datetime.now(DISPLAY_TZ)
     print(f"\n{'=' * 70}")
-    print(f"  MCL account view — {datetime.now():%Y-%m-%d %H:%M:%S}")
+    print(f"  MCL account view — {now_et:%Y-%m-%d %H:%M:%S} {DISPLAY_TZ_LABEL}")
     print(f"{'=' * 70}")
 
     # ---- balances (account-wide, always available) ------------------------
@@ -99,22 +108,32 @@ async def snapshot(ib: IB) -> None:
         print(f"  {VIEWER_CLIENT_ID} in Gateway API settings and restart Gateway.")
         print("  Either way, mcl_fills_YYYYMMDD.csv is the authoritative record.")
     else:
-        print(f"  {'TIME':10s} {'SYMBOL':8s} {'SIDE':5s} {'QTY':>7s} "
-              f"{'PRICE':>10s} {'COMM':>8s} {'RLZ P/L':>10s}")
+        print(f"  {'TIME (' + DISPLAY_TZ_LABEL + ')':10s} {'SYMBOL':8s} {'SIDE':5s} "
+              f"{'QTY':>7s} {'PRICE':>10s} {'COMM':>8s} {'RLZ P/L':>10s}")
         realized = 0.0
+        any_comm = False
         for f in sorted(fills, key=lambda x: x.execution.time):
             e, r = f.execution, f.commissionReport
             comm = r.commission if r else 0.0
+            if comm:
+                any_comm = True
             pnl = r.realizedPNL if r and r.realizedPNL not in (None, 0.0) else 0.0
             if pnl and abs(pnl) < 1e11:      # IB sends a sentinel for "n/a"
                 realized += pnl
             # `Execution` carries no contract; the Fill does. `e.contract`
             # raised AttributeError and hid the MEDS executions exactly when
             # they were needed.
-            print(f"  {e.time:%H:%M:%S}  {f.contract.symbol:8s} {e.side:5s} "
+            # `e.time` comes back UTC-aware from IB; converting here keeps
+            # every timestamp on screen in DISPLAY_TZ, matching the header.
+            t_local = e.time.astimezone(DISPLAY_TZ)
+            print(f"  {t_local:%H:%M:%S}  {f.contract.symbol:8s} {e.side:5s} "
                   f"{e.shares:>7.0f} {e.price:>10.4f} {comm:>8.2f} "
                   f"{pnl if pnl else 0.0:>10.2f}")
         print(f"\n  {len(fills)} fills, realized P/L {realized:>,.2f}")
+        if not any_comm:
+            print("  NOTE: IB paper reports $0.00 commission on every row above —")
+            print("  that's IB's paper-account behavior, not a bug here. The")
+            print("  mcl_fills_YYYYMMDD.csv fill log is the authoritative cost/P&L source.")
 
 
 async def main_async(port: int, watch: bool) -> int:
