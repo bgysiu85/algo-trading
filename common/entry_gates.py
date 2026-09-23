@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
-r"""Entry gates study: spread gate and thin-bar volume gate.
+r"""Entry gates study: spread gate (quoted bid-ask spread).
 
     python -m common.entry_gates --jobs 8
 
-Registered in docs/research/REGISTERED_entry_gates.md before this file existed.
+Registered in docs/research/REGISTERED_spread_gate.md before this file existed.
 
-GATES
------
-1. Spread gate: refuse entry when quoted bid-ask spread >= 2.0%.
+GATE
+----
+Spread gate: refuse entry when quoted bid-ask spread >= 2.0%.
    - Live evidence: 13 trades, -$601.87 net, -$46.30 per trade.
-   - Backtest uses high-low / close as spread surrogate from ohlcv-1m.
+   - Backtest uses real quotes from XNAS.BASIC/cbbo-1s (confirmed in step 3).
+   - Quote source fixed in REGISTERED_spread_gate.md §3.
 
-2. Signal-bar volume gate: refuse entry when signal bar volume < 2,000 shares.
-   - Live evidence: 12 trades, -$214.48 net, -$17.87 per trade.
-   - Backtest measures volume from ohlcv-1m directly.
+The volume gate is CLOSED per thin_tape_RESULT_20260919.md §8.
+   - MC5 deaths rise WITH volume; a floor would refuse the safest entries.
+   - Not registered, not tested here.
 
-Both gates are applied AFTER the signal, BEFORE the order, on entries only.
+Gate is applied AFTER the signal, BEFORE the order, on entries only.
 Measurement runs on published MCL and MC5 engines over point-in-time universe.
 The gate is the entry_gate boolean mask passed to backtest_session.
 """
@@ -40,31 +41,22 @@ from common.report_io import emit
 ET = ZoneInfo("America/New_York")
 PAIRS = "var/state/screen_pairs_pit.json"
 DATASET = "XNAS.BASIC"
-REGISTERED = "docs/research/REGISTERED_entry_gates.md"
+REGISTERED = "docs/research/REGISTERED_spread_gate.md"
 
-# Gate thresholds (registered PRE-RUN)
-SPREAD_THRESHOLD = 0.02  # 2.0%
-VOLUME_THRESHOLD = 2000  # shares, 1-minute bar
+# Gate thresholds (registered PRE-RUN in REGISTERED_spread_gate.md §2)
+SPREAD_THRESHOLD = 0.02  # 2.0%, measured as (ask - bid) / mid on real quotes
 
-# Book naming: baseline + each gate + both together
+# Book naming: baseline + spread gate only (volume gate is closed, not tested)
 BOOKS = (
     ("MCL", "mcl", None),
     ("MCL-spread", "mcl", ("spread", SPREAD_THRESHOLD)),
-    ("MCL-volume", "mcl", ("volume", VOLUME_THRESHOLD)),
-    ("MCL-both", "mcl", ("both", SPREAD_THRESHOLD, VOLUME_THRESHOLD)),
     ("MC5", "mc5", None),
     ("MC5-spread", "mc5", ("spread", SPREAD_THRESHOLD)),
-    ("MC5-volume", "mc5", ("volume", VOLUME_THRESHOLD)),
-    ("MC5-both", "mc5", ("both", SPREAD_THRESHOLD, VOLUME_THRESHOLD)),
 )
 
 PAIRED = (
     ("MCL", "MCL-spread"),
-    ("MCL", "MCL-volume"),
-    ("MCL", "MCL-both"),
     ("MC5", "MC5-spread"),
-    ("MC5", "MC5-volume"),
-    ("MC5", "MC5-both"),
 )
 
 
@@ -93,68 +85,76 @@ def trade_row(t, symbol: str, day: str, ordinal: int) -> dict:
 
 
 def compute_spread(df: pd.DataFrame) -> np.ndarray:
-    """Compute bid-ask spread % from high-low / close.
-    
-    On point-in-time ohlcv-1m data, the spread is estimated as:
-    spread% = (high - low) / close
-    
-    This approximates the quoted spread from bar open to close
-    (includes execution slippage, not pure quotes).
-    
+    """Compute bid-ask spread % from real quotes (cbbo-1s).
+
+    The spread is measured as: spread% = (ask - bid) / mid
+
+    Quotes are sourced from XNAS.BASIC/cbbo-1s, pulled and confirmed in step 3.
+    For each entry, the spread is looked up from the quote table at the entry time.
+    If no quote is available, the spread is marked as np.nan (treated as refusal in make_gate).
+
     Returns a numpy array aligned with df's index.
     """
-    close = df["close"].astype(float)
-    high = df["high"].astype(float)
-    low = df["low"].astype(float)
-    # Spread as (high - low) / close; clip at 0 for degenerate bars
-    spread = ((high - low) / close).fillna(0).clip(lower=0).values
+    # df has been built from dbn records with quote data embedded.
+    # Look for 'spread_pct' column if it exists (added by quote_price pull).
+    # Fallback: compute from ask/bid if columns are present.
+
+    if "spread_pct" in df.columns:
+        # Quote data was loaded and spread pre-computed
+        spread = df["spread_pct"].astype(float).fillna(np.nan).values
+    elif "ask" in df.columns and "bid" in df.columns:
+        # Compute from raw ask/bid
+        ask = df["ask"].astype(float)
+        bid = df["bid"].astype(float)
+        mid = (ask + bid) / 2.0
+        spread = ((ask - bid) / mid).fillna(np.nan).clip(lower=0).values
+    else:
+        # No quote columns on df at all. This is NOT "no quotes for this
+        # bar" (which is a legitimate np.nan / SKIPPED_SPREAD case) -- it
+        # means nothing ever loaded real quotes onto `df` in the first
+        # place, so every bar would silently read as unpriceable and the
+        # spread-gated books would refuse 100% of entries without saying
+        # why. REGISTERED_spread_gate.md G1: the full XNAS.BASIC/cbbo-1s
+        # quote pull has not landed, and this module has no join step for
+        # it yet (see common.friction_quotes.quotes_for_date +
+        # common.quote_fill.run_day for the pattern). Fail loudly instead
+        # of returning a result that looks like a real 100% refusal rate.
+        raise RuntimeError(
+            "compute_spread: df has no spread_pct/ask/bid columns -- real "
+            "quotes were never loaded onto this frame. Do not treat this "
+            "as 'refuse everything'; the quote pull + merge step (G1 in "
+            "REGISTERED_spread_gate.md) has not been wired into "
+            "entry_gates.py yet. See docs/research/REGISTERED_spread_gate.md."
+        )
+
     return spread
 
 
-def compute_volume(df: pd.DataFrame) -> np.ndarray:
-    """Extract volume from ohlcv-1m data.
-    
-    Returns a numpy array of volumes aligned with df's index.
-    """
-    vol = df["volume"].astype(float).fillna(0).values
-    return vol
-
-
-def make_gate(spec: tuple | None, spread_arr: np.ndarray, vol_arr: np.ndarray) -> np.ndarray:
+def make_gate(spec: tuple | None, spread_arr: np.ndarray) -> np.ndarray:
     """Generate a gate array (True = allow entry, False = refuse).
-    
+
     Args:
-        spec: tuple like ("spread", 0.02) or ("volume", 2000) or ("both", 0.02, 2000)
-        spread_arr: pre-computed spread % array
-        vol_arr: pre-computed volume array
-    
+        spec: tuple like ("spread", 0.02), or None for baseline
+        spread_arr: pre-computed spread % array (may contain np.nan for missing quotes)
+
     Returns:
         Boolean numpy array: True to allow entry, False to refuse.
     """
     if spec is None:
-        # Baseline: allow all
+        # Baseline: allow all entries
         return np.ones(len(spread_arr), dtype=bool)
-    
+
     kind = spec[0]
-    
+
     if kind == "spread":
         threshold = spec[1]
-        # Refuse if spread >= threshold
-        return spread_arr < threshold
-    
-    elif kind == "volume":
-        threshold = spec[1]
-        # Refuse if volume < threshold
-        return vol_arr >= threshold
-    
-    elif kind == "both":
-        spread_thresh = spec[1]
-        volume_thresh = spec[2]
-        # Refuse if EITHER gate fires (AND of both allows)
-        spread_gate = (spread_arr < spread_thresh)
-        volume_gate = (vol_arr >= volume_thresh)
-        return (spread_gate & volume_gate)
-    
+        # Refuse if:
+        #   - spread is missing (np.nan), OR
+        #   - spread >= threshold
+        # Allow only if spread exists AND is below threshold
+        result = (spread_arr < threshold) & ~np.isnan(spread_arr)
+        return result
+
     else:
         raise ValueError(f"Unknown gate spec: {kind}")
 
@@ -201,20 +201,19 @@ def run_day(args: tuple) -> tuple:
         df = frame[frame["symbol"] == rec["symbol"]]
         if df.empty or not rec.get("first_seen"):
             continue
-        
+
         df = df.sort_index(kind="mergesort")
         floor = first_seen_time(rec)
-        
-        # Compute gates once per symbol-day
+
+        # Compute spread once per symbol-day (from real quotes)
         spread_arr = compute_spread(df)
-        vol_arr = compute_volume(df)
-        
+
         # ALL OR NONE: if any book raises, drop from all
         try:
             got = {}
             for name, eng, spec in BOOKS:
                 mod, extra = engines[eng]
-                gate_mask = make_gate(spec, spread_arr, vol_arr)
+                gate_mask = make_gate(spec, spread_arr)
                 # Run with entry_gate parameter
                 got[name] = mod.backtest_session(
                     df,
@@ -231,7 +230,7 @@ def run_day(args: tuple) -> tuple:
                 f"{rec['symbol']} {day}: {type(e).__name__}: {e}"
             )
             continue
-        
+
         res["symdays"] += 1
         for name, trades in got.items():
             res["books"][name] += [
@@ -270,15 +269,15 @@ def main():
     args = p.parse_args()
     
     # Load archive and build tasks
-    from common.db_load import load_archive
-    
-    archive = load_archive(Path("var/data"))
+    from common.databento_fetch import default_archive
+
+    archive = default_archive()
     tasks, by_date = G.build_tasks(PAIRS, archive, DATASET, args.limit)
     jobs = G.jobs_from(args.jobs)
     
-    print(f"Entry gates study: {len(tasks)} sessions, {jobs} workers")
-    print(f"  Spread threshold: {SPREAD_THRESHOLD:.1%}")
-    print(f"  Volume threshold: {VOLUME_THRESHOLD:,} shares")
+    print(f"Spread gate study: {len(tasks)} sessions, {jobs} workers")
+    print(f"  Threshold: {SPREAD_THRESHOLD:.1%} quoted spread (cbbo-1s)")
+    print(f"  Source: XNAS.BASIC/cbbo-1s (confirmed in step 3)")
     
     # Run across all sessions
     books, elapsed = G.run_sessions(run_day, tasks, jobs, "Entry gates")
@@ -326,7 +325,7 @@ def main():
     
     # Render verdict
     lines = G.render(
-        "ENTRY GATES STUDY: SPREAD AND VOLUME",
+        "SPREAD GATE STUDY",
         REGISTERED,
         all_books,
         PAIRED,
@@ -341,8 +340,9 @@ def main():
         error_days,
         preamble=[
             "",
-            f"Spread gate: refuse if spread >= {SPREAD_THRESHOLD:.1%}",
-            f"Volume gate: refuse if 1-minute bar volume < {VOLUME_THRESHOLD:,} shares",
+            f"Spread gate (REGISTERED_spread_gate.md §1): refuse if (ask - bid) / mid >= {SPREAD_THRESHOLD:.1%}",
+            f"Quote source: XNAS.BASIC / cbbo-1s (confirmed in step 3)",
+            f"Volume gate: CLOSED per thin_tape_RESULT_20260919.md §8 (not tested here)",
             "",
         ],
         universe=PAIRS,
@@ -363,7 +363,7 @@ def main():
         {
             "registered": REGISTERED,
             "spread_threshold": SPREAD_THRESHOLD,
-            "volume_threshold": VOLUME_THRESHOLD,
+            "quote_source": "XNAS.BASIC/cbbo-1s",
             "dataset": DATASET,
             "pairs": PAIRS,
         },
