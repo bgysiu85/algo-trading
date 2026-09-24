@@ -105,7 +105,14 @@ def align_weekly_to_daily(daily_dates, weekly_df, cols):
     dd["week_end"] = week_end(dd["date"])
     dd["key"] = dd["week_end"] - pd.Timedelta(days=7)
     dd = dd.reset_index().rename(columns={"index": "_orig"})
-    w = weekly_df[["week_end"] + cols].sort_values("week_end")
+    # pandas 2.x can hand back mixed datetime64 resolutions (e.g. one side
+    # "us" from a pyarrow/parquet read, the other "ns" from to_period()
+    # .apply(...)); merge_asof requires the merge keys to match exactly, so
+    # force both to a common resolution here rather than upstream, where
+    # the source dtype may legitimately vary.
+    dd["key"] = dd["key"].astype("datetime64[ns]")
+    w = weekly_df[["week_end"] + cols].sort_values("week_end").copy()
+    w["week_end"] = w["week_end"].astype("datetime64[ns]")
     merged = pd.merge_asof(dd.sort_values("key"), w, left_on="key",
                             right_on="week_end", direction="backward",
                             suffixes=("", "_w")).sort_values("_orig")
