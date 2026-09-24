@@ -172,9 +172,12 @@ def test_vw9_find_setups_is_still_apply_indicators_plus_track_setups():
 # TL-60
 # --------------------------------------------------------------------------
 
-def test_tl60_refuses_until_gate_g4():
+def test_tl60_is_gated_on_g4(monkeypatch):
     a = S.panel([S.random_walk("AAA", S.sessions(10))]).arrays("AAA")
-    assert R.TL_PARITY_PASSED is False
+    # G4 cleared 2026-09-25 (W01-0006 Done; Ben on W14-0008: "Yes")
+    assert R.TL_PARITY_PASSED is True
+    assert R.tl60(a, "R5").entry.dtype == bool
+    monkeypatch.setattr(R, "TL_PARITY_PASSED", False)
     with pytest.raises(R.NotRegistered, match="G4"):
         R.tl60(a, "R5")
 

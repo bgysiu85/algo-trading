@@ -103,10 +103,15 @@ def test_no_grid_recorded_refuses_before_any_bar_is_read(tmp_path, monkeypatch):
     assert calls == []
 
 
-def test_the_committed_grid_is_still_unrecorded_until_amendment_b():
-    """Flip this test in the amendment-B commit, not before: a grid set in
-    code without the amendment text is exactly what §2.2 forbids."""
-    assert B.GRID is None
+def test_the_committed_grid_is_amendment_bs():
+    """Amendment B (2026-09-25, W14-0006, Ben: "A") keeps the primary grid.
+    Changing GRID without a new amendment is what §2.2 forbids."""
+    assert B.GRID == "primary"
+    from pathlib import Path
+    reg = (Path(__file__).resolve().parents[3] / "docs" / "research"
+           / "REGISTERED_h60_v0.md")
+    if reg.exists():
+        assert "Amendment B" in reg.read_text(encoding="utf-8")
 
 
 def test_build_and_load_cache_roundtrip(tmp_path):

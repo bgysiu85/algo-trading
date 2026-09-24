@@ -58,9 +58,11 @@ from strategy.h60.panel import SymArrays
 TRAIL_PCT = 5.0            # MCL / MC5 / ORB trail, as published
 
 # Gate G4 (REGISTERED_h60_v0.md §0): TL-60 runs only once the TL-v0 Python
-# engine has passed its Pine parity check (W01-0006). Flipped by the commit
-# that records W01-0006 Done -- never on a result from this study.
-TL_PARITY_PASSED = False
+# engine has passed its Pine parity check (W01-0006). W01-0006 closed Done
+# 2026-09-25 (commit 4529c51); Ben confirmed on W14-0008 the same day, in his
+# words: "Yes". Recorded in the registration beside amendment B, before any
+# H60 bar was read -- never on a result from this study.
+TL_PARITY_PASSED = True
 
 # Gate G3: MR-60's parameters come from amendment A. Set by that commit.
 MR_AMENDMENT_A = False

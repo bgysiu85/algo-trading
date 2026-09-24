@@ -94,7 +94,10 @@ def test_preflight_stops_at_g2(world):
         RUN.score_all(None, n_draws=10)
 
 
-def test_full_training_side_score(world):
+def test_full_training_side_score(world, monkeypatch):
+    """With G4 held shut, TL-60 must report 'not run' and a False verdict."""
+    from strategy.h60 import rules as R
+    monkeypatch.setattr(R, "TL_PARITY_PASSED", False)
     H.cut(RUN.session_list())
     assert RUN.preflight(None, world["eod"]) == 0
     assert RUN.score_all(None, n_draws=50) == 0
@@ -115,6 +118,19 @@ def test_full_training_side_score(world):
             assert t["exit_session"].max() < rec["first_locked"]
     # nothing was spent
     assert not (world["tmp"] / "holdout_h60_spent.json").exists()
+
+
+def test_with_g4_open_tl60_is_scored_as_its_ensemble(world):
+    from strategy.h60 import rules as R
+    assert R.TL_PARITY_PASSED is True
+    H.cut(RUN.session_list())
+    assert RUN.preflight(None, world["eod"]) == 0
+    assert RUN.score_all(None, n_draws=20) == 0
+    text = (world["tmp"] / "score.txt").read_text(encoding="utf-8")
+    assert "== TL-60 (scored) ==" in text and "sleeve trades" in text
+    assert "TL-60/sleeve-R3 (reported, never scored)" in text
+    assert "10_tl_beats_don" in text
+    assert "MR-60: NOT RUN" in text
 
 
 def test_money_brackets():

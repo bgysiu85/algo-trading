@@ -453,3 +453,40 @@ omission, not Ben's choice. Offered the option to add it or leave it out, Ben ch
 
 What moved: a seventh rule set (§3.7); criterion 5's bootstrap bar from 99% to 99.3%; VW9-60 fifth
 in §8's holdout order; §9–§11 updated to match. Nothing else changed.
+
+---
+
+## Amendment B — PRE-RUN, 2026-09-25: the bar grid stays PRIMARY
+
+Written **before any 60-minute bar was built or read** (the engine, W14-0003, refused every
+real-data path until this amendment set `strategy/h60/bars.py` `GRID`). No H60 return of any
+kind exists.
+
+**The trigger.** §2.2's fallback rule: *"if the pricing in G1 puts the RTH 1-minute pull above
+$50 or 25 GB billable, the grid becomes 09:30–10:00 (from 1-minute) + clock-hour bars
+10:00–16:00."* The W14-0002 pricing (`var/reports/h60_data_plan.txt`, attached by reference,
+generated 2026-09-23 20:30 AEST) came to **35.76 GB, $0.00** for 2018-05-01 → 2026-09-22 — above
+the 25 GB line, so the rule as written reads FALLBACK. The 1-minute RTH pull was then made anyway
+(2,191 day files under the H60 archive root), at no cost.
+
+**The decision.** Offered (W14-0006) A — keep the primary grid, because the fallback guarded
+against a costly, large pull that in the event cost $0 and is already on disk, and because the
+fallback would change two registered rule definitions (§3.3 ORB-60's "09:30–10:30 bar" range and
+§3.7 VW9-60's first trigger at the 11:30 close) — or B — apply the fallback as written. Ben,
+2026-09-25, in his words: **"A"**.
+
+**What moved:** `GRID = "primary"`. §2.2's primary grid stands exactly as registered: 09:30,
+10:30, 11:30, 12:30, 13:30, 14:30 (60 minutes) and 15:30–16:00 (30 minutes), built from the
+1-minute pull. §3.3 and §3.7 are unchanged. The positive control (§4.3) plants at the 10:30 open
+as registered. Nothing else changed. Decided by what the pull cost and what the rules say, not by
+any return.
+
+## Gate G4 — cleared 2026-09-25 (recorded, not an amendment)
+
+§0 G4: *"TL-60 runs only if the TL-v0 Python engine has passed its Pine parity check (W01-0006)."*
+W01-0006 was closed Done on 2026-09-25 by the W01 line (commit 4529c51; G3 of
+`REGISTERED_tl_v0.md` accepted on the synthetic proof Ben approved on 2026-09-20 — the live
+bar-for-bar TradingView diff was skipped by his call). Asked (W14-0008) whether TL-60 should
+therefore run, Ben, 2026-09-25, in his words: **"Yes"**. `strategy/h60/rules.py`
+`TL_PARITY_PASSED = True`. TL-60 is scored as its three-sleeve ensemble (§3.5) and must also beat
+DON-60 (§7 criterion 10). Before any H60 bar was read.

@@ -14,8 +14,8 @@ The W14-0002 pricing report (var/reports/h60_data_plan.txt, 2026-09-23) says
 35.76 GB at $0.00 -- above the 25 GB line, so §2.2's rule reads FALLBACK, and
 the 1-minute RTH pull was then made anyway. Which grid this study uses is a
 PRE-RUN registration decision (amendment B), recorded BEFORE any bar is read.
-`GRID` below is None until that amendment is committed, and every entry point
-that reads real bars refuses while it is None. Both grids are built from the
+Every entry point that reads real bars refuses while `GRID` is None. Amendment
+B (2026-09-25, W14-0006, Ben: "A") set it to "primary". Both grids are built from the
 same 1-minute files: a clock-hour bar resampled from ITCH 1-minute bars is the
 same aggregation `ohlcv-1h` performs on the same prints.
 
@@ -42,7 +42,8 @@ GRIDS = ("primary", "fallback")
 
 # Set by amendment B (REGISTERED_h60_v0.md §2.2), in the same commit as the
 # amendment text, BEFORE any bar is read. None refuses every real-data path.
-GRID: str | None = None
+# Amendment B, 2026-09-25 (W14-0006), Ben: "A" -- the primary grid stands.
+GRID: str | None = "primary"
 
 RTH_OPEN_MIN = 9 * 60 + 30          # 570
 RTH_CLOSE_MIN = 16 * 60             # 960
