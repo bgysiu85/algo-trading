@@ -231,6 +231,43 @@ DRIFT_GUARD_PCT = 6.0
 # exited is the MEDS failure, not a saving).
 SPREAD_GUARD_PCT = 2.0
 
+# THE SESSION GIVE-BACK CAP -- H-S4, STRATEGY scope, MC5 only. W02-0019.
+#
+# Registered in docs/research/REGISTERED_giveback_cap.md (research chat's
+# S0-7, build chat's amendment A) before common/session_stop.py existed, and
+# tested there against six readings, a matched-random-cut control, and H-S6
+# (a flat daily stop) before ever reaching this file. It is the first rule in
+# the project to pass all six readings, MC5 only, under both scopes, at every
+# friction level -- MCL FAILS and is made WORSE under session scope, so MCL
+# is not capped here. Ben's decision on W02-0019 (paper cuts review,
+# 2026-09-24), in his own words: "Both, give-back cap on MC5".
+#
+# THE RULE (registration Sec.1), walking one strategy's closed trades in time
+# order:
+#     realised = cumulative realised P/L so far, net of commission
+#     peak     = running max of realised
+#     armed    = peak >= GIVEBACK_ARM
+#     if armed and realised <= GIVEBACK_RATIO * peak:
+#         no further ENTRIES this session (this strategy only)
+#
+# realised/peak are REALISED ONLY -- closed trades, exactly self.session_pnl's
+# own accounting (see _record_realised), never a mark-to-market of open
+# positions. An open position when the cap trips still rides its normal
+# exits; this refuses new entries only, per registration Sec.1's "open
+# positions ride their normal exits. Force-flattening them is a second,
+# different rule and is not registered here."
+#
+# GIVEBACK_ARM is fixed at one average winner, $41.53/100sh from
+# pit_three_results_20260911 Sec.3, rounded to $40 -- NOT a free parameter,
+# and recorded here so it cannot be chosen after seeing results (Sec.1).
+# GIVEBACK_RATIO=0.50 is cell GB-50, the PRIMARY cell both practitioner
+# sources agreed on (Sec.0, Sec.3) and the one that passed (PROGRAM_INDEX).
+GIVEBACK_ARM = 40.0
+GIVEBACK_RATIO = 0.50
+# st.strategy.name is uppercase (the fill log's own "strategy" column reads
+# MC5/MCL) -- a lowercase entry here would silently never match.
+GIVEBACK_STRATEGIES = frozenset({"MC5"})
+
 
 def is_cancel_echo(why: str, status: str) -> bool:
     """True when `why` says nothing beyond 'the order was cancelled'."""
@@ -976,6 +1013,14 @@ class MCLPaperTrader:
         self.equity = 0.0
         self.session_pnl = 0.0
         self.session_trades = 0
+        # H-S4 give-back cap (see GIVEBACK_* above) -- one realised-P/L
+        # accumulator PER STRATEGY, so MCL's trades never move MC5's trip
+        # point or the reverse (amendment A2, STRATEGY scope). Tracked for
+        # every strategy for symmetry; only a name in GIVEBACK_STRATEGIES can
+        # ever be added to giveback_tripped (see _record_realised).
+        self.strategy_realised: dict[str, float] = {}
+        self.strategy_peak: dict[str, float] = {}
+        self.giveback_tripped: set[str] = set()
         self._wl_mtime: float | None = None
         self._paced_warned = False
         self._empty_warned_at = 0.0
@@ -1459,6 +1504,36 @@ class MCLPaperTrader:
         unknown: a row labelled with the WRONG strategy is worse than one
         labelled with none, which is the same rule notify.py applies."""
         return st.strategy.name if st.strategy is not None else ""
+
+    def _record_realised(self, strategy: str, pnl: float) -> None:
+        """Feed one closed trade's net P/L into the give-back cap (H-S4;
+        see GIVEBACK_* above). Called from every exit path that updates
+        self.session_pnl, on the SAME pnl value, so the cap reads `realised`
+        exactly the way self.session_pnl and the fill log's own trade_pnl
+        column do -- confirming the live path computes it the same way the
+        backtest's forward sweep does is registration Sec.6's condition
+        before this could ship at all.
+
+        Latches: once a strategy in GIVEBACK_STRATEGIES trips, it stays
+        tripped for the rest of this process's session -- the registration's
+        "no further ENTRIES this session", not a level that could re-arm
+        intra-session on a bounce.
+        """
+        realised = self.strategy_realised.get(strategy, 0.0) + pnl
+        self.strategy_realised[strategy] = realised
+        peak = max(self.strategy_peak.get(strategy, 0.0), realised)
+        self.strategy_peak[strategy] = peak
+        if (strategy in GIVEBACK_STRATEGIES
+                and strategy not in self.giveback_tripped
+                and peak >= GIVEBACK_ARM
+                and realised <= GIVEBACK_RATIO * peak):
+            self.giveback_tripped.add(strategy)
+            LOG.warning(
+                "%s SESSION GIVE-BACK CAP TRIPPED -- realised %+.2f <= %.0f%% "
+                "of peak %+.2f. No further %s entries this session; open "
+                "%s positions still manage their normal exits.",
+                strategy, realised, GIVEBACK_RATIO * 100, peak, strategy,
+                strategy)
 
     def quote(self, st: SymbolState) -> tuple[float, float]:
         t = st.ticker
@@ -2040,6 +2115,7 @@ class MCLPaperTrader:
         held_min = (datetime.now(ET) - pos.entry_time).total_seconds() / 60.0
         self.session_pnl += pnl
         self.session_trades += 1
+        self._record_realised(self._name_of(st), pnl)
         LOG.error("%s LATE FILL: the SELL logged ORDER_UNKNOWN filled %d @ "
                   "%.4f. Recorded as the exit; nothing re-sent. P/L %+.2f",
                   st.symbol, sold, avg, pnl)
@@ -2129,6 +2205,7 @@ class MCLPaperTrader:
             held_min = (datetime.now(ET) - pos.entry_time).total_seconds() / 60.0
             self.session_pnl += pnl
             self.session_trades += 1
+            self._record_realised(self._name_of(st), pnl)
             LOG.error("%s RECONCILED: IB is flat; its executions show %d sold "
                       "@ %.4f (the trader had missed the fill). P/L %+.2f",
                       st.symbol, shares, avg, pnl)
@@ -2354,6 +2431,7 @@ class MCLPaperTrader:
             + order_cost(sold, exit_px, True, COMMISSION_PLAN))
         self.session_pnl += pnl
         self.session_trades += 1
+        self._record_realised(self._name_of(st), pnl)
         LOG.info("CLOSED %s %s  %d @ %.4f -> %.4f  P/L %+.2f  "
                  "(session: %d trades, %+.2f)",
                  st.symbol, reason, sold, pos.entry_price, exit_px, pnl,
@@ -2500,6 +2578,28 @@ class MCLPaperTrader:
                            reason="entry_signal", ref_close=round(sig.close, 4),
                            ref_kind="signal_close",
                            status="SKIPPED_PAUSED", reject_reason=why,
+                           **detail)
+            return
+
+        # THE GIVE-BACK CAP -- H-S4, STRATEGY scope, MC5 only (see
+        # GIVEBACK_* above). A strategy-level gate, so it sits beside the
+        # paused/disabled check above rather than the portfolio-level cap
+        # below: it does not depend on what else is open. An open position
+        # when the cap trips still rides its normal exits -- this declines
+        # NEW entries only, recorded like every other declined signal.
+        if st.strategy.name in self.giveback_tripped:
+            peak = self.strategy_peak.get(st.strategy.name, 0.0)
+            realised = self.strategy_realised.get(st.strategy.name, 0.0)
+            why = (f"{st.strategy.name} give-back cap: realised {realised:+.2f} "
+                  f"<= {GIVEBACK_RATIO:.0%} of session peak {peak:+.2f}")
+            LOG.info("%s %s entry signal declined — %s",
+                     st.strategy.name, st.symbol, why)
+            self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                           strategy=self._name_of(st),
+                           symbol=st.symbol, action="BUY",
+                           reason="entry_signal", ref_close=round(sig.close, 4),
+                           ref_kind="signal_close",
+                           status="SKIPPED_GIVEBACK", reject_reason=why,
                            **detail)
             return
 
