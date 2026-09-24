@@ -47,6 +47,24 @@ class Meta:
         return self.nbytes
 
 
+class FlakyMeta:
+    """Fails get_cost the first `fail_times` calls, then succeeds -- models
+    the transient '504 The remote gateway timed out' W02-0013 subitem 8 hit
+    live on 2026-09-24 (1-2 of 1,888 windows), which cleared on the very
+    next attempt."""
+    def __init__(self, fail_times, usd=0.0, nbytes=1000):
+        self.fail_times, self.usd, self.nbytes, self.calls = fail_times, usd, nbytes, 0
+
+    def get_cost(self, **kw):
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise RuntimeError("504 The remote gateway timed out.")
+        return self.usd
+
+    def get_billable_size(self, **kw):
+        return self.nbytes
+
+
 class TS:
     def __init__(self):
         self.calls = []
@@ -136,6 +154,35 @@ def test_confirm_refuses_when_any_window_failed_to_price(tmp_path):
                  "--report", str(tmp_path / "r.txt")],
                 client=c, today=date(2026, 9, 19))
     assert rc == 2 and c.timeseries.calls == []
+
+
+def test_price_retries_a_transient_failure_then_succeeds():
+    """W02-0013 subitem 8, 2026-09-24: don't refuse a whole 1,888-window run
+    over one gateway blip that clears on retry."""
+    m = FlakyMeta(fail_times=2)
+    c = Client(m)
+    ws = Q.windows(rows())[:1]
+    pr = Q.price(c, "XNAS.ITCH", "mbp-1", ws, sleep=lambda s: None)
+    assert pr.failed == 0 and pr.n == 1
+    assert m.calls == 3          # 2 failures + the try that succeeded
+
+
+def test_price_still_fails_a_window_that_never_recovers():
+    """Retrying must not turn a real, persistent failure into a silent pass."""
+    m = FlakyMeta(fail_times=99)
+    c = Client(m)
+    ws = Q.windows(rows())[:1]
+    pr = Q.price(c, "XNAS.ITCH", "mbp-1", ws, sleep=lambda s: None)
+    assert pr.failed == 1 and pr.n == 0
+    assert m.calls == 3          # gives up after RETRIES attempts, not forever
+
+
+def test_price_retry_wait_is_between_attempts_only_not_after_the_last():
+    waits = []
+    m = FlakyMeta(fail_times=99)
+    Q.price(Client(m), "XNAS.ITCH", "mbp-1", Q.windows(rows())[:1],
+            sleep=waits.append)
+    assert waits == [Q.RETRY_WAIT, Q.RETRY_WAIT]   # 3 attempts -> 2 gaps, no trailing wait
 
 
 def test_confirm_pulls_free_windows_and_skips_what_is_on_disk(tmp_path):

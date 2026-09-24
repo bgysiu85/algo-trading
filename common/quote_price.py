@@ -203,19 +203,42 @@ class Priced:
     paid_days: list = field(default_factory=list)
 
 
+RETRIES = 3     # per-window attempts before counting it failed
+RETRY_WAIT = 0.15  # seconds between attempts -- a beat for a gateway blip to clear
+
+
 def price(client, dataset: str, schema: str, ws: list[Window], *,
-          scrub=lambda s: str(s), tick: int = TICK, label: str = "") -> Priced:
+          scrub=lambda s: str(s), tick: int = TICK, label: str = "",
+          retries: int = RETRIES, backoff: float = RETRY_WAIT,
+          sleep=time.sleep) -> Priced:
+    """Price every window. 2026-09-24 (W02-0013 subitem 8): a live 1,888-window
+    run hit '504 The remote gateway timed out' on 1-2 windows out of 1,888
+    sequential metadata calls -- a single blip, gone on the next attempt, but
+    it failed the *entire* run outright (REFUSED, since --confirm won't pull
+    on an incomplete price). So each window gets up to `retries` tries, a
+    short `backoff` apart, before it counts as failed; a window that fails
+    on every attempt behaves exactly as before (out.failed, out.first_error).
+    `sleep` is injectable so tests never actually wait."""
     out = Priced()
     t0 = time.time()
     for i, w in enumerate(ws, start=1):
         kw = request(dataset, schema, w)
-        try:
-            c = float(client.metadata.get_cost(**kw))
-            b = int(client.metadata.get_billable_size(**kw))
-        except Exception as e:                                  # noqa: BLE001
+        c = b = None
+        err = None
+        for attempt in range(retries):
+            try:
+                c = float(client.metadata.get_cost(**kw))
+                b = int(client.metadata.get_billable_size(**kw))
+                err = None
+                break
+            except Exception as e:                              # noqa: BLE001
+                err = e
+                if attempt < retries - 1:
+                    sleep(backoff)
+        if err is not None:
             out.failed += 1
             if not out.first_error:
-                out.first_error = scrub(e)
+                out.first_error = scrub(err)
             continue
         out.n += 1
         out.usd += c
