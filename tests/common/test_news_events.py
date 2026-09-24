@@ -1,6 +1,6 @@
 """tests/common/test_news_events.py
 
-G3 sanity check (REGISTERED_news_events.md \xa70): the classifier must flag
+G3 sanity check (REGISTERED_news_events.md §0): the classifier must flag
 every event a human already read off the probe's hand-read sample
 (claude/raw/w03_0010_news_probe_20260924.txt) as the same type a human
 assigned it, and must score the two named false positives (G2a) as NOT flagged.
@@ -36,20 +36,20 @@ def test_normalize_empty():
 # --- G2(a): the two named false positives -----------------------------------------
 
 def test_g2a_bundle_offering_not_flagged():
-    # GM/PCG, probe sample \xa73 -- a product bundle, not a securities offering.
+    # GM/PCG, probe sample §3 -- a product bundle, not a securities offering.
     h = ("PG&E And GM Energy Announce Bundle Offering New GM EV Buyers "
         "No-Cost Home Charger, $15 Mon")
     assert N.classify_headline(h) is None
 
 
 def test_g2a_regained_compliance_not_flagged():
-    # IMCC, probe sample \xa73 -- the OPPOSITE of a new deficiency notice.
+    # IMCC, probe sample §3 -- the OPPOSITE of a new deficiency notice.
     h = ("IM Cannabis Says It Received Nasdaq Notice Of Regained Compliance "
         "With Minimum Bid Price R")
     assert N.classify_headline(h) is None
 
 
-# --- G3: the probe's hand-read headline sample, \xa73 top-10 ------------------------
+# --- G3: the probe's hand-read headline sample, §3 top-10 ------------------------
 
 def test_g3_headline_sample_section3():
     c = N.classify_headline
@@ -90,7 +90,7 @@ def test_headline_other_negative():
     assert N.classify_headline(None) is None
 
 
-# --- filing classification, \xa73's exact form/item lists -------------------------
+# --- filing classification, §3's exact form/item lists -------------------------
 
 def test_trigger_a_forms():
     for form in ("S-1", "S-1/A", "S-3", "424B4", "424B5", "EFFECT"):
@@ -98,14 +98,14 @@ def test_trigger_a_forms():
 
 
 def test_424b3_is_active_shelf_never_trigger_a():
-    # \xa73: "424B3 is excluded from Trigger A" -- WHLR filed 70 in 90 days.
+    # §3: "424B3 is excluded from Trigger A" -- WHLR filed 70 in 90 days.
     assert N.classify_filing("424B3", "") == frozenset({"ACTIVE_SHELF_CANDIDATE"})
 
 
 def test_proxy_forms_are_proposed_rs_never_trigger_b():
     for form in ("DEF 14A", "PRE 14A", "DEFA14A"):
         assert N.classify_filing(form, "") == frozenset({"PROPOSED_RS_CANDIDATE"})
-    # PRE 14C / DEF 14C are not in \xa73's named PROPOSED_RS set at all
+    # PRE 14C / DEF 14C are not in §3's named PROPOSED_RS set at all
     assert N.classify_filing("DEF 14C", "") == frozenset()
 
 
@@ -121,13 +121,13 @@ def test_8k_items_1_01_3_02_are_trigger_a():
 
 
 def test_8k_both_triggers_at_once():
-    # GRML's own filing, probe sample \xa74: items "1.01,3.02,5.03" in ONE 8-K.
+    # GRML's own filing, probe sample §4: items "1.01,3.02,5.03" in ONE 8-K.
     assert N.classify_filing("8-K", "1.01,3.02,5.03") == frozenset({"TRIGGER_A", "TRIGGER_B"})
 
 
 def test_8k_uninteresting_items_no_trigger():
     # 3.01 (listing deficiency) and 3.03 (holders' rights) alone are not
-    # scored by \xa73 -- SMTK's and KIFZ's own rows in the probe sample.
+    # scored by §3 -- SMTK's and KIFZ's own rows in the probe sample.
     assert N.classify_filing("8-K", "3.01") == frozenset()
     assert N.classify_filing("8-K", "3.03") == frozenset()
     assert N.classify_filing("8-K", "") == frozenset()
@@ -135,7 +135,7 @@ def test_8k_uninteresting_items_no_trigger():
 
 def test_10q_and_earnings_forms_no_trigger():
     assert N.classify_filing("10-Q", "") == frozenset()
-    assert N.classify_filing("424B1", "") == frozenset()   # not in \xa73's Trigger A list
+    assert N.classify_filing("424B1", "") == frozenset()   # not in §3's Trigger A list
 
 
 # --- G3: the probe's hand-read EDGAR sample, symbol by symbol ---------------------

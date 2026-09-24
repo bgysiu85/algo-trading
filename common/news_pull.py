@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 r"""G4 -- per-symbol EDGAR filing history and Alpaca/Benzinga headline
-history, for every symbol in REGISTERED_news_events.md's \xa72.1 population
+history, for every symbol in REGISTERED_news_events.md's §2.1 population
 (chase_gate_trades.csv, book in {MCL, MC5} -- the same 10,370 entries, 1,578
 symbols). Promotes the read-only probe (w03_0010_news_probe.py, subitem 2)
 from a sample to a per-symbol, full-history pull, the input news_study.py
@@ -13,7 +13,7 @@ scores.
     python -m common.news_pull --pull-edgar --confirm
     python -m common.news_pull --pull-alpaca --confirm
 
-PRICED BEFORE PULLED (\xa70 G4)
+PRICED BEFORE PULLED (§0 G4)
 -------------------------------
 `--coverage` runs first and costs one request (the ticker map, already cached
 by `common.edgar_shares` if that has run). It reports what a full pull of
@@ -66,7 +66,7 @@ from common import edgar_shares as E
 from common.report_io import emit
 
 TRADES_CSV = "var/reports/chase_gate_trades.csv"
-SCORED_BOOKS = ("MCL", "MC5")            # REGISTERED \xa72.1: the two baseline books
+SCORED_BOOKS = ("MCL", "MC5")            # REGISTERED §2.1: the two baseline books
 
 SEC_SUBMISSIONS = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 ALPACA_NEWS = "https://data.alpaca.markets/v1beta1/news"
@@ -78,7 +78,7 @@ FILING_COLS = ("symbol", "form", "items", "accepted", "filed")
 HEADLINE_COLS = ("symbol", "headline", "created_at")
 
 # A pull starts this many days before a symbol's EARLIEST scored trade, so a
-# trigger whose window (\xa73: 2 or 30 days) reaches back before the first
+# trigger whose window (§3: 2 or 30 days) reaches back before the first
 # trade is still measurable on that trade rather than silently absent.
 HISTORY_BUFFER_DAYS = 35
 
@@ -96,7 +96,7 @@ def population_symbols(trades_csv: str = TRADES_CSV,
     changed, not about two different counting rules."""
     p = Path(trades_csv)
     if not p.exists():
-        sys.exit(f"{p} does not exist -- this is REGISTERED_news_events.md \xa72.1's "
+        sys.exit(f"{p} does not exist -- this is REGISTERED_news_events.md §2.1's "
                  f"population; run `python -m common.chase_gate` first.")
     earliest: dict[str, str] = {}
     with p.open(newline="", encoding="utf-8") as fh:
@@ -133,7 +133,7 @@ def interesting_filing_rows(sub: dict) -> list[dict]:
 def oldest_recent_filing_date(sub: dict) -> str:
     """The oldest `filingDate` in `filings.recent`, or '' if empty -- used to
     flag a symbol whose recent block does not reach back to its earliest
-    scored trade (the \xa70 caveat this module's docstring names)."""
+    scored trade (the §0 caveat this module's docstring names)."""
     rows = interesting_filing_rows(sub)
     dates = [r["filed"] for r in rows if r["filed"]]
     return min(dates) if dates else ""
@@ -191,7 +191,7 @@ def edgar_pull_report(rows: list[dict], status: dict[str, str]) -> str:
         L += ["SYMBOL_HISTORY_CAVEAT: `filings.recent` does not reach the symbol's",
              "earliest scored trade for these -- a Trigger A/B window near that",
              "trade could be missing an earlier filing. Not followed into",
-             "`filings.files` (\xa70 docstring). Reported, not silently dropped:", ""]
+             "`filings.files` (§0 docstring). Reported, not silently dropped:", ""]
         for s, v in sorted(truncated.items()):
             L.append(f"    {s:<8} {v}")
         L.append("")
@@ -348,7 +348,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pull-alpaca", action="store_true")
     p.add_argument("--confirm", action="store_true",
                    help="required for --pull-edgar / --pull-alpaca to actually run "
-                        "(\xa70 G4: priced before pulled)")
+                        "(§0 G4: priced before pulled)")
     p.add_argument("--limit", type=int, default=None,
                    help="stop after N symbols -- for a costed trial run")
     p.add_argument("--cache", default=str(E.CACHE))
@@ -376,7 +376,7 @@ def main(argv=None) -> int:
             emit("\n".join(cost), a.out or "var/reports/news_pull_edgar_cost.txt")
         if a.pull_edgar:
             if not a.confirm:
-                sys.exit("--pull-edgar needs --confirm (\xa70 G4: priced before "
+                sys.exit("--pull-edgar needs --confirm (§0 G4: priced before "
                          "pulled).\n\n" + "\n".join(cost))
             rows, status = pull_edgar(pop, f, tmap, limit=a.limit)
             write_csv(a.filings_out, FILING_COLS, rows)
@@ -390,7 +390,7 @@ def main(argv=None) -> int:
             emit("\n".join(cost), "var/reports/news_pull_alpaca_cost.txt")
         if a.pull_alpaca:
             if not a.confirm:
-                sys.exit("--pull-alpaca needs --confirm (\xa70 G4: priced before "
+                sys.exit("--pull-alpaca needs --confirm (§0 G4: priced before "
                          "pulled).\n\n" + "\n".join(cost))
             key = secrets_util.resolve("ALPACA_API_KEY_ID", "Alpaca key id")
             secret = secrets_util.resolve("ALPACA_API_SECRET_KEY", "Alpaca secret")

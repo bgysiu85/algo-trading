@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 r"""The classifier: dilution/reverse-split filings and press headlines, as
 Trigger A / Trigger B / two descriptive-only labels -- exactly per
-`docs/research/REGISTERED_news_events.md` \xa73. No network here and no P&L;
+`docs/research/REGISTERED_news_events.md` §3. No network here and no P&L;
 this module turns rows a puller already fetched into point-in-time labels.
 `common.news_pull` fetches; `common.news_study` scores. This module only
 classifies and windows.
 
-THE TWO GATES THIS MODULE CLEARS (\xa70 G2-G3)
+THE TWO GATES THIS MODULE CLEARS (§0 G2-G3)
 -------------------------------------------
 G2(a) two named false positives, both from the probe's own 30-day sample,
 checked BEFORE the headline rules that would otherwise fire on them:
@@ -48,7 +48,7 @@ _HYPHENS = {
 
 def normalize_headline(text: str | None) -> str:
     """HTML-entity unescape, then every non-standard hyphen/dash folded to
-    '-'. Applied before any keyword match (\xa70 G2b) -- the probe's DCOY
+    '-'. Applied before any keyword match (§0 G2b) -- the probe's DCOY
     headline ("1‑For‑12", U+2011) and the live-websocket sample
     ("&#39;A...", an HTML entity) are the two cases this exists for."""
     if not text:
@@ -71,7 +71,7 @@ _EXCLUDE_BEFORE: list[re.Pattern] = [
 
 # Order matters: the first rule that matches wins, most specific first --
 # unchanged from the probe's first draft (w03_0010_news_probe.py), which this
-# module supersedes as the STUDY's registered classifier (\xa73's own words:
+# module supersedes as the STUDY's registered classifier (§3's own words:
 # "the study registers its own").
 HEADLINE_RULES: list[tuple[str, re.Pattern]] = [
     ("REVERSE_SPLIT", re.compile(
@@ -109,7 +109,7 @@ def classify_headline(headline: str | None) -> str | None:
     return None
 
 
-# --- EDGAR filing classification, exactly per REGISTERED_news_events.md \xa73 ------
+# --- EDGAR filing classification, exactly per REGISTERED_news_events.md §3 ------
 
 # Trigger A -- a fresh dilution EVENT, trailing 2 calendar days.
 TRIGGER_A_FORMS = frozenset({"S-1", "S-1/A", "S-3", "424B4", "424B5", "EFFECT"})
@@ -120,17 +120,17 @@ TRIGGER_A_WINDOW_DAYS = 2
 TRIGGER_B_8K_ITEM = "5.03"
 TRIGGER_B_WINDOW_DAYS = 30
 
-# 424B3 is explicitly EXCLUDED from Trigger A (\xa73): a routine prospectus
+# 424B3 is explicitly EXCLUDED from Trigger A (§3): a routine prospectus
 # supplement under an ALREADY-EFFECTIVE shelf is a continuous state, not a
 # discrete event. Tracked as its own descriptive label instead.
 ACTIVE_SHELF_FORM = "424B3"
 ACTIVE_SHELF_WINDOW_DAYS = 90
 ACTIVE_SHELF_MIN_COUNT = 3
 
-# A proxy alone is not Trigger B (\xa73) -- descriptive only.
+# A proxy alone is not Trigger B (§3) -- descriptive only.
 PROPOSED_RS_FORMS = frozenset({"DEF 14A", "PRE 14A", "DEFA14A"})
 
-# Descriptive-only headline labels that are never a trigger (\xa73): reported
+# Descriptive-only headline labels that are never a trigger (§3): reported
 # beside the scored buckets, folded into neither A nor B.
 DESCRIPTIVE_HEADLINE_LABELS = frozenset({"DELIST_NOTICE", "ATM"})
 
@@ -149,7 +149,7 @@ def classify_filing(form: str, items_field: str | None = "") -> frozenset[str]:
     so this returns a set rather than the first match. A form outside every
     list here -- an 8-K whose only item is 3.01 or 3.03, e.g. -- returns the
     empty set: those items bear on listing/holder mechanics the registration
-    does not score (\xa73 only names 1.01, 3.02, 5.03)."""
+    does not score (§3 only names 1.01, 3.02, 5.03)."""
     items = _8k_items(items_field)
     out: set[str] = set()
     if form == ACTIVE_SHELF_FORM:
@@ -173,7 +173,7 @@ def parse_edgar_accepted(raw: str) -> datetime:
 
     THE RAW JSON'S TRAILING 'Z' IS MISLEADING. SEC's own field is Eastern
     wall-clock time despite the ISO-8601 UTC marker -- the evidence is the
-    probe's own hand-pulled sample (\xa70 G2d, `w03_0010_news_probe_20260924.txt`):
+    probe's own hand-pulled sample (§0 G2d, `w03_0010_news_probe_20260924.txt`):
     WHLR's four same-day 424B3 filings land at 20:07-20:18, IPDN/GRML/KIDZ's
     filings cluster 20:30-21:23. EDGAR accepts filings up to 22:00 ET for
     same-day filing status; a cluster in the twenty minutes before 22:00 is
@@ -184,7 +184,7 @@ def parse_edgar_accepted(raw: str) -> datetime:
     re-check (this session cannot reach sec.gov); `common.news_pull`'s own
     docstring repeats the same claim and its report prints the raw
     acceptanceDateTime beside the parsed one so Ben can eyeball the same
-    clustering against a live pull before subitem 5 is scored (\xa70 G2d says
+    clustering against a live pull before subitem 5 is scored (§0 G2d says
     "confirmed", not "assumed", and this is the puller's job to confirm).
 
     Localized DST-aware via zoneinfo, never converted from UTC -- converting
@@ -241,7 +241,7 @@ def events_from_headlines(symbol: str, headlines: list[dict]) -> list[Event]:
     """`headlines`: rows shaped {headline, created_at (Alpaca's raw UTC
     string)}. REVERSE_SPLIT -> TRIGGER_B; OFFERING_PRICED/OFFERING_PROPOSED
     -> TRIGGER_A; ATM/WARRANT/DELIST_NOTICE are kept as their own descriptive
-    kind, never folded into a trigger (\xa73)."""
+    kind, never folded into a trigger (§3)."""
     label_to_trigger = {"REVERSE_SPLIT": "TRIGGER_B",
                         "OFFERING_PRICED": "TRIGGER_A",
                         "OFFERING_PROPOSED": "TRIGGER_A"}
@@ -294,14 +294,14 @@ def label_at(events: list[Event], at: datetime, *,
     }
 
 
-# --- \xa73's recency table, descriptive only ------------------------------------
+# --- §3's recency table, descriptive only ------------------------------------
 
 RECENCY_BUCKETS = ((0.0, 1.0, "0-1 day"), (1.0, 7.0, "2-7"),
                    (7.0, 30.0, "8-30"), (30.0, 90.0, "31-90"))
 
 
 def recency_bucket(events: list[Event], kind: str, at: datetime) -> str:
-    """Which \xa73 recency bucket the MOST RECENT `kind` event before `at`
+    """Which §3 recency bucket the MOST RECENT `kind` event before `at`
     falls in, or 'none' / '90+'. Descriptive only -- never read by a verdict."""
     cand = [e for e in events if e.kind == kind and e.ts <= at]
     if not cand:

@@ -5,22 +5,22 @@ r"""H-N1 (entry veto) and H-N2 (exit alert) -- REGISTERED_news_events.md.
     python -m common.news_study --filings var/edgar/news_filings.csv \
         --headlines var/news/alpaca_headlines.csv
 
-ACCOUNTING FORM ONLY (registration \xa71, H-N1's own words: "refused entries
+ACCOUNTING FORM ONLY (registration §1, H-N1's own words: "refused entries
 are removed, not re-entered elsewhere"). Unlike `chase_gate.py` /
 `range_rank.py`, this study does NOT re-run the MCL/MC5 engines: it reads the
 population straight from `var/reports/chase_gate_trades.csv` (book in
-{MCL, MC5} -- the same 10,370 entries / 1,578 symbols \xa72.1 names) and
+{MCL, MC5} -- the same 10,370 entries / 1,578 symbols §2.1 names) and
 removes a trade from the KEPT book when Trigger A or B was active at that
 trade's own entry timestamp, per `common.news_events.label_at`, fed by the
 per-symbol caches `common.news_pull` writes.
 
-H-N1's four readings 1-4 (\xa75.1) reuse `common.gate_study`'s own arithmetic
+H-N1's four readings 1-4 (§5.1) reuse `common.gate_study`'s own arithmetic
 unchanged; reading 5 (the abstention control) does NOT reuse
 `gate_study.abstention`'s default parameters -- the registration's own bar is
 5,000 draws, seed 20260924, and the Bonferroni-adjusted 99.375th percentile
 (four cells: 2 sources x 2 books), not `gate_study`'s 2,000/95th defaults, so
 `abstention_hn1` below runs the SAME mechanism at THOSE parameters. Items 6
-(the marginal trade) and 7 (fewer than half the top-20 refused) are \xa76's
+(the marginal trade) and 7 (fewer than half the top-20 refused) are §6's
 own carry-forward bar, computed and reported separately from the PASSES /
 NOTHING / REFUSED tag. Item 8 (overlap with the spread gate) is NOT computed
 here -- it needs W03-0002's own refused-trades output joined in, which this
@@ -28,13 +28,13 @@ pass does not have on disk, and the report says so rather than a fabricated
 zero.
 
 H-N2 IS COUNTED, NOT SCORED, IN THIS PASS. The paired-delta simulation
-(\xa75.2: "exit immediately at the next bar's open") needs intrabar price
+(§5.2: "exit immediately at the next bar's open") needs intrabar price
 data this study's population (entry/exit price only, no tape) does not
-carry. \xa75.2.4 orders this correctly regardless -- "how many trades this
+carry. §5.2.4 orders this correctly regardless -- "how many trades this
 could even apply to, reported FIRST" -- so this module computes exactly that
 count (a trade whose news state flips false-to-true strictly between its own
 entry and exit, needing no price data at all) and, per the registration's own
-prediction (\xa79: "UNDERPOWERED on at least one book"), stops there when the
+prediction (§9: "UNDERPOWERED on at least one book"), stops there when the
 count is under the ~30-trade power floor. If a book clears that floor, the
 report says so explicitly and names what is still missing (tape access for
 the simulated exit) rather than fabricating a delta from data this pass does
@@ -62,14 +62,14 @@ REGISTERED = "docs/research/REGISTERED_news_events.md"
 TRADES_CSV = P.TRADES_CSV
 BOOKS = ("MCL", "MC5")
 
-# \xa75.1 item 5: the registration's OWN abstention parameters -- distinct
+# §5.1 item 5: the registration's OWN abstention parameters -- distinct
 # from gate_study.abstention's defaults (2,000 draws / breadth.SEED / 95th).
 HN1_DRAWS = 5000
 HN1_SEED = 20260924
-HN1_Q = 0.99375          # "the 99.375th percentile (0.05 / 4)" -- \xa75.1 item 5, verbatim
-HN1_TOP_N = 20            # \xa76 item 4 / \xa75.1 item 7: the 20 best trades
+HN1_Q = 0.99375          # "the 99.375th percentile (0.05 / 4)" -- §5.1 item 5, verbatim
+HN1_TOP_N = 20            # §6 item 4 / §5.1 item 7: the 20 best trades
 
-# \xa75.2.4: the power floor below which H-N2 is reported as underpowered
+# §5.2.4: the power floor below which H-N2 is reported as underpowered
 # rather than scored, whichever book it is measured on.
 HN2_MIN_TRADES = 30
 
@@ -89,7 +89,7 @@ def load_population(trades_csv: str = TRADES_CSV,
     """book -> its trade rows, straight from `chase_gate_trades.csv`, with
     `entry_ts` / `exit_ts` added (tz-aware ET) for point-in-time joins. The
     same 10,370-row / 1,578-symbol population REGISTERED_news_events.md
-    \xa72.1 names -- read here, not re-derived, so a mismatch is a fact about
+    §2.1 names -- read here, not re-derived, so a mismatch is a fact about
     the CSV, not about two counting rules."""
     p = Path(trades_csv)
     if not p.exists():
@@ -150,7 +150,7 @@ def abstention_hn1(base: list[dict], k: int, symdays: int,
                    f: float = MEASURED_FRICTION, draws: int = HN1_DRAWS,
                    seed: int = HN1_SEED, q: float = HN1_Q) -> dict:
     """The same random-removal mechanism as `gate_study.abstention`, at
-    H-N1's OWN parameters (\xa75.1 item 5) rather than that function's
+    H-N1's OWN parameters (§5.1 item 5) rather than that function's
     defaults -- see the module docstring for why this is not reused as-is."""
     nets = np.array([r["net"] - f for r in base], dtype=float)
     n = len(nets)
@@ -170,7 +170,7 @@ def abstention_hn1(base: list[dict], k: int, symdays: int,
 
 def verdict_hn1(base: list[dict], gated: list[dict], cut: str,
                 symdays: int) -> tuple[str, str, dict]:
-    """H-N1's five registered readings (\xa75.1 items 1-5). Items 1-4 reuse
+    """H-N1's five registered readings (§5.1 items 1-5). Items 1-4 reuse
     `gate_study`'s own arithmetic (imported into it from `first_entry_skip`
     / `breadth`, both reachable off the `G` module); item 5 uses
     `abstention_hn1`, not `gate_study.abstention`'s default bar."""
@@ -227,7 +227,7 @@ def verdict_hn1(base: list[dict], gated: list[dict], cut: str,
 
 
 def marginal_trade(base: list[dict], gated: list[dict]) -> dict:
-    """\xa75.1 item 6, all three friction levels."""
+    """§5.1 item 6, all three friction levels."""
     out = {}
     n0 = len(base)
     n1 = len(gated)
@@ -239,7 +239,7 @@ def marginal_trade(base: list[dict], gated: list[dict]) -> dict:
 
 
 def top20_check(base: list[dict], gated: list[dict]) -> tuple[int, bool]:
-    """\xa76 item 4 / \xa75.1 item 7: fewer than half of the book's 20 best
+    """§6 item 4 / §5.1 item 7: fewer than half of the book's 20 best
     trades refused. Returns (how many of the top 20 are absent from `gated`,
     whether that is FEWER than half)."""
     gone, _rows = G.top_absent(base, gated, MEASURED_FRICTION, n=HN1_TOP_N)
@@ -253,7 +253,7 @@ def mid_hold_trades(base: list[dict], events: dict[str, list[N.Event]],
     """Trades where Trigger A/B was FALSE at entry and TRUE by exit -- a
     genuinely new event landing inside the hold, since these windows (2 and
     30 days) cannot expire back to False over a multi-minute MCL/MC5 hold.
-    No price data needed for this count (\xa75.2.4's own ordering)."""
+    No price data needed for this count (§5.2.4's own ordering)."""
     out = []
     for r in base:
         ev = events.get(r["symbol"], [])
@@ -310,7 +310,7 @@ def hn1_cell_block(book: str, source_name: str, base, gated, removed, cut, symda
          "in this pass -- needs that gate's own refused-trades output joined "
          "in, which is not on disk here.",
          "",
-         f"  CARRY FORWARD (\xa76): "
+         f"  CARRY FORWARD (§6): "
          + ("YES" if tag == "PASSES" and top20_ok else "no")
          + (" -- verdict PASSES and fewer than half the top-20 refused"
             if tag == "PASSES" and top20_ok else
@@ -327,9 +327,9 @@ def hn2_cell_block(book: str, source_name: str, base, events, sources) -> list[s
         f"  trades with a mid-hold trigger: {n:,} of {len(base):,} base trades", ""]
     if n < HN2_MIN_TRADES:
         L += [f"  UNDERPOWERED: under the {HN2_MIN_TRADES}-trade power floor "
-             f"(\xa75.2.4) -- reported as such, not scored as a pass or fail.",
-             "  The paired-delta simulation (\xa75.2: exit at the next bar's",
-             "  open) is not run for this cell -- \xa75.2.4 orders the count",
+             f"(§5.2.4) -- reported as such, not scored as a pass or fail.",
+             "  The paired-delta simulation (§5.2: exit at the next bar's",
+             "  open) is not run for this cell -- §5.2.4 orders the count",
              "  first and this count does not clear the floor.", ""]
     else:
         L += [f"  CLEARS the {HN2_MIN_TRADES}-trade power floor. The paired-delta",
@@ -363,11 +363,11 @@ def render(pop: dict, events: dict, cuts: dict, symdays: dict) -> list[str]:
         for source_name, sources in N_SOURCE_CELLS:
             L += hn2_cell_block(book, source_name, base, events, sources)
     L += ["WHAT THIS IS NOT", "",
-         "  NOT AN ENGINE RE-RUN. Accounting form only (\xa71): refused entries",
+         "  NOT AN ENGINE RE-RUN. Accounting form only (§1): refused entries",
          "  are removed, not re-entered elsewhere; a freed concurrency slot is",
          "  not in these numbers.",
          "  NOT H-N3. News-triggered entries are not scored anywhere in this",
-         "  module (\xa71).",
+         "  module (§1).",
          "  NOT OUT OF SAMPLE. holdout.json has not been touched.",
          "  NOT COMPLETE COVERAGE. A symbol with no filing/headline data pulled",
          "  is never vetoed by construction -- see `gate_book`'s own docstring;",
