@@ -91,6 +91,30 @@ LOW_VOL_RATIO = 0.2          # thin if entry volume < this * the local average
 BADTICK_REVIEWED = {
     ("MBB", "2025-03-12"),   # 322-share print, above local average -- real, liquid
     ("PPG", "2025-04-09"),   # genuine exchange trade, but on 2 shares -- thin, not a bad tick
+    # W05-0003 step 10 (2026-09-24) -- 15 of the 19 criterion (d) flags from
+    # the broadened population, hand-reviewed against a 60s/30s ohlcv-1s
+    # window (var/reports/w05_0003_step10_badtick_spotcheck.txt). All show a
+    # real, sustained price path (no isolated spike-and-revert) or continue
+    # in the SAME direction after entry rather than reverting -- the opposite
+    # of a bad tick. The other 4 (VRRM, PCVX, NAIL, CCI) show a genuine
+    # spike-and-near-full-reversion pattern and are deliberately left OFF
+    # this list pending Ben's call -- see the same report and the board.
+    ("OHI", "2024-08-23"),    # thin illiquid name, 0.08 print on 34 sh, no reversal seen
+    ("AVDL", "2024-09-20"),   # real step down on 340 sh, kept drifting lower afterward
+    ("TSDD", "2024-09-23"),   # part of a real 6-print decline, 7.55->7.47 over ~55s
+    ("SOC", "2024-10-08"),    # small real thin-volume uptick, no reversal evidence
+    ("VLTO", "2024-10-09"),   # price continued HIGHER after entry -- opposite of a reversion
+    ("NMRA", "2024-10-21"),   # part of a real 4-print decline, 15.00->14.77 over ~47s
+    ("PNC", "2024-11-06"),    # liquid, actively-trading name; entry sits inside an
+                              # already-active ~0.4-point oscillation range
+    ("VGK", "2024-12-24"),    # small real dip with partial (not full) recovery
+    ("XPRO", "2025-02-03"),   # small real thin-volume decline, no reversal evidence
+    ("FAF", "2025-04-23"),    # part of a real, actively-traded decline/retrace, 100s of sh/print
+    ("AOS", "2025-05-14"),    # small real thin-volume decline, no reversal evidence
+    ("MTCH", "2025-06-20"),   # 133-share print, real move, no reversal evidence
+    ("HESM", "2025-11-25"),   # ordinary small fluctuation in a ~5-cent range, no spike
+    ("WHR", "2026-01-27"),    # price continued HIGHER after entry -- opposite of a reversion
+    ("BBJP", "2026-03-17"),   # dense, steady tick-by-tick trading in a tight ~4-cent band
 }
 
 RESULT_COLS = [
