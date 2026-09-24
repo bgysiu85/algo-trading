@@ -136,3 +136,29 @@ def test_with_g4_open_tl60_is_scored_as_its_ensemble(world):
 def test_money_brackets():
     assert RUN.money(-1234.5) == "(1,234.50)" and RUN.money(12.0) == "12.00"
     assert RUN.money(float("nan")) == "n/a"
+
+
+def test_build_cache_cli_does_not_double_the_h60_segment(tmp_path, monkeypatch):
+    """--build-cache must read <H60 root>/<dataset>/<rth dir> directly. Calling
+    data_plan.rth_root (which itself appends the H60 segment) on a root that is
+    ALREADY the H60 root doubles it to <H60 root>/H60/<dataset>/<rth dir> and the
+    real pull is never found. archive_root() is exercised for real here (not
+    monkeypatched) since the bug is in how run.py composes the two."""
+    from strategy.h60 import data_plan as DP
+    h60_root = tmp_path / "H60"
+    src_dir = h60_root / DP.DATASET / DP.RTH_DIR
+    src_dir.mkdir(parents=True)
+    (src_dir / "2020-01-02.dbn.zst").write_bytes(b"")
+    monkeypatch.setattr(RUN, "archive_root", lambda a: h60_root)
+    seen = {}
+
+    def fake_build_cache(src, root):
+        seen["src"] = src
+        seen["root"] = root
+        return {"files": 1, "empty_days": 0, "rows_by_year": {}, "dir": str(root)}
+
+    monkeypatch.setattr(B, "build_cache", fake_build_cache)
+    assert RUN.main(["--build-cache"]) == 0
+    assert seen["src"] == src_dir
+    assert seen["root"] == h60_root
+    assert "/H60/H60/" not in str(seen["src"]).replace("\\", "/")

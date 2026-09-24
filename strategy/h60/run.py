@@ -341,14 +341,17 @@ def main(argv=None) -> int:
     ap.add_argument("--eod-dir", default=str(XC.EOD_DIR))
     a = ap.parse_args(argv)
     if a.build_cache:
-        from strategy.h60.data_plan import rth_root
+        from strategy.h60.data_plan import DATASET, RTH_DIR
         root = archive_root(a.archive)
-        src = rth_root(root)
+        src = root / DATASET / RTH_DIR
         if not any(src.glob("*.dbn.zst")):
             raise SystemExit(f"no 1-minute RTH files under {src}. The W14-0002 pull "
-                             "writes <shared archive>/H60/H60/XNAS.ITCH/ohlcv-1m-rth "
-                             "(data_plan.rth_root under the H60 root); pass --archive "
-                             "if they are elsewhere.")
+                             f"writes <H60 root>/{DATASET}/{RTH_DIR} "
+                             "(data_plan.rth_root, called on the SHARED archive, "
+                             "lands here); pass --archive if they are elsewhere. "
+                             "--archive takes the H60 root itself -- do not pass "
+                             "the shared archive or rth_root will double the H60 "
+                             "segment.")
         print(f"reading {src}", flush=True)
         res = B.build_cache(src, root)
         print(json.dumps(res, indent=1, default=str))
