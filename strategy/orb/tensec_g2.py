@@ -93,12 +93,15 @@ BADTICK_REVIEWED = {
     ("PPG", "2025-04-09"),   # genuine exchange trade, but on 2 shares -- thin, not a bad tick
     # W05-0003 step 10 (2026-09-24) -- 15 of the 19 criterion (d) flags from
     # the broadened population, hand-reviewed against a 60s/30s ohlcv-1s
-    # window (var/reports/w05_0003_step10_badtick_spotcheck.txt). All show a
+    # window (var/reports/w05_0003_step10_badtick_spotcheck.txt). 15 show a
     # real, sustained price path (no isolated spike-and-revert) or continue
     # in the SAME direction after entry rather than reverting -- the opposite
     # of a bad tick. The other 4 (VRRM, PCVX, NAIL, CCI) show a genuine
-    # spike-and-near-full-reversion pattern and are deliberately left OFF
-    # this list pending Ben's call -- see the same report and the board.
+    # spike-and-near-full-reversion pattern on thin volume -- real exchange
+    # prints (confirmed real, not corrupted), but Ben's call (2026-09-24,
+    # same treatment as PPG below): accept as real-but-thin, carried as a
+    # fill-realism caveat rather than excluded -- a thin print is weaker
+    # evidence a full-size order fills there, but not a bad tick.
     ("OHI", "2024-08-23"),    # thin illiquid name, 0.08 print on 34 sh, no reversal seen
     ("AVDL", "2024-09-20"),   # real step down on 340 sh, kept drifting lower afterward
     ("TSDD", "2024-09-23"),   # part of a real 6-print decline, 7.55->7.47 over ~55s
@@ -115,6 +118,16 @@ BADTICK_REVIEWED = {
     ("HESM", "2025-11-25"),   # ordinary small fluctuation in a ~5-cent range, no spike
     ("WHR", "2026-01-27"),    # price continued HIGHER after entry -- opposite of a reversion
     ("BBJP", "2026-03-17"),   # dense, steady tick-by-tick trading in a tight ~4-cent band
+    # Ben's decision 2026-09-24: accept as real-but-thin, same as MBB/PPG --
+    # fill-realism caveat, not excluded (see comment block above).
+    ("VRRM", "2024-09-20"),   # 300-sh print, real one-second dip (27.57) that closes the
+                              # same second at 27.6750 -- genuine but thin, weak fill evidence
+    ("PCVX", "2025-02-06"),   # 20-sh dip to 88.86 then 5-sh print at 89.33 7s later -- both
+                              # real exchange trades, but thin on both sides of the move
+    ("NAIL", "2025-07-11"),   # 15-sh print at 61.84, near-full recovery to 61.85 in 9s --
+                              # real but thin, weak evidence a full-size order fills at 61.84
+    ("CCI", "2026-03-24"),    # 1-sh print at 80.605 above the 80.50-80.55 range, real exchange
+                              # trade but an odd lot -- weakest fill evidence of the four
 }
 
 RESULT_COLS = [
