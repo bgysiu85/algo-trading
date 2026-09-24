@@ -226,3 +226,70 @@ def test_score_criterion_e_a_ground_truth_row_is_covered_by_c_not_d():
     assert sc["gate_d"] is True
     assert len(sc["unexplained"]) == 0
     assert sc["gate_e"] is True          # covered by (c), never asked to clear (d)'s screen
+
+
+def _b_row(symbol, date, ledger_entry_px, sec_entry_px, **overrides):
+    """Minimal row for criterion (b) tests: an ungapped, matched trade whose
+    exit reason agrees with the ledger (so it never touches (e)'s machinery),
+    with no bad-tick context so it can never be flagged by (d)'s screen."""
+    row = dict(
+        symbol=symbol, date=date, side=1, why=G.E.OK,
+        ledger_entry_px=ledger_entry_px, ledger_exit_px=1.0,
+        ledger_exit_reason="stop", ledger_gapped_entry=False,
+        ledger_r=-1.0, ledger_or_high=999.0, ledger_or_low=0.0,
+        sec_entry_px=sec_entry_px, sec_exit_px=1.0, sec_exit_reason="stop",
+        sec_entry_sec=34200, sec_exit_sec=57600,
+        sec_entry_volume=float("nan"), sec_entry_vol_baseline=float("nan"),
+        sec_entry_px_baseline=float("nan"), sec_entry_px_revert=float("nan"),
+    )
+    row.update(overrides)
+    return row
+
+
+def test_score_criterion_b_small_mismatch_within_tolerance_passes():
+    """W05-0003 step 11 (2026-09-24): a mismatch inside PRICE_TOLERANCE_PCT is
+    ordinary sub-resolution noise between the 1-second engine and the
+    1-minute-bar ledger, not a real disagreement -- it must pass (b) without
+    needing to be in ground truth or the bad-tick screen at all."""
+    tiny_diff = 100.00 * G.PRICE_TOLERANCE_PCT * 0.5   # well inside tolerance
+    res = pd.DataFrame([_b_row("AAA", "2025-01-01", 100.00, 100.00 + tiny_diff)])
+    empty_gt = pd.DataFrame(columns=["symbol", "date", "sec_entry_px", "sec_exit_px"])
+    sc = G.score(res, empty_gt)
+    assert sc["entry_ok"] == 1 and sc["entry_n"] == 1
+    assert sc["gate_b"] is True
+    assert len(sc["entry_unexplained"]) == 0
+
+
+def test_score_criterion_b_large_unexplained_mismatch_fails():
+    """A mismatch far outside tolerance, not in ground truth, and flagged by
+    (d)'s bad-tick screen without being on the reviewed allowlist, is a real,
+    unexplained disagreement -- it must still fail (b), same as the old
+    exact-match gate would have. (A mismatch (d) never flags at all -- no
+    spike/revert/thin-volume signature -- is not "unexplained": (d)'s screen
+    already looked at it and found nothing suspicious, so it's covered, same
+    as an allowlisted trade; that's a separate, passing case.)"""
+    res = pd.DataFrame([_b_row(
+        "BBB", "2025-01-02", 100.00, 105.00,   # 5%, way outside tolerance
+        sec_entry_px_baseline=100.00, sec_entry_px_revert=100.01,
+        sec_entry_volume=2.0, sec_entry_vol_baseline=50.0,   # spike-and-revert, thin volume
+    )])
+    empty_gt = pd.DataFrame(columns=["symbol", "date", "sec_entry_px", "sec_exit_px"])
+    sc = G.score(res, empty_gt)
+    assert sc["entry_ok"] == 0 and sc["entry_n"] == 1
+    assert sc["gate_b"] is False
+    assert list(sc["entry_unexplained"]["symbol"]) == ["BBB"]
+
+
+def test_score_criterion_b_large_mismatch_covered_by_ground_truth_passes():
+    """A large mismatch is still fine if the trade is a ground-truth row --
+    (c) has already independently verified it, so (b) must not re-fail it
+    just because it differs from the LEDGER'S price."""
+    res = pd.DataFrame([_b_row("CCC", "2025-01-03", 100.00, 105.00)])
+    ground_truth = pd.DataFrame({
+        "symbol": ["CCC"], "date": ["2025-01-03"],
+        "sec_entry_px": [105.00], "sec_exit_px": [1.0],
+    })
+    sc = G.score(res, ground_truth)
+    assert sc["entry_ok"] == 1 and sc["entry_n"] == 1
+    assert sc["gate_b"] is True
+    assert len(sc["entry_unexplained"]) == 0
