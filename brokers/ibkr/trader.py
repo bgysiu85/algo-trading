@@ -215,6 +215,22 @@ CANCEL_ECHO_RE = re.compile(r"Order Cancel(?:l)?ed\s*-\s*reason:\s*$")
 # absolute, either direction. Exits are never guarded.
 DRIFT_GUARD_PCT = 6.0
 
+# A BUY IS NOT SENT ACROSS A SPREAD THIS WIDE, 2026-09-24.
+#
+# Registered in docs/research/REGISTERED_spread_gate.md before the full-quote
+# study ran; shipped per Ben's decision on W03-0002 step 6 ("let's ship it").
+# The full-quote backtest (claude/w03_0002_spread_gate_RESULT_20260924.md)
+# found the gate refuses 74-76% of entries -- far above the ~7% the live
+# 180-trade sample implied -- and reduces both books' losses, though the
+# study's own abstention control shows most of that is a "trade far less"
+# effect rather than spread specifically flagging bad trades. Shipped as a
+# cost control on that basis, the same footing as the drift guard: refuse to
+# cross a visible toll, never a claimed source of profit on its own.
+# Measured as (ask - bid) / mid, on the SAME fresh quote the drift guard
+# reads. Entries only; exits are never guarded (a position that cannot be
+# exited is the MEDS failure, not a saving).
+SPREAD_GUARD_PCT = 2.0
+
 
 def is_cancel_echo(why: str, status: str) -> bool:
     """True when `why` says nothing beyond 'the order was cancelled'."""
@@ -793,6 +809,43 @@ def drift_guard_ok(ask: float, ref_close: float,
         return True, ""
     return False, (f"ask {ask:.4f} is {d:+.1f}% from the signal close "
                    f"{ref_close:.4f}; guard {limit_pct:.1f}%")
+
+
+def quoted_spread_pct(bid: float, ask: float) -> float:
+    """(ask - bid) / mid * 100, NaN when either side is missing or crossed.
+
+    Same "NaN means no quote" convention as ask_drift_pct -- NO_QUOTE, not a
+    refusal under the wrong name. The live path already has
+    SKIPPED_STALE_BAR / NO_QUOTE upstream of this guard covering the no-data
+    case, so this guard only has to say what it CAN measure.
+    """
+    if bid != bid or ask != ask or bid <= 0 or ask <= 0 or ask < bid:
+        return float("nan")
+    mid = (bid + ask) / 2.0
+    if not mid:
+        return float("nan")
+    return (ask - bid) / mid * 100.0
+
+
+def spread_guard_ok(bid: float, ask: float,
+                    limit_pct: float = SPREAD_GUARD_PCT) -> tuple[bool, str]:
+    """Whether a BUY may be placed: quoted spread < limit_pct, or no quote.
+
+    REGISTERED_spread_gate.md Sec.1: refuse at "2.0% or more" -- strictly
+    less than the threshold is required to admit, the opposite direction
+    from the drift guard's own "at the threshold is admitted". Mirrors the
+    backtest's make_gate exactly:
+    `(spread_arr < threshold) & ~np.isnan(spread_arr)`.
+    """
+    s = quoted_spread_pct(bid, ask)
+    if s != s:
+        return True, ""
+    # Rounded before the compare for the same float-noise reason as the
+    # drift guard (round(2.0000000000000004, 6) == 2.0).
+    if round(s, 6) < limit_pct:
+        return True, ""
+    return False, (f"quoted spread {s:.2f}% (bid {bid:.4f} / ask {ask:.4f}); "
+                   f"guard {limit_pct:.1f}%")
 
 
 def ref_drift(bid: float, ask: float, ref_close: float) -> float:
@@ -2538,6 +2591,24 @@ class MCLPaperTrader:
                            ref_kind="signal_close", bid=_b, ask=ask_now,
                            ref_drift_pct=ref_drift(_b, ask_now, sig.close),
                            status="SKIPPED_DRIFT", reject_reason=why,
+                           **detail)
+            return
+
+        # THE SPREAD GUARD -- same fresh quote as the drift guard immediately
+        # above, so this never sends a second market-data request for the
+        # same decision. docs/research/REGISTERED_spread_gate.md; full-quote
+        # result: claude/w03_0002_spread_gate_RESULT_20260924.md.
+        ok, why = spread_guard_ok(_b, ask_now, SPREAD_GUARD_PCT)
+        if not ok:
+            LOG.warning("%s %s entry signal declined — %s",
+                        st.strategy.name, st.symbol, why)
+            self.log.write(ts_et=now_et.strftime("%Y-%m-%d %H:%M:%S"),
+                           strategy=self._name_of(st),
+                           symbol=st.symbol, action="BUY",
+                           reason="entry_signal", ref_close=round(sig.close, 4),
+                           ref_kind="signal_close", bid=_b, ask=ask_now,
+                           ref_drift_pct=ref_drift(_b, ask_now, sig.close),
+                           status="SKIPPED_SPREAD", reject_reason=why,
                            **detail)
             return
 
