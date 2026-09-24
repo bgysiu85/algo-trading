@@ -105,17 +105,32 @@ def apply_indicators(bars: pd.DataFrame, *, ema_fast: int = EMA_FAST,
     ema_ready = bar_count >= ema_fast
     vwap_ready = (bar_count >= min_vwap_bars) & (out["cum_dv"] >= min_vwap_dollar_vol)
     mature = ema_ready & vwap_ready
+    out["regime"] = classify_regime(c, out["ema9"], out["vwap"], mature)
+    out["mature"] = mature
+    return out
 
-    regime = pd.Series([None] * len(out), index=out.index, dtype=object)
-    bearish = mature & (c <= out["vwap"])
-    strong = mature & ~bearish & (c > out["ema9"])
+
+def classify_regime(close: pd.Series, ema9: pd.Series, vwap: pd.Series,
+                    mature: pd.Series) -> pd.Series:
+    """§3's regime gate, per bar: BEARISH (close <= vwap), STRONG (above vwap
+    and above ema9), WEAK_BULL (above vwap, not above ema9), None while
+    immature.
+
+    EXTRACTED from apply_indicators 2026-09-25, unchanged, so the H60 port
+    (strategy/h60/rules.py, VW9-60) can run the SAME regime and setup code on
+    indicators it builds differently -- VWAP anchored per 09:30 session, EMA9
+    and ATR continuous across sessions (REGISTERED_h60_v0.md §3.7). Importing
+    rather than copying is the parity rule: a 60-minute run and a 5-minute run
+    cannot drift apart if there is one implementation.
+    """
+    regime = pd.Series([None] * len(close), index=close.index, dtype=object)
+    bearish = mature & (close <= vwap)
+    strong = mature & ~bearish & (close > ema9)
     weak_bull = mature & ~bearish & ~strong
     regime[bearish] = REGIME_BEARISH
     regime[strong] = REGIME_STRONG
     regime[weak_bull] = REGIME_WEAK_BULL
-    out["regime"] = regime
-    out["mature"] = mature
-    return out
+    return regime
 
 
 def find_setups(bars: pd.DataFrame, *,
@@ -134,6 +149,27 @@ def find_setups(bars: pd.DataFrame, *,
     sig = apply_indicators(bars, ema_fast=ema_fast, atr_length=atr_length,
                             min_vwap_bars=min_vwap_bars,
                             min_vwap_dollar_vol=min_vwap_dollar_vol)
+    return track_setups(sig, min_below_bars=min_below_bars,
+                        reclaim_lookback=reclaim_lookback,
+                        impulse_lookback=impulse_lookback,
+                        pullback_ctrl_atr=pullback_ctrl_atr,
+                        max_pullback_bars=max_pullback_bars)
+
+
+def track_setups(sig: pd.DataFrame, *,
+                 min_below_bars: int = MIN_BELOW_BARS,
+                 reclaim_lookback: int = RECLAIM_LOOKBACK,
+                 impulse_lookback: int = IMPULSE_LOOKBACK,
+                 pullback_ctrl_atr: float = PULLBACK_CTRL_ATR,
+                 max_pullback_bars: int = MAX_PULLBACK_BARS) -> list[Setup]:
+    """The Setup A / Setup B trackers over ONE session's bars whose
+    high/low/close/volume/atr14/regime columns are already computed.
+
+    EXTRACTED from find_setups 2026-09-25, unchanged: find_setups is now
+    apply_indicators + this. It exists so strategy/h60/rules.py (VW9-60) can
+    hand the trackers indicators built its own way (continuous EMA9/ATR, VWAP
+    per 09:30 session) and still run this code rather than a copy of it.
+    """
     n = len(sig)
     setups: list[Setup] = []
     if n == 0:
