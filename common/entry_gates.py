@@ -179,19 +179,32 @@ def compute_spread(df: pd.DataFrame, quotes: pd.DataFrame) -> np.ndarray:
     return m["spread_pct"].to_numpy()
 
 
-def make_gate(spec: tuple | None, spread_arr: np.ndarray) -> np.ndarray:
-    """Generate a gate array (True = allow entry, False = refuse).
+def make_gate(spec: tuple | None, spread_arr: np.ndarray, index: pd.Index) -> pd.Series:
+    """Generate a gate Series (True = allow entry, False = refuse).
+
+    Every sibling gate in this codebase (chase_gate.stamp_on, pullback_cell's
+    gate, dist_from_high_gate) hands the engines a pd.Series indexed like the
+    bar frame, because strategy/mc5/mc5.py and strategy/mcl/mcl.py both do
+    ``entry_gate.reindex(sig.index, fill_value=False)`` on whatever they are
+    given -- a bare ndarray has no .reindex and raises AttributeError deep
+    inside the engine, on every session, which is what a bare-array return
+    here actually did on the first real run (2026-09-24).
 
     Args:
         spec: tuple like ("spread", 0.02), or None for baseline
-        spread_arr: pre-computed spread % array (may contain np.nan for missing quotes)
+        spread_arr: pre-computed spread % array (may contain np.nan for
+            missing quotes), positionally aligned with `index`
+        index: the bar frame's own index (df.index) that spread_arr lines
+            up with -- this becomes the returned Series' index so the
+            engines' own .reindex(sig.index, ...) call lines it up correctly.
 
     Returns:
-        Boolean numpy array: True to allow entry, False to refuse.
+        Boolean pd.Series, indexed by `index`: True to allow entry, False to
+        refuse.
     """
     if spec is None:
         # Baseline: allow all entries
-        return np.ones(len(spread_arr), dtype=bool)
+        return pd.Series(np.ones(len(spread_arr), dtype=bool), index=index)
 
     kind = spec[0]
 
@@ -202,7 +215,7 @@ def make_gate(spec: tuple | None, spread_arr: np.ndarray) -> np.ndarray:
         #   - spread >= threshold
         # Allow only if spread exists AND is below threshold
         result = (spread_arr < threshold) & ~np.isnan(spread_arr)
-        return result
+        return pd.Series(result, index=index)
 
     else:
         raise ValueError(f"Unknown gate spec: {kind}")
@@ -263,7 +276,7 @@ def run_day(args: tuple) -> tuple:
             got = {}
             for name, eng, spec in BOOKS:
                 mod, extra = engines[eng]
-                gate_mask = make_gate(spec, spread_arr)
+                gate_mask = make_gate(spec, spread_arr, df.index)
                 # Run with entry_gate parameter
                 got[name] = mod.backtest_session(
                     df,
