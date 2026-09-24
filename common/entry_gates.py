@@ -140,6 +140,12 @@ def load_quote_window(archive: Path, day: str, symbol: str) -> pd.DataFrame:
         columns={tcol: "ts", "bid_px_00": "bid", "ask_px_00": "ask"})
     out = out[(out["bid"] > 0) & (out["ask"] > 0) & (out["ask"] >= out["bid"])]
     out["ts"] = pd.to_datetime(out["ts"], utc=True)
+    # A record with a valid priced bid/ask but a null/unparseable timestamp
+    # is not a mapping bug (columns and prices are fine) -- merge_asof
+    # cannot join on a null key on either side, so drop it here and let the
+    # bar it would have matched fall through to compute_spread's np.nan /
+    # make_gate's refusal, same as a bar with no quote in the window at all.
+    out = out.dropna(subset=["ts"])
     return out.sort_values("ts").reset_index(drop=True)
 
 
