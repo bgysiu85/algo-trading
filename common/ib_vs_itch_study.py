@@ -94,7 +94,8 @@ SIGNED_IN_FROM = "2026-09-21"     # feed_delay.SIGNED_IN_FROM
 DELAY = 15                        # feed_delay.DELAY
 BAR_COLS = ["open", "high", "low", "close", "volume"]
 MATERIAL_PCT = 0.01               # >1% close delta on a shared bar
-MATERIAL_MISSING = 3              # >3 bars missing from one side
+MATERIAL_MISSING = 3              # kept for reference, no longer used to classify
+MATERIAL_FLAT_SHARE = 0.15         # >15% of overlap bars: IB flat, ITCH traded
 
 
 def feed_offset(day: str) -> int:
@@ -105,7 +106,7 @@ def needed_symdays() -> dict[tuple[str, str, str], list[dict]]:
     """(strategy, symbol, date) -> the live_vs_sim_trades.csv rows for it.
     live-only and matched only -- those are where live actually traded."""
     need: dict[tuple[str, str, str], list[dict]] = {}
-    with open(TRADES_CSV, newline="") as f:
+    with open(TRADES_CSV, newline="", encoding="utf-8") as f:
         for r in csv.DictReader(f):
             if r["kind"] in ("live-only", "matched"):
                 key = (r["strategy"], r["symbol"], r["date"])
@@ -141,6 +142,29 @@ def run_entries(df: pd.DataFrame | None, strategy: str, day: str, floor) -> list
 
 
 def bar_diff(ib_df: pd.DataFrame | None, itch_df: pd.DataFrame | None) -> dict | None:
+    """CORRECTED 2026-09-24 -- the first version outer-joined and called any
+    IB-only or ITCH-only minute "material divergence". That is wrong: IB's
+    reqHistoricalData fills every quiet minute with a flat, ZERO-VOLUME bar
+    (last close carried forward, barCount=0); ITCH's tick-built bars simply
+    don't exist for a minute nothing traded. Across a 15-symbol-day sample
+    30-52% of IB's bars are these zero-volume fills. Counting that as
+    "divergence" made every single symbol-day read "bars diverge" -- an
+    artifact of bar-construction convention, not a feed disagreement, and it
+    buried the real, much smaller price gap underneath it (median close delta
+    on genuinely overlapping bars was 0.05%, not the 4-37% the old max-based
+    figure reported, itself one outlier bar).
+
+    Three things are reported now, on the INNER join (timestamps both have):
+    - price delta (median/mean/max) on bars where BOTH sides show a trade
+      (ib volume > 0) -- the real "do the feeds disagree on price" question.
+    - `ib_flat_itch_traded`: bars where IB shows NO trade (volume 0) but ITCH
+      does. This is the mechanism that actually matters for the strategy:
+      MCL/MC5's volume-surge and MFI conditions read zero on an IB bar where
+      ITCH saw real volume, which can suppress or delay a signal on IB's feed
+      that ITCH's tape would have taken.
+    - bar coverage counts (ib_only / itch_only), kept as a plain fact, not a
+      verdict driver.
+    """
     if ib_df is None or itch_df is None:
         return None
     a = ib_df[BAR_COLS].copy()
@@ -152,29 +176,49 @@ def bar_diff(ib_df: pd.DataFrame | None, itch_df: pd.DataFrame | None) -> dict |
     ib_only = int(j["close_itch"].isna().sum())
     itch_only = int(j["close_ib"].isna().sum())
     if both.empty:
-        return {"bars_both": 0, "ib_only_bars": ib_only, "itch_only_bars": itch_only,
-                "max_close_delta": None, "max_close_delta_pct": None}
-    delta = (both["close_ib"] - both["close_itch"]).abs()
-    pct = (delta / both["close_itch"].replace(0, pd.NA)).abs()
-    return {"bars_both": int(len(both)), "ib_only_bars": ib_only, "itch_only_bars": itch_only,
-            "max_close_delta": float(delta.max()),
-            "max_close_delta_pct": float(pct.max(skipna=True)) if pct.notna().any() else None}
+        return {"bars_both": 0, "bars_both_traded": 0, "ib_flat_itch_traded": 0,
+                "ib_only_bars": ib_only, "itch_only_bars": itch_only,
+                "median_close_delta_pct": None, "mean_close_delta_pct": None,
+                "max_close_delta_pct": None}
+    ib_traded = both["volume_ib"] > 0
+    ib_flat_itch_traded = int((~ib_traded).sum())
+    traded = both[ib_traded]
+    if traded.empty:
+        med = mean = mx = None
+    else:
+        delta = (traded["close_ib"] - traded["close_itch"]).abs()
+        pct = (delta / traded["close_itch"].replace(0, pd.NA)).abs().dropna()
+        med = float(pct.median()) if not pct.empty else None
+        mean = float(pct.mean()) if not pct.empty else None
+        mx = float(pct.max()) if not pct.empty else None
+    return {"bars_both": int(len(both)), "bars_both_traded": int(traded.shape[0]),
+            "ib_flat_itch_traded": ib_flat_itch_traded,
+            "ib_only_bars": ib_only, "itch_only_bars": itch_only,
+            "median_close_delta_pct": med, "mean_close_delta_pct": mean,
+            "max_close_delta_pct": mx}
 
 
 def classify(diff: dict | None, ib_entries: list[dict], itch_entries: list[dict]) -> str:
+    """CORRECTED 2026-09-24 -- price divergence now reads the MEDIAN delta on
+    bars both feeds actually traded (see bar_diff), not the max over an
+    outer join that mostly counted IB's zero-volume fills. A large
+    `ib_flat_itch_traded` share is reported as its own verdict, because it is
+    plausibly the real mechanism, not folded silently into "bars diverge"."""
     if diff is None:
         return "PENDING_IB_PULL"
     if diff["bars_both"] == 0:
         return "no overlapping bars"
-    material = ((diff["max_close_delta_pct"] or 0) > MATERIAL_PCT
-                or diff["ib_only_bars"] > MATERIAL_MISSING
-                or diff["itch_only_bars"] > MATERIAL_MISSING)
-    if material:
-        return "bars diverge"
+    price_material = (diff["median_close_delta_pct"] or 0) > MATERIAL_PCT
     ib_et = [e["entry_et"] for e in ib_entries]
     itch_et = [e["entry_et"] for e in itch_entries]
-    if ib_et != itch_et:
-        return "bars agree, signal timing diverges"
+    signal_diverges = ib_et != itch_et
+    flat_share = (diff["ib_flat_itch_traded"] / diff["bars_both"]) if diff["bars_both"] else 0
+    if price_material:
+        return "bars diverge (price)"
+    if flat_share > MATERIAL_FLAT_SHARE and signal_diverges:
+        return "IB shows no trade where ITCH does, signal timing diverges"
+    if signal_diverges:
+        return "bars agree, signal timing diverges (other cause)"
     return "bars and signal agree"
 
 
@@ -218,17 +262,19 @@ def main() -> int:
             "ib_entries": ";".join(e["entry_et"] for e in ib_entries),
             "itch_entries": ";".join(e["entry_et"] for e in itch_entries),
             "bars_both": diff["bars_both"] if diff else "",
+            "bars_both_traded": diff["bars_both_traded"] if diff else "",
+            "ib_flat_itch_traded": diff["ib_flat_itch_traded"] if diff else "",
             "ib_only_bars": diff["ib_only_bars"] if diff else "",
             "itch_only_bars": diff["itch_only_bars"] if diff else "",
-            "max_close_delta": round(diff["max_close_delta"], 4)
-                if diff and diff["max_close_delta"] is not None else "",
-            "max_close_delta_pct": round(diff["max_close_delta_pct"] * 100, 2)
+            "median_close_delta_pct": round(diff["median_close_delta_pct"] * 100, 3)
+                if diff and diff["median_close_delta_pct"] is not None else "",
+            "max_close_delta_pct": round(diff["max_close_delta_pct"] * 100, 3)
                 if diff and diff["max_close_delta_pct"] is not None else "",
             "verdict": verdict,
         })
 
     REPORT_CSV.parent.mkdir(parents=True, exist_ok=True)
-    with open(REPORT_CSV, "w", newline="") as f:
+    with open(REPORT_CSV, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader()
         w.writerows(rows)

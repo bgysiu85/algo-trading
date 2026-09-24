@@ -1,0 +1,10 @@
+W02-0016 -- IB bars vs ITCH bars on the live symbol-days, signal-by-signal
+Descriptive, not registered. See module docstring for method and caveat.
+symbol-days: 98
+
+verdict counts:
+  bars agree, signal timing diverges (other cause)  40
+  bars and signal agree                 36
+  IB shows no trade where ITCH does, signal timing diverges  22
+
+full rows: var/reports/ib_vs_itch_study_symdays.csv
