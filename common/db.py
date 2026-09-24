@@ -570,6 +570,15 @@ paper_fill = Table(
     # fill -- see trader.FIELDS. Added 2026-09-16.
     Column("ref_drift_pct", Float),
 
+    # IB's own execution id(s) for this row's fill(s), comma-joined --
+    # trader.exec_ids(). Added to trader.FIELDS by W02-0006 (commit d9ae552,
+    # 2026-09-23) without this column or the loader entry it needs: every
+    # row loaded since then has arrived NULL, indistinguishable from a
+    # session that predates the id existing at all. Nullable, no default --
+    # addable_columns' own rule -- so existing rows pick it up honestly as
+    # NULL rather than a backfilled guess.
+    Column("exec_id", String(255)),
+
     Column("source_file", String(255)),
     Column("loaded_at", DateTime),
 )

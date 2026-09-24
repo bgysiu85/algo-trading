@@ -685,6 +685,11 @@ def load_paper_fills(conn, paths) -> tuple[int, list[str]]:
                 # that fills it. Both halves of that guard now run on this
                 # column too.
                 "ref_drift_pct": _f(r.get("ref_drift_pct")),
+                # THE SAME THREE PLACES, AGAIN. exec_id made it into
+                # trader.FIELDS and db.paper_fill and not this loader --
+                # test_every_trader_field_survives_the_loader is the guard
+                # that exists specifically to catch this, and it did.
+                "exec_id": (r.get("exec_id") or "")[:255],
                 "source_file": path.name[:255], "loaded_at": now})
 
     # DE-DUPLICATE WITHIN THE BATCH, on the primary key. Two files can overlap:
