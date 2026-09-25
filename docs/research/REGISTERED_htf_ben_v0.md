@@ -27,6 +27,23 @@ bar"); the daily filter stays daily. Reason: a 4-hour signal uses 2–4 of a ses
 before it can even enter, so a same-day exit leaves it almost no room. Also added: NinjaTrader's
 overnight margin as a reported check on B's account view (§2.5).
 
+### Amendment B — PRE-RUN, 2026-09-25 (G1 had run as a data check only; no indicator, signal or P&L computed)
+
+G1 as first written compared daily closes rebuilt from the 1-hour bars on the
+18:00–17:00 New York session against the owned GLBX.MDP3 ohlcv-1d CL.c.0, which
+Databento stamps on UTC calendar days (common/dbn_io.py). Different day boundaries
+gave 45.58% agreement (1,910/4,190): a convention mismatch, not a data fault
+(roll dates and instrument_ids match). Board W15-0006.
+Ben's decision, in his words: *"Like-for-like UTC days (Recommended)"*.
+
+§5.1 now reads: the CL.c.0 1-hour bars re-aggregated on UTC calendar days
+(ts_event in [D 00:00, D+1 00:00) UTC; close = close of the last bar in the day)
+vs the owned ohlcv-1d CL.c.0 close: ≥ 99% of days within $0.05, every miss listed
+with its date and whether it is a roll day. High, low and volume are reported beside
+it (volume is expected to match exactly). The 18:00 New York session grid is
+verified by the bars-module tests (DST crossings, 16:00/14:00 last bars, early
+close), not by G1. Stop rule unchanged.
+
 ---
 
 ## 0. PRE-RUN GATES — the backtest (§3) does not start until all five are cleared
@@ -196,7 +213,10 @@ Account view (§2.5) is **reported, not scored** — Ben chooses the live size a
 
 Bars per year; first and last bar; hours missing inside sessions (excluding the 17:00–18:00
 break and weekends) listed if > 3 in a row; roll sessions from `CL.c.0` symbol changes; the
-rebuilt daily close vs owned `ohlcv-1d` `CL.c.0` close, share within $0.05 and every miss.
+CL.c.0 1-hour bars re-aggregated on **UTC calendar days** vs owned `ohlcv-1d` `CL.c.0` close,
+share within $0.05 and every miss listed with its date and whether it is a roll day, high/low/
+volume reported beside it (Amendment B; the 18:00 New York session grid is verified by the
+bars-module tests, not by G1).
 **Stop rule:** below 99% agreement, the study stops until the mismatch is explained.
 
 ### 5.2 G2 pre-flight (training side only: 2010-06-06 → 2021-12-31)
