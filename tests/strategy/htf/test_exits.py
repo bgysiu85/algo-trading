@@ -223,3 +223,25 @@ class TestFindStartPos:
         hourly = _hourly([("d1", 0, 100.0, 100.1, 99.9, 100.0)])
         with pytest.raises(KeyError):
             E.find_start_pos(hourly, pd.Timestamp("2099-01-01", tz="UTC"))
+
+    def test_falls_back_to_the_next_available_hour_when_the_exact_one_is_missing(self):
+        """Regression: found on Ben's real archive (2012-03-20 22:00 UTC) --
+        an entry-chart bucket's own arithmetic t_open can land on an hour
+        the 1-hour archive is genuinely missing (a real gap, G1's own
+        gaps_over already reports these exist), even though the bucket
+        itself is valid. The old exact-match-only implementation raised
+        KeyError here; the fix must return the next REAL hour instead."""
+        hourly = _hourly([("d1", 0, 100.0, 100.1, 99.9, 100.0),
+                          ("d1", 1, 100.0, 100.1, 99.9, 100.0)])
+        missing = hourly["t_open"].iloc[0] + pd.Timedelta(minutes=30)
+        pos = E.find_start_pos(hourly, missing)
+        assert pos == 1
+        assert hourly["t_open"].iloc[pos] > missing
+
+    def test_still_matches_exactly_when_the_hour_is_present(self):
+        """The gap fallback must not change the ordinary, no-gap result."""
+        hourly = _hourly([("d1", 0, 100.0, 100.1, 99.9, 100.0),
+                          ("d1", 1, 100.0, 100.1, 99.9, 100.0),
+                          ("d1", 2, 100.0, 100.1, 99.9, 100.0)])
+        pos = E.find_start_pos(hourly, hourly["t_open"].iloc[2])
+        assert pos == 2

@@ -25,9 +25,14 @@ different granularities of the same rule). A 2H/4H bucket's own
 back-adjustment offset and the 1H grid's offset are computed independently
 (each from its own held_id-change sequence) and are only guaranteed to
 agree away from a roll -- so this module re-reads the fill price at the
-SAME t_open from the 1-hour grid (an entry-chart bucket's t_open always
-equals its first source hour's t_open, bars.py's resample() docstring),
-and rebuilds the initial stop there as fill_1h +/- stop_dist, where
+SAME t_open from the 1-hour grid via exits.find_start_pos, which returns
+that exact hourly row when the archive has one there (the ordinary case:
+an entry-chart bucket's t_open is its first source hour's own t_open,
+bars.resample()'s docstring) and the first REAL hour at or after it
+otherwise -- a real gap inside that bucket (G1's own gaps_over reports
+these exist; find_start_pos's own docstring has the full reasoning), not a
+bug to raise on. It then rebuilds the initial stop there as fill_1h +/-
+stop_dist, where
 stop_dist (a $ distance, not a price level) is untouched from preflight's
 own S1 computation. Walking the exit and pricing the roll on one single
 series this way is what keeps "its stop moved by the same roll gap so its
@@ -130,9 +135,13 @@ def simulate(entries: list[dict], hourly: pd.DataFrame, *, bar_hours: int,
         try:
             start_pos = E.find_start_pos(hourly, t_open)
         except KeyError:
-            # the entry-chart fill bar's own t_open must exist as an hourly
-            # row (bars.py guarantees this); a miss means the two grids were
-            # built from different archives -- surfaced, not swallowed
+            # find_start_pos already falls back across a real gap (its own
+            # docstring); reaching here means there is nothing left at or
+            # after t_open in the hourly grid AT ALL -- the fill is past the
+            # end of the archive, which should not happen for an entry
+            # bars.resample already proved has data, so a miss here is a
+            # caller bug (e.g. the two grids built from different archives),
+            # not a data gap -- surfaced, not swallowed
             raise
         fill_adj = float(hourly["open_adj"].iloc[start_pos])
         stop_dist = float(e["stop_dist"])

@@ -162,12 +162,34 @@ def simulate_exit(hourly: pd.DataFrame, *, start_pos: int, direction: str,
 
 
 def find_start_pos(hourly: pd.DataFrame, t_open) -> int:
-    """The hourly grid's row position whose t_open matches an entry's fill
-    t_open exactly -- bars.py's resample() sets an entry-chart bucket's
-    t_open to its first source (here: first hourly) bar's own t_open, so this
-    always finds a row, never interpolates. Raises if it does not (a caller
-    bug, not a data gap -- the fill bar came FROM the archive)."""
-    matches = np.flatnonzero((hourly["t_open"] == t_open).to_numpy())
-    if len(matches) == 0:
-        raise KeyError(f"no hourly bar at t_open={t_open!r}")
-    return int(matches[0])
+    """The hourly grid's row position AT OR IMMEDIATELY AFTER an entry's fill
+    t_open.
+
+    bars.resample() sets an entry-chart bucket's t_open ARITHMETICALLY --
+    session_open + bar*bar_hours (bars.resample's own docstring) -- not from
+    an actual source bar's timestamp. That coincides with the bucket's first
+    real hourly bar whenever the archive has one right there, which is the
+    ordinary case this function used to require exactly. But G1 already
+    reports real gaps inside a session (readback.gaps_over): found on Ben's
+    real archive, a bucket whose OWN first calendar hour has no 1-hour print
+    even though the bucket itself is valid (bars.resample only emits a
+    bucket row when >=1 source bar falls somewhere inside it) -- an exact
+    match then does not exist, and the previous exact-match-only
+    implementation raised KeyError on real data it should have handled.
+
+    This returns the first hourly row whose OWN t_open is >= the target,
+    which is still guaranteed to fall inside the SAME bucket (the bucket has
+    at least one real bar, and any real bar's t_open is by definition >= the
+    bucket's own arithmetic start and < the next bucket's start) -- i.e. the
+    honest first-available fill hour, not a guess. When an exact match
+    exists this is identical to it (the smallest t_open >= target IS the
+    match), so the ordinary, gap-free case is unaffected.
+
+    Raises only when NOTHING at or after t_open remains in the grid at all
+    (the fill is past the end of the archive) -- that is a caller bug, since
+    a fill can only be built from a bucket bars.resample already proved has
+    data somewhere inside it."""
+    pos = int(hourly["t_open"].searchsorted(pd.Timestamp(t_open), side="left"))
+    if pos >= len(hourly):
+        raise KeyError(f"no hourly bar at or after t_open={t_open!r}")
+    return pos
