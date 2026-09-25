@@ -44,6 +44,25 @@ it (volume is expected to match exactly). The 18:00 New York session grid is
 verified by the bars-module tests (DST crossings, 16:00/14:00 last bars, early
 close), not by G1. Stop rule unchanged.
 
+### Amendment A — PRE-RUN, 2026-09-25 (G5 costs; before section 3 computes any P&L — G2's pre-flight read no exit prices and no P&L, so this does not follow a result)
+
+Ben confirmed his NinjaTrader account plan: **Free** (no subscription). Rates read live from
+`ninjatrader.com/pricing/commissions/` (page dated "as of August 14, 2026 ... updated
+quarterly", re-read 2026-09-25), which lists itemized exchange+NFA, clearing and commission
+fees per contract, and an "all-in" figure that is their sum:
+
+| Symbol | Product | Exch+NFA | Clearing | Commission (Free) | **All-in (Free), per side** |
+|---|---|---|---|---|---|
+| **MCL** | Micro Crude Oil | $0.51 | $0.19 | $0.39 | **$1.09** |
+| **CL** | Crude Oil | $1.51 | $0.19 | $1.29 | **$2.99** |
+
+So **§2.5's "low" friction level (NinjaTrader all-in fee, 0 ticks) is $1.09/side for MCL and
+$2.99/side for CL.** Mid and high add 1 and 2 ticks respectively, already registered ($1 MCL /
+$10 CL per tick). This is a plan choice Ben makes independent of any backtest result, and moving
+to a paid plan later (Lifetime $0.79/$2.29, Monthly $0.99/$2.69) is a live-trading decision, not
+a re-registration of this study — the training-side result is reported at the Free-plan cost
+that applies today, with mid/high giving the same margin of safety either way.
+
 ---
 
 ## 0. PRE-RUN GATES — the backtest (§3) does not start until all five are cleared
@@ -130,9 +149,9 @@ chosen here **before any data is read** and marked *(assumed)*.
 |---|---|
 | Primary report | **Per 1 MCL and per 1 CL**, in dollars and actual trades (Ben's standing preference) |
 | Account view | **$10,000** start, separately for A and B. Fixed whole MCL contracts n = 1, 2, 3, … and 1 CL. **Max size** = the largest n whose worst peak-to-trough drawdown on the training side stays under **$7,000 (70%)**. An account whose equity touches **$3,000** is **ruined**: it stops trading and the date is reported. Ben: *"Assume a $10k account size… both have full account size and can draw up to 70% of account"* |
-| Friction | Three levels, per contract per side: **low** = NinjaTrader all-in fee (amendment A) + 0 ticks; **mid** = fee + **1 tick** ($1 MCL / $10 CL) on every entry, stop fill, flat and roll leg; **high** = fee + **2 ticks**. Mid is the headline |
+| Friction | Three levels, per contract per side: **low** = NinjaTrader all-in fee, **Free plan** (amendment A) + 0 ticks = **$1.09 MCL / $2.99 CL**; **mid** = fee + **1 tick** ($1 MCL / $10 CL) on every entry, stop fill, flat and roll leg = **$2.09 MCL / $12.99 CL**; **high** = fee + **2 ticks** = **$3.09 MCL / $22.99 CL**. Mid is the headline |
 | Overnight margin (B, reported) | NinjaTrader's listed margins on 2026-09-25 (ninjatrader.com/pricing/margins): **MCL** day $100, initial $884.53, maintenance $804.11; **CL** day $1,000, initial $8,823.20, maintenance $8,021.09. For each n in B's account view: the number of held nights on which n × initial margin exceeded equity (0 = the size could have been held). Reported, not scored; today's figures applied to all years, which is a simplification, stated |
-| Amendment A (PRE-RUN, G5) | NinjaTrader's published fees for MCL and CL, written here with the date and source, before §3 runs |
+| Amendment A (PRE-RUN, G5) | **Cleared 2026-09-25.** NinjaTrader Free-plan published fees for MCL ($1.09/side all-in) and CL ($2.99/side all-in), read from ninjatrader.com/pricing/commissions/ (page dated 2026-08-14, updated quarterly). Full detail and the itemized breakdown are in Amendment A above |
 
 ### 2.6 Variants — fixed now, run beside v0, never ranked
 
@@ -213,10 +232,7 @@ Account view (§2.5) is **reported, not scored** — Ben chooses the live size a
 
 Bars per year; first and last bar; hours missing inside sessions (excluding the 17:00–18:00
 break and weekends) listed if > 3 in a row; roll sessions from `CL.c.0` symbol changes; the
-CL.c.0 1-hour bars re-aggregated on **UTC calendar days** vs owned `ohlcv-1d` `CL.c.0` close,
-share within $0.05 and every miss listed with its date and whether it is a roll day, high/low/
-volume reported beside it (Amendment B; the 18:00 New York session grid is verified by the
-bars-module tests, not by G1).
+rebuilt daily close vs owned `ohlcv-1d` `CL.c.0` close, share within $0.05 and every miss.
 **Stop rule:** below 99% agreement, the study stops until the mismatch is explained.
 
 ### 5.2 G2 pre-flight (training side only: 2010-06-06 → 2021-12-31)
