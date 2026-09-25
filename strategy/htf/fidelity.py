@@ -135,8 +135,18 @@ def replay(trades: list[dict], v0_window: list[dict]) -> list[dict]:
     return results
 
 
+def bars_in_window(entry_adj: pd.DataFrame, start: pd.Timestamp = WINDOW_START,
+                   end: pd.Timestamp = WINDOW_END) -> int:
+    """How many 4H entry-chart bars the archive actually has in the window
+    -- a diagnostic, so 'zero v0 triggers' can be told apart from 'zero
+    archive coverage' (the two look identical in the trigger count alone)."""
+    t = pd.to_datetime(entry_adj["t_open"], utc=True)
+    return int(((t >= start) & (t < end)).sum())
+
+
 def run(archive) -> dict:
     entry_adj, daily_adj = prepare_b(archive)
+    n_bars = bars_in_window(entry_adj)
     v0_window = v0_entries_in_window(entry_adj, daily_adj)
     trades = load_ben_trades()
     results = replay(trades, v0_window)
@@ -148,6 +158,7 @@ def run(archive) -> dict:
     unmatched_v0 = [e for e in v0_window if e["t_open"] not in matched_t_opens]
     return {
         "scenario": SCENARIO, "window": [str(WINDOW_START), str(WINDOW_END)],
+        "n_entry_bars_in_window": n_bars,
         "n_ben_trades": len(results), "n_v0_signal_found": n_match,
         "n_mismatch": len(results) - n_match,
         "n_v0_triggers_in_window": len(v0_window),
@@ -167,6 +178,8 @@ def main(argv=None) -> int:
     out_path.write_text(json.dumps(result, indent=2, default=str))
     print(f"wrote {out_path}")
     print(f"scenario B, window {result['window'][0]} .. {result['window'][1]}")
+    print(f"4H entry bars covered by the archive in this window: "
+          f"{result['n_entry_bars_in_window']}")
     print(f"Ben's trades: {result['n_ben_trades']}, "
           f"v0 signal found for {result['n_v0_signal_found']}, "
           f"mismatch {result['n_mismatch']}")

@@ -66,6 +66,23 @@ class TestWindowFilter:
         assert F.v0_entries_in_window(entry_adj, daily_adj, start, end) == []
 
 
+class TestBarsInWindow:
+    def test_counts_bars_actually_in_the_window(self, entry_daily):
+        entry_adj, _daily_adj = entry_daily
+        t = pd.to_datetime(entry_adj["t_open"], utc=True)
+        mid = t.iloc[len(t) // 2]
+        start, end = mid - pd.Timedelta(days=2), mid + pd.Timedelta(days=2)
+        n = F.bars_in_window(entry_adj, start, end)
+        assert n == int(((t >= start) & (t < end)).sum())
+        assert n > 0
+
+    def test_zero_for_a_window_outside_the_archive(self, entry_daily):
+        entry_adj, _daily_adj = entry_daily
+        far_future = pd.Timestamp("2099-01-01", tz="UTC")
+        assert F.bars_in_window(entry_adj, far_future,
+                                far_future + pd.Timedelta(days=7)) == 0
+
+
 class TestMatchTrade:
     def test_matches_a_trade_on_the_same_side_and_bar(self, all_v0_entries):
         e = all_v0_entries[0]
