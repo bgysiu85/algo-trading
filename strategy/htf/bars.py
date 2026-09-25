@@ -85,6 +85,25 @@ def split_held(df: pd.DataFrame) -> pd.DataFrame:
     return d.sort_index()
 
 
+def settlement_bar_mask(df_1h: pd.DataFrame) -> np.ndarray:
+    """True for a source bar landing exactly at elapsed==23h (wall-clock
+    17:00, the session's own close instant): a real, recurring Databento
+    print (a settlement/closing tick), found in G1 (readback.py) at roughly
+    one per weekday session throughout the CL.c.0 archive. ts_event==17:00
+    means the interval [17:00,18:00) -- AFTER the 18:00-17:00 session this
+    study trades on ends -- so it is not a 24th intraday bar and is excluded
+    from every grid, not folded into the last bucket. Reported by G1, not
+    silently dropped: readback.py counts these and lists them in the report
+    rather than raising."""
+    if df_1h.empty:
+        return np.zeros(0, dtype=bool)
+    naive = local_naive(df_1h.index)
+    sess = session_of(naive)
+    open_naive = session_open_naive(sess)
+    elapsed = ((naive - open_naive) / pd.Timedelta(hours=1)).to_numpy()
+    return np.isclose(elapsed, 23.0)
+
+
 def resample(df_1h: pd.DataFrame, grid: str) -> pd.DataFrame:
     """CL.c.0 1-hour bars (tz-aware UTC index; held_id/open/high/low/close/
     volume columns, e.g. from split_held) -> one of the registered grids.
@@ -93,6 +112,8 @@ def resample(df_1h: pd.DataFrame, grid: str) -> pd.DataFrame:
     >=1 source bar falls in its bucket; OHLC = first open, max high, min low,
     last close, summed volume, held_id = the LAST source bar's (so a roll
     inside a multi-hour bucket is reflected honestly rather than hidden).
+    A bar at elapsed==23h (settlement_bar_mask) is excluded, not bucketed --
+    see that function's docstring.
     """
     bar_hours = GRID_HOURS[grid]
     if df_1h.empty:
@@ -102,10 +123,13 @@ def resample(df_1h: pd.DataFrame, grid: str) -> pd.DataFrame:
     open_naive = session_open_naive(sess)
     elapsed_h = (naive - open_naive) / pd.Timedelta(hours=1)
     elapsed = elapsed_h.to_numpy()
-    if ((elapsed < 0) | (elapsed >= 23)).any():
+    settlement = np.isclose(elapsed, 23.0)
+    if ((elapsed < 0) | (elapsed > 23) & ~settlement).any():
         raise SessionBoundsError(
-            "a source bar's elapsed-since-open fell outside [0,23); the "
+            "a source bar's elapsed-since-open fell outside [0,23]; the "
             "session/bucket derivation is wrong for at least one bar")
+    keep = ~settlement
+    df_1h, naive, sess, elapsed = df_1h[keep], naive[keep], sess[keep], elapsed[keep]
     bucket = np.floor(elapsed / bar_hours).astype(int)
 
     d = df_1h.copy()
