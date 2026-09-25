@@ -1,0 +1,22 @@
+{
+  "source": "Ninja_Trader_Paper connector (MCP), account DEMO9246950, pulled 2026-09-25 via fill_history/position_history",
+  "pulled_at": "2026-09-25T11:10:00Z",
+  "symbol": "CLX6",
+  "note": "Round trips reconstructed from fill_history in strict fill order (FIFO by time, not the connector's own position_history pairing, which splits partial fills into many rows). Trade 12 (2026-09-25 08:47:31Z, Sell 10 @ 92.84) was still OPEN as of the pull -- no exit fill yet -- and is excluded from the fidelity replay (no exit bar to compare).",
+  "round_trips": [
+    {"trade_id": 1, "side": "long", "qty": 1, "entry_time": "2026-09-20T23:30:07.466Z", "entry_price": 96.11, "exit_time": "2026-09-20T23:30:11.951Z", "exit_price": 96.08, "realized_pnl": -30.0, "note": "4-second scratch, 1 lot"},
+    {"trade_id": 2, "side": "short", "qty": 10, "entry_time": "2026-09-21T12:08:53.709Z", "entry_price": 93.29, "exit_time": "2026-09-21T22:00:49.280Z", "exit_price": 92.01, "realized_pnl": 12800.0},
+    {"trade_id": 3, "side": "short", "qty": 10, "entry_time": "2026-09-22T07:57:06.827Z", "entry_price": 93.12, "exit_time": "2026-09-22T08:03:43.191Z", "exit_price": 93.01, "realized_pnl": 1100.0},
+    {"trade_id": 4, "side": "short", "qty": 10, "entry_time": "2026-09-22T09:52:22.354Z", "entry_price": 90.03, "exit_time": "2026-09-22T10:48:51.381Z", "exit_price": 89.74, "realized_pnl": 2900.0},
+    {"trade_id": 5, "side": "short", "qty": 10, "entry_time": "2026-09-22T13:35:01.081Z", "entry_price": 90.36, "exit_time": "2026-09-22T14:07:44.285Z", "exit_price": 90.924, "realized_pnl": -5620.0, "note": "exit filled in 6 fragments (1+1+1+4+1+2) 90.92-90.93, weighted avg 90.924"},
+    {"trade_id": 6, "side": "long", "qty": 10, "entry_time": "2026-09-22T14:21:22.398Z", "entry_price": 91.10, "exit_time": "2026-09-22T14:22:59.847Z", "exit_price": 90.94, "realized_pnl": -1600.0},
+    {"trade_id": 7, "side": "short", "qty": 10, "entry_time": "2026-09-22T14:24:32.282Z", "entry_price": 90.89, "exit_time": "2026-09-22T14:41:15.315Z", "exit_price": 91.40, "realized_pnl": -5100.0},
+    {"trade_id": 8, "side": "long", "qty": 10, "entry_time": "2026-09-23T13:25:50.703Z", "entry_price": 91.14, "exit_time": "2026-09-23T13:26:32.524Z", "exit_price": 91.24, "realized_pnl": 1000.0},
+    {"trade_id": 9, "side": "long", "qty": 10, "entry_time": "2026-09-23T13:27:10.735Z", "entry_price": 91.13, "exit_time": "2026-09-23T14:53:42.247Z", "exit_price": 91.465, "realized_pnl": 3350.0, "note": "exit filled in 2 fragments (5+5) 91.46-91.47"},
+    {"trade_id": 10, "side": "long", "qty": 10, "entry_time": "2026-09-23T22:01:52.880Z", "entry_price": 92.71, "exit_time": "2026-09-24T10:10:15.276Z", "exit_price": 93.59, "realized_pnl": 8800.0, "note": "held overnight"},
+    {"trade_id": 11, "side": "long", "qty": 10, "entry_time": "2026-09-24T13:35:04.175Z", "entry_price": 94.16, "exit_time": "2026-09-24T14:44:53.917Z", "exit_price": 95.21, "realized_pnl": 10500.0}
+  ],
+  "open_at_pull": [
+    {"trade_id": 12, "side": "short", "qty": 10, "entry_time": "2026-09-25T08:47:31.665Z", "entry_price": 92.84, "note": "still open when pulled; no exit fill in the account yet"}
+  ]
+}
