@@ -83,12 +83,14 @@ def _is_session_last_hour(hourly: pd.DataFrame, pos: int) -> bool:
 
 def simulate_exit(hourly: pd.DataFrame, *, start_pos: int, direction: str,
                   fill_price: float, initial_stop: float, bar_hours: int,
-                  session_flatten: bool) -> ExitOutcome:
+                  session_flatten: bool, trail_trigger: float = TRAIL_TRIGGER) -> ExitOutcome:
     """hourly: the back-adjusted 1H grid (preflight.prepare_grids's
     grids["1H"]), with 'session', 'bar', 'open_adj'/'high_adj'/'low_adj'/
     'close_adj' columns. start_pos: hourly.iloc[start_pos] must be the fill
     hour (its open_adj equals fill_price -- the caller's job to align, same
-    as preflight's own t_open-matching convention)."""
+    as preflight's own t_open-matching convention). trail_trigger defaults
+    to the registered $0.20/bbl (S2); overridable only for the neighbour
+    grid (REGISTERED sec 3 item 8: trail trigger in {$0.10, $0.20, $0.40})."""
     n = len(hourly)
     if start_pos >= n:
         raise IndexError("start_pos beyond the end of the hourly grid")
@@ -116,7 +118,7 @@ def simulate_exit(hourly: pd.DataFrame, *, start_pos: int, direction: str,
             # below, still see the OLD stop; only pos+1 onward sees the new one)
             if is_long:
                 peak = max(peak, bucket_extreme)
-                if peak - fill_price >= TRAIL_TRIGGER:
+                if peak - fill_price >= trail_trigger:
                     candidate = fill_price + (peak - fill_price) / 2.0
                     new_stop = max(stop, candidate)
                     if new_stop > stop:
@@ -124,7 +126,7 @@ def simulate_exit(hourly: pd.DataFrame, *, start_pos: int, direction: str,
                     stop = new_stop
             else:
                 peak = min(peak, bucket_extreme)
-                if fill_price - peak >= TRAIL_TRIGGER:
+                if fill_price - peak >= trail_trigger:
                     candidate = fill_price - (fill_price - peak) / 2.0
                     new_stop = min(stop, candidate)
                     if new_stop < stop:

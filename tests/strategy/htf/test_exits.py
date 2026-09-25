@@ -122,6 +122,44 @@ class TestTrail:
         assert out.exit_price == pytest.approx(99.85)
 
 
+class TestTrailTriggerParam:
+    """REGISTERED sec 3 item 8: trail trigger in {$0.10, $0.20, $0.40}, for
+    the neighbour grid -- simulate_exit's `trail_trigger` param, default
+    E.TRAIL_TRIGGER ($0.20)."""
+
+    def test_a_smaller_trigger_starts_the_trail_where_the_default_would_not(self):
+        hourly = _hourly([
+            ("d1", 0, 100.0, 100.1, 99.9, 100.0),
+            ("d1", 1, 100.0, 100.1, 99.9, 100.0),
+            ("d1", 2, 100.0, 100.12, 99.9, 100.1),
+            ("d1", 3, 100.1, 100.15, 100.05, 100.1),   # bucket 0's extreme high = 100.15 (bars 0-3), peak-fill = 0.15
+            ("d1", 4, 100.1, 100.15, 100.02, 100.1),  # bucket 1: with trail_trigger=0.10, new stop=100.075 -> low 100.02 hits it
+        ])
+        default_out = E.simulate_exit(hourly, start_pos=0, direction="long", fill_price=100.0,
+                                      initial_stop=90.0, bar_hours=4, session_flatten=False)
+        assert not default_out.trail_started   # 0.15 < the registered $0.20 trigger
+
+        tight_out = E.simulate_exit(hourly, start_pos=0, direction="long", fill_price=100.0,
+                                    initial_stop=90.0, bar_hours=4, session_flatten=False,
+                                    trail_trigger=0.10)
+        assert tight_out.trail_started
+        assert tight_out.exit_price == pytest.approx(100.075)   # 100.0 + 0.15/2
+
+    def test_default_matches_the_module_constant(self):
+        hourly = _hourly([
+            ("d1", 0, 100.0, 100.1, 99.9, 100.0),
+            ("d1", 1, 100.0, 100.1, 99.9, 100.0),
+            ("d1", 2, 100.0, 100.30, 99.9, 100.2),
+            ("d1", 3, 100.2, 100.25, 100.05, 100.2),
+        ])
+        a = E.simulate_exit(hourly, start_pos=0, direction="long", fill_price=100.0,
+                            initial_stop=90.0, bar_hours=4, session_flatten=False)
+        b = E.simulate_exit(hourly, start_pos=0, direction="long", fill_price=100.0,
+                            initial_stop=90.0, bar_hours=4, session_flatten=False,
+                            trail_trigger=E.TRAIL_TRIGGER)
+        assert a == b
+
+
 class TestSessionFlatten:
     def test_scenario_a_flattens_at_the_last_hour_of_the_session(self):
         hourly = _hourly([

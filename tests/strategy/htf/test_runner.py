@@ -119,3 +119,24 @@ class TestShortMirrorsLong:
         assert t.direction == "short"
         assert t.exit_price_adj == pytest.approx(105.5)   # gapped open, not the 105.0 stop level
         assert t.gross_pnl("MCL") < 0    # price rose against the short
+
+
+class TestTrailTriggerPassthrough:
+    """REGISTERED sec 3 item 8: runner.simulate's trail_trigger param must
+    actually reach exits.simulate_exit, not just be accepted and ignored."""
+
+    def test_a_tighter_trigger_starts_the_trail_where_the_default_would_not(self):
+        hourly = _hourly([
+            ("d1", 0, 100.0, 100.1, 99.9, 100.0, 1, 0.0),
+            ("d1", 1, 100.0, 100.1, 99.9, 100.0, 1, 0.0),
+            ("d1", 2, 100.0, 100.12, 99.9, 100.1, 1, 0.0),
+            ("d1", 3, 100.1, 100.15, 100.05, 100.1, 1, 0.0),
+            ("d1", 4, 100.1, 100.15, 100.02, 100.1, 1, 0.0),
+        ])
+        entries = [{"t_open": hourly["t_open"].iloc[0], "direction": "long",
+                   "stop_dist": 10.0, "session": "d1"}]
+        default_trades, _ = R.simulate(entries, hourly, bar_hours=4, session_flatten=False)
+        tight_trades, _ = R.simulate(entries, hourly, bar_hours=4, session_flatten=False,
+                                     trail_trigger=0.10)
+        assert not default_trades[0].trail_started
+        assert tight_trades[0].trail_started

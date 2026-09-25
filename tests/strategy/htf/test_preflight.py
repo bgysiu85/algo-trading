@@ -89,6 +89,43 @@ class TestDetectV0Invariants:
         assert counts["blocked_end_of_session"] == 0
 
 
+class TestNeighbourGridParams:
+    """REGISTERED sec 3 item 8: confirm_window in {1,2,3}, swing_LR in
+    {2,3} -- both default to the registered values and both must actually
+    change what detect_v0 produces (a no-op parameter would be a silent bug
+    in the neighbour grid)."""
+
+    @pytest.mark.parametrize("scenario", ["B", "A-2H"])
+    def test_confirm_window_default_matches_omitting_it(self, grids_and_daily, scenario):
+        grids, daily_adj = grids_and_daily
+        entry_adj = grids[P.SCENARIO_GRID[scenario]]
+        a, _ = P.detect_v0(entry_adj, daily_adj, scenario=scenario)
+        b, _ = P.detect_v0(entry_adj, daily_adj, scenario=scenario, confirm_window=2)
+        assert [e["t_open"] for e in a] == [e["t_open"] for e in b]
+
+    def test_wider_confirm_window_never_loses_entries_the_default_found(self, grids_and_daily):
+        """A wider window can only ADD confirmations reachable at t+3 that
+        window=2 could not see (or leave counts unchanged), never remove
+        one the narrower window already confirmed at t+1/t+2."""
+        grids, daily_adj = grids_and_daily
+        entry_adj = grids["4H"]
+        default_entries, _ = P.detect_v0(entry_adj, daily_adj, scenario="B", confirm_window=2)
+        wide_entries, _ = P.detect_v0(entry_adj, daily_adj, scenario="B", confirm_window=3)
+        default_t = {e["t_open"] for e in default_entries}
+        wide_t = {e["t_open"] for e in wide_entries}
+        assert default_t.issubset(wide_t)
+
+    def test_larger_swing_LR_changes_stop_distances(self, grids_and_daily):
+        grids, daily_adj = grids_and_daily
+        entry_adj = grids["4H"]
+        default_entries, _ = P.detect_v0(entry_adj, daily_adj, scenario="B", swing_LR=2)
+        wide_entries, _ = P.detect_v0(entry_adj, daily_adj, scenario="B", swing_LR=3)
+        assert default_entries and wide_entries
+        default_dists = [e["stop_dist"] for e in default_entries]
+        wide_dists = [e["stop_dist"] for e in wide_entries]
+        assert default_dists != wide_dists   # a wider swing window moves at least some stops
+
+
 class TestDetectC1:
     @pytest.mark.parametrize("scenario", list(P.ALL_SCENARIOS))
     def test_no_confirmation_window_fills_at_trigger_plus_one(self, grids_and_daily, scenario):

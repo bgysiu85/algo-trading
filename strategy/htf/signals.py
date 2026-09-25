@@ -150,12 +150,15 @@ def confirmation_flags(close: pd.Series, macd_line: pd.Series, signal_line: pd.S
     return confirms_from_emas(ema9, ema21, macd_line, signal_line)
 
 
-def confirmation_bar(confirms: pd.Series, trigger_pos: int) -> int | None:
-    """The first of {t+1, t+2} (positional index) where `confirms` is True,
-    else None (E2: "If neither bar confirms, the trigger lapses"). Reads
-    ONLY positions trigger_pos+1 and trigger_pos+2 -- a trigger at t can
-    never be confirmed by t itself or by t+3 onward."""
-    for c in (trigger_pos + 1, trigger_pos + 2):
+def confirmation_bar(confirms: pd.Series, trigger_pos: int, window: int = 2) -> int | None:
+    """The first of {t+1, ..., t+window} (positional index) where `confirms`
+    is True, else None (E2: "If neither bar confirms, the trigger lapses").
+    `window` defaults to the registered 2 bars; overridable only for the
+    neighbour grid (REGISTERED sec 3 item 8: confirmation window in {1,2,3}
+    bars) -- reads ONLY positions trigger_pos+1..trigger_pos+window, a
+    trigger at t can never be confirmed by t itself or by a bar past the
+    window."""
+    for c in range(trigger_pos + 1, trigger_pos + 1 + window):
         if c >= len(confirms):
             continue
         if bool(confirms.iloc[c]):

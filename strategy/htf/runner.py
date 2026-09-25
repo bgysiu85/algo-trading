@@ -112,11 +112,12 @@ def _count_rolls(hourly: pd.DataFrame, start_pos: int, exit_pos: int) -> int:
 
 
 def simulate(entries: list[dict], hourly: pd.DataFrame, *, bar_hours: int,
-            session_flatten: bool) -> tuple[list[Trade], int]:
+            session_flatten: bool, trail_trigger: float = E.TRAIL_TRIGGER) -> tuple[list[Trade], int]:
     """entries: preflight's time-ordered, E5-UNAWARE candidate list (each
     dict has 'direction', 'stop_dist', 't_open'). Returns (taken_trades,
     n_ignored_in_position) -- E5 applied here, for real, against each taken
-    trade's own simulated exit time."""
+    trade's own simulated exit time. trail_trigger defaults to S2's
+    registered $0.20/bbl; overridable only for the neighbour grid."""
     trades: list[Trade] = []
     n_ignored = 0
     blocked_until: pd.Timestamp | None = None
@@ -140,7 +141,8 @@ def simulate(entries: list[dict], hourly: pd.DataFrame, *, bar_hours: int,
 
         outcome = E.simulate_exit(hourly, start_pos=start_pos, direction=direction,
                                   fill_price=fill_adj, initial_stop=initial_stop_adj,
-                                  bar_hours=bar_hours, session_flatten=session_flatten)
+                                  bar_hours=bar_hours, session_flatten=session_flatten,
+                                  trail_trigger=trail_trigger)
 
         offset = hourly["adj_offset"].to_numpy()
         fill_raw = fill_adj - float(offset[start_pos])
@@ -162,17 +164,22 @@ def simulate(entries: list[dict], hourly: pd.DataFrame, *, bar_hours: int,
     return trades, n_ignored
 
 
-def run_v0(df_1h: pd.DataFrame, *, scenario: str) -> tuple[list[Trade], dict]:
+def run_v0(df_1h: pd.DataFrame, *, scenario: str, trail_trigger: float = E.TRAIL_TRIGGER,
+          confirm_window: int = 2, swing_LR: int = 2) -> tuple[list[Trade], dict]:
     """v0, one scenario, whole archive (caller slices to training/holdout by
-    each trade's own session -- same convention as preflight.summarize)."""
+    each trade's own session -- same convention as preflight.summarize).
+    trail_trigger/confirm_window/swing_LR all default to the registered
+    values; overridable only for the neighbour grid (REGISTERED sec 3 item
+    8), which calls this with each of its 18 combinations."""
     grids, daily_adj = P.prepare_grids(df_1h)
     hourly = grids["1H"]
     bar_hours = B.GRID_HOURS[P.SCENARIO_GRID[scenario]]
     entry_adj = grids[P.SCENARIO_GRID[scenario]]
-    entries, counts = P.detect_v0(entry_adj, daily_adj, scenario=scenario)
+    entries, counts = P.detect_v0(entry_adj, daily_adj, scenario=scenario,
+                                  confirm_window=confirm_window, swing_LR=swing_LR)
     session_flatten = scenario in P.INTRADAY_SCENARIOS
     trades, n_ignored = simulate(entries, hourly, bar_hours=bar_hours,
-                                 session_flatten=session_flatten)
+                                 session_flatten=session_flatten, trail_trigger=trail_trigger)
     counts = dict(counts)
     counts["ignored_in_position"] = n_ignored
     counts["trades_taken"] = len(trades)

@@ -142,6 +142,31 @@ class TestConfirmation:
         assert S.confirmation_bar(confirms, trigger_pos=2) == 4
 
 
+class TestConfirmationWindowParam:
+    """REGISTERED sec 3 item 8: confirmation window in {1,2,3} bars, for the
+    neighbour grid -- confirmation_bar's `window` param, default 2."""
+
+    def _confirms(self):
+        idx = pd.date_range("2020-01-01", periods=8, freq="4h", tz="UTC")
+        # confirms True only at position 4 -- reachable from trigger_pos=1
+        # only with window>=3 (positions checked: 2,3,4)
+        return pd.Series([False, False, False, False, True, False, False, False], index=idx)
+
+    def test_window_1_only_checks_t_plus_1(self):
+        confirms = self._confirms()
+        assert S.confirmation_bar(confirms, trigger_pos=1, window=1) is None
+        assert S.confirmation_bar(confirms, trigger_pos=3, window=1) == 4
+
+    def test_window_2_is_the_registered_default(self):
+        confirms = self._confirms()
+        assert S.confirmation_bar(confirms, trigger_pos=1, window=2) is None
+        assert S.confirmation_bar(confirms, trigger_pos=1) is None   # default matches
+
+    def test_window_3_reaches_a_confirmation_windows_1_and_2_would_miss(self):
+        confirms = self._confirms()
+        assert S.confirmation_bar(confirms, trigger_pos=1, window=3) == 4
+
+
 class TestDailyFilterNoLookahead:
     """G4: 'the daily filter reads the last completed session only ... a
     daily close that flips after c's close must not change the decision

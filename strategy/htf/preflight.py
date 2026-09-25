@@ -74,11 +74,14 @@ def _training_mask(dates: pd.Series, start=TRAIN_START, end=TRAIN_END) -> np.nda
 
 
 def detect_v0(entry_adj: pd.DataFrame, daily_adj: pd.DataFrame, *, scenario: str,
-             warmup_bars: int = SIG.WARMUP_ENTRY_BARS) -> tuple[list[dict], dict]:
+             warmup_bars: int = SIG.WARMUP_ENTRY_BARS, confirm_window: int = 2,
+             swing_LR: int = 2) -> tuple[list[dict], dict]:
     """v0's entries (E1-E3, S1) and block counts, scored trigger-by-trigger
     (see module docstring: E5 not applied). Returns (entries, counts) over
     the WHOLE frame passed in -- callers slice to the training window
-    afterward by each entry's 'year'/'session'."""
+    afterward by each entry's 'year'/'session'. confirm_window/swing_LR
+    default to the registered E2/S1 values (2 bars, L=R=2); overridable
+    only for the neighbour grid (REGISTERED sec 3 item 8)."""
     bar_hours = B.GRID_HOURS[SCENARIO_GRID[scenario]]
     n = len(entry_adj)
     close = entry_adj["close_adj"]
@@ -88,8 +91,8 @@ def detect_v0(entry_adj: pd.DataFrame, daily_adj: pd.DataFrame, *, scenario: str
     confirms_long, confirms_short = SIG.confirmation_flags(close, macd_line, signal_line)
     daily_dir = SIG.daily_filter_as_of(entry_adj, daily_adj, bar_hours)
     ready = SIG.entry_ready_mask(entry_adj, warmup_bars)
-    swing_low = SIG.swing_lows(entry_adj["low_adj"]).ffill()
-    swing_high = SIG.swing_highs(entry_adj["high_adj"]).ffill()
+    swing_low = SIG.swing_lows(entry_adj["low_adj"], L=swing_LR, R=swing_LR).ffill()
+    swing_high = SIG.swing_highs(entry_adj["high_adj"], L=swing_LR, R=swing_LR).ffill()
     last_bar = SIG.session_last_bar_mask(entry_adj, bar_hours)
     low_adj = entry_adj["low_adj"].to_numpy()
     high_adj = entry_adj["high_adj"].to_numpy()
@@ -109,7 +112,7 @@ def detect_v0(entry_adj: pd.DataFrame, daily_adj: pd.DataFrame, *, scenario: str
             continue
         counts["triggers"] += 1
         confirms = confirms_long if direction == "long" else confirms_short
-        c = SIG.confirmation_bar(confirms, i)
+        c = SIG.confirmation_bar(confirms, i, window=confirm_window)
         if c is None:
             counts["lapsed"] += 1
             continue
