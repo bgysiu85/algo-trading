@@ -255,6 +255,54 @@ this tool prints.
 
 ---
 
+## `intraday_pull.py` — the full EODHD intraday pull (W07-0012 subitem 5, part 1 of 2)
+
+The Alpaca probe above found free IEX 100% MISSING for 2016-2019 and ~80-90%
+hit/backfill from 2020 — a material gap against the swing window's
+2016-05-10 start. Ben approved and made the EODHD "EOD + Intraday — All World
+Extended" upgrade, 2026-09-25 (same account/key `pit_universe.py` already
+uses). This pulls every (symbol, date, bucket) the fill engine (part 2, not
+yet built) will actually consume — a point-in-time member with an EOD close
+on file, same gating the Alpaca probe used — not a symbol's whole history.
+
+```
+$env:EODHD_API_KEY = op read "op://Trading/EODHD/api-token"
+python -m strategy.swing.intraday_pull --confirm
+python -m strategy.swing.intraday_pull --self-test
+```
+
+One EODHD `intraday/` request per **chunk** of up to 60 trading days for a
+symbol (not one request per symbol-day — the Alpaca probe's per-pair-request
+shape does not scale to the full ~900-symbol, ~10-year universe), so a call
+covers roughly 60 symbol-days at once. Writes `var/swing_pit/intraday/<code>.csv`
+(one row per date/bucket: HIT/BACKFILL/MISSING, same rule and tolerance the
+Alpaca probe used) and resumes — a symbol with an existing file is skipped
+unless `--refresh`. Prints the chunk-count/wall-clock plan and stops without
+`--confirm`.
+
+**Discovers the real per-request window cap rather than assuming it**
+(`w07_0012_intraday_data_options_20260925.md`'s own caveat: the ~120-day cap
+is inferred from EODHD's docs, not confirmed): any date inside a requested
+chunk that has an EOD close on file but comes back with zero bars anywhere in
+that chunk's response is flagged to `var/swing_pit/intraday_chunk_gaps.csv`,
+never silently folded into a real MISSING bucket. A few scattered gaps look
+like genuine no-print days; many clustered at the same offset from a chunk's
+start means the assumed 60-trading-day chunk size is too large for the real
+cap.
+
+Same conventions as `pit_universe.py` and `alpaca_coverage_probe.py`: no repo
+imports beyond `pit_universe` (the EODHD fetch factory and key handling) and
+`reversal_v0` (the point-in-time universe loader and its guards) — both
+siblings in this package; key from `EODHD_API_KEY` only, no `--key` flag,
+scrubbed from everything this tool prints.
+
+**Part 2, not yet built:** the fill engine itself — bucket entry pricing off
+this pull's output, the N-day same-bucket exit (spec S2.4), and its own
+mutation-tested guard that an exit never reads a bucket price from before its
+own entry day. W07-0012 subitem 5 stays open until that lands.
+
+---
+
 ## Open, blocking
 
 - **G2** is **provisionally cleared**: 2026-09-18, one full regular session,
