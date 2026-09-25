@@ -269,6 +269,35 @@ def test_rth_root_never_uses_the_shared_schema_folder(tmp_path):
     assert "H60" in r.parts
 
 
+def test_rth_root_does_not_double_the_h60_segment(tmp_path):
+    """rth_root() takes the H60 root directly (as guard_archive() and
+    run.py's archive_root() both return, and as --archive is documented on
+    both CLIs) -- it must not append another H60_SUBDIR on top. This is the
+    defect W14-0004 hit: 2192 real sessions were pulled to
+    <H60 root>/H60/<dataset>/<rth dir> before it was caught."""
+    h60_root = tmp_path / "Databento" / "H60"
+    r = P.rth_root(h60_root)
+    assert r == h60_root / P.DATASET / P.RTH_DIR
+    assert r.parts.count("H60") == 1
+
+
+def test_main_pull_and_run_build_cache_agree_on_where_files_land(tmp_path, monkeypatch):
+    """Cross-check the two real call sites that write/read the RTH directory:
+    data_plan.main()'s --pull (via pull() -> rth_root()) and run.py's
+    --build-cache (via archive_root() + rth_root()) must land on the exact
+    same directory for the same shared archive, with no double H60."""
+    from strategy.h60 import run as RUN
+    shared = tmp_path / "Databento"
+    shared.mkdir()
+    monkeypatch.setattr("common.databento_fetch.default_archive", lambda: str(shared))
+    pull_root = P.guard_archive(shared / P.H60_SUBDIR, shared)
+    pull_dir = P.rth_root(pull_root)
+    build_cache_root = RUN.archive_root(None)
+    build_cache_dir = build_cache_root / P.DATASET / P.RTH_DIR
+    assert pull_dir == build_cache_dir
+    assert str(pull_dir).count("H60") == 1
+
+
 # --------------------------------------------------------------------------
 # pulling
 # --------------------------------------------------------------------------

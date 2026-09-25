@@ -327,8 +327,17 @@ def report(dataset: str, rng: tuple[dt.date, dt.date], start: dt.date,
 # pulling
 # --------------------------------------------------------------------------
 
-def rth_root(archive: Path, dataset: str = DATASET) -> Path:
-    return Path(archive) / H60_SUBDIR / dataset / RTH_DIR
+def rth_root(h60_root: Path, dataset: str = DATASET) -> Path:
+    """`h60_root` is already the H60 archive root -- e.g. guard_archive()'s
+    return value, or run.py's archive_root(). It is NOT the shared Databento
+    archive: --archive on this CLI and on strategy.h60.run both document
+    themselves as taking the H60 root, and every real caller (main()'s pull,
+    run.py's --build-cache) already has that root in hand by the time it
+    needs the RTH directory. Appending H60_SUBDIR here on top of that would
+    double it to <h60_root>/H60/<dataset>/<rth dir> -- exactly the defect
+    W14-0004 hit (2192 real sessions were pulled to that doubled path before
+    this was caught; see git history for the one-time move that fixed it)."""
+    return Path(h60_root) / dataset / RTH_DIR
 
 
 def guard_archive(archive: Path, shared: Path | None) -> Path:
