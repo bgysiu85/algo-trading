@@ -107,6 +107,22 @@ def roll_sessions(df_1h: pd.DataFrame) -> list[dict]:
     return out
 
 
+def coverage(df_1h: pd.DataFrame, *, gap_hours: int = 3) -> dict:
+    """W15-0004 step 7 checkpoint 10. REGISTERED sec 3 item 11: "Coverage in
+    the same pass: bars per year, gaps, roll dates, first and last bar" --
+    every one of those is already exactly what this gate (G1) computes for
+    its own one-time report (bars_per_year, gaps_over, roll_sessions), so
+    this is a thin re-assembly for report.py to call on every run's own
+    1-hour archive, NOT a second read-back gate: it does not touch the
+    owned ohlcv-1d comparison (that stays G1's one-time job, run() above,
+    not something every backtest pass repeats)."""
+    return {
+        "bars_per_year": bars_per_year(df_1h),
+        "gaps_over_3h": gaps_over(df_1h, hours=gap_hours),
+        "roll_sessions": roll_sessions(df_1h),
+    }
+
+
 def utc_daily(df_1h: pd.DataFrame) -> pd.DataFrame:
     """CL.c.0 1-hour bars (tz-aware UTC index; open/high/low/close/volume/
     held_id columns, e.g. from bars.split_held) re-aggregated on UTC

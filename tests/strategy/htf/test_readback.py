@@ -164,3 +164,31 @@ class TestRunPassFailGating:
         assert report["passed"] is True
         assert report["daily_agreement"]["pct_within_tol"] == 1.0
         assert report["daily_agreement_session_grid_reported_only"]["pct_within_tol"] < 1.0
+
+
+class TestCoverage:
+    """W15-0004 step 7 checkpoint 10, REGISTERED sec 3 item 11: coverage() is
+    a thin re-assembly of bars_per_year/gaps_over/roll_sessions -- it must
+    not touch the owned ohlcv-1d comparison (no ohlcv1d_path argument at
+    all), and must report exactly what each of those three already gives."""
+
+    def test_assembles_the_three_figures_sec_3_item_11_asks_for(self):
+        df_1h = _synth_1h_with_roll(n_days=6)
+        cov = R.coverage(df_1h)
+        assert set(cov.keys()) == {"bars_per_year", "gaps_over_3h", "roll_sessions"}
+        assert cov["bars_per_year"] == R.bars_per_year(df_1h)
+        assert cov["gaps_over_3h"] == R.gaps_over(df_1h, hours=3)
+        assert cov["roll_sessions"] == R.roll_sessions(df_1h)
+        assert len(cov["roll_sessions"]) == 1     # the synthetic roll fixture's own roll
+
+    def test_gap_hours_is_threaded_through(self):
+        df_1h = _synth_1h(n_days=4)
+        cov = R.coverage(df_1h, gap_hours=1)
+        assert cov["gaps_over_3h"] == R.gaps_over(df_1h, hours=1)
+
+    def test_empty_input_does_not_raise(self):
+        empty = _synth_1h(n_days=0)
+        cov = R.coverage(empty)
+        assert cov["bars_per_year"]["n_total"] == 0
+        assert cov["gaps_over_3h"] == []
+        assert cov["roll_sessions"] == []
