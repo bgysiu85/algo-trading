@@ -337,6 +337,78 @@ report layer) is next.
 
 ---
 
+## `report_layer.py` — the S3 backtest/report layer (W07-0012 subitem 6)
+
+Turns `fill_engine.py`'s priced trades into the nine things spec S3
+(`docs/research/REGISTERED_swing_v0.md`) requires every run to emit: net
+market-relative return at three friction levels, both halves, every
+calendar year, drop-top-N by name, a 2,000-resample cluster bootstrap, a
+2,000-draw random-decile control, the full K x N x bucket grid plus the
+ensemble, and coverage/counts.
+
+```
+python -m strategy.swing.report_layer run --pit-dir var/swing_pit
+python -m strategy.swing.report_layer --self-test
+```
+
+**Does NOT spend the holdout** (`holdout_swing.json`, spec S6) — reserved
+for the deployed cell alone, and explicitly outside this subitem's own
+title.
+
+**Friction (spec S2.6), three levels:**
+- `measured` — G2's own **5.46 bps all-in** figure (spread + IBKR fees
+  already combined; nothing added here).
+- `bucket` — the by-entry-time **spread-only** figure (7.98/3.61/2.96 bps,
+  open/midday/close) **plus commission**, added per S2.6's own instruction.
+- `stress` — **2x the bucket-specific level's full total** (one of two
+  readings the spec's wording leaves open; documented as a caveat).
+
+**Commission is a documented simplification**: the spec doesn't fix a
+position dollar size (S2.5 sizes by risk-budget *fraction*), so this module
+uses `swing_preflight_20260914.md` S3.5's own conservative upper-bound
+combined commission + exchange/regulatory/clearing bps by cap tier — 1.7
+bps (S&P 500) / 3.3 bps (S&P 400) — keyed by whichever index's spell covers
+the code on its entry date, never an invented per-share formula.
+
+**2:1 levered financing**: 0.99 bps per TRADING day held (linear, per
+`swing_preflight` S3.4 / the G2 result's own table) — `Trade.n` already IS
+that count. Reported beside the cash-funded headline, never as the
+headline itself (G3).
+
+**Market-relative scoring (G1)**: the benchmark — equal-weight average
+bucket-to-bucket return of every code *eligible* on the entry date (not the
+picked decile) with both a priced entry and exit — does not depend on which
+codes were picked. It is cached once per `(entry_date, exit_date, bucket,
+index)` and reused across every one of the 18 grid cells and every
+random-decile draw that shares it, which is what keeps a 2,000-draw control
+tractable.
+
+**Every aggregation helper is weight-aware** (`aggregate`, `by_half`,
+`by_year`, `drop_top_n`, `cluster_bootstrap_by_month`): a row's `weight`
+defaults to 1.0, and the N-ensemble pools its three N=5/10/20 sleeves at
+weight 1/3 each (S2.4) and reuses every helper unchanged rather than a
+second set of ensemble-specific formulas.
+
+**drop-top-N** ranks CODES by total weighted contribution and drops the
+top N's trades entirely; `"n/a"` (never a `$0`-shaped result) when the
+sample has N or fewer distinct codes traded, per the spec's own
+instruction.
+
+Writes a plain-text report (`--out`, default
+`claude/raw/w07_0012_report_layer.txt`) and a JSON summary with the bulky
+per-trade rows stripped (`--json-out`) — `write_scored_rows_csv()` exports
+any one cell's trade-level rows separately when that detail is needed.
+`--random-draws` overrides the 2,000-draw default for a quick smoke run.
+
+Same "no repo imports beyond the package" convention: only `pit_universe`,
+`reversal_v0`, and `fill_engine`, siblings in this package.
+
+W07-0012 subitem 6 closes once this lands. Subitems 7 (the real EODHD pull,
+Ben, hands-on) and 8/9 (running the backtest on real data, the S3 result
+doc) are next.
+
+---
+
 ## Open, blocking
 
 - **G2** is **provisionally cleared**: 2026-09-18, one full regular session,
