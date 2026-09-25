@@ -104,6 +104,16 @@ from strategy.swing import pit_universe as P
 
 Refused = P.Refused
 
+
+class InvalidSymbol(Exception):
+    """Alpaca rejected the symbol outright (HTTP 400) -- it is not a real
+    ticker, not a coverage gap. `pit_universe.py`'s own EODHD membership data
+    carries codes like 'NFX_OLD' for a name later reused by an unrelated
+    company (the same class of thing `pit_validate.py`'s RENAME check exists
+    for); EODHD accepts that as a code, Alpaca does not. Caught in
+    run_pairs() and reported in its own section, never silently merged into
+    MISSING (a real Alpaca gap) or allowed to abort the whole sample)."""
+
 API_BARS = "https://data.alpaca.markets/v2/stocks/{symbol}/bars"
 ENV_KEY_ID = "ALPACA_API_KEY_ID"
 ENV_SECRET = "ALPACA_API_SECRET_KEY"
@@ -209,6 +219,8 @@ def http_fetch_factory(key_id: str, secret: str, pause: float = ALPACA_PACE_S,
                     time.sleep(delay)
                     delay *= 2
                     continue
+                if e.code == 400:
+                    raise InvalidSymbol(symbol) from None
                 raise RuntimeError(
                     scrub(f"HTTP {e.code} on {symbol} {day}", key_id, secret)
                 ) from None
@@ -332,6 +344,15 @@ def bar_et_time(bar: dict) -> dt.datetime:
     return dt.datetime.fromisoformat(ts).astimezone(ET)
 
 
+def invalid_symbol_observations(symbol: str, day: dt.date,
+                                eod_close: float | None) -> list[Observation]:
+    """One row per bucket for a symbol Alpaca rejected outright (HTTP 400) --
+    not a coverage gap, so never carries HIT/BACKFILL/MISSING."""
+    return [Observation(symbol, day, bucket, btime.isoformat(), None, None,
+                        None, eod_close, None, "INVALID_SYMBOL")
+           for bucket, btime in BUCKETS]
+
+
 def evaluate_day(symbol: str, day: dt.date, bars: list[dict],
                  eod_close: float | None) -> list[Observation]:
     parsed = sorted(((bar_et_time(b), b) for b in bars if "t" in b),
@@ -406,14 +427,26 @@ def cost_lines(plan: dict, pace_s: float = ALPACA_PACE_S) -> list[str]:
 
 
 def run_pairs(fetch: Fetch, pairs: list[tuple[str, dt.date, float]],
-             log=print) -> list[Observation]:
+             log=print) -> tuple[list[Observation], set[str]]:
+    """Returns (observations, symbols Alpaca rejected outright as HTTP 400).
+    A rejected symbol is not a coverage gap -- it is skipped and the run
+    continues rather than aborting on the first bad ticker label."""
     out: list[Observation] = []
+    invalid_symbols: set[str] = set()
     for i, (sym, d, eod_close) in enumerate(pairs, 1):
-        bars = fetch(sym, d)
-        out.extend(evaluate_day(sym, d, bars, eod_close))
+        try:
+            bars = fetch(sym, d)
+        except InvalidSymbol:
+            invalid_symbols.add(sym)
+            out.extend(invalid_symbol_observations(sym, d, eod_close))
+        else:
+            out.extend(evaluate_day(sym, d, bars, eod_close))
         if i % 50 == 0:
             log(f"  {i}/{len(pairs)} symbol-days pulled")
-    return out
+    if invalid_symbols:
+        log(f"  {len(invalid_symbols)} symbol(s) rejected outright by Alpaca "
+           f"(HTTP 400, not a coverage gap): {', '.join(sorted(invalid_symbols))}")
+    return out, invalid_symbols
 
 
 # --------------------------------------------------------------------------
@@ -425,14 +458,29 @@ def _pct(n: int, d: int) -> str:
 
 
 def build_report(obs: list[Observation], delisted_symbols: set[str],
-                 plan: dict) -> str:
+                 plan: dict, invalid_symbols: set[str] | None = None) -> str:
+    invalid_symbols = invalid_symbols or set()
     L = ["Alpaca IEX coverage probe -- W07-0012 subitem 2", ""]
     L += [f"  {k}: {v}" for k, v in plan.items()]
     L.append("")
 
+    if invalid_symbols:
+        L.append(f"SYMBOLS ALPACA REJECTED OUTRIGHT (HTTP 400, not a coverage "
+                 f"gap -- {len(invalid_symbols)} of {plan['symbols_sampled']} "
+                 "sampled; excluded from every table below)")
+        for s in sorted(invalid_symbols):
+            tag = " (ever delisted)" if s in delisted_symbols else ""
+            L.append(f"  {s}{tag}")
+        L.append("")
+
+    # coverage tables only ever score a real Alpaca answer (HIT/BACKFILL/
+    # MISSING); a rejected symbol's rows are reported above, not folded in
+    # here as if Alpaca had answered and simply had no bar.
+    coverage_obs = [o for o in obs if o.status != "INVALID_SYMBOL"]
+
     by_bucket: dict[str, dict[str, int]] = {b: {"HIT": 0, "BACKFILL": 0, "MISSING": 0}
                                             for b, _ in BUCKETS}
-    for o in obs:
+    for o in coverage_obs:
         by_bucket[o.bucket][o.status] += 1
 
     L.append("COVERAGE BY BUCKET (all sampled symbol-days)")
@@ -445,7 +493,7 @@ def build_report(obs: list[Observation], delisted_symbols: set[str],
     L.append("")
 
     def split(pred, label):
-        rows = [o for o in obs if pred(o)]
+        rows = [o for o in coverage_obs if pred(o)]
         by_b: dict[str, dict[str, int]] = {b: {"HIT": 0, "BACKFILL": 0, "MISSING": 0}
                                            for b, _ in BUCKETS}
         for o in rows:
@@ -462,7 +510,7 @@ def build_report(obs: list[Observation], delisted_symbols: set[str],
     split(lambda o: o.symbol in delisted_symbols, "ever delisted from the index")
     split(lambda o: o.symbol not in delisted_symbols, "still current")
 
-    gaps = [o.gap_bps for o in obs if o.bucket == "close" and o.gap_bps is not None]
+    gaps = [o.gap_bps for o in coverage_obs if o.bucket == "close" and o.gap_bps is not None]
     L.append("CLOSE-BUCKET PRICE vs pit_universe.py's EOD CLOSE, in bps (|gap|)")
     if gaps:
         abs_gaps = sorted(abs(g) for g in gaps)
@@ -474,13 +522,13 @@ def build_report(obs: list[Observation], delisted_symbols: set[str],
                  "EOD close to compare")
     L.append("")
 
-    worst = sorted({o.symbol for o in obs},
-                   key=lambda s: sum(1 for o in obs if o.symbol == s and
+    worst = sorted({o.symbol for o in coverage_obs},
+                   key=lambda s: sum(1 for o in coverage_obs if o.symbol == s and
                                      o.status == "MISSING"), reverse=True)[:10]
     L.append("SYMBOLS WITH THE MOST MISSING BUCKETS (top 10)")
     for s in worst:
-        n_missing = sum(1 for o in obs if o.symbol == s and o.status == "MISSING")
-        n_total = sum(1 for o in obs if o.symbol == s)
+        n_missing = sum(1 for o in coverage_obs if o.symbol == s and o.status == "MISSING")
+        n_total = sum(1 for o in coverage_obs if o.symbol == s)
         if n_missing:
             tag = " (ever delisted)" if s in delisted_symbols else ""
             L.append(f"  {s:<8}{tag}  {n_missing}/{n_total} bucket-days missing")
@@ -507,11 +555,13 @@ def write_obs_csv(path: Path, obs: list[Observation]) -> None:
 def self_test() -> list[str]:
     import tempfile
 
-    sample_day = dt.date(2020, 6, 15)     # inside BOTH spells' coverage below
+    sample_day = dt.date(2020, 6, 15)     # inside ALL three spells' coverage below
     spells = [
         P.Spell("sp500", "GOOD", "Still Here Inc", dt.date(2015, 1, 1), None,
                True, False),
         P.Spell("sp500", "GONE", "Delisted Co", dt.date(2015, 1, 1),
+               dt.date(2020, 6, 30), False, True),
+        P.Spell("sp500", "BAD_OLD", "Reused Ticker Co", dt.date(2015, 1, 1),
                dt.date(2020, 6, 30), False, True),
     ]
 
@@ -528,7 +578,13 @@ def self_test() -> list[str]:
     gone_bars: list[dict] = []           # nothing prints all day -> MISSING x3
 
     def fake_fetch(symbol: str, day: dt.date) -> list[dict]:
-        return good_bars if symbol == "GOOD" else gone_bars
+        if symbol == "GOOD":
+            return good_bars
+        if symbol == "BAD_OLD":
+            # Alpaca doesn't recognize an EODHD-internal reuse label --
+            # simulates the real NFX_OLD crash this fix addresses.
+            raise InvalidSymbol(symbol)
+        return gone_bars
 
     with tempfile.TemporaryDirectory() as td:
         out = Path(td)
@@ -546,14 +602,21 @@ def self_test() -> list[str]:
             w.writerow({"date": sample_day.isoformat(), "open": 5.0, "high": 5.1,
                        "low": 4.9, "close": 5.0, "adjusted_close": 5.0,
                        "volume": 500})
+        with (eod_dir / "BAD_OLD.csv").open("w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=P.PRICE_FIELDS)
+            w.writeheader()
+            w.writerow({"date": sample_day.isoformat(), "open": 7.0, "high": 7.1,
+                       "low": 6.9, "close": 7.0, "adjusted_close": 7.0,
+                       "volume": 200})
 
-        pairs, plan = build_plan(spells, out, sample_n=2, dates_n=1, seed=1,
+        pairs, plan = build_plan(spells, out, sample_n=3, dates_n=1, seed=1,
                                  window_start=sample_day, window_end=sample_day)
-        assert plan["symbols_sampled"] == 2, plan
-        assert plan["pairs_to_pull"] == 2, plan   # both cover 2026-01-05
+        assert plan["symbols_sampled"] == 3, plan
+        assert plan["pairs_to_pull"] == 3, plan   # all three cover the sample day
 
-        obs = run_pairs(fake_fetch, pairs, log=lambda m: None)
-        assert len(obs) == 6, len(obs)   # 2 symbols x 3 buckets
+        obs, invalid_symbols = run_pairs(fake_fetch, pairs, log=lambda m: None)
+        assert len(obs) == 9, len(obs)   # 3 symbols x 3 buckets
+        assert invalid_symbols == {"BAD_OLD"}, invalid_symbols
 
         good = {o.bucket: o for o in obs if o.symbol == "GOOD"}
         assert good["open"].status == "HIT" and good["open"].minutes_back == 0, good
@@ -567,13 +630,23 @@ def self_test() -> list[str]:
         gone = {o.bucket: o for o in obs if o.symbol == "GONE"}
         assert all(o.status == "MISSING" for o in gone.values()), gone
 
-        report = build_report(obs, delisted_symbols={"GONE"}, plan=plan)
+        bad = {o.bucket: o for o in obs if o.symbol == "BAD_OLD"}
+        assert all(o.status == "INVALID_SYMBOL" for o in bad.values()), bad
+
+        report = build_report(obs, delisted_symbols={"GONE", "BAD_OLD"}, plan=plan,
+                              invalid_symbols=invalid_symbols)
         assert "ever delisted from the index" in report
         assert "GONE" in report        # shows up as a symbol with missing buckets
+        assert "REJECTED OUTRIGHT" in report and "BAD_OLD" in report
+        # a rejected symbol must never leak into the worst-missing-buckets
+        # table as if Alpaca had simply had no bar for it
+        assert "BAD_OLD" not in report.split("MOST MISSING BUCKETS")[1]
 
     return ["self-test passed: HIT / BACKFILL / MISSING classified correctly, "
-           "the close-bucket bps gap matched by hand, and the delisted split "
-           "and worst-symbols table both surfaced the all-missing name"]
+           "the close-bucket bps gap matched by hand, an HTTP-400 rejection "
+           "(NFX_OLD-style code) was skipped and reported separately instead "
+           "of aborting the run, and the delisted split and worst-symbols "
+           "table both surfaced the all-missing name"]
 
 
 # --------------------------------------------------------------------------
@@ -622,7 +695,7 @@ def main(argv: list[str] | None = None) -> int:
     key_id, secret = api_keys()
     fetch = http_fetch_factory(key_id, secret)
     try:
-        obs = run_pairs(fetch, pairs)
+        obs, invalid_symbols = run_pairs(fetch, pairs)
     except RuntimeError as e:
         print(f"STOPPED: {scrub(str(e), key_id, secret)}", file=sys.stderr)
         return 2
@@ -633,7 +706,7 @@ def main(argv: list[str] | None = None) -> int:
     delisted_symbols = {c for c, ss in by_code.items() if any(s.is_delisted for s in ss)}
 
     write_obs_csv(out / "alpaca_coverage_obs.csv", obs)
-    report = build_report(obs, delisted_symbols, plan)
+    report = build_report(obs, delisted_symbols, plan, invalid_symbols)
     (out / "alpaca_coverage_report.txt").write_text(report, encoding="utf-8")
     print("\n" + report)
     print(f"written to {out / 'alpaca_coverage_report.txt'} and "

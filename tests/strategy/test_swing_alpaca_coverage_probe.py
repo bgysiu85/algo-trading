@@ -209,6 +209,21 @@ def test_build_report_sections_present():
     assert "does not decide" in report
 
 
+def test_build_report_invalid_symbol_excluded_from_coverage_tables():
+    day = D(2026, 3, 10)
+    obs = A.evaluate_day("AAA", day, [bar(day, "13:30", 10.0)], eod_close=10.0)
+    obs += A.invalid_symbol_observations("NFX_OLD", day, eod_close=None)
+    plan = {"symbols_sampled": 2, "symbols_ever_delisted": 1,
+           "dates_sampled": 1, "pairs_to_pull": 2,
+           "pairs_skipped_no_eod_or_not_member": 0}
+    report = A.build_report(obs, delisted_symbols={"NFX_OLD"}, plan=plan,
+                            invalid_symbols={"NFX_OLD"})
+    assert "REJECTED OUTRIGHT" in report
+    assert "NFX_OLD" in report
+    # not folded into the missing-buckets table as a genuine coverage gap
+    assert "NFX_OLD" not in report.split("MOST MISSING BUCKETS")[1]
+
+
 def test_write_obs_csv_roundtrip(tmp_path: Path):
     day = D(2026, 3, 10)
     obs = A.evaluate_day("AAA", day, [bar(day, "13:30", 10.0)], eod_close=10.0)
@@ -219,6 +234,28 @@ def test_write_obs_csv_roundtrip(tmp_path: Path):
     assert len(rows) == 3
     assert set(rows[0]) == set(A.OBS_FIELDS)
     assert rows[0]["symbol"] == "AAA"
+
+
+# --------------------------------------------------------------------------
+# run_pairs: a rejected symbol (HTTP 400) must not abort the run
+# --------------------------------------------------------------------------
+
+def test_run_pairs_skips_invalid_symbol_instead_of_aborting():
+    day = D(2026, 3, 10)
+
+    def fetch(symbol: str, d: D) -> list[dict]:
+        if symbol == "NFX_OLD":
+            raise A.InvalidSymbol(symbol)
+        return [bar(d, "13:30", 10.0)]
+
+    pairs = [("AAA", day, 10.0), ("NFX_OLD", day, 20.0), ("BBB", day, 30.0)]
+    obs, invalid_symbols = A.run_pairs(fetch, pairs, log=lambda m: None)
+    assert invalid_symbols == {"NFX_OLD"}
+    assert len(obs) == 9   # 3 symbols x 3 buckets, run continued past NFX_OLD
+    bad = [o for o in obs if o.symbol == "NFX_OLD"]
+    assert all(o.status == "INVALID_SYMBOL" for o in bad)
+    good = [o for o in obs if o.symbol == "AAA"]
+    assert any(o.status == "HIT" for o in good)   # AAA/BBB still processed normally
 
 
 # --------------------------------------------------------------------------
