@@ -213,6 +213,48 @@ Those rows **are** the survivorship hole, and the number to watch.
 
 ---
 
+## `alpaca_coverage_probe.py` — is Alpaca's free IEX feed good enough for the bucket fill? (W07-0012)
+
+The entry-bucket fill (`REGISTERED_swing_v0.md` S2.3, 09:30/11:30/15:30 ET) needs
+an intraday quote; only daily EOD bars exist on disk. Three sources were priced
+in `claude/w07_0012_intraday_data_options_20260925.md` (EODHD intraday upgrade,
+Polygon.io, Alpaca free/IEX-only). Ben, 2026-09-25: *"Let's try Alpaca first. If
+there is still gap, then we go for EODHD."* This probe measures that gap on a
+**sample**, not the full ~900-name universe, before either the full pull or the
+EODHD spend happens.
+
+```
+$env:ALPACA_API_KEY_ID = op read "op://Trading/Alpaca/key-id"
+$env:ALPACA_API_SECRET_KEY = op read "op://Trading/Alpaca/secret-key"
+python -m strategy.swing.alpaca_coverage_probe --sample 40 --dates 20 --confirm
+python -m strategy.swing.alpaca_coverage_probe --self-test
+```
+
+Requires `membership.csv` and `eod/*.csv` from `pit_universe.py` above (a
+(symbol, date) pair is only pulled if it is both a member spell on that date
+and `pit_universe.py` already has an EOD close for it). Half the sampled
+symbols are drawn from names that were ever delisted from the index, because
+that is the coverage risk actually in question, not an all-current sample.
+Prints the request-count/wall-clock plan and stops without `--confirm` (§1:
+"a tool that can spend HOURS states that number too," even at $0 of billing).
+
+Writes `var/swing_pit/alpaca_coverage_obs.csv` (one row per symbol/date/bucket:
+HIT within 5 minutes of the bucket, BACKFILL further back, or MISSING) and
+`alpaca_coverage_report.txt` (coverage % by bucket, split ever-delisted vs
+current, the close-bucket price gap against the EOD close in bps, and the
+symbols with the most missing buckets). **It measures; it does not decide** —
+the board's subitem 4 (Ben) reviews the report and approves the EODHD top-up
+only if the gap is material.
+
+Same "no repo imports beyond the package" convention as `pit_universe.py`:
+standard library only, plus `from strategy.swing import pit_universe as P` for
+the membership/EOD readers it already owns. Key from `ALPACA_API_KEY_ID` /
+`ALPACA_API_SECRET_KEY` only — the same two names `common/news_pull.py` uses
+for the same vendor — never a `--key` flag, both scrubbed from everything
+this tool prints.
+
+---
+
 ## Open, blocking
 
 - **G2** is **provisionally cleared**: 2026-09-18, one full regular session,
