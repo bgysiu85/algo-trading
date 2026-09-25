@@ -296,10 +296,44 @@ imports beyond `pit_universe` (the EODHD fetch factory and key handling) and
 siblings in this package; key from `EODHD_API_KEY` only, no `--key` flag,
 scrubbed from everything this tool prints.
 
-**Part 2, not yet built:** the fill engine itself — bucket entry pricing off
-this pull's output, the N-day same-bucket exit (spec S2.4), and its own
-mutation-tested guard that an exit never reads a bucket price from before its
-own entry day. W07-0012 subitem 5 stays open until that lands.
+---
+
+## `fill_engine.py` — bucket entry/exit pricing, the N-day exit (W07-0012 subitem 5, part 2 of 2)
+
+Turns `reversal_v0.py`'s daily picks into priced trades off `intraday_pull.py`'s
+output: entry is the very next trading session after the signal day (spec
+S2.3 — "the signal is known at the previous close, and the order is placed at
+a fixed clock time the next session," never the signal day itself), exit is
+exactly N trading days later at the **same** bucket (S2.4).
+
+```
+python -m strategy.swing.fill_engine run --bucket midday --n 5 --k 5
+python -m strategy.swing.fill_engine --self-test
+```
+
+**This is raw fill pricing only** — one row per (code, signal day): entry/exit
+date, bucket price, raw simple return. No costs, no market-relative scoring,
+no bootstrap, no K x N x bucket grid — that is spec S3's job, W07-0012
+subitem 6, not yet built. A pick that cannot be priced (no next session, no
+session N days later, or a MISSING/absent bucket price at either end) is
+written to `unfilled_<tag>.csv` with a reason, never silently dropped — spec
+S3 item 8 requires every count reported.
+
+**Mutation-tested no-look-ahead guard** (`check_no_lookahead`): re-derives,
+independently of trade construction, that every trade's entry index is
+exactly the signal index + 1 and its exit index is exactly entry + N.
+`tests/strategy/test_swing_fill_engine.py` and the module's own self-test
+mutate a trade back onto its own signal day (same-day entry) and short its
+hold by one session, and assert the guard catches both — the fill-side
+equivalent of `reversal_v0.py`'s hindsight guard.
+
+Writes `var/swing_pit/trades/trades_<k><bucket><n>.csv` and
+`unfilled_<k><bucket><n>.csv`. Same "no repo imports beyond the package"
+convention: only `pit_universe`, `reversal_v0`, and `intraday_pull` (reads
+its `OBS_FIELDS` output shape rather than re-defining it).
+
+W07-0012 subitem 5 (both parts) closes once this lands; subitem 6 (the S3
+report layer) is next.
 
 ---
 
