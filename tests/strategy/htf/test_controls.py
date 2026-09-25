@@ -1,13 +1,17 @@
-"""Tests for strategy/htf/controls.py (C2 Donchian). W15-0004 step 7
-checkpoint 4. detect_c2/simulate_c2 are tested directly against small
-hand-built entry-chart frames, same approach as test_exits.py/test_runner.py."""
+"""Tests for strategy/htf/controls.py (C2 Donchian, C3 random entries).
+W15-0004 step 7 checkpoints 4-5. detect_c2/simulate_c2/_draw_entries are
+tested directly against small hand-built entry-chart frames, same approach
+as test_exits.py/test_runner.py."""
 from __future__ import annotations
+
+import zlib
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from strategy.htf import controls as CT
+from strategy.htf import signals as SIG
 
 
 def _entry_adj(rows):
@@ -125,3 +129,101 @@ class TestSimulateC2:
         assert t.fill_raw == pytest.approx(50.0)             # offset 0 at the fill row
         assert t.exit_price_adj == pytest.approx(34.0)        # data_end -> close_adj of the last row (raw 35.0 + offset -1.0)
         assert t.exit_price_raw == pytest.approx(35.0)         # adj - that row's own offset -> back to raw close
+
+
+# ---------------------------------------------------------------------------
+# C3 -- random entries, same stop/trail (reuses runner.simulate exactly)
+# ---------------------------------------------------------------------------
+from strategy.htf import runner as R  # noqa: E402
+
+
+def _hourly(rows):
+    """Mirrors test_runner.py's _hourly fixture (session, bar, open, high,
+    low, close, held_id, offset), needed here because run_c3/flat_pool work
+    against the SAME two-grid shape (entry chart + 1H) as runner.py."""
+    idx = pd.date_range("2020-01-01", periods=len(rows), freq="h", tz="UTC")
+    df = pd.DataFrame({
+        "session": [r[0] for r in rows], "bar": [r[1] for r in rows],
+        "open": [r[2] for r in rows], "high": [r[3] for r in rows],
+        "low": [r[4] for r in rows], "close": [r[5] for r in rows],
+        "held_id": [r[6] for r in rows], "adj_offset": [r[7] for r in rows],
+    })
+    for c in ("open", "high", "low", "close"):
+        df[c + "_adj"] = df[c] + df["adj_offset"]
+    df["t_open"] = idx
+    return df
+
+
+class TestFlatPool:
+    def test_excludes_bars_covered_by_a_v0_trade_window(self):
+        hourly = _hourly([("d1", i, 100.0, 100.1, 99.9, 100.0, 1, 0.0) for i in range(6)])
+        trade = R.Trade(session="d1", direction="long", entry_t=hourly["t_open"].iloc[1],
+                        fill_adj=100.0, fill_raw=100.0, stop_dist=1.0, initial_stop_adj=99.0,
+                        start_pos=1, exit_pos=3, exit_t=hourly["t_open"].iloc[3],
+                        exit_price_adj=99.0, exit_price_raw=99.0, exit_reason="initial_stop",
+                        trail_started=False, n_rolls=0)
+        pool = CT.flat_pool(hourly, [trade], min_room=1)
+        # bars 1 and 2 (>= entry_t, < exit_t) are covered; 0, 3, 4 are free
+        # (5 excluded by min_room=1 -> needs room, n=6 so index<5)
+        assert 1 not in pool and 2 not in pool
+        assert 0 in pool and 3 in pool and 4 in pool
+        assert 5 not in pool   # no room left to run
+
+
+class TestDrawEntries:
+    """_draw_entries is the actual randomised unit inside run_c3 (run_c3
+    itself is archive-level wiring through preflight.prepare_grids and is
+    exercised for real on Ben's machine, same convention as test_runner.py's
+    run_v0/run_c1). Uses a small entry-chart fixture (mirrors _entry_adj
+    above) with real swing structure so preflight._initial_stop returns a
+    usable stop, not None, for the drawn bars."""
+
+    def test_same_seed_gives_the_same_draw(self):
+        rows = _flat_history(30, base=50.0)
+        entry_adj = _entry_adj(rows)
+        swing_low = SIG.swing_lows(entry_adj["low_adj"]).ffill()
+        swing_high = SIG.swing_highs(entry_adj["high_adj"]).ffill()
+        low_adj = entry_adj["low_adj"].to_numpy()
+        high_adj = entry_adj["high_adj"].to_numpy()
+        pool = np.arange(5, 25)
+
+        def _draw(seed):
+            rng = np.random.default_rng(seed)
+            return CT._draw_entries(entry_adj, pool, ["long", "short"], rng=rng,
+                                    swing_low=swing_low, swing_high=swing_high,
+                                    low_adj=low_adj, high_adj=high_adj)
+
+        e1 = _draw(zlib.crc32(b"pfx0") & 0xFFFFFFFF)
+        e2 = _draw(zlib.crc32(b"pfx0") & 0xFFFFFFFF)
+        assert [e["t_open"] for e in e1] == [e["t_open"] for e in e2]
+        assert [e["direction"] for e in e1] == [e["direction"] for e in e2]
+
+    def test_preserves_the_requested_direction_mix_and_is_time_ordered(self):
+        rows = _flat_history(30, base=50.0)
+        entry_adj = _entry_adj(rows)
+        swing_low = SIG.swing_lows(entry_adj["low_adj"]).ffill()
+        swing_high = SIG.swing_highs(entry_adj["high_adj"]).ffill()
+        low_adj = entry_adj["low_adj"].to_numpy()
+        high_adj = entry_adj["high_adj"].to_numpy()
+        pool = np.arange(5, 25)
+        rng = np.random.default_rng(42)
+        directions = ["long", "long", "short"]
+        entries = CT._draw_entries(entry_adj, pool, directions, rng=rng, swing_low=swing_low,
+                                   swing_high=swing_high, low_adj=low_adj, high_adj=high_adj)
+        assert sorted(e["direction"] for e in entries) == sorted(directions)
+        t_opens = [e["t_open"] for e in entries]
+        assert t_opens == sorted(t_opens)
+
+    def test_every_stop_dist_is_positive(self):
+        rows = _flat_history(30, base=50.0)
+        entry_adj = _entry_adj(rows)
+        swing_low = SIG.swing_lows(entry_adj["low_adj"]).ffill()
+        swing_high = SIG.swing_highs(entry_adj["high_adj"]).ffill()
+        low_adj = entry_adj["low_adj"].to_numpy()
+        high_adj = entry_adj["high_adj"].to_numpy()
+        pool = np.arange(5, 25)
+        rng = np.random.default_rng(7)
+        entries = CT._draw_entries(entry_adj, pool, ["long", "short", "long"], rng=rng,
+                                   swing_low=swing_low, swing_high=swing_high,
+                                   low_adj=low_adj, high_adj=high_adj)
+        assert all(e["stop_dist"] > 0 for e in entries)
