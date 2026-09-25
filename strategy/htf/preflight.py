@@ -297,12 +297,27 @@ def run(archive_1h) -> dict:
                                  "board separately, not silently skipped.")
     v0_b = report["variants"]["v0"]["B"]["totals"]["entries_training"]
     v0_a2h = report["variants"]["v0"]["A-2H"]["totals"]["entries_training"]
-    report["underpowered_stop_rule"] = {
-        "v0_B_entries_training": v0_b, "v0_A2H_entries_training": v0_a2h,
-        "min_required": MIN_ENTRIES,
-        "underpowered": (v0_b < MIN_ENTRIES) or (v0_a2h < MIN_ENTRIES),
-    }
+    report["underpowered_stop_rule"] = combine_underpowered(v0_b, v0_a2h)
     return report
+
+
+def combine_underpowered(v0_b_entries: int, v0_a2h_entries: int,
+                         min_required: int = MIN_ENTRIES) -> dict:
+    """REGISTERED sec 5.2, verbatim: 'if v0 has fewer than 150 entries on
+    the training side in BOTH B and A-2H, the study stops as underpowered'.
+    That is an AND -- one scenario clearing the bar is enough to continue,
+    even if the other falls short (which is then its own reported finding,
+    not a stop condition on its own). Split out from run() so the
+    AND-vs-OR distinction is directly unit-testable without a real
+    archive."""
+    below_b = v0_b_entries < min_required
+    below_a2h = v0_a2h_entries < min_required
+    return {
+        "v0_B_entries_training": v0_b_entries, "v0_A2H_entries_training": v0_a2h_entries,
+        "min_required": min_required,
+        "underpowered": below_b and below_a2h,
+        "v0_B_below_threshold": below_b, "v0_A2H_below_threshold": below_a2h,
+    }
 
 
 def main(argv=None) -> int:
@@ -326,9 +341,15 @@ def main(argv=None) -> int:
                   f"stop$ median={t['stop_dist_median']!s:>8s}  "
                   f"p90={t['stop_dist_p90']!s:>8s}")
     ur = report["underpowered_stop_rule"]
-    print(f"\nunderpowered stop rule: v0 B={ur['v0_B_entries_training']}, "
-          f"v0 A-2H={ur['v0_A2H_entries_training']} (need >= {ur['min_required']} "
-          f"in BOTH) -> {'UNDERPOWERED' if ur['underpowered'] else 'OK'}")
+    print(f"\nunderpowered stop rule (sec 5.2, AND): v0 B={ur['v0_B_entries_training']}"
+          f"{' [below 150]' if ur['v0_B_below_threshold'] else ''}, "
+          f"v0 A-2H={ur['v0_A2H_entries_training']}"
+          f"{' [below 150]' if ur['v0_A2H_below_threshold'] else ''} "
+          f"(stops only if BOTH < {ur['min_required']}) -> "
+          f"{'UNDERPOWERED' if ur['underpowered'] else 'OK'}")
+    if ur["v0_B_below_threshold"] or ur["v0_A2H_below_threshold"]:
+        print("  note: one scenario is individually below 150 even though the "
+              "study is not stopped -- read its numbers with that in mind.")
     print(f"\n{report['v0_tl_not_built']}")
 
     if a.out:

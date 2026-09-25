@@ -191,3 +191,30 @@ class TestSummarize:
         out = P.summarize(entries, counts, scenario="B")
         assert out["totals"]["underpowered"] is False
         assert out["totals"]["entries_training"] == 150
+
+
+class TestCombineUnderpowered:
+    """REGISTERED sec 5.2's stop rule is an AND across B and A-2H, not an
+    OR -- regression coverage for the bug found on the first real G2 run
+    (v0 B=143, v0 A-2H=259: one scenario below 150, the other comfortably
+    above; the study is NOT underpowered)."""
+
+    def test_real_run_result_is_not_underpowered(self):
+        out = P.combine_underpowered(143, 259)
+        assert out["v0_B_below_threshold"] is True
+        assert out["v0_A2H_below_threshold"] is False
+        assert out["underpowered"] is False
+
+    def test_both_below_is_underpowered(self):
+        out = P.combine_underpowered(100, 120)
+        assert out["underpowered"] is True
+
+    def test_both_above_is_not_underpowered(self):
+        out = P.combine_underpowered(200, 300)
+        assert out["underpowered"] is False
+        assert out["v0_B_below_threshold"] is False
+        assert out["v0_A2H_below_threshold"] is False
+
+    def test_exactly_at_threshold_is_not_below(self):
+        out = P.combine_underpowered(150, 150)
+        assert out["underpowered"] is False
