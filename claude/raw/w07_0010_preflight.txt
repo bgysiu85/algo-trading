@@ -1,0 +1,28 @@
+SWING-v0 signal-layer pre-flight (spec section 5) -- 2015-01-02 to 2026-09-18, 2945 sessions, 1515 codes with usable prices
+
+GUARDS
+  universe_file_guard: passed at load (see load_universe)
+  hindsight_guard: passed, 72360 (day, spell) pairs checked over 40 sampled days
+  suspect_leak_guard: passed, 35 suspect spells confirmed absent from the eligible universe
+
+K = 5
+  eligible universe size   min 853  median 894  max 914
+  bottom-decile size       min 0  median 89  max 91
+  days with decile < 5 names: 0 (0.0%)
+  no-trade days (decile empty): 5
+  day-to-day decile turnover   min 0.1702  median 0.5528  max 1.0
+
+K = 10
+  eligible universe size   min 853  median 894  max 914
+  bottom-decile size       min 0  median 89  max 91
+  days with decile < 5 names: 0 (0.0%)
+  no-trade days (decile empty): 10
+  day-to-day decile turnover   min 0.1684  median 0.419  max 1.0
+
+STOP-RULE CHECK (spec section 5)
+  not triggered: the bottom decile has at least 5 names on more than 90% of trading days, for every K
+
+CAVEATS
+  - Ranking uses adjusted_close (splits and dividends folded in), a design choice this module makes -- see the module docstring.
+  - The trading calendar is AAPL's own session dates, not an independent exchange calendar.
+  - This pre-flight does not price any trade: the entry-time bucket (2.3) and the N-day exit (2.4) need intraday quotes this module does not yet load. No P&L number appears anywhere in this report.
