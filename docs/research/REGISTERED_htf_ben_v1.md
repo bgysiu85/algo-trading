@@ -177,6 +177,36 @@ $ per MCL (median, p90, max). No exit price is read; the runner refuses P&L in t
 **Stop rule:** fewer than **150 v1 entries on B** → stop as underpowered, reported as the
 finding, and back to Ben before any P&L.
 
+**Amendment C (PRE-RUN, 2026-09-26) — q_h, q_e and the G2 result.** Computed on the training
+side (2010-06-06 → 2021-12-31), 4-hour back-adjusted CL bars, from `strategy/htf/v1_preflight.py`
+against the real archive (Ben's machine, commit 58a0340):
+
+- **q_h = 0.190280** (25th percentile of the rolling max\|hist\|/ATR(14) ratio, 9-bar window)
+- **q_e = 0.501239** (25th percentile of the rolling max\|spread\|/ATR(14) ratio, 9-bar window)
+
+Stop rule (§5.2): **324 v1 entries on B, training side — clears the 150 minimum. NOT underpowered.**
+(506 on A-2H.) These two numbers are now fixed for every subsequent v1 run on this line — §7:
+"Changing q_h / q_e after G2 writes them in" is registered as not to be done.
+
+G2 counts (training side, full detail in `Claude outputs/w15_0011_v1_preflight_20260926.json`):
+
+| Variant | Scenario | cross triggers | curl triggers | curl failing T | lapsed | blocked F1 | blocked F2 | blocked E3 | entries |
+|---|---|---|---|---|---|---|---|---|---|
+| v1 | B | 1,975 | 7,818 | 7,588 | 407 | 338 | 492 | 504 | **324** |
+| v1 | A-2H | 3,741 | 16,633 | 16,253 | 751 | 465 | 1,002 | 1,097 | **506** |
+| v1−curl | B | 1,975 | 0 | 0 | 315 | 301 | 490 | 478 | 270 |
+| v1−curl | A-2H | 3,741 | 0 | 0 | 569 | 417 | 1,001 | 1,047 | 439 |
+| v1−F1 | B | 1,975 | 7,818 | 7,588 | 407 | 0 | 628 | 607 | 401 |
+| v1−F1 | A-2H | 3,741 | 16,633 | 16,253 | 751 | 0 | 1,173 | 1,289 | 578 |
+| v1−F2 | B | 1,975 | 7,818 | 7,588 | 407 | 338 | 0 | 844 | 433 |
+| v1−F2 | A-2H | 3,741 | 16,633 | 16,253 | 751 | 465 | 0 | 1,772 | 721 |
+
+Early read, not a criterion: **the curl route (E1b/T) contributes only 54 of v1's 324 entries on B**
+(324 v1 vs 270 v1−curl) and 67 of 506 on A-2H — the great majority of curl triggers (7,588 of
+7,818 on B) fail T outright. This is the kind of thing §8's "curl route look-ahead" risk item
+flagged; T is a tight filter, not the volume driver §0.3's power pre-check's upper-bound number
+(744) suggested before F1/F2/T were counted properly.
+
 ---
 
 ## 6. The holdout
