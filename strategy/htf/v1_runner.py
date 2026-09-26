@@ -36,11 +36,14 @@ def _entry_chart_index_lookup(entry_adj: pd.DataFrame) -> dict:
 
 def simulate_v1(entries: list[dict], hourly: pd.DataFrame, entry_adj: pd.DataFrame, *,
                 bar_hours: int, session_flatten: bool,
-                trail_trigger: float = V1E.TRAIL_TRIGGER) -> tuple[list[R.Trade], int]:
+                trail_trigger: float = V1E.TRAIL_TRIGGER,
+                x2_bars: int = 1) -> tuple[list[R.Trade], int]:
     """Same E5 walk as runner.simulate (blocked_until, in time order),
-    calling v1_exits.simulate_exit_v1 in place of exits.simulate_exit."""
+    calling v1_exits.simulate_exit_v1 in place of exits.simulate_exit.
+    x2_bars: 1 (primary) or 2 (neighbour-grid variant, sec 3) -- passed
+    straight through to v1_exits.x_signal_series."""
     macd_line, signal_line, hist, ema9, ema21, spread = V1S.entry_chart_indicators(entry_adj)
-    x1_long, x1_short, x2_long, x2_short = V1E.x_signal_series(hist, ema9)
+    x1_long, x1_short, x2_long, x2_short = V1E.x_signal_series(hist, ema9, x2_bars=x2_bars)
     entry_lookup = V1E.entry_bar_lookup(entry_adj)
     t_open_lookup = _entry_chart_index_lookup(entry_adj)
 

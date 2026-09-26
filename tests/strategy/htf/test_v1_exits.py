@@ -76,6 +76,54 @@ class TestXSignalSeries:
         assert not x2_short.iloc[:3].any()
 
 
+class TestXSignalSeriesX2Bars:
+    """The sec 3 neighbour-grid X2 axis: x2_bars=1 (primary, tested above
+    via the default) vs x2_bars=2 ('2 bars in a row' -- two consecutive
+    down-moves for long, up-moves for short)."""
+
+    def test_rejects_anything_other_than_1_or_2(self):
+        idx = pd.date_range("2020-01-01", periods=3, freq="4h", tz="UTC")
+        hist = pd.Series([1.0] * 3, index=idx)
+        ema9 = pd.Series([1.0, 2.0, 3.0], index=idx)
+        with pytest.raises(ValueError):
+            V1E.x_signal_series(hist, ema9, x2_bars=3)
+
+    def test_x2_bars_2_needs_two_consecutive_down_moves_for_long(self):
+        # bars:      0     1     2     3     4
+        # ema9:    1.0   2.0   3.0   2.5   2.0   (rises, rises, falls, falls)
+        idx = pd.date_range("2020-01-01", periods=5, freq="4h", tz="UTC")
+        hist = pd.Series([1.0] * 5, index=idx)
+        ema9 = pd.Series([1.0, 2.0, 3.0, 2.5, 2.0], index=idx)
+        _, _, x2_long, _ = V1E.x_signal_series(hist, ema9, x2_bars=2)
+        assert not bool(x2_long.iloc[3]), "only ONE down-move so far (bar 2->3)"
+        assert bool(x2_long.iloc[4]), "TWO down-moves in a row (bar 2->3->4)"
+
+    def test_x2_bars_1_fires_on_the_first_down_move_alone(self):
+        """Same series as above: x2_bars=1 must already fire at bar 3,
+        unlike x2_bars=2 which needs to wait one more bar."""
+        idx = pd.date_range("2020-01-01", periods=5, freq="4h", tz="UTC")
+        hist = pd.Series([1.0] * 5, index=idx)
+        ema9 = pd.Series([1.0, 2.0, 3.0, 2.5, 2.0], index=idx)
+        _, _, x2_long, _ = V1E.x_signal_series(hist, ema9, x2_bars=1)
+        assert bool(x2_long.iloc[3])
+        assert bool(x2_long.iloc[4])
+
+    def test_x2_bars_2_short_needs_two_consecutive_up_moves(self):
+        idx = pd.date_range("2020-01-01", periods=5, freq="4h", tz="UTC")
+        hist = pd.Series([-1.0] * 5, index=idx)
+        ema9 = pd.Series([3.0, 2.0, 1.0, 1.5, 2.0], index=idx)
+        _, _, _, x2_short = V1E.x_signal_series(hist, ema9, x2_bars=2)
+        assert not bool(x2_short.iloc[3])
+        assert bool(x2_short.iloc[4])
+
+    def test_x2_bars_2_long_and_short_are_still_mutually_exclusive_at_a_bar(self):
+        idx = pd.date_range("2020-01-01", periods=5, freq="4h", tz="UTC")
+        hist = pd.Series([1.0] * 5, index=idx)
+        ema9 = pd.Series([1.0, 2.0, 3.0, 2.5, 2.0], index=idx)
+        _, _, x2_long, x2_short = V1E.x_signal_series(hist, ema9, x2_bars=2)
+        assert not (bool(x2_long.iloc[4]) and bool(x2_short.iloc[4]))
+
+
 class TestEntryBarLookup:
     def test_lookup_matches_bucket_to_row(self):
         entry_adj = _entry_adj_frame(5)

@@ -178,6 +178,29 @@ class TestRunV1Integration:
         trades, _ = V1R.run_v1_no_signal_exits(archive_df_1h, scenario="B", q_h=q_h, q_e=q_e)
         assert all(t.exit_reason not in ("x1_opposite_cross", "x2_ema9_turn") for t in trades)
 
+    def test_x2_bars_2_wired_through_simulate_v1_directly(self, archive_df_1h, q_h_q_e):
+        """x2_bars is a plain pass-through from simulate_v1 into
+        v1_exits.x_signal_series (that module's own tests cover the 1-vs-2
+        semantics); this only checks the argument actually reaches the real
+        wiring end-to-end (prepare_grids -> detect_v1 -> simulate_v1) and
+        both settings run cleanly, without asserting a specific
+        trade-by-trade outcome (too data-dependent on the synthetic seed)."""
+        q_h, q_e = q_h_q_e
+        grids, daily_adj = P.prepare_grids(archive_df_1h)
+        hourly = grids["1H"]
+        entry_adj = grids["4H"]
+        four_h_adj = grids["4H"]
+        entries, _ = V1P.detect_v1(entry_adj, daily_adj, four_h_adj, scenario="B",
+                                   q_h=q_h, q_e=q_e)
+        trades_1, _ = V1R.simulate_v1(entries, hourly, entry_adj, bar_hours=4,
+                                      session_flatten=False, x2_bars=1)
+        trades_2, _ = V1R.simulate_v1(entries, hourly, entry_adj, bar_hours=4,
+                                      session_flatten=False, x2_bars=2)
+        assert all(t.exit_reason in V1E.REASONS for t in trades_1)
+        assert all(t.exit_reason in V1E.REASONS for t in trades_2)
+        # not asserting they differ -- on some synthetic seeds they may
+        # coincide -- only that both run cleanly through the real wiring.
+
     def test_v1_x_and_v1_use_the_same_entries_and_e5_walk_order(self, archive_df_1h, q_h_q_e):
         """v1-X changes only the exit rule, not entry detection -- the two
         runs must start from the same candidate list count (v1_preflight's

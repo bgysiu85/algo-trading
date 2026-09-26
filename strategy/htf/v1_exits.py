@@ -74,16 +74,27 @@ def entry_bar_lookup(entry_adj: pd.DataFrame) -> dict:
     return {(s, int(b)): i for i, (s, b) in enumerate(zip(sessions, bars))}
 
 
-def x_signal_series(hist: pd.Series, ema9: pd.Series):
+def x_signal_series(hist: pd.Series, ema9: pd.Series, *, x2_bars: int = 1):
     """(x1_long, x1_short, x2_long, x2_short), all on the entry chart.
     X1 long: hist crosses to <= 0 (hist = MACD - signal; a MACD-below-
-    signal cross). X1 short is the mirror (crosses to >= 0). X2 long:
-    EMA9[b] < EMA9[b-1]; X2 short is the mirror."""
+    signal cross). X1 short is the mirror (crosses to >= 0). X2 long,
+    x2_bars=1 (primary, sec 2.2): EMA9[b] < EMA9[b-1]. x2_bars=2 (the
+    neighbour-grid variant, sec 3: "1 bar primary; 2 bars in a row in the
+    grid"): EMA9[b] < EMA9[b-1] < EMA9[b-2] -- two consecutive down-moves,
+    not just the latest one. X2 short is the mirror throughout."""
+    if x2_bars not in (1, 2):
+        raise ValueError(f"x2_bars must be 1 or 2, got {x2_bars!r}")
     prev = hist.shift(1)
     x1_long = ((prev > 0) & (hist <= 0)).fillna(False)
     x1_short = ((prev < 0) & (hist >= 0)).fillna(False)
-    x2_long = (ema9 < ema9.shift(1)).fillna(False)
-    x2_short = (ema9 > ema9.shift(1)).fillna(False)
+    down1 = ema9 < ema9.shift(1)
+    up1 = ema9 > ema9.shift(1)
+    if x2_bars == 1:
+        x2_long = down1.fillna(False)
+        x2_short = up1.fillna(False)
+    else:
+        x2_long = (down1 & down1.shift(1)).fillna(False)
+        x2_short = (up1 & up1.shift(1)).fillna(False)
     return x1_long, x1_short, x2_long, x2_short
 
 
