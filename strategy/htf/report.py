@@ -111,10 +111,12 @@ def run_scenario(df_1h: pd.DataFrame, daily_adj: pd.DataFrame, *, scenario: str,
     v0_all, v0_counts = R.run_v0(df_1h, scenario=scenario)
     c1_all, c1_counts = R.run_c1(df_1h, scenario=scenario)
     c2_all, c2_counts = CT.run_c2(df_1h, scenario=scenario)
+    v0tl_all, v0tl_counts = R.run_v0_tl(df_1h, scenario=scenario)
 
     v0 = training_trades(v0_all)
     c1 = training_trades(c1_all)
     c2 = training_trades(c2_all)
+    v0tl = training_trades(v0tl_all)
 
     df_low = BK.net_table(v0, symbol, "low")
     df_mid = BK.net_table(v0, symbol, "mid")
@@ -149,10 +151,17 @@ def run_scenario(df_1h: pd.DataFrame, daily_adj: pd.DataFrame, *, scenario: str,
     account_mcl = A.account_view(v0, "MCL", "mid", session_calendar=session_calendar)
     account_cl = A.account_view(v0, "CL", "mid", session_calendar=session_calendar)
 
+    v0tl_summary_mid = BK.summarize(BK.net_table(v0tl, symbol, "mid")) if v0tl else None
+
     return {
         "scenario": scenario, "symbol": symbol,
-        "counts_full_history": {"v0": v0_counts, "c1": c1_counts, "c2": c2_counts},
-        "trades_training": {"v0": len(v0), "c1": len(c1), "c2": len(c2)},
+        "counts_full_history": {"v0": v0_counts, "c1": c1_counts, "c2": c2_counts,
+                                "v0-TL": v0tl_counts},
+        "trades_training": {"v0": len(v0), "c1": len(c1), "c2": len(c2), "v0-TL": len(v0tl)},
+        "v0_tl": {"summary_mid": v0tl_summary_mid,                                       # W15-0007
+                 "sample_trades_mid": BK.sample_trades(v0tl, symbol, "mid") if v0tl else [],
+                 "note": ("reported beside v0, never ranked and never scored "
+                          "against sec 4's criteria -- REGISTERED sec 2.6, sec 3")},
         "summary": {"low": BK.summarize(df_low), "mid": BK.summarize(df_mid),
                    "high": BK.summarize(df_high)},                                 # item 1 (MCL)
         "summary_cl_mid": BK.summarize(BK.net_table(v0, "CL", "mid")),             # sec 2.5, "and per 1 CL"

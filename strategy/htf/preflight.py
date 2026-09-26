@@ -24,16 +24,14 @@ explicitly forbidden from doing. So "entries" here is an upper bound on
 what the runner will actually take; the runner's own count will be equal
 or lower. This is stated in every report this module emits, not just here.
 
-VARIANTS RUN: v0 (E1-E3, S1) and C1 (MACD cross alone: no confirmation
+VARIANTS RUN: v0 (E1-E3, S1), C1 (MACD cross alone: no confirmation
 window, no daily filter, fills at the trigger bar's own t+1 open -- same
-stop rule). v0-1H is IDENTICAL to v0 at the entry-counting level (it only
-changes S2/S3, the trail-checking cadence, which G2 never touches) --
-reported here as v0's own numbers, relabelled, per REGISTERED sec 2.6
-("identical to v0 on A-1H, so not run there"). v0-TL (the trend-line
-break+retest variant) is NOT built in this module -- it needs its own
-break-then-retest geometry (common/tl_v0_lines.py's line/break machinery
-answers a related but different question) and is tracked separately
-(board W15-0008) rather than silently skipped.
+stop rule), and v0-TL (E1-E4 plus the sec 2.6 trend-line break+retest
+gate, strategy.htf.tl_variant.detect_v0_tl, built W15-0007). v0-1H is
+IDENTICAL to v0 at the entry-counting level (it only changes S2/S3, the
+trail-checking cadence, which G2 never touches) -- reported here as
+v0's own numbers, relabelled, per REGISTERED sec 2.6 ("identical to v0
+on A-1H, so not run there").
 """
 from __future__ import annotations
 
@@ -46,6 +44,7 @@ import pandas as pd
 
 from strategy.htf import bars as B
 from strategy.htf import signals as SIG
+from strategy.htf import tl_variant as TLV
 
 TRAIN_START = pd.Timestamp("2010-06-06").date()
 TRAIN_END = pd.Timestamp("2021-12-31").date()
@@ -265,20 +264,23 @@ def summarize(entries: list[dict], counts: dict, *, scenario: str) -> dict:
 
 
 def run(archive_1h) -> dict:
-    """Load once, run v0 and C1 on all four scenarios, training side only.
-    v0-1H's report is v0's A-2H... no -- v0-1H is v0 itself (all scenarios
-    identical at the entry-counting level); it is not scored separately,
-    only relabelled (module docstring). v0-TL is not built here."""
+    """Load once, run v0, C1 and v0-TL on all four scenarios, training side
+    only. v0-1H's report is v0's own numbers relabelled -- v0-1H is v0
+    itself (all scenarios identical at the entry-counting level); it is not
+    scored separately, only relabelled (module docstring)."""
     df_1h = B.load_1h(archive_1h)
     grids, daily_adj = prepare_grids(df_1h)
 
+    four_h_adj = grids["4H"]
     report: dict = {"variants": {}}
-    for variant, fn in (("v0", detect_v0), ("C1", detect_c1)):
+    for variant, fn in (("v0", detect_v0), ("C1", detect_c1), ("v0-TL", TLV.detect_v0_tl)):
         report["variants"][variant] = {}
         for scenario in ALL_SCENARIOS:
             entry_adj = grids[SCENARIO_GRID[scenario]]
             if variant == "v0":
                 entries, counts = fn(entry_adj, daily_adj, scenario=scenario)
+            elif variant == "v0-TL":
+                entries, counts = fn(entry_adj, daily_adj, four_h_adj, scenario=scenario)
             else:
                 entries, counts = fn(entry_adj, scenario=scenario)
             # counts accumulated above cover the WHOLE series (pre-training-
@@ -295,9 +297,6 @@ def run(archive_1h) -> dict:
                 "cadence is not modeled by G2); not run on A-1H (REGISTERED "
                 "sec 2.6). See variants.v0 for the numbers.",
     }
-    report["v0_tl_not_built"] = ("v0-TL (trend-line break+retest) is not "
-                                 "implemented in this gate -- tracked on the "
-                                 "board separately, not silently skipped.")
     v0_b = report["variants"]["v0"]["B"]["totals"]["entries_training"]
     v0_a2h = report["variants"]["v0"]["A-2H"]["totals"]["entries_training"]
     report["underpowered_stop_rule"] = combine_underpowered(v0_b, v0_a2h)
@@ -334,7 +333,7 @@ def main(argv=None) -> int:
 
     report = run(archive)
     print("G2 -- HTF-Ben pre-flight (training side, no P&L, no exit prices)\n")
-    for variant in ("v0", "C1"):
+    for variant in ("v0", "C1", "v0-TL"):
         for scenario in ALL_SCENARIOS:
             t = report["variants"][variant][scenario]["totals"]
             print(f"{variant:4s} {scenario:5s}  triggers={t['triggers']:5d}  "
@@ -353,7 +352,6 @@ def main(argv=None) -> int:
     if ur["v0_B_below_threshold"] or ur["v0_A2H_below_threshold"]:
         print("  note: one scenario is individually below 150 even though the "
               "study is not stopped -- read its numbers with that in mind.")
-    print(f"\n{report['v0_tl_not_built']}")
 
     if a.out:
         a.out.parent.mkdir(parents=True, exist_ok=True)

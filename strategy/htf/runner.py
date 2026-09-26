@@ -74,6 +74,7 @@ from strategy.htf import bars as B
 from strategy.htf import costs as C
 from strategy.htf import exits as E
 from strategy.htf import preflight as P
+from strategy.htf import tl_variant as TLV
 
 
 @dataclass
@@ -204,6 +205,29 @@ def run_c1(df_1h: pd.DataFrame, *, scenario: str) -> tuple[list[Trade], dict]:
     session_flatten = scenario in P.INTRADAY_SCENARIOS
     trades, n_ignored = simulate(entries, hourly, bar_hours=bar_hours,
                                  session_flatten=session_flatten)
+    counts = dict(counts)
+    counts["ignored_in_position"] = n_ignored
+    counts["trades_taken"] = len(trades)
+    return trades, counts
+
+
+def run_v0_tl(df_1h: pd.DataFrame, *, scenario: str, trail_trigger: float = E.TRAIL_TRIGGER,
+             confirm_window: int = 2, swing_LR: int = 2) -> tuple[list[Trade], dict]:
+    """v0-TL, W15-0007 -- same shape as run_v0, with tl_variant.detect_v0_tl
+    in place of preflight.detect_v0 (sec 2.6: 'E1-E4 plus' the trend-line
+    gate; sec 2.6 also fixes the TL geometry to the 4-hour series for every
+    scenario, so this always reads grids['4H'] for it, whatever scenario is
+    asked for). Reported beside v0, never ranked (sec 2.6, sec 3)."""
+    grids, daily_adj = P.prepare_grids(df_1h)
+    hourly = grids["1H"]
+    bar_hours = B.GRID_HOURS[P.SCENARIO_GRID[scenario]]
+    entry_adj = grids[P.SCENARIO_GRID[scenario]]
+    four_h_adj = grids["4H"]
+    entries, counts = TLV.detect_v0_tl(entry_adj, daily_adj, four_h_adj, scenario=scenario,
+                                       confirm_window=confirm_window, swing_LR=swing_LR)
+    session_flatten = scenario in P.INTRADAY_SCENARIOS
+    trades, n_ignored = simulate(entries, hourly, bar_hours=bar_hours,
+                                 session_flatten=session_flatten, trail_trigger=trail_trigger)
     counts = dict(counts)
     counts["ignored_in_position"] = n_ignored
     counts["trades_taken"] = len(trades)
