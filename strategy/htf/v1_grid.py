@@ -69,11 +69,19 @@ def cell_id(cross_window: int, f1_window: int, pctl: int, x2_bars: int) -> str:
 
 def run_cell(df_1h: pd.DataFrame, *, scenario: str, cross_window: int, f1_window: int,
             pctl: int, x2_bars: int, trail_trigger: float = V1E.TRAIL_TRIGGER,
-            symbol: str = "MCL", level: str = "mid") -> dict:
+            symbol: str = "MCL", level: str = "mid", train_start=None,
+            train_end=None) -> dict:
     """One neighbour-grid cell: v1's full rule set (curl route, F2, T, E3 --
     nothing here disables any of those, unlike the sec 2.4 ablations) with
     this cell's own cross_window/F1-window/F1-percentile/X2-bar-count.
-    net/trades_taken are at `symbol`/`level` friction (mid, per sec 3)."""
+    net/trades_taken are at `symbol`/`level` friction (mid, per sec 3).
+
+    train_start/train_end (same convention as neighbours.py's own
+    run_grid, sec 4 criterion 8's "training side"): if given, net/
+    trades_taken are summed over trades whose own entry SESSION falls in
+    [train_start, train_end] only. Left None (the default) for a quick
+    check on a short synthetic archive where a date filter would empty
+    every cell -- a real run passes v1_preflight.TRAIN_START/TRAIN_END."""
     grids, daily_adj = P.prepare_grids(df_1h)
     hourly = grids["1H"]
     entry_adj = grids[P.SCENARIO_GRID[scenario]]
@@ -94,6 +102,10 @@ def run_cell(df_1h: pd.DataFrame, *, scenario: str, cross_window: int, f1_window
     trades, n_ignored = V1R.simulate_v1(entries, hourly, entry_adj, bar_hours=bar_hours,
                                         session_flatten=session_flatten,
                                         trail_trigger=trail_trigger, x2_bars=x2_bars)
+    if train_start is not None or train_end is not None:
+        trades = [t for t in trades
+                 if (train_start is None or pd.Timestamp(t.session).date() >= train_start)
+                 and (train_end is None or pd.Timestamp(t.session).date() <= train_end)]
     net = sum(t.net_pnl(symbol, level) for t in trades)
 
     counts = dict(counts)
@@ -109,14 +121,15 @@ def run_cell(df_1h: pd.DataFrame, *, scenario: str, cross_window: int, f1_window
 
 
 def run_grid(df_1h: pd.DataFrame, *, scenario: str = "B", symbol: str = "MCL",
-            level: str = "mid") -> dict:
+            level: str = "mid", train_start=None, train_end=None) -> dict:
     """All 24 cells, reported unranked (sec 3: "Nothing is ranked. No 'best
     cell' table.") -- callers must not sort `cells` by net; the order here
     is a fixed nested loop (cross_window, then N, then percentile, then
-    X2), not a ranking."""
+    X2), not a ranking. train_start/train_end: see run_cell."""
     cells = [
         run_cell(df_1h, scenario=scenario, cross_window=cw, f1_window=n, pctl=p,
-                x2_bars=x2b, symbol=symbol, level=level)
+                x2_bars=x2b, symbol=symbol, level=level, train_start=train_start,
+                train_end=train_end)
         for cw in CROSS_WINDOWS for n in F1_WINDOWS for p in F1_PERCENTILES
         for x2b in X2_BAR_COUNTS
     ]

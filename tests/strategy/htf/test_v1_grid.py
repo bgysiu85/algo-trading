@@ -72,6 +72,28 @@ class TestRunCell:
         assert (c9["q_h"], c9["q_e"]) != (c12["q_h"], c12["q_e"])
 
 
+class TestTrainingSideFilter:
+    def test_train_end_before_the_archive_starts_empties_every_cell(self, archive_df_1h):
+        """Same convention as neighbours.py's own run_grid: a train_end
+        that predates the whole archive must drop every trade, not silently
+        fall back to the unfiltered count."""
+        import datetime
+        cell = VG.run_cell(archive_df_1h, scenario="B", cross_window=3, f1_window=9,
+                           pctl=25, x2_bars=1, train_end=datetime.date(2000, 1, 1))
+        assert cell["trades_taken"] == 0
+        assert cell["net"] == 0.0
+
+    def test_a_generous_training_window_matches_the_unfiltered_run(self, archive_df_1h):
+        import datetime
+        unfiltered = VG.run_cell(archive_df_1h, scenario="B", cross_window=3, f1_window=9,
+                                 pctl=25, x2_bars=1)
+        filtered = VG.run_cell(archive_df_1h, scenario="B", cross_window=3, f1_window=9,
+                               pctl=25, x2_bars=1, train_start=datetime.date(2000, 1, 1),
+                               train_end=datetime.date(2100, 1, 1))
+        assert filtered["trades_taken"] == unfiltered["trades_taken"]
+        assert filtered["net"] == pytest.approx(unfiltered["net"])
+
+
 class TestRunGrid:
     def test_produces_exactly_24_cells_with_a_valid_share(self, archive_df_1h):
         result = VG.run_grid(archive_df_1h, scenario="B")
