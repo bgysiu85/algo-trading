@@ -53,10 +53,16 @@ The engine that runs Tori's trend-line method (v0 and v0-rev) through 2010–202
 
 ## Commands (also on the board)
 
+Already committed by the Build & test chat (commit 6b7107b) — no git step needed. What this does: re-runs the
+tests on your venv, then runs the backtest (training side only, about a minute) and writes the report and
+three CSVs into D:\Trading\Claude outputs.
+
 ```
 Set-Location D:\Trading
-git add strategy/tl_v0 tests/strategy/tl_v0 docs/research/REGISTERED_tl_v0.md claude/handover_w15_0014_engine_20260928.md
-git commit -m "W15-0014: TL-v0/TL-v0-rev step-4 backtest engine + PRE-RUN amendments A-D"
 .\.venv\Scripts\python.exe -m pytest -q tests\strategy\tl_v0 tests\test_tl_v0_lines.py tests\test_tl_v0_hindsight_guard.py tests\common\test_tl_v0_holdout.py -p no:cacheprovider
 .\.venv\Scripts\python.exe -m strategy.tl_v0.run
 ```
+
+What to report back: "77 passed" from the first command and the last line of the second
+(`report: D:\Trading\Claude outputs\tl_v0_backtest_<date>.txt`), or any error text. The next chat reads the
+report file directly.
