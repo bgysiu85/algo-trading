@@ -36,15 +36,23 @@ covers ~60 symbol-days instead of 60 separate calls. The options doc's
 
 DISCOVER THE REAL PER-REQUEST CAP, DO NOT ASSUME IT
 ------------------------------------------------------
-If EODHD's real window cap is smaller than assumed, a chunk silently comes
-back covering only part of the requested range -- the bars are there for some
-dates and absent for others with no error raised. `stage_pull` checks this
-directly: for every date in a chunk that has an EOD close on file (so the
-market was open and the name traded) but returns literally zero bars anywhere
-in the chunk's response, that date is logged to `intraday_chunk_gaps.csv`
-rather than silently recorded as a real MISSING bucket -- a systematic gap at
-the chunk boundary is a discovered cap, not a coverage finding, and the two
-must not be conflated (`w07_0012_intraday_data_options_20260925.md` caveat).
+If EODHD's real window cap is smaller than assumed, a chunk (within the
+accepted range, see below) silently comes back covering only part of the
+requested range -- the bars are there for some dates and absent for others
+with no error raised. `stage_pull` checks this directly: for every date in a
+chunk that has an EOD close on file (so the market was open and the name
+traded) but returns literally zero bars anywhere in the chunk's response,
+that date is logged to `intraday_chunk_gaps.csv` rather than silently
+recorded as a real MISSING bucket -- a systematic gap at the chunk boundary
+is a discovered cap, not a coverage finding, and the two must not be
+conflated (`w07_0012_intraday_data_options_20260925.md` caveat).
+
+A sufficiently OVER-wide request (`--probe CODE`'s original ~10-year default
+against a real symbol, 2026-09-27) is not silently truncated at all -- EODHD
+rejects it outright (HTTP 400/422). `probe_window` handles both: a request
+inside the real cap that comes back short is the truncation case above; one
+rejected outright is binary-searched down to the boundary in a bounded few
+calls instead of one.
 
 WHAT "HIT" / "BACKFILL" / "MISSING" MEAN HERE
 ------------------------------------------------
@@ -431,22 +439,28 @@ def stage_pull(fetch: Fetch, plan: dict, out_dir: Path,
     return stats
 
 
-def probe_window(fetch: Fetch, code: str, lookback_days: int = 3650) -> dict:
-    """Issues ONE request across a wide window (default ~10 years) and
-    reports the actual span of bars EODHD returns for `code` -- measures the
-    real per-request window cap directly, with a single API call, instead
-    of inferring it destructively from however many chunk-gap rows a full
-    pull happens to produce. Run this BEFORE resuming a large pull whenever
-    the per-symbol-day chunk-gap rate looks high (see the module docstring
-    and `stage_pull`'s own log line)."""
-    today = dt.date.today()
-    first = today - dt.timedelta(days=lookback_days)
-    bars = fetch(code, first, today)
+# 2026-09-27: probing AAPL with the original ~10-year default got
+# "STOPPED: HTTP 422 on intraday/AAPL.US" -- EODHD does not always silently
+# truncate an over-wide window (the module docstring's original assumption);
+# a sufficiently oversized one gets rejected outright. 400/422 are treated
+# as that signal; anything else (402 quota, 429/5xx exhausted, a network
+# error, 401/403) is a real problem and must propagate, not be misread as a
+# window-cap finding.
+WINDOW_REJECTED_HTTP_CODES = ("HTTP 400", "HTTP 422")
+
+
+def _rejected_as_too_wide(exc: RuntimeError) -> bool:
+    return any(code in str(exc) for code in WINDOW_REJECTED_HTTP_CODES)
+
+
+def _describe_span(code: str, first: dt.date, today: dt.date, bars: list[dict],
+                   calls_used: int, window_rejected: bool) -> dict:
     if not bars:
         return {"code": code, "requested_from": first.isoformat(),
                 "requested_to": today.isoformat(), "bars": 0,
                 "actual_first": None, "actual_last": None,
-                "actual_calendar_days": None}
+                "actual_calendar_days": None, "window_rejected": window_rejected,
+                "calls_used": calls_used}
     by_date = group_bars_by_et_date(bars)
     dates = sorted(by_date)
     return {
@@ -454,14 +468,106 @@ def probe_window(fetch: Fetch, code: str, lookback_days: int = 3650) -> dict:
         "requested_to": today.isoformat(), "bars": len(bars),
         "actual_first": dates[0].isoformat(), "actual_last": dates[-1].isoformat(),
         "actual_calendar_days": (dates[-1] - dates[0]).days,
+        "window_rejected": window_rejected, "calls_used": calls_used,
     }
 
 
+def probe_window(fetch: Fetch, code: str, lookback_days: int = 3650,
+                 floor_days: int = 90, tolerance_days: int = 5) -> dict:
+    """Measures EODHD's real per-request intraday window cap for `code`,
+    instead of inferring it destructively from however many chunk-gap rows a
+    full pull happens to produce. Run this BEFORE resuming a large pull
+    whenever the per-symbol-day chunk-gap rate looks high (see the module
+    docstring and `stage_pull`'s own log line).
+
+    Two failure modes, both handled:
+    - SILENT TRUNCATION: the requested window is accepted but fewer bars
+      come back than asked for -- one call, reports the actual span.
+    - OUTRIGHT REJECTION (HTTP 400/422, confirmed 2026-09-27 against a real
+      ~10-year ask): the request itself is refused, nothing comes back at
+      all. Binary-searches downward from `lookback_days` to `floor_days`
+      (default 90 -- comfortably inside the ~84-calendar-day chunks the
+      2026-09-25 production pull ran almost entirely on) to locate the real
+      accepted/rejected boundary within `tolerance_days`, in a handful of
+      calls rather than the tens of thousands a full pull would spend
+      finding it the hard way."""
+    today = dt.date.today()
+
+    def try_span(days: int):
+        first = today - dt.timedelta(days=days)
+        try:
+            bars = fetch(code, first, today)
+        except RuntimeError as e:
+            if _rejected_as_too_wide(e):
+                return None
+            raise
+        return bars, first
+
+    calls_used = 1
+    result = try_span(lookback_days)
+    if result is not None:
+        bars, first = result
+        return _describe_span(code, first, today, bars, calls_used,
+                              window_rejected=False)
+
+    lo, hi = floor_days, lookback_days
+    floor_result = try_span(lo)
+    calls_used += 1
+    if floor_result is None:
+        # even the conservative, evidence-backed floor was rejected --
+        # something else is wrong (bad symbol, account issue), not a
+        # window-cap finding, so say so plainly rather than guessing further
+        first = today - dt.timedelta(days=lookback_days)
+        return {"code": code, "requested_from": first.isoformat(),
+                "requested_to": today.isoformat(), "bars": 0,
+                "actual_first": None, "actual_last": None,
+                "actual_calendar_days": None, "window_rejected": True,
+                "floor_also_rejected": True, "calls_used": calls_used}
+
+    best_bars, best_first = floor_result
+    while hi - lo > tolerance_days:
+        mid = (lo + hi) // 2
+        mid_result = try_span(mid)
+        calls_used += 1
+        if mid_result is None:
+            hi = mid
+        else:
+            lo = mid
+            best_bars, best_first = mid_result
+
+    out = _describe_span(code, best_first, today, best_bars, calls_used,
+                         window_rejected=True)
+    out["accepted_days_floor"] = lo
+    out["rejected_days_ceiling"] = hi
+    return out
+
+
 def format_probe(result: dict) -> str:
+    if result.get("floor_also_rejected"):
+        return (f"probe {result['code']}: even a conservative, "
+               "evidence-backed floor window was REJECTED by EODHD ("
+               f"{result['calls_used']} calls spent) -- this is not a "
+               "window-cap finding, something else is wrong (check the "
+               "symbol is a real, currently-covered EODHD code, and that "
+               "today's account/quota is otherwise fine).")
     if result["bars"] == 0:
         return (f"probe {result['code']}: requested {result['requested_from']} "
                f"to {result['requested_to']}, got 0 bars back -- inconclusive "
                "(check the symbol is a real, currently-covered EODHD code).")
+    if result.get("window_rejected"):
+        return (
+            f"probe {result['code']}: the full requested window was "
+            "REJECTED outright by EODHD (not silently truncated) -- binary-"
+            f"searched down in {result['calls_used']} total calls to find "
+            f"the real cap is roughly between {result['accepted_days_floor']} "
+            f"(accepted) and {result['rejected_days_ceiling']} (rejected) "
+            "calendar days. Largest accepted window actually returned bars "
+            f"spanning {result['actual_first']} to {result['actual_last']} "
+            f"({result['actual_calendar_days']} calendar days).\n"
+            f"Compare against the {MAX_CHUNK_TRADING_DAYS}-trading-day "
+            f"(~{MAX_CHUNK_TRADING_DAYS * 7 // 5} calendar day) assumption "
+            "`chunk_dates` uses and shrink MAX_CHUNK_TRADING_DAYS if the "
+            "real cap is smaller.")
     return (
         f"probe {result['code']}: requested {result['requested_from']} to "
         f"{result['requested_to']} ({lookback_calendar_days(result)} calendar "
@@ -664,6 +770,53 @@ def self_test() -> list[str]:
         assert empty_probe["bars"] == 0 and empty_probe["actual_first"] is None
         assert "inconclusive" in format_probe(empty_probe)
 
+        # 2026-09-27: probing AAPL with the original design got
+        # "STOPPED: HTTP 422 on intraday/AAPL.US" -- EODHD does not always
+        # silently truncate an over-wide window, it can reject it outright.
+        # A fake fetch that rejects any window wider than 400 days models
+        # this; probe_window must binary-search down to find the boundary
+        # in a bounded few calls, not crash.
+        def rejecting_fetch(code: str, first: dt.date, last: dt.date) -> list[dict]:
+            days = (last - first).days
+            if days > 400:
+                raise RuntimeError("HTTP 422 on intraday/WIDE.US")
+            return [bar(first, "13:30", 1.0),
+                   bar(first + dt.timedelta(days=days), "13:30", 1.1)]
+
+        wide_probe = probe_window(rejecting_fetch, "WIDE", lookback_days=3650,
+                                  floor_days=90, tolerance_days=10)
+        assert wide_probe["window_rejected"] is True, wide_probe
+        assert wide_probe["accepted_days_floor"] <= 400, wide_probe
+        assert wide_probe["rejected_days_ceiling"] > 400, wide_probe
+        assert wide_probe["accepted_days_floor"] < wide_probe["rejected_days_ceiling"]
+        assert 3 < wide_probe["calls_used"] < 12, wide_probe   # bounded, not exhaustive
+        wide_text = format_probe(wide_probe)
+        assert "REJECTED outright" in wide_text, wide_text
+
+        # a call that raises anything OTHER than HTTP 400/422 (quota, rate
+        # limit, network) must propagate, never be misread as a window-cap
+        # signal -- that would silently mask a real problem
+        def quota_fetch(code: str, first: dt.date, last: dt.date) -> list[dict]:
+            raise RuntimeError("HTTP 402 on intraday/QUOTA.US")
+
+        try:
+            probe_window(quota_fetch, "QUOTA")
+        except RuntimeError as e:
+            assert "HTTP 402" in str(e), e
+        else:
+            raise AssertionError("probe_window swallowed a non-window-cap error")
+
+        # even the conservative floor being rejected is reported plainly,
+        # not misdiagnosed as a window-cap finding
+        def always_rejecting_fetch(code: str, first: dt.date,
+                                   last: dt.date) -> list[dict]:
+            raise RuntimeError("HTTP 422 on intraday/BROKEN.US")
+
+        broken_probe = probe_window(always_rejecting_fetch, "BROKEN")
+        assert broken_probe.get("floor_also_rejected") is True, broken_probe
+        assert broken_probe["calls_used"] == 2, broken_probe
+        assert "REJECTED by EODHD" in format_probe(broken_probe)
+
     return ["self-test passed: eligible-date gating (member AND EOD close), "
            "chunking by both size and gap, HIT/BACKFILL/MISSING classified "
            "correctly, resumability skipped an already-pulled symbol, a "
@@ -671,10 +824,15 @@ def self_test() -> list[str]:
            "into MISSING, gap rows already found survive a later symbol's "
            "fetch crashing (the 2026-09-27 data-loss bug) rather than being "
            "lost with the whole in-memory buffer, the one-call window "
-           "probe reports the real (not requested) span, and per-call "
-           "timing correctly leaves a normal-speed run's slow-call count at "
-           "zero while flagging a call slower than slow_threshold_s as "
-           "probably rate-limit-throttled"]
+           "probe reports the real (not requested) span when the window is "
+           "silently truncated, per-call timing correctly leaves a normal-"
+           "speed run's slow-call count at zero while flagging a call "
+           "slower than slow_threshold_s as probably rate-limit-throttled, "
+           "and the probe binary-searches to the real cap in a bounded few "
+           "calls (never crashing, never misreading a quota/rate-limit "
+           "error as a window-cap finding) when EODHD rejects an over-wide "
+           "window outright instead of truncating it (the 2026-09-27 "
+           "AAPL HTTP 422)"]
 
 
 # --------------------------------------------------------------------------
