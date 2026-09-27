@@ -294,13 +294,22 @@ whole pull finishes — a real run on 2026-09-27 hit an EODHD HTTP 402 (plan
 quota exhausted) partway through and would otherwise have silently lost
 136,000+ already-found gap rows along with the crash.
 
-**`--probe CODE`** spends exactly ONE real API call fetching a ~10-year
-window for `CODE` and reports the actual span of bars that comes back —
-measures the real per-request cap directly and cheaply, rather than reading
-it off however many chunk-gap rows a full pull happens to produce. Run this
-once (any real, currently-covered symbol) before resuming a pull whose gap
-rate looks high, and shrink `MAX_CHUNK_TRADING_DAYS` if the real cap turns
-out smaller than the assumed 60 trading days.
+**`--probe CODE`** measures the real per-request cap directly and cheaply,
+rather than reading it off however many chunk-gap rows a full pull happens
+to produce. Run this once (any real, currently-covered symbol) before
+resuming a pull whose gap rate looks high, and shrink
+`MAX_CHUNK_TRADING_DAYS` if the real cap turns out smaller than the assumed
+60 trading days. Handles both ways EODHD can respond to an over-wide ask:
+a window it accepts but silently truncates (one call, reports the actual
+span) — and, discovered 2026-09-27 probing AAPL with the original ~10-year
+default ("STOPPED: HTTP 422 on intraday/AAPL.US"), a window it rejects
+outright. The second case binary-searches down from the ask to a
+conservative, evidence-backed floor (90 calendar days — comfortably inside
+the ~84-calendar-day chunks the 2026-09-25 production pull ran almost
+entirely on) to locate the real accepted/rejected boundary in a bounded
+handful of calls, never in one giant leap and never by crashing. A 402
+(quota) or any other non-400/422 error still propagates immediately —
+never misread as a window-cap finding.
 
 **HTTP 402 gets a specific, actionable message**, not just a generic
 "STOPPED: HTTP 402 on …": it almost always means the EODHD plan's daily call

@@ -261,6 +261,46 @@ def test_probe_window_empty_is_inconclusive():
     assert "inconclusive" in I.format_probe(result)
 
 
+def test_probe_window_bisects_when_eodhd_rejects_the_wide_ask_outright():
+    """2026-09-27: probing AAPL with lookback_days=3650 got
+    'STOPPED: HTTP 422 on intraday/AAPL.US' -- EODHD can reject an over-wide
+    window outright rather than silently truncating it. probe_window must
+    binary-search down to the real boundary in a bounded few calls."""
+    def rejecting_fetch(code, first, last):
+        days = (last - first).days
+        if days > 400:
+            raise RuntimeError("HTTP 422 on intraday/WIDE.US")
+        return [bar(first, "13:30", 1.0), bar(first + dt.timedelta(days=days), "13:30", 1.1)]
+
+    result = I.probe_window(rejecting_fetch, "WIDE", lookback_days=3650,
+                            floor_days=90, tolerance_days=10)
+    assert result["window_rejected"] is True
+    assert result["accepted_days_floor"] <= 400 < result["rejected_days_ceiling"]
+    assert 3 < result["calls_used"] < 12
+    assert "REJECTED outright" in I.format_probe(result)
+
+
+def test_probe_window_propagates_non_window_errors():
+    """A 402 (quota) or any error other than HTTP 400/422 must never be
+    misread as a window-cap signal -- that would silently mask a real
+    account/quota problem behind a bogus 'found the cap' result."""
+    def quota_fetch(code, first, last):
+        raise RuntimeError("HTTP 402 on intraday/QUOTA.US")
+
+    with pytest.raises(RuntimeError, match="HTTP 402"):
+        I.probe_window(quota_fetch, "QUOTA")
+
+
+def test_probe_window_reports_plainly_when_even_the_floor_is_rejected():
+    def always_rejecting(code, first, last):
+        raise RuntimeError("HTTP 422 on intraday/BROKEN.US")
+
+    result = I.probe_window(always_rejecting, "BROKEN")
+    assert result.get("floor_also_rejected") is True
+    assert result["calls_used"] == 2
+    assert "REJECTED by EODHD" in I.format_probe(result)
+
+
 def test_main_probe_flag_runs_one_call_and_exits(monkeypatch, capsys):
     monkeypatch.setenv("EODHD_API_KEY", "fake-key-for-test")
 
