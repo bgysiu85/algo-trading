@@ -19,6 +19,34 @@ hypothesis and spends from §11.
 
 ---
 
+### Amendment A — PRE-RUN, 2026-09-27 (G5 costs; before §5 computes any P&L — G2's pre-flight reads no exit prices and no P&L, so this does not follow a result)
+
+Rates read live from `ninjatrader.com/pricing/commissions/` (page dated "as of August 14, 2026 ... updated
+quarterly" — the same table W15's Amendment A and W16's own H60/HTF lines read on 2026-09-25), which lists itemized
+exchange+NFA, clearing and commission fees per contract, and an "all-in" figure that is their sum:
+
+| Symbol | Product | Exch+NFA | Clearing | Commission (Free) | **All-in (Free), per side** |
+|---|---|---|---|---|---|
+| **MES** | Micro E-mini S&P 500 | $0.36 | $0.19 | $0.39 | **$0.94** |
+| **MNQ** | Micro E-mini NASDAQ-100 | $0.36 | $0.19 | $0.39 | **$0.94** |
+| **ES** | E-mini S&P 500 | $1.39 | $0.19 | $1.29 | **$2.87** |
+| **NQ** | E-mini NASDAQ 100 | $1.39 | $0.19 | $1.29 | **$2.87** |
+
+So **§4's L1 ("low", NinjaTrader all-in fee, 0 ticks) is $0.94/side for MES and MNQ, and $2.87/side for ES and NQ.**
+L2 (the scoring level) and L3 add 1 and 2 ticks respectively on every market or stop fill (tick values already
+registered in §2: MES $1.25, MNQ $0.50, ES $12.50, NQ $5.00 per tick) — target fills add 0 ticks either way. This is
+a plan choice Ben makes independent of any backtest result; moving to a paid plan later (Lifetime/Monthly rates, same
+page) is a live-trading decision, not a re-registration of this study.
+
+**Overnight margins** (B2, reported per §5 item 7, never scored), read live 2026-09-27 from
+`ninjatrader.com/margin-details/`: **MES** day $50.00 / maintenance $2,619.42 / initial $2,881.37; **MNQ** day
+$100.00 / maintenance $4,329.42 / initial $4,762.37.
+
+`strategy/w16/costs.py` pins every figure above as a module-level constant, cross-checked against the tick-value
+table by test (`tests/strategy/w16/test_costs.py`).
+
+---
+
 ## In plain terms
 
 We test three simple, widely quoted day-trading rules on the S&P 500 and Nasdaq-100 futures, one micro contract at a
@@ -122,10 +150,9 @@ control C-O2.
 | **L3 high** | L1 **plus 2 ticks** on every market or stop fill; target fills 0 ticks | criterion 6 |
 | L0 zero | nothing charged | replication controls only (§7.4) |
 
-The fee figures are filled in by **Amendment A (PRE-RUN)** from `ninjatrader.com/pricing/commissions/` before any P&L
-exists (the page loads its table by script; read it in a browser). The W15 reading (MCL $1.09/side, 2026-08-14 table)
-shows the shape. Per full contract (ES, NQ) the same levels use the full contract's fee and tick value.
-Every P&L figure says which level it is at (`PROGRAM_INDEX` §2.6).
+The fee figures are filled in by **Amendment A (PRE-RUN)** above, read from `ninjatrader.com/pricing/commissions/`
+before any P&L exists (the page loads its table by script; read it in a browser). Per full contract (ES, NQ) the same
+levels use the full contract's fee and tick value. Every P&L figure says which level it is at (`PROGRAM_INDEX` §2.6).
 
 ---
 
@@ -320,6 +347,8 @@ it pays for several round trips a day. I'd be glad to be wrong on any of them.
 - **Subitem 2 — Build & test chat, Sonnet · Medium:** price and pull the data (§6.1), reusing the W15 CL puller; Ben
   runs the commands; the read-back report goes on the board.
 - **Subitem 3 — Build & test chat, Sonnet · High:** engine, costs (Amendment A from the live NinjaTrader table first),
-  holdout ledger, look-ahead tests, pre-flight (G2–G5).
+  holdout ledger, look-ahead tests, pre-flight (G2–G5). **Done 2026-09-27** — `strategy/w16/{costs,sessions,signals,
+  controls,holdout,preflight,runner}.py` plus 103 passing tests under `tests/strategy/w16/`; see the handover doc for
+  what §9 criteria 5 and 8 still need (control/grid wiring, left to subitem 4/5).
 - **Subitem 4 — Ben runs the training backtest locally; Scalping chat, Sonnet · Medium, writes the Result doc**
   against §9.
