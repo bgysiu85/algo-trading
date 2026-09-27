@@ -445,6 +445,32 @@ per-trade rows stripped (`--json-out`) — `write_scored_rows_csv()` exports
 any one cell's trade-level rows separately when that detail is needed.
 `--random-draws` overrides the 2,000-draw default for a quick smoke run.
 
+**2026-09-27 perf fix**: at real production scale (2,945 trading days,
+1,537 codes, ~1,809 membership spells) the first real run of this module
+was still computing after 9+ hours, not hung — three separate hot spots,
+all invisible against this module's tiny synthetic self-test/unit-test
+data, made it that slow:
+- `cluster_bootstrap_by_month` (spec S3 item 5) re-walked **every trade in
+  every resampled month, on every one of the 2,000 resamples** —
+  `O(resamples x total_trades)`. Measured as ~93% of one real grid cell's
+  wall time. Fixed by precomputing each month's own total ONCE and summing
+  those in the resample loop instead — algebraically identical, `~10x`
+  faster on real data.
+- The random-decile control (spec S3 item 6) recomputed "who's eligible
+  today" (a linear scan over every membership spell) fresh on **every one
+  of its thousands of draws**, and the per-trade index (S&P 400/500)
+  lookup was a linear scan over every spell rather than just that code's
+  own. Fixed by precomputing the per-day eligible set and a per-code spell
+  index once (`spells_by_code`) and reusing both across every draw/trade.
+- The random-decile control is still the heaviest stage even after the
+  fix (2,000 draws x however many N-values, each replaying the whole
+  calendar) — there's no further algorithmic shortcut for it, since each
+  draw's trades really do differ. `run()`, `run_grid()`, and
+  `random_decile_control()` all take an optional `log` callback (default:
+  timestamped `print`) that reports per-cell and per-draw progress with an
+  ETA, so a real run is never silent for hours with no way to tell
+  "still working" from "hung."
+
 Same "no repo imports beyond the package" convention: only `pit_universe`,
 `reversal_v0`, and `fill_engine`, siblings in this package.
 
