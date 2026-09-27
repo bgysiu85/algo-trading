@@ -77,6 +77,7 @@ ALLOWED_CANDIDATE = "v0-rev"
 REFUSED_CUT_NAMES = {
     "holdout.json", "holdout_pairs_2026H2.json",           # equity (common/holdout.py)
     "tsmom_holdout_spent.json",                              # TSMOM's own ledger
+    "tl_bounce_holdout_spent.json",                          # TL-bounce's own ledger (sibling study)
 }
 
 
