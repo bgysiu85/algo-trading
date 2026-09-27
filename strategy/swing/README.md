@@ -288,7 +288,27 @@ that chunk's response is flagged to `var/swing_pit/intraday_chunk_gaps.csv`,
 never silently folded into a real MISSING bucket. A few scattered gaps look
 like genuine no-print days; many clustered at the same offset from a chunk's
 start means the assumed 60-trading-day chunk size is too large for the real
-cap.
+cap. Gap rows are written to that file AS THEY ARE FOUND (appending across
+resumed runs, never overwriting) rather than buffered in memory until the
+whole pull finishes — a real run on 2026-09-27 hit an EODHD HTTP 402 (plan
+quota exhausted) partway through and would otherwise have silently lost
+136,000+ already-found gap rows along with the crash.
+
+**`--probe CODE`** spends exactly ONE real API call fetching a ~10-year
+window for `CODE` and reports the actual span of bars that comes back —
+measures the real per-request cap directly and cheaply, rather than reading
+it off however many chunk-gap rows a full pull happens to produce. Run this
+once (any real, currently-covered symbol) before resuming a pull whose gap
+rate looks high, and shrink `MAX_CHUNK_TRADING_DAYS` if the real cap turns
+out smaller than the assumed 60 trading days.
+
+**HTTP 402 gets a specific, actionable message**, not just a generic
+"STOPPED: HTTP 402 on …": it almost always means the EODHD plan's daily call
+allowance is used up for the day, not a problem with the specific symbol it
+happened to land on — check the account's usage page for today's quota and
+reset time, then re-run the exact same command once it resets. Resumability
+(an existing `intraday/<code>.csv` is skipped) means this picks up exactly
+where it stopped, no repeat calls.
 
 Same conventions as `pit_universe.py` and `alpaca_coverage_probe.py`: no repo
 imports beyond `pit_universe` (the EODHD fetch factory and key handling) and

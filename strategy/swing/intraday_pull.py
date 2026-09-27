@@ -314,49 +314,117 @@ def cost_lines(summary: dict, pace_s: float = INTRADAY_PACE_S) -> list[str]:
 
 def stage_pull(fetch: Fetch, plan: dict, out_dir: Path,
               log: Callable[[str], None] = print) -> dict:
+    """Writes each symbol's intraday/<code>.csv as soon as that symbol's own
+    chunks are done (already resumable -- an interrupted run's completed
+    symbols are skipped by `build_plan` next time). The chunk-gaps log is
+    now held to the SAME discipline: earlier versions of this function
+    buffered every gap row in memory and wrote `intraday_chunk_gaps.csv`
+    only after the whole plan finished, so ANY exception mid-run (a network
+    error, an HTTP error from `fetch` -- see `main()`'s handling of a 402
+    quota wall below) silently discarded every gap already found, even
+    after tens of thousands of real API calls had already paid for that
+    diagnosis. The gaps file is opened once up front (appending to a prior
+    run's file rather than overwriting it, so gap history accumulates
+    across resumed runs) and each row is flushed as it is found."""
     intraday_dir = out_dir / INTRADAY_SUBDIR
     intraday_dir.mkdir(parents=True, exist_ok=True)
     gaps_path = out_dir / CHUNK_GAPS_NAME
-    gap_rows: list[list] = []
+    gaps_is_new = not gaps_path.exists()
     stats = {"codes_pulled": 0, "api_calls": 0, "chunk_gaps": 0}
     codes = sorted(plan)
-    for i, code in enumerate(codes, 1):
-        obs: list[Observation] = []
-        for chunk in plan[code]:
-            first, last = chunk[0], chunk[-1]
-            bars = fetch(code, first, last)
-            stats["api_calls"] += 1
-            by_date = group_bars_by_et_date(bars)
-            for day in chunk:
-                if day not in by_date:
-                    gap_rows.append([code, day.isoformat(), first.isoformat(),
-                                     last.isoformat()])
-                    stats["chunk_gaps"] += 1
-                obs.extend(evaluate_day(day, by_date))
-        path = intraday_dir / f"{P.file_stem(code)}.csv"
-        with path.open("w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(OBS_FIELDS)
-            for o in obs:
-                w.writerow(o.row())
-        stats["codes_pulled"] += 1
-        if i % 20 == 0:
-            log(f"  {i}/{len(codes)} symbols pulled "
-               f"({stats['api_calls']} API calls so far, "
-               f"{stats['chunk_gaps']} chunk gaps flagged)")
-    if gap_rows:
-        with gaps_path.open("w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["code", "date", "chunk_from", "chunk_to"])
-            w.writerows(gap_rows)
-        log(f"  {len(gap_rows)} chunk gap(s) written to {gaps_path} -- a date "
-           "with an EOD close on file that came back with zero intraday bars "
-           "anywhere in its chunk's response. A few, scattered, look like "
-           "real no-print days; many clustered at the same offset from a "
-           "chunk's start suggests the real per-request window cap is "
-           f"smaller than the {MAX_CHUNK_TRADING_DAYS}-trading-day assumption "
-           "-- re-check before trusting the fill engine's MISSING counts.")
+    with gaps_path.open("a", newline="", encoding="utf-8") as gaps_f:
+        gaps_w = csv.writer(gaps_f)
+        if gaps_is_new:
+            gaps_w.writerow(["code", "date", "chunk_from", "chunk_to"])
+            gaps_f.flush()
+        for i, code in enumerate(codes, 1):
+            obs: list[Observation] = []
+            for chunk in plan[code]:
+                first, last = chunk[0], chunk[-1]
+                bars = fetch(code, first, last)
+                stats["api_calls"] += 1
+                by_date = group_bars_by_et_date(bars)
+                for day in chunk:
+                    if day not in by_date:
+                        gaps_w.writerow([code, day.isoformat(), first.isoformat(),
+                                        last.isoformat()])
+                        gaps_f.flush()
+                        stats["chunk_gaps"] += 1
+                    obs.extend(evaluate_day(day, by_date))
+            path = intraday_dir / f"{P.file_stem(code)}.csv"
+            with path.open("w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(OBS_FIELDS)
+                for o in obs:
+                    w.writerow(o.row())
+            stats["codes_pulled"] += 1
+            if i % 20 == 0:
+                log(f"  {i}/{len(codes)} symbols pulled "
+                   f"({stats['api_calls']} API calls so far, "
+                   f"{stats['chunk_gaps']} chunk gaps flagged)")
+    if stats["chunk_gaps"]:
+        log(f"  {stats['chunk_gaps']} chunk gap(s) this run, written "
+           f"as they were found to {gaps_path} -- a date with an EOD close "
+           "on file that came back with zero intraday bars anywhere in its "
+           "chunk's response. A few, scattered, look like real no-print "
+           "days; many clustered at the same offset from a chunk's start "
+           "suggests the real per-request window cap is smaller than the "
+           f"{MAX_CHUNK_TRADING_DAYS}-trading-day assumption -- re-check "
+           "before trusting the fill engine's MISSING counts (see "
+           "`probe_window` / `--probe CODE` for a one-call direct "
+           "measurement of the real cap, cheaper than reading this file's "
+           "pattern).")
     return stats
+
+
+def probe_window(fetch: Fetch, code: str, lookback_days: int = 3650) -> dict:
+    """Issues ONE request across a wide window (default ~10 years) and
+    reports the actual span of bars EODHD returns for `code` -- measures the
+    real per-request window cap directly, with a single API call, instead
+    of inferring it destructively from however many chunk-gap rows a full
+    pull happens to produce. Run this BEFORE resuming a large pull whenever
+    the per-symbol-day chunk-gap rate looks high (see the module docstring
+    and `stage_pull`'s own log line)."""
+    today = dt.date.today()
+    first = today - dt.timedelta(days=lookback_days)
+    bars = fetch(code, first, today)
+    if not bars:
+        return {"code": code, "requested_from": first.isoformat(),
+                "requested_to": today.isoformat(), "bars": 0,
+                "actual_first": None, "actual_last": None,
+                "actual_calendar_days": None}
+    by_date = group_bars_by_et_date(bars)
+    dates = sorted(by_date)
+    return {
+        "code": code, "requested_from": first.isoformat(),
+        "requested_to": today.isoformat(), "bars": len(bars),
+        "actual_first": dates[0].isoformat(), "actual_last": dates[-1].isoformat(),
+        "actual_calendar_days": (dates[-1] - dates[0]).days,
+    }
+
+
+def format_probe(result: dict) -> str:
+    if result["bars"] == 0:
+        return (f"probe {result['code']}: requested {result['requested_from']} "
+               f"to {result['requested_to']}, got 0 bars back -- inconclusive "
+               "(check the symbol is a real, currently-covered EODHD code).")
+    return (
+        f"probe {result['code']}: requested {result['requested_from']} to "
+        f"{result['requested_to']} ({lookback_calendar_days(result)} calendar "
+        f"days) in ONE call -- got {result['bars']} bars back, actually "
+        f"spanning {result['actual_first']} to {result['actual_last']} "
+        f"({result['actual_calendar_days']} calendar days).\n"
+        f"If the actual span is much shorter than the requested one, THAT "
+        f"gap is EODHD's real per-request window cap -- compare it against "
+        f"the {MAX_CHUNK_TRADING_DAYS}-trading-day (~{MAX_CHUNK_TRADING_DAYS * 7 // 5} "
+        "calendar day) assumption `chunk_dates` uses and shrink "
+        "MAX_CHUNK_TRADING_DAYS if the real cap is smaller.")
+
+
+def lookback_calendar_days(result: dict) -> int:
+    a = dt.date.fromisoformat(result["requested_from"])
+    b = dt.date.fromisoformat(result["requested_to"])
+    return (b - a).days
 
 
 # --------------------------------------------------------------------------
@@ -428,6 +496,56 @@ def self_test() -> list[str]:
         assert summary2["codes_to_pull"] == 0, summary2
         assert summary2["codes_skipped_existing"] == 1, summary2
 
+        # crash-safety: a gap flagged on an EARLIER symbol in the same
+        # stage_pull call must already be on disk even if a LATER symbol's
+        # fetch raises mid-run (2026-09-27: a real run lost 136k+ flagged
+        # gaps this way when EODHD returned HTTP 402 partway through --
+        # gaps must be written as found, not buffered until the whole plan
+        # finishes). Two codes: BADCODE gaps on day2 like GOOD did, then
+        # CRASHCODE's own fetch raises.
+        bad_spell = P.Spell("sp500", "BADCODE", "Bad Co", dt.date(2020, 1, 1),
+                            None, True, False)
+        crash_spell = P.Spell("sp500", "CRASHCODE", "Crash Co", dt.date(2020, 1, 1),
+                              None, True, False)
+        with (eod_dir / "BADCODE.csv").open("w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=P.PRICE_FIELDS)
+            w.writeheader()
+            for d, px in [(day1, 20.0), (day2, 20.1)]:
+                w.writerow({"date": d.isoformat(), "open": px, "high": px,
+                           "low": px, "close": px, "adjusted_close": px,
+                           "volume": 1000})
+        with (eod_dir / "CRASHCODE.csv").open("w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=P.PRICE_FIELDS)
+            w.writeheader()
+            for d, px in [(day1, 30.0), (day2, 30.1)]:
+                w.writerow({"date": d.isoformat(), "open": px, "high": px,
+                           "low": px, "close": px, "adjusted_close": px,
+                           "volume": 1000})
+
+        def crashing_fetch(code: str, first: dt.date, last: dt.date) -> list[dict]:
+            if code == "BADCODE":
+                return fake_bars   # same manufactured gap on day2
+            raise RuntimeError("HTTP 402 on intraday/CRASHCODE.US")
+
+        plan3, _ = build_plan([bad_spell, crash_spell], out)
+        assert set(plan3) == {"BADCODE", "CRASHCODE"}, plan3
+        try:
+            stage_pull(crashing_fetch, plan3, out, log=lambda m: None)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("stage_pull did not propagate CRASHCODE's "
+                                 "fetch error")
+        gap_rows_after_crash = list(csv.DictReader(
+            gaps_path.open(newline="", encoding="utf-8")))
+        # the original GOOD/day2 gap plus BADCODE/day2, both preserved --
+        # appended to, never overwritten -- despite CRASHCODE crashing after
+        assert len(gap_rows_after_crash) == 2, gap_rows_after_crash
+        assert {r["code"] for r in gap_rows_after_crash} == {"GOOD", "BADCODE"}
+        # CRASHCODE itself never got an intraday/<code>.csv (crashed before
+        # any row was written) -- correctly NOT resumable-skipped next time
+        assert not (out / "intraday" / "CRASHCODE.csv").exists()
+
         # chunking: a long, gappy date list splits on both size and the gap
         many_dates = [dt.date(2016, 1, 4) + dt.timedelta(days=i)
                      for i in range(70)]  # 70 > MAX_CHUNK_TRADING_DAYS (60)
@@ -436,11 +554,39 @@ def self_test() -> list[str]:
         assert len(chunks) == 3, len(chunks)
         assert len(chunks[0]) == 60 and len(chunks[1]) == 10, [len(c) for c in chunks]
 
+        # probe_window: one call, reports the ACTUAL span even when it is
+        # narrower than requested (the real per-request cap discovery path)
+        def narrow_fetch(code: str, first: dt.date, last: dt.date) -> list[dict]:
+            assert code == "NARROW"
+            # only 3 calendar days of bars come back, however wide the ask
+            return [bar(first, "13:30", 1.0),
+                   bar(first + dt.timedelta(days=1), "13:30", 1.1),
+                   bar(first + dt.timedelta(days=2), "13:30", 1.2)]
+
+        probe = probe_window(narrow_fetch, "NARROW", lookback_days=3650)
+        assert probe["bars"] == 3, probe
+        assert probe["actual_calendar_days"] == 2, probe   # first to first+2
+        probe_text = format_probe(probe)
+        # reports the ACTUAL span (2 days), not just the requested one
+        # (3650 days) -- both numbers appear, but distinctly
+        assert "2 calendar days" in probe_text, probe_text
+        assert probe["actual_first"] in probe_text
+
+        def empty_fetch(code: str, first: dt.date, last: dt.date) -> list[dict]:
+            return []
+
+        empty_probe = probe_window(empty_fetch, "EMPTY")
+        assert empty_probe["bars"] == 0 and empty_probe["actual_first"] is None
+        assert "inconclusive" in format_probe(empty_probe)
+
     return ["self-test passed: eligible-date gating (member AND EOD close), "
            "chunking by both size and gap, HIT/BACKFILL/MISSING classified "
-           "correctly, resumability skipped an already-pulled symbol, and a "
+           "correctly, resumability skipped an already-pulled symbol, a "
            "manufactured chunk gap was flagged rather than silently folded "
-           "into MISSING"]
+           "into MISSING, gap rows already found survive a later symbol's "
+           "fetch crashing (the 2026-09-27 data-loss bug) rather than being "
+           "lost with the whole in-memory buffer, and the one-call window "
+           "probe reports the real (not requested) span"]
 
 
 # --------------------------------------------------------------------------
@@ -454,12 +600,29 @@ def main(argv: list[str] | None = None) -> int:
                   help="re-pull symbols that already have an intraday/<code>.csv")
     p.add_argument("--confirm", action="store_true",
                   help="required to actually pull from EODHD")
+    p.add_argument("--probe", metavar="CODE",
+                  help="spend ONE real API call fetching a wide window for "
+                       "CODE and report the actual span of bars returned -- "
+                       "measures EODHD's real per-request window cap "
+                       "directly. Does not touch the pull plan or --confirm.")
     p.add_argument("--self-test", action="store_true")
     a = p.parse_args(argv)
 
     if a.self_test:
         for line in self_test():
             print(line)
+        return 0
+
+    if a.probe:
+        key = P.api_key()
+        underlying = P.http_fetch_factory(key, pause=INTRADAY_PACE_S)
+        fetch = intraday_fetch_factory(underlying)
+        try:
+            result = probe_window(fetch, a.probe)
+        except (P.Refused, RuntimeError) as e:
+            print(f"STOPPED: {P.scrub(str(e), key)}", file=sys.stderr)
+            return 2
+        print(format_probe(result))
         return 0
 
     try:
@@ -486,7 +649,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         stats = stage_pull(fetch, plan, a.pit_dir)
     except (P.Refused, RuntimeError) as e:
-        print(f"STOPPED: {P.scrub(str(e), key)}", file=sys.stderr)
+        msg = P.scrub(str(e), key)
+        print(f"STOPPED: {msg}", file=sys.stderr)
+        if "HTTP 402" in msg:
+            print(
+                "HTTP 402 (Payment Required) from EODHD almost always means "
+                "the plan's daily API call allowance is used up for today -- "
+                "not a problem with this specific symbol. Check the usage "
+                "page on your EODHD account dashboard for today's quota and "
+                "when it resets, then re-run the SAME command once it has: "
+                "every symbol that already has an intraday/<code>.csv is "
+                "skipped automatically (see 'plan: ... already have a file, "
+                "skipped' in the next run's own printed plan), so this "
+                "resumes from exactly where it stopped rather than "
+                "re-pulling anything.", file=sys.stderr)
         return 2
 
     print(f"\ndone: {stats['codes_pulled']} symbols pulled, "
