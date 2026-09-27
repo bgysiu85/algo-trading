@@ -140,6 +140,142 @@ def test_stage_pull_flags_chunk_gap_without_polluting_missing(tmp_path: Path):
     assert day2_open["status"] == "MISSING"   # still recorded, just also flagged
 
 
+def test_stage_pull_gaps_survive_a_later_symbols_fetch_crashing(tmp_path: Path):
+    """2026-09-27: a real ~2.5hr pull lost 136,000+ flagged gaps because the
+    gaps file was only written after the WHOLE plan finished, and an HTTP
+    402 partway through discarded the entire in-memory buffer. Gaps must be
+    written as found."""
+    day1, day2 = D(2020, 6, 15), D(2020, 6, 16)
+    spells = [P.Spell("sp500", "AAA", "Alpha", D(2016, 1, 1), None, True, False),
+             P.Spell("sp500", "ZZZ", "Zulu", D(2016, 1, 1), None, True, False)]
+    write_eod(tmp_path / "eod" / "AAA.csv",
+             {day1.isoformat(): 10.0, day2.isoformat(): 10.1})
+    write_eod(tmp_path / "eod" / "ZZZ.csv",
+             {day1.isoformat(): 20.0, day2.isoformat(): 20.1})
+
+    def crashing_fetch(code, first, last):
+        if code == "AAA":
+            return [bar(day1, "13:30", 10.0)]   # AAA gaps on day2, as above
+        raise RuntimeError("HTTP 402 on intraday/ZZZ.US")   # ZZZ crashes
+
+    plan, _ = I.build_plan(spells, tmp_path)
+    assert set(plan) == {"AAA", "ZZZ"}
+    with pytest.raises(RuntimeError):
+        I.stage_pull(crashing_fetch, plan, tmp_path, log=lambda m: None)
+
+    # AAA was processed (alphabetically) before ZZZ crashed -- its gap row
+    # must already be on disk, not lost with ZZZ's exception
+    gap_rows = list(csv.DictReader(
+        (tmp_path / I.CHUNK_GAPS_NAME).open(newline="", encoding="utf-8")))
+    assert len(gap_rows) == 1 and gap_rows[0]["code"] == "AAA"
+    assert (tmp_path / "intraday" / "AAA.csv").exists()
+    assert not (tmp_path / "intraday" / "ZZZ.csv").exists()   # crashed first
+
+
+def test_stage_pull_times_calls_and_counts_slow_ones(tmp_path: Path):
+    """2026-09-27: a real pull took ~1.5 days against a 147.6-minute
+    estimate; there was no way to tell after the fact whether that was real
+    network latency or pit_universe.http_fetch_factory's own retry backoff
+    on a throttled (HTTP 429) response, since that backoff happens INSIDE a
+    single fetch() call. stage_pull now times every call directly and
+    counts any call slower than slow_threshold_s as probably-throttled."""
+    spells = [P.Spell("sp500", "AAA", "Alpha", D(2016, 1, 1), None, True, False)]
+    day1, day2 = D(2020, 6, 15), D(2020, 6, 16)
+    write_eod(tmp_path / "eod" / "AAA.csv",
+             {day1.isoformat(): 10.0, day2.isoformat(): 10.1})
+    plan, _ = I.build_plan(spells, tmp_path)
+
+    fast_stats = I.stage_pull(
+        lambda code, first, last: [bar(day1, "13:30", 10.0)],
+        plan, tmp_path, log=lambda m: None)
+    assert fast_stats["slow_calls"] == 0
+    assert fast_stats["fetch_seconds_total"] >= 0.0
+
+    tmp_path2 = tmp_path / "second"
+    write_eod(tmp_path2 / "eod" / "AAA.csv",
+             {day1.isoformat(): 10.0, day2.isoformat(): 10.1})
+    plan2, _ = I.build_plan(spells, tmp_path2)
+
+    def slow_fetch(code, first, last):
+        import time
+        time.sleep(0.02)
+        return [bar(day1, "13:30", 10.0)]
+
+    slow_stats = I.stage_pull(slow_fetch, plan2, tmp_path2, log=lambda m: None,
+                              slow_threshold_s=0.01)
+    assert slow_stats["slow_calls"] == 1
+    assert slow_stats["slowest_call_s"] >= 0.02
+    assert slow_stats["fetch_seconds_total"] >= 0.02
+
+
+def test_cost_lines_flags_estimate_as_floor_not_a_real_estimate():
+    summary = {"codes_total": 900, "codes_skipped_existing": 100,
+              "codes_to_pull": 800, "api_calls": 4000, "symbol_days": 200000}
+    joined = "\n".join(I.cost_lines(summary))
+    assert "best-case FLOOR" in joined
+    assert "1.5 days" in joined
+
+
+def test_stage_pull_appends_gaps_across_resumed_runs(tmp_path: Path):
+    spells1 = [P.Spell("sp500", "AAA", "Alpha", D(2016, 1, 1), None, True, False)]
+    day1, day2 = D(2020, 6, 15), D(2020, 6, 16)
+    write_eod(tmp_path / "eod" / "AAA.csv",
+             {day1.isoformat(): 10.0, day2.isoformat(): 10.1})
+    plan1, _ = I.build_plan(spells1, tmp_path)
+    I.stage_pull(lambda code, first, last: [bar(day1, "13:30", 10.0)],
+                plan1, tmp_path, log=lambda m: None)
+
+    spells2 = [P.Spell("sp500", "BBB", "Bravo", D(2016, 1, 1), None, True, False)]
+    write_eod(tmp_path / "eod" / "BBB.csv",
+             {day1.isoformat(): 5.0, day2.isoformat(): 5.1})
+    plan2, _ = I.build_plan(spells2, tmp_path)
+    I.stage_pull(lambda code, first, last: [bar(day1, "13:30", 5.0)],
+                plan2, tmp_path, log=lambda m: None)
+
+    gap_rows = list(csv.DictReader(
+        (tmp_path / I.CHUNK_GAPS_NAME).open(newline="", encoding="utf-8")))
+    assert {r["code"] for r in gap_rows} == {"AAA", "BBB"}   # both kept
+
+
+# --------------------------------------------------------------------------
+# probe_window: one-call direct measurement of the real per-request cap
+# --------------------------------------------------------------------------
+
+def test_probe_window_reports_actual_narrower_than_requested_span():
+    def narrow_fetch(code, first, last):
+        assert code == "NARROW"
+        return [bar(first, "13:30", 1.0),
+               bar(first + dt.timedelta(days=1), "13:30", 1.1)]
+
+    result = I.probe_window(narrow_fetch, "NARROW", lookback_days=3650)
+    assert result["bars"] == 2
+    assert result["actual_calendar_days"] == 1
+    text = I.format_probe(result)
+    assert "1 calendar days" in text
+    assert result["actual_first"] in text
+
+
+def test_probe_window_empty_is_inconclusive():
+    result = I.probe_window(lambda code, first, last: [], "NOPE")
+    assert result["bars"] == 0 and result["actual_first"] is None
+    assert "inconclusive" in I.format_probe(result)
+
+
+def test_main_probe_flag_runs_one_call_and_exits(monkeypatch, capsys):
+    monkeypatch.setenv("EODHD_API_KEY", "fake-key-for-test")
+
+    def fake_factory(key, pause=0.0):
+        def fetch(path, params):
+            return [{"timestamp": 1_600_000_000, "close": 1.0}]
+        return fetch
+
+    monkeypatch.setattr(P, "http_fetch_factory", fake_factory)
+    rc = I.main(["--probe", "AAPL"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "probe AAPL" in out
+
+
 # --------------------------------------------------------------------------
 # cost_lines / CLI gate
 # --------------------------------------------------------------------------
