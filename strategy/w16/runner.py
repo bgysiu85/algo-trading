@@ -390,7 +390,8 @@ def compute_controls(baseline: str, market: str, *, frames=None, trades=None,
 # orchestration
 # ---------------------------------------------------------------------
 
-def run_cell(baseline: str, market: str, archive, *, spend_holdout_candidate: str | None = None) -> dict:
+def run_cell(baseline: str, market: str, archive, *, spend_holdout_candidate: str | None = None,
+            compute_controls_flag: bool = True, n_control_draws: int = N_DRAWS) -> dict:
     df_1m = load_root_bars(archive, market)
     frames = session_frames(df_1m)
     all_dates = sorted(frames.keys())
@@ -418,8 +419,42 @@ def run_cell(baseline: str, market: str, archive, *, spend_holdout_candidate: st
     n_voided = sum(1 for t in trades if t.get("voided"))
     result = {"baseline": baseline, "market": market, "date_side": label,
              "n_raw_trades": len(trades), "n_voided": n_voided}
-    result.update(score_cell(priced_by_level))
+
+    control_nets = None
+    control_deterministic = None
+    control_summary = None
+    if compute_controls_flag:
+        train_dates = set(dates)
+        if baseline == "B1":
+            ctrl = compute_controls(baseline, market, frames=frames, trades=trades,
+                                    n_draws=n_control_draws)
+        elif baseline == "B2":
+            full_index, price_at = training_full_index_price(df_1m, train_dates)
+            ctrl = compute_controls(baseline, market, frames=frames, trades=trades,
+                                    full_index=full_index, price_at=price_at,
+                                    n_draws=n_control_draws)
+        elif baseline == "B3":
+            flip_counts = b3_flip_counts(frames, market, dates)
+            ctrl = compute_controls(baseline, market, frames=frames, trades=trades,
+                                    flip_counts=flip_counts, n_draws=n_control_draws)
+        control_nets = ctrl["random_nets"]
+        control_deterministic = ctrl["deterministic_net"]
+        control_summary = {
+            "n_draws": len(control_nets),
+            "p5": float(np.percentile(control_nets, 5)) if control_nets else None,
+            "p50": float(np.percentile(control_nets, 50)) if control_nets else None,
+            "p95": float(np.percentile(control_nets, 95)) if control_nets else None,
+            "deterministic": control_deterministic,
+        }
+
+    result.update(score_cell(priced_by_level, control_nets=control_nets,
+                             control_deterministic=control_deterministic))
     result["by_level"] = {lvl: summarize(rows) for lvl, rows in priced_by_level.items()}
+    l2 = priced_by_level["L2"]
+    result["exit_reasons"] = exit_reason_counts(l2)
+    result["sample_trades"] = sample_trades(l2)
+    result["account_view"] = account_view(l2, baseline, market)
+    result["control_summary"] = control_summary
     return result
 
 

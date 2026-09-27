@@ -278,3 +278,28 @@ def test_b3_flip_counts_matches_signal_module(synthetic_frames):
     d0 = date_list[0]
     expected = SIG.vwap_flip_session(synthetic_frames[d0], d0, market="ES")["n_flips"]
     assert counts[d0] == expected
+
+
+def test_run_cell_wires_controls_and_reporting_end_to_end(monkeypatch, synthetic_frames):
+    """Regression test: run_cell() itself must build the control inputs and
+    thread compute_controls_flag/n_control_draws through to compute_controls
+    and score_cell (helper-level unit tests above don't catch a run_cell
+    that forgets to call them -- this caught exactly that bug once)."""
+    date_list = sorted(synthetic_frames.keys())
+    df_1m = pd.concat([synthetic_frames[d] for d in date_list]).sort_index()
+    monkeypatch.setattr(R, "load_root_bars", lambda archive, market: df_1m)
+    monkeypatch.setattr(R, "session_frames", lambda df: synthetic_frames)
+
+    for baseline in ("B1", "B2", "B3"):
+        result = R.run_cell(baseline, "ES", None, n_control_draws=3)
+        assert result["baseline"] == baseline
+        assert result["control_summary"] is not None
+        assert result["control_summary"]["n_draws"] == 3
+        assert isinstance(result["exit_reasons"], dict)
+        assert isinstance(result["sample_trades"], list)
+        assert "equity_final" in result["account_view"]
+        assert result["criteria"]["5_beats_control"] in (True, False)
+
+    result = R.run_cell("B1", "ES", None, compute_controls_flag=False)
+    assert result["control_summary"] is None
+    assert result["criteria"]["5_beats_control"] is None
