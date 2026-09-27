@@ -5,10 +5,13 @@ REGISTERED_w16_session_baselines.md sec 4 (costs), sec 5 (what every run
 must emit) and sec 9 (the bar to clear)."""
 from __future__ import annotations
 
+import numpy as np
+import pandas as pd
 import pytest
 
 import strategy.w16.runner as R
 import strategy.w16.costs as C
+import strategy.w16.signals as SIG
 
 
 def _trade(date, direction, entry, exit_, entry_kind="market_or_stop",
@@ -123,3 +126,155 @@ def test_score_cell_all_positive_book_passes_computed_criteria():
     assert c["2_both_halves_positive"] is True
     assert c["9_min_trades"] is True
     assert c["7_survives_dropping_best_1pct"] is True
+
+
+# ---------------------------------------------------------------------
+# sec 9 #5 -- control_deterministic (B2's AND-condition: > C-O2 AND > C-O3 p95)
+# ---------------------------------------------------------------------
+
+def test_score_cell_control_nets_only_uses_p95():
+    trades = [{"date": f"2020-01-{d:02d}", "net": 10.0, "gross": 10.0, "cost": 0.0}
+             for d in range(1, 21)]
+    priced_by_level = {lvl: trades for lvl in R.LEVELS}
+    passing = R.score_cell(priced_by_level, control_nets=[1.0] * 94 + [50.0] * 6)
+    failing = R.score_cell(priced_by_level, control_nets=[1.0] * 6 + [500.0] * 94)
+    assert passing["criteria"]["5_beats_control"] is True     # net 200 > p95 of that mix
+    assert failing["criteria"]["5_beats_control"] is False    # p95 is 500, net is 200
+
+
+def test_score_cell_control_deterministic_adds_and_condition_for_b2():
+    trades = [{"date": f"2020-01-{d:02d}", "net": 10.0, "gross": 10.0, "cost": 0.0}
+             for d in range(1, 21)]
+    priced_by_level = {lvl: trades for lvl in R.LEVELS}
+    # net (200) beats the p95 (100) but NOT the deterministic C-O2 comparator (250)
+    result = R.score_cell(priced_by_level, control_nets=[100.0] * 100,
+                          control_deterministic=250.0)
+    assert result["criteria"]["5_beats_control"] is False
+    # now the deterministic comparator is below net -- both conditions hold
+    result2 = R.score_cell(priced_by_level, control_nets=[100.0] * 100,
+                           control_deterministic=50.0)
+    assert result2["criteria"]["5_beats_control"] is True
+
+
+# ---------------------------------------------------------------------
+# sec 5 reporting: exit reasons, sample trades, account view
+# ---------------------------------------------------------------------
+
+def test_exit_reason_counts_tallies_by_reason_and_ignores_reasonless_trades():
+    priced = [{"exit_reason": "stop"}, {"exit_reason": "stop"}, {"exit_reason": "target"},
+             {"no_reason_here": True}]
+    counts = R.exit_reason_counts(priced)
+    assert counts == {"stop": 2, "target": 1}
+
+
+def test_sample_trades_returns_all_when_fewer_than_n():
+    priced = [{"date": f"2020-01-{d:02d}", "net": 1.0} for d in range(1, 6)]
+    out = R.sample_trades(priced, n=20)
+    assert len(out) == 5
+
+
+def test_sample_trades_spreads_evenly_across_a_long_list():
+    priced = [{"date": f"2020-{(i // 28) + 1:02d}-{(i % 28) + 1:02d}", "net": float(i)}
+             for i in range(200)]
+    out = R.sample_trades(priced, n=20)
+    assert len(out) == 20
+    # evenly spread means the first and last dated trades both appear
+    dates = [t["date"] for t in out]
+    assert dates == sorted(dates)
+
+
+def test_account_view_empty_book():
+    v = R.account_view([], "B1", "ES")
+    assert v["equity_final"] == 0.0 and v["max_drawdown_usd"] == 0.0
+
+
+def test_account_view_reports_overnight_margin_only_for_b2():
+    priced = [{"date": "2020-01-01", "net": 10.0}]
+    v_b1 = R.account_view(priced, "B1", "ES")
+    v_b2 = R.account_view(priced, "B2", "MES".replace("MES", "ES"))
+    assert "overnight_margin" not in v_b1
+    assert "overnight_margin" in v_b2
+    assert v_b2["overnight_margin"]["initial"] == pytest.approx(2881.37)   # MES, Amendment A
+
+
+def test_account_view_drawdown_pct_of_account():
+    # a winning trade first establishes the peak (1000), then a loss draws the
+    # equity down by exactly $2,212.90 = 10% of the $22,129 account
+    priced = [{"date": "2020-01-01", "net": 1000.0},
+             {"date": "2020-01-02", "net": -2212.9}]
+    v = R.account_view(priced, "B1", "ES")
+    assert v["max_drawdown_usd"] == pytest.approx(-2212.9)
+    assert v["max_drawdown_pct_of_account"] == pytest.approx(10.0, rel=1e-3)
+
+
+# ---------------------------------------------------------------------
+# controls actually run (sec 9 #5) -- small n_draws, synthetic bars
+# ---------------------------------------------------------------------
+
+def _synthetic_session(date_str, seed, n=60, base=5000.0):
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range(f"{date_str} 09:30", periods=n, freq="1min", tz="America/New_York").tz_convert("UTC")
+    walk = np.cumsum(rng.normal(0, 0.5, n))
+    close = base + walk
+    open_ = np.concatenate([[base], close[:-1]])
+    high = np.maximum(open_, close) + rng.uniform(0, 0.5, n)
+    low = np.minimum(open_, close) - rng.uniform(0, 0.5, n)
+    vol = rng.integers(50, 500, n)
+    return pd.DataFrame({"open": open_, "high": high, "low": low, "close": close,
+                        "volume": vol, "held_id": 1}, index=idx)
+
+
+@pytest.fixture
+def synthetic_frames():
+    dates = [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2020-01-06", periods=10)]
+    return {d: _synthetic_session(d, seed=i) for i, d in enumerate(dates)}
+
+
+def test_compute_controls_b1_returns_n_draws_nets(synthetic_frames):
+    date_list = sorted(synthetic_frames.keys())
+    trades = R.generate_b1_trades(synthetic_frames, "ES", date_list)
+    ctrl = R.compute_controls("B1", "ES", frames=synthetic_frames, trades=trades,
+                              n_draws=5, progress=False)
+    assert len(ctrl["random_nets"]) == 5
+    assert ctrl["deterministic_net"] is None
+    assert all(isinstance(v, float) for v in ctrl["random_nets"])
+
+
+def test_compute_controls_b2_returns_deterministic_and_random(synthetic_frames):
+    date_list = sorted(synthetic_frames.keys())
+    trades = R.generate_b2_trades(synthetic_frames, "ES", date_list)
+    df_1m = pd.concat([synthetic_frames[d] for d in date_list]).sort_index()
+    full_index, price_at = R.training_full_index_price(df_1m, set(date_list))
+    ctrl = R.compute_controls("B2", "ES", frames=synthetic_frames, trades=trades,
+                              full_index=full_index, price_at=price_at,
+                              n_draws=5, progress=False)
+    assert len(ctrl["random_nets"]) == 5
+    assert isinstance(ctrl["deterministic_net"], float)
+
+
+def test_compute_controls_b3_returns_n_draws_nets(synthetic_frames):
+    date_list = sorted(synthetic_frames.keys())
+    flip_counts = R.b3_flip_counts(synthetic_frames, "ES", date_list)
+    ctrl = R.compute_controls("B3", "ES", frames=synthetic_frames, flip_counts=flip_counts,
+                              n_draws=5, progress=False)
+    assert len(ctrl["random_nets"]) == 5
+    assert ctrl["deterministic_net"] is None
+
+
+def test_training_full_index_price_filters_to_given_dates(synthetic_frames):
+    date_list = sorted(synthetic_frames.keys())
+    df_1m = pd.concat([synthetic_frames[d] for d in date_list]).sort_index()
+    keep = set(date_list[:5])
+    full_index, price_at = R.training_full_index_price(df_1m, keep)
+    from strategy.w16.readback import local_naive_et
+    seen_dates = set(local_naive_et(full_index).strftime("%Y-%m-%d"))
+    assert seen_dates == keep
+    assert len(full_index) == len(price_at)
+
+
+def test_b3_flip_counts_matches_signal_module(synthetic_frames):
+    date_list = sorted(synthetic_frames.keys())
+    counts = R.b3_flip_counts(synthetic_frames, "ES", date_list)
+    d0 = date_list[0]
+    expected = SIG.vwap_flip_session(synthetic_frames[d0], d0, market="ES")["n_flips"]
+    assert counts[d0] == expected

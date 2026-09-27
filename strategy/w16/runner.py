@@ -1,42 +1,41 @@
 #!/usr/bin/env python3
 """W16 session-baselines backtest runner: G5 (costs) integration, trade
-generation for all three baselines, dollar P&L at L1/L2/L3, and the sec 9
-scoring criteria that don't require a separately-run control or grid.
-Board W16-0003 subitem 3 ("engine, costs ... holdout ledger, look-ahead
-tests, pre-flight (G2-G5)"); the actual training-side run against the real
-archive is subitem 4 (Ben, locally) -- this module is the engine that run
-calls, not the run itself.
+generation for all three baselines, dollar P&L at L1/L2/L3, the control
+comparison (sec 9 #5), and full sec 5 reporting (exit reasons, sample
+trades, account view). Board W16-0003 subitem 3 built this engine;
+subitem 4 (Ben, locally, real archive) is running it -- this module is
+what subitem 4's command calls.
 
     D:\\Trading\\.venv\\Scripts\\python.exe -m strategy.w16.runner --preflight
-    D:\\Trading\\.venv\\Scripts\\python.exe -m strategy.w16.runner --backtest
+    D:\\Trading\\.venv\\Scripts\\python.exe -m strategy.w16.runner --backtest --skip-controls   # fast sanity pass
+    D:\\Trading\\.venv\\Scripts\\python.exe -m strategy.w16.runner --backtest                    # full run, sec 9 #5 included
 
 WHAT IS, AND IS NOT, BUILT HERE (read this before assuming a number below
 is a finished sec 9 verdict)
 ------------------------------------------------------------------------
 Built: trade generation for B1/B2/B3 (via strategy.w16.signals), cost/P&L at
-L1/L2/L3 (via strategy.w16.costs), per-year and both-halves aggregation, exit-
-reason and voided/skipped counts (sec 5 items 1-3), the holdout gate (G3,
-strategy.w16.holdout), and four of sec 9's nine pass criteria that need
-nothing but the trade list itself: #1 net>0, #2 both halves net>0, #3 no
-year >50% of net, #7 net>0 after dropping the best 1% of trades, #9 >=300
-trades. #4 (month bootstrap, 2,000 resamples) is implemented
-(`bootstrap_by_month`) since it needs only the trade list and a seed.
+L1/L2/L3 (via strategy.w16.costs), per-year and both-halves aggregation,
+exit-reason counts, sample trades and account view (sec 5 items 1-3/7/8),
+the holdout gate (G3, strategy.w16.holdout), and EIGHT of sec 9's nine pass
+criteria: #1 net>0, #2 both halves net>0, #3 no year >50% of net, #4 month
+bootstrap (2,000 resamples), #5 beats its own random-timing control (1,000
+seeded draws via strategy.w16.controls, run for real by `compute_controls`
+-- B1 against C-B1, B2 against C-O2 AND C-O3 per sec 9's own AND-condition,
+B3 against C-B3), #6 net>0 at L3, #7 net>0 after dropping the best 1% of
+trades, #9 >=300 trades. `--skip-controls` skips #5's 1,000 draws for a
+fast sanity pass on trade counts and net before committing to the full run
+(#5 then reports `None`, not False).
 
-NOT built here, on purpose -- each needs machinery beyond "one cell's own
-trade list": #5 (beats its own random-timing control's p95) needs 1,000
-control draws actually run (strategy.w16.controls has the draw functions;
-`score_cell` accepts pre-computed `control_nets` and scores #5 if given
-them, and reports #5 as `None` -- not False -- if not); #6 (net>0 at L3) IS
-computed (L3 is just another cost level, already available) but is listed
-here for completeness; #8 (neighbour grid, sec 7.3) needs re-parameterized
-versions of the B1/B2/B3 rules (range length, target ratio, bar size, ...)
-that do not exist yet -- building those is a separate, materially larger
-piece of work than re-running the registered rule, and REGISTERED sec 7.3
-is explicit that "the grid never replaces the registered rule", so its
-absence does not block reading #1-#4/#6/#7/#9 on the registered cells.
-`score_cell`'s return dict has `beats_control` and `neighbour_grid_share`
-both explicitly `None` until those are supplied, rather than silently
-omitted keys a caller could mistake for "not applicable".
+NOT built here, on purpose: #8 (neighbour grid, sec 7.3) needs
+re-parameterized versions of the B1/B2/B3 rules (range length, target
+ratio, bar size, ...) that do not exist yet -- building those is a
+separate, materially larger piece of work than re-running the registered
+rule (a new board item tracks it), and REGISTERED sec 7.3 is explicit that
+"the grid never replaces the registered rule", so its absence does not
+block reading #1-#7/#9 on the registered cells. `score_cell`'s return dict
+has `neighbour_grid_share` explicitly `None` until a caller supplies it,
+rather than a silently omitted key that could be mistaken for "not
+applicable".
 """
 from __future__ import annotations
 
@@ -47,10 +46,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from collections import Counter
+
+from strategy.w16 import controls as CTRL
 from strategy.w16 import holdout as H
 from strategy.w16 import signals as SIG
 from strategy.w16 import sessions as S
-from strategy.w16.costs import FULL_TO_MICRO, pnl_dollars, trade_cost
+from strategy.w16.costs import FULL_TO_MICRO, OVERNIGHT_MARGIN, pnl_dollars, trade_cost
 from strategy.w16.preflight import ROOTS, load_root_bars, session_frames
 
 LEVELS = ("L1", "L2", "L3")
@@ -58,6 +60,7 @@ SCORE_LEVEL = "L2"
 MIN_TRADES = 300
 BOOTSTRAP_DRAWS = 2000
 BOOTSTRAP_PASS_PCT = 0.99          # sec 9 #4: raised from 95% for 6 scored cells
+ACCOUNT_USD = 22129.0              # sec 2 -- the project's standard account
 
 
 # ---------------------------------------------------------------------
@@ -206,10 +209,22 @@ def bootstrap_by_month(priced: list[dict], *, n_draws: int = BOOTSTRAP_DRAWS,
 
 
 def score_cell(priced_by_level: dict[str, list[dict]], *, control_nets: list[float] | None = None,
+              control_deterministic: float | None = None,
               neighbour_grid_share: float | None = None) -> dict:
     """sec 9's nine criteria, on the SCORE_LEVEL (L2) trade list, with #6
-    read off the L3 list already computed alongside it. See module
-    docstring for what #5/#8 need that this function alone cannot supply."""
+    read off the L3 list already computed alongside it.
+
+    #5 ("beats its controls on net", sec 9): `control_nets` is the cell's
+    own random-timing control distribution (C-B1 for B1, C-O3 for B2, C-B3
+    for B3) -- the p95 comparator every baseline needs. B2's row in sec 9
+    is an AND of two conditions ("B2 > C-O2 and > C-O3 p95"); the other
+    baselines have only the p95 test. `control_deterministic` carries that
+    extra condition (C-O2's own net) and is ignored (has no effect) unless
+    supplied -- so B1/B3 callers that never pass it get exactly the single
+    p95 test, unchanged from before this was added.
+    #8 (neighbour grid) is unchanged: `None` until a caller supplies
+    `neighbour_grid_share` -- see module docstring for why that is not
+    built yet."""
     l2 = priced_by_level["L2"]
     l3 = priced_by_level["L3"]
     l2_summary = summarize(l2)
@@ -220,13 +235,19 @@ def score_cell(priced_by_level: dict[str, list[dict]], *, control_nets: list[flo
     max_year_share = (max(abs(v) for v in year_nets.values()) / abs(total_net)
                       if year_nets and total_net != 0 else None)
 
+    if control_nets is None:
+        crit5 = None
+    else:
+        beats_p95 = total_net > float(np.percentile(control_nets, 95))
+        crit5 = beats_p95 and (total_net > control_deterministic
+                               if control_deterministic is not None else True)
+
     criteria = {
         "1_net_positive": total_net > 0,
         "2_both_halves_positive": halves["early"]["net"] > 0 and halves["late"]["net"] > 0,
         "3_no_year_over_50pct": (max_year_share is not None and max_year_share <= 0.5),
         "4_month_bootstrap": bootstrap_by_month(l2)["pass"],
-        "5_beats_control": (None if control_nets is None else
-                            total_net > float(np.percentile(control_nets, 95))),
+        "5_beats_control": crit5,
         "6_net_positive_at_l3": summarize(l3)["net"] > 0,
         "7_survives_dropping_best_1pct": drop_best_pct(l2)["net"] > 0,
         "8_neighbour_grid_6_of_9": (None if neighbour_grid_share is None else
@@ -237,6 +258,132 @@ def score_cell(priced_by_level: dict[str, list[dict]], *, control_nets: list[flo
     criteria["passes_all_computed"] = bool(computed) and all(computed)
     return {"criteria": criteria, "l2_summary": l2_summary, "both_halves": halves,
            "by_year": yearly, "max_year_share_of_net": max_year_share}
+
+
+# ---------------------------------------------------------------------
+# sec 5 reporting: exit reasons, sample trades, account view
+# ---------------------------------------------------------------------
+
+def exit_reason_counts(priced: list[dict]) -> dict:
+    """sec 5 item 3: counts by exit_reason (B1/C-B1: stop/target/time_exit;
+    B3/C-B3: flip/flat_at_close). Trades with no exit_reason (B2 and its
+    controls, which have none) are omitted rather than miscounted."""
+    return dict(Counter(t["exit_reason"] for t in priced if "exit_reason" in t))
+
+
+def sample_trades(priced: list[dict], n: int = 20) -> list[dict]:
+    """sec 5 item 8: n trades evenly spaced through the dated list (every
+    ~1/nth), not the best n -- so a run with fewer than n trades just
+    returns all of them."""
+    if not priced:
+        return []
+    dated = sorted(priced, key=lambda t: t["date"])
+    if len(dated) <= n:
+        return dated
+    step = len(dated) / n
+    positions = sorted({min(int(i * step), len(dated) - 1) for i in range(n)})
+    return [dated[i] for i in positions]
+
+
+def account_view(priced: list[dict], baseline: str, market: str,
+                 account_usd: float = ACCOUNT_USD) -> dict:
+    """sec 5 item 7: equity curve summary at $22,129 fixed size, 1 micro;
+    for B2, the NinjaTrader overnight margin (G5, Amendment A) checked
+    against the account, reported never scored."""
+    if not priced:
+        out = {"equity_final": 0.0, "max_drawdown_usd": 0.0,
+              "max_drawdown_pct_of_account": 0.0}
+    else:
+        dated = sorted(priced, key=lambda t: t["date"])
+        nets = np.array([t["net"] for t in dated])
+        equity = np.cumsum(nets)
+        running_max = np.maximum.accumulate(equity)
+        drawdown = equity - running_max
+        max_dd = float(drawdown.min())
+        out = {"equity_final": float(equity[-1]), "max_drawdown_usd": max_dd,
+              "max_drawdown_pct_of_account": abs(max_dd) / account_usd * 100.0}
+    if baseline == "B2":
+        micro = FULL_TO_MICRO[market]
+        margin = OVERNIGHT_MARGIN[micro]
+        out["overnight_margin"] = margin
+        out["margin_initial_within_account"] = margin["initial"] <= account_usd
+    return out
+
+
+# ---------------------------------------------------------------------
+# controls (sec 9 #5): C-B1 / C-O2+C-O3 / C-B3, run for real at N_DRAWS
+# ---------------------------------------------------------------------
+
+N_DRAWS = CTRL.N_DRAWS
+
+
+def b3_flip_counts(frames: dict[str, pd.DataFrame], market: str, dates) -> dict[str, int]:
+    """Per-day flip counts on the given (training) dates -- what C-B3 needs
+    to draw a matched number of random flips per day. Re-runs
+    vwap_flip_session (already run once by generate_b3_trades); cheap next
+    to the 1,000 control draws themselves, and keeps this function
+    independent of generate_b3_trades's own return shape."""
+    out = {}
+    for date_str in dates:
+        if date_str not in frames:
+            continue
+        res = SIG.vwap_flip_session(frames[date_str], date_str, market=market)
+        if res["skipped"]:
+            continue
+        out[date_str] = res["n_flips"]
+    return out
+
+
+def training_full_index_price(df_1m: pd.DataFrame, train_dates: set) -> tuple[pd.DatetimeIndex, pd.Series]:
+    """Every 1-minute bar timestamp (NOT RTH-windowed -- a C-O3 draw can
+    start anywhere) whose ET calendar date is in `train_dates`, plus its
+    close price -- what C-O3 draws its random window against. `df_1m` is
+    the full loaded root bars (strategy.w16.preflight.load_root_bars)."""
+    from strategy.w16.readback import local_naive_et
+    df = df_1m.sort_index()
+    naive = local_naive_et(df.index)
+    date_strs = naive.strftime("%Y-%m-%d")
+    mask = np.asarray(date_strs.isin(train_dates))
+    sub = df[mask]
+    return pd.DatetimeIndex(sub.index), sub["close"]
+
+
+def compute_controls(baseline: str, market: str, *, frames=None, trades=None,
+                     full_index=None, price_at=None, flip_counts=None,
+                     level: str = SCORE_LEVEL, n_draws: int = N_DRAWS,
+                     progress: bool = True) -> dict:
+    """Runs the registered control for one cell, `n_draws` seeded draws
+    (sec 7.1: 1,000). Returns {"random_nets": [...], "deterministic_net":
+    float|None} -- the deterministic value is C-O2's net and is only
+    non-None for B2 (sec 9 #5's extra AND-condition)."""
+    random_nets: list[float] = []
+    deterministic_net = None
+    if baseline == "B1":
+        for i in range(n_draws):
+            draw = CTRL.c_b1_draw(trades, frames, i)
+            random_nets.append(summarize(price_all(draw, level))["net"])
+            if progress and (i + 1) % 100 == 0:
+                print(f"    C-B1 {market}: {i + 1}/{n_draws} draws")
+    elif baseline == "B2":
+        for i in range(n_draws):
+            draw = CTRL.c_o3_draw(trades, full_index, price_at, i)
+            random_nets.append(summarize(price_all(draw, level))["net"])
+            if progress and (i + 1) % 100 == 0:
+                print(f"    C-O3 {market}: {i + 1}/{n_draws} draws")
+        o2 = CTRL.c_o2_trades(trades, frames)
+        deterministic_net = summarize(price_all(o2, level))["net"]
+    elif baseline == "B3":
+        for i in range(n_draws):
+            legs = CTRL.c_b3_draw(flip_counts, frames, i)
+            for leg in legs:
+                leg["market"] = market
+            draw = SIG.pair_b3_legs(legs)
+            random_nets.append(summarize(price_all(draw, level))["net"])
+            if progress and (i + 1) % 100 == 0:
+                print(f"    C-B3 {market}: {i + 1}/{n_draws} draws")
+    else:
+        raise ValueError(f"unknown baseline {baseline!r}")
+    return {"random_nets": random_nets, "deterministic_net": deterministic_net}
 
 
 # ---------------------------------------------------------------------
@@ -283,6 +430,12 @@ def main(argv=None) -> int:
     mode.add_argument("--preflight", action="store_true")
     mode.add_argument("--backtest", action="store_true")
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--skip-controls", action="store_true",
+                    help="Skip the 1,000-draw control comparison (sec 9 #5) -- fast sanity "
+                         "pass on trade counts/net before committing to the full run.")
+    ap.add_argument("--n-control-draws", type=int, default=N_DRAWS,
+                    help=f"Control draws per cell (registered: {N_DRAWS}). Lower only for a "
+                         "quick look; the registered pass bar needs the full count.")
     a = ap.parse_args(argv)
 
     from common.tsmom_fetch import default_archive
@@ -300,11 +453,17 @@ def main(argv=None) -> int:
     report = {}
     for baseline in ("B1", "B2", "B3"):
         for market in ROOTS:
-            print(f"running {baseline} {market} (training side)...")
-            report[f"{baseline}-{market}"] = run_cell(baseline, market, archive)
+            print(f"running {baseline} {market} (training side)"
+                 f"{' [no controls]' if a.skip_controls else f' [{a.n_control_draws} control draws]'}...")
+            report[f"{baseline}-{market}"] = run_cell(
+                baseline, market, archive,
+                compute_controls_flag=not a.skip_controls,
+                n_control_draws=a.n_control_draws)
     for key, cell in report.items():
         s = cell["by_level"]["L2"]
-        print(f"{key:6s}  n={s['n_trades']:5d}  net(L2)=${s['net']:,.2f}  "
+        ctrl = cell.get("control_summary")
+        ctrl_str = f"  control_p95=${ctrl['p95']:,.2f}" if ctrl else ""
+        print(f"{key:6s}  n={s['n_trades']:5d}  net(L2)=${s['net']:,.2f}{ctrl_str}  "
               f"passes_all_computed={cell['criteria']['passes_all_computed']}")
     if a.out:
         a.out.parent.mkdir(parents=True, exist_ok=True)
