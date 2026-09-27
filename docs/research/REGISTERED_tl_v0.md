@@ -28,6 +28,65 @@ result is a new hypothesis and spends from the budget in §9.
 
 ---
 
+## 0.1 PRE-RUN amendments — 2026-09-28, W15-0014, before any P&L was computed
+
+Written with the step-4 engine (`strategy/tl_v0/`), after its build and independent review and
+**before its first run on the archive**. No return of either rule set, or of any control, had
+been seen. None of these changes a threshold in §4.
+
+**Amendment A — the bars and the markets.**
+- *Markets:* 12 — the eleven TSMOM core roots plus **MTN** (signal and P&L from TN's held contract
+  at $100/point). ZN is TSMOM's *alternative* rates arm (a), not a thirteenth market; the pre-flight
+  had carried it as a 13th row. Ben, 2026-09-28, in his words: **"12 markets, MTN only
+  (Recommended)"**. Vehicles and ticks: `strategy/tl_v0/spec.py` (micros per §5; NG and 6J full
+  size; MTN's tick taken as TN's 1/64 point, flagged).
+- *Sunday rows:* GLBX `ohlcv-1d` bars are UTC days; a Sunday row is the first hour or two of
+  Monday's Globex session (TSMOM archive note, point 1). It is **folded into the same contract's
+  next row** (open = Sunday's open, high/low = both, close = the next row's). Saturday rows and
+  orphan Sunday rows are dropped. All counted. (The pre-flight used Sunday rows as full bars.)
+- *Roll rule and gap:* the held contract is TSMOM's `roll.held_contract` (five sessions, weekday
+  calendar, Amendment C cycles), imported, not re-derived. The back-adjustment gap is measured on
+  the roll session itself, between the two contracts' closes (`roll.held_series`'s convention),
+  not across two sessions as `common/tl_v0_data.back_adjust` did.
+- *Holdout:* rows dated 2022-01-01 onward are dropped by `split_dates` the moment the date column
+  exists, before folding, de-duplication or mapping.
+
+**Amendment B — which book the §4 verdict is read on.** §4 names the ensemble spec but not the
+sizing. The verdict is read on the **fractional** book at **$22,129** (every trade risks exactly
+1%, one third per pivot-size sleeve). The integer book at $22,129 is scored and printed beside
+it; if the two disagree in sign at mid friction, that is the headline. Integer books at $100k and
+$500k are capacity readings only. Ben, 2026-09-28, in his words: **"Fractional @ $22,129
+(Recommended)"**.
+
+**Amendment C — readings where the text is silent** (Pine `TL_v0.pine` followed where it speaks):
+- Weekly lines use the sleeve's own L = R; the weekly direction takes the *last* event on a bar
+  that breaks both ways; a daily bar that breaks both ways enters on the up-break (all as Pine).
+- Initial stop = the safety-line level at the signal close if it is on the right side of the
+  close, else the 2L+1-bar extreme ∓ 0.25 × ATR (Pine's `pendStop`). v0-rev: the weekly line
+  (completed weeks, extrapolated to the current week) first, then v0's chain.
+- ATR(14) is unknown for the first 13 bars, daily and weekly (Pine's `ta.atr`).
+- Equity is fixed per book (1% of $22,129 per trade, never of a running balance).
+- Years and both halves are read on the daily mark-to-market (raw held-contract prices), which
+  sums to the trade list; halves split at the median training session (`describe()`).
+  Realised volatility = std of the book's daily $ P&L × √252.
+- Controls: **C1** close beyond the prior 20-bar high/low → next open, resting stop at the 10-bar
+  opposite channel, no weekly filter, one sleeve at 1%. **C2** v0's entries, stop = highest high
+  (lowest low) since the signal bar ∓ 3 × ATR(14), ratcheting, three sleeves at ⅓. **C3** the
+  12-month sign, each position held exactly H sessions (H = the median hold of the rule set it is
+  compared with, run once for each) then closed and re-opened on the sign at that time; no stop,
+  sized as if the stop were 3 × ATR(14) away; one sleeve at 1%.
+- Explained Pine/Python differences left in the G3-cleared line code: the birth-validity test
+  uses each bar's own ATR (Pine: the confirming bar's); the 400-bar span is pivot-to-pivot (Pine:
+  first pivot to the confirming bar). The G3 parity was on TradingView session bars; these are
+  UTC-day bars — same rules, different bars (the report says so).
+
+**Amendment D — Davey process figures (W01-0005, Ben: option A), reported only, never scored:**
+Monte Carlo worst-drawdown distribution at $22,129 (median, 95th percentile, chance of 30% and
+50%), quit points (3 losses in a row; a 10% = $2,213 drawdown pause; the MC 95th-percentile
+figure), and a written incubation/paper-trading recommendation with its pass condition.
+
+---
+
 ## 1. The hypothesis, in one sentence
 
 **Trend-line breakout entries with a trend-line trailing stop (Tori Trades' method, coded)
@@ -189,6 +248,9 @@ come from what cannot be coded.*
 ---
 
 ## Next steps
+
+- **W15-0014 subitem 2** — run `python -m strategy.tl_v0.run` on Ben's PC (training side only). Then
+  subitem 3, the Result doc. (2026-09-28)
 
 - **AT-105 subitem 3** — pre-flight (§5), Python, training side only. Suggested session: **Sonnet, medium effort**.
 - Then G2 (AT-43) and G3–G5 before any backtest (step 4).
