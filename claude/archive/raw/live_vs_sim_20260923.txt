@@ -1,0 +1,217 @@
+# generated 2026-09-23 11:19:25 UTC
+# common.live_vs_sim sessions=11 registered=docs/research/REGISTERED_mcl_vs_mc5_live.md
+
+H-L1 (W02-0002) -- IS MC5 REALLY BETTER THAN MCL? LIVE AGAINST THE BACKTEST, SAME SESSIONS
+
+  registered   docs/research/REGISTERED_mcl_vs_mc5_live.md
+  sessions     11  2026-09-08 -> 2026-09-22   (both strategies from 2026-09-10: 9; apex-ON 6, apex-OFF 3)
+  universe     2026-09-08<-screen_pairs_pit_itch_ext.json, 2026-09-09<-screen_pairs_pit_itch_ext.json, 2026-09-10<-screen_pairs_pit_itch_ext.json, 2026-09-11<-screen_pairs_pit_itch_ext.json, 2026-09-14<-screen_pairs_pit_itch_ext.json, 2026-09-15<-screen_pairs_pit_itch_ext.json, 2026-09-16<-screen_pairs_pit_itch_ext.json, 2026-09-17<-screen_pairs_pit_itch_ext.json, 2026-09-18<-screen_pairs_pit_itch_ext.json, 2026-09-21<-screen_pairs_pit_itch_ext3.json, 2026-09-22<-screen_pairs_pit_itch_ext3.json
+  no tape      none
+  symbol-days  111   errors 0
+  feed-matched +15 for sessions < 2026-09-21, +0 from it
+  C1 books vs feed_delay Arm B: OK (289 rows, 8 sessions)
+  C2 universe overlap: OK (9 overlapping sessions identical)
+  live         224 round trips on these sessions; C3 OK
+
+  C4 cap=inf identity OK;  cap=1 no overlap OK
+  C6 apex-ON book differs from apex-OFF on 48 trade rows
+
+1. THE LIVE BOOK  (as logged; price-only P/L)
+
+  all rows, both running   (9 sessions)
+    MCL  n     60   net       18.64   /trade     0.31   /session      2.07
+    MC5  n    156   net    (595.14)   /trade   (3.82)   /session   (66.13)
+    MCL - MC5 per_trade         4.13   90% [(6.20), 13.67]   -> CAN'T TELL
+    MCL - MC5 per_session      68.20   90% [(19.08), 148.32]   -> CAN'T TELL
+
+  MC5 apex-OFF sessions only   (3 sessions)
+    MCL  n     18   net      241.28   /trade    13.40   /session     80.43
+    MC5  n     33   net    (136.36)   /trade   (4.13)   /session   (45.45)
+    MCL - MC5 per_trade        17.54   90% [11.14, 27.77]   -> MCL BETTER
+    MCL - MC5 per_session     125.88   90% [72.70, 179.06]   -> MCL BETTER
+
+  MC5 apex-ON sessions only   (6 sessions)
+    MCL  n     42   net    (222.64)   /trade   (5.30)   /session   (37.11)
+    MC5  n    123   net    (458.78)   /trade   (3.73)   /session   (76.46)
+    MCL - MC5 per_trade       (1.57)   90% [(14.76), 9.45]   -> CAN'T TELL
+    MCL - MC5 per_session      39.36   90% [(84.64), 151.93]   -> CAN'T TELL
+
+  all rows, with IBKR tiered commission   (9 sessions)
+    MCL  n     60   net     (63.65)   /trade   (1.06)   /session    (7.07)
+    MC5  n    156   net    (809.12)   /trade   (5.19)   /session   (89.90)
+    MCL - MC5 per_trade         4.13   90% [(6.20), 13.67]   -> CAN'T TELL
+    MCL - MC5 per_session      82.83   90% [(8.53), 168.01]   -> CAN'T TELL
+
+  MCL alone before 2026-09-10: 8 trades (134.00) (not in the comparison)
+
+2. SIM, FEED-MATCHED, SAME SESSIONS  (read at $4.26; per-trade difference is friction-invariant)
+
+  uncapped, both running   (9 sessions)
+    MCL  n     78   net    (329.04)   /trade   (4.22)   /session   (36.56)   /symday   (3.66)
+    MC5  n     98   net    (189.21)   /trade   (1.93)   /session   (21.02)   /symday   (2.10)
+    MCL - MC5 per_trade       (2.29)   90% [(14.29), 9.03]   -> CAN'T TELL
+    MCL - MC5 per_session    (15.54)   90% [(143.59), 100.72]   -> CAN'T TELL
+    MCL - MC5 per_symday      (1.55)   90% [(13.95), 10.38]   -> CAN'T TELL
+
+  uncapped, apex-OFF sessions   (3 sessions)
+    MCL  n     28   net     (80.68)   /trade   (2.88)   /session   (26.89)   /symday   (2.31)
+    MC5  n     44   net    (102.66)   /trade   (2.33)   /session   (34.22)   /symday   (2.93)
+    MCL - MC5 per_trade       (0.55)   90% [(16.86), 25.72]   -> CAN'T TELL
+    MCL - MC5 per_session       7.33   90% [(244.36), 259.01]   -> CAN'T TELL
+    MCL - MC5 per_symday        0.63   90% [(18.33), 25.90]   -> CAN'T TELL
+
+  uncapped, apex-ON sessions   (6 sessions)
+    MCL  n     50   net    (248.36)   /trade   (4.97)   /session   (41.39)   /symday   (4.52)
+    MC5  n     54   net     (86.55)   /trade   (1.60)   /session   (14.42)   /symday   (1.57)
+    MCL - MC5 per_trade       (3.36)   90% [(17.47), 4.83]   -> CAN'T TELL
+    MCL - MC5 per_session    (26.97)   90% [(126.98), 52.27]   -> CAN'T TELL
+    MCL - MC5 per_symday      (2.94)   90% [(12.86), 5.44]   -> CAN'T TELL
+
+  apex-ON sessions, MC5 on the apex-ON book   (6 sessions)
+    MCL  n     50   net    (248.36)   /trade   (4.97)   /session   (41.39)   /symday   (4.52)
+    MC5  n     66   net    (283.83)   /trade   (4.30)   /session   (47.30)   /symday   (5.16)
+    MCL - MC5 per_trade       (0.67)   90% [(14.91), 5.84]   -> CAN'T TELL
+    MCL - MC5 per_session       5.91   90% [(104.27), 96.57]   -> CAN'T TELL
+    MCL - MC5 per_symday        0.64   90% [(11.80), 9.84]   -> CAN'T TELL
+
+  sensitivity: the OTHER feed offset per session   (9 sessions)
+    MCL  n     85   net    (450.88)   /trade   (5.30)   /session   (50.10)   /symday   (5.01)
+    MC5  n    110   net      434.25   /trade     3.95   /session     48.25   /symday     4.83
+    MCL - MC5 per_trade       (9.25)   90% [(18.05), (1.00)]   -> MC5 BETTER
+    MCL - MC5 per_session    (98.35)   90% [(195.55), (10.45)]   -> MC5 BETTER
+    MCL - MC5 per_symday      (9.83)   90% [(18.10), (1.17)]   -> MC5 BETTER
+
+3. SIM, FEED-MATCHED, SHARED CAP OF 3 REPLAYED
+
+  shared cap, MCL first on a same-minute tie   (9 sessions)
+    MCL  n     66   net    (201.81)   /trade   (3.06)   /session   (22.42)   /symday   (2.24)
+    MC5  n     86   net    (478.69)   /trade   (5.57)   /session   (53.19)   /symday   (5.32)
+    MCL - MC5 per_trade         2.51   90% [(8.79), 12.01]   -> CAN'T TELL
+    MCL - MC5 per_session      30.76   90% [(60.75), 123.24]   -> CAN'T TELL
+    MCL - MC5 per_symday        3.08   90% [(6.36), 12.19]   -> CAN'T TELL
+
+  shared cap, MC5 first on a same-minute tie   (9 sessions)
+    MCL  n     65   net    (163.12)   /trade   (2.51)   /session   (18.12)   /symday   (1.81)
+    MC5  n     87   net    (506.33)   /trade   (5.82)   /session   (56.26)   /symday   (5.63)
+    MCL - MC5 per_trade         3.31   90% [(7.93), 12.59]   -> CAN'T TELL
+    MCL - MC5 per_session      38.13   90% [(52.53), 128.13]   -> CAN'T TELL
+    MCL - MC5 per_symday        3.81   90% [(5.38), 12.67]   -> CAN'T TELL
+
+  cap census on the live sessions (sim):
+  MCL first
+    MCL      78 ->     66  refused    12 (15.4%)   per trade (4.22) -> (3.06)   refused trade worth (10.60)
+    MC5      98 ->     86  refused    12 (12.2%)   per trade (1.93) -> (5.57)   refused trade worth 24.12
+
+  MC5 first
+    MCL      78 ->     65  refused    13 (16.7%)   per trade (4.22) -> (2.51)   refused trade worth (12.76)
+    MC5      98 ->     87  refused    11 (11.2%)   per trade (1.93) -> (5.82)   refused trade worth 28.83
+
+  live, same sessions: BUY rows refused by the cap / all BUY rows
+    MCL    38 / 106  (35.8%)
+    MC5   116 / 316  (36.7%)
+
+4. THE POPULATION  (ITCH v2 +0, feed_delay_trades.csv)
+
+  C5  MCL 3,908 at (8.97)   MC5 6,462 at (8.57)   OK
+  symbol-days from screen_pairs_pit_itch_v2.json: 6,411 over 550 sessions
+
+  uncapped (published)   (550 sessions)
+    MCL  n  3,908   net (35,063.12)   /trade   (8.97)   /session   (63.75)   /symday   (5.47)
+    MC5  n  6,462   net (55,364.07)   /trade   (8.57)   /session  (100.66)   /symday   (8.64)
+    MCL - MC5 per_trade       (0.40)   90% [(2.49), 1.45]   -> CAN'T TELL
+    MCL - MC5 per_session      36.91   90% [14.01, 56.34]   -> MCL BETTER
+    MCL - MC5 per_symday        3.17   90% [1.20, 4.82]   -> MCL BETTER
+
+  cap 3 shared, MCL first   (550 sessions)
+    MCL  n  3,337   net (30,061.76)   /trade   (9.01)   /session   (54.66)   /symday   (4.69)
+    MC5  n  5,809   net (49,120.53)   /trade   (8.46)   /session   (89.31)   /symday   (7.66)
+    MCL - MC5 per_trade       (0.55)   90% [(2.86), 1.52]   -> CAN'T TELL
+    MCL - MC5 per_session      34.65   90% [12.33, 54.02]   -> MCL BETTER
+    MCL - MC5 per_symday        2.97   90% [1.06, 4.62]   -> MCL BETTER
+
+  census, cap 3 shared, MCL first
+    MCL   3,908 ->  3,337  refused   571 (14.6%)   per trade (8.97) -> (9.01)   refused trade worth (8.76)
+    MC5   6,462 ->  5,809  refused   653 (10.1%)   per trade (8.57) -> (8.46)   refused trade worth (9.56)
+
+  cap 3 shared, MC5 first   (550 sessions)
+    MCL  n  3,266   net (29,609.79)   /trade   (9.07)   /session   (53.84)   /symday   (4.62)
+    MC5  n  5,860   net (49,402.19)   /trade   (8.43)   /session   (89.82)   /symday   (7.71)
+    MCL - MC5 per_trade       (0.64)   90% [(2.91), 1.45]   -> CAN'T TELL
+    MCL - MC5 per_session      35.99   90% [13.86, 55.29]   -> MCL BETTER
+    MCL - MC5 per_symday        3.09   90% [1.19, 4.73]   -> MCL BETTER
+
+  census, cap 3 shared, MC5 first
+    MCL   3,908 ->  3,266  refused   642 (16.4%)   per trade (8.97) -> (9.07)   refused trade worth (8.49)
+    MC5   6,462 ->  5,860  refused   602 (9.3%)   per trade (8.57) -> (8.43)   refused trade worth (9.90)
+
+  cap 3 strategy, MCL first   (550 sessions)
+    MCL  n  3,863   net (34,902.26)   /trade   (9.04)   /session   (63.46)   /symday   (5.44)
+    MC5  n  6,139   net (52,897.02)   /trade   (8.62)   /session   (96.18)   /symday   (8.25)
+    MCL - MC5 per_trade       (0.42)   90% [(2.58), 1.48]   -> CAN'T TELL
+    MCL - MC5 per_session      32.72   90% [10.30, 51.90]   -> MCL BETTER
+    MCL - MC5 per_symday        2.81   90% [0.89, 4.45]   -> MCL BETTER
+
+  census, cap 3 strategy, MCL first
+    MCL   3,908 ->  3,863  refused    45 (1.2%)   per trade (8.97) -> (9.04)   refused trade worth (3.57)
+    MC5   6,462 ->  6,139  refused   323 (5.0%)   per trade (8.57) -> (8.62)   refused trade worth (7.64)
+
+  cap 3 strategy, MC5 first   (550 sessions)
+    MCL  n  3,863   net (34,902.26)   /trade   (9.04)   /session   (63.46)   /symday   (5.44)
+    MC5  n  6,139   net (52,897.02)   /trade   (8.62)   /session   (96.18)   /symday   (8.25)
+    MCL - MC5 per_trade       (0.42)   90% [(2.58), 1.48]   -> CAN'T TELL
+    MCL - MC5 per_session      32.72   90% [10.30, 51.90]   -> MCL BETTER
+    MCL - MC5 per_symday        2.81   90% [0.89, 4.45]   -> MCL BETTER
+
+  census, cap 3 strategy, MC5 first
+    MCL   3,908 ->  3,863  refused    45 (1.2%)   per trade (8.97) -> (9.04)   refused trade worth (3.57)
+    MC5   6,462 ->  6,139  refused   323 (5.0%)   per trade (8.57) -> (8.62)   refused trade worth (7.64)
+
+5. LIVE - SIM, DECOMPOSED  (feed-matched, uncapped; gross; join within 2 bars)
+
+  MCL all sessions   (11 sessions)
+    live   68 trades   (115.36)   sim   86 trades      75.71 (gross)   live - sim   (191.07)
+    matched    9   live 91.63  sim 71.64   execution 19.99 = 2.22/trade
+               entry price 49.00   exit price (29.00)   other (0.01)
+    live-only   59    (206.99)   not in sim universe: 11 (101.09)  sim no entry near: 48 (105.90)
+    sim-only    77      (4.07) (removed)   cap: 11 57.82  live busy: 11 161.63  never signalled: 55 (215.38)
+    identity residual -0.000000
+
+    sensitivity, join within 1 bar: matched 2, execution 33.25
+
+  MC5 apex-ON sessions, vs apex-ON book   (6 sessions)
+    live  123 trades   (458.78)   sim   66 trades     (2.67) (gross)   live - sim   (456.11)
+    matched   23   live 192.42  sim (0.33)   execution 192.75 = 8.38/trade
+               entry price 305.00   exit price (112.25)   other (0.00)
+    live-only  100    (651.20)   not in sim universe: 20 (181.44)  sim no entry near: 80 (469.76)
+    sim-only    43        2.34 (removed)   cap: 7 55.64  live busy: 1 (13.37)  never signalled: 34 (88.24)  other skip: 1 43.63
+    identity residual -0.000000
+
+    sensitivity, join within 1 bar: matched 9, execution 109.40
+
+  MC5 apex-ON sessions, vs published book   (6 sessions)
+    live  123 trades   (458.78)   sim   54 trades     143.49 (gross)   live - sim   (602.27)
+    matched   20   live 183.55  sim 17.85   execution 165.70 = 8.28/trade
+               entry price 313.00   exit price (147.30)   other (0.00)
+    live-only  103    (642.33)   not in sim universe: 20 (181.44)  sim no entry near: 83 (460.89)
+    sim-only    34    (125.64) (removed)   cap: 5 111.55  never signalled: 28 (29.54)  other skip: 1 43.63
+    identity residual 0.000000
+
+    sensitivity, join within 1 bar: matched 7, execution 100.40
+
+  MC5 apex-OFF sessions   (3 sessions)
+    live   33 trades   (136.36)   sim   44 trades      84.78 (gross)   live - sim   (221.14)
+    matched   15   live (136.59)  sim 109.15   execution (245.74) = (16.38)/trade
+               entry price 117.00   exit price (362.75)   other 0.01
+    live-only   18        0.23   not in sim universe: 3 (102.13)  sim no entry near: 15 102.36
+    sim-only    29       24.37 (removed)   cap: 13 1.90  never signalled: 13 (57.68)  other skip: 3 31.41
+    identity residual -0.000000
+
+    sensitivity, join within 1 bar: matched 5, execution (290.59)
+
+WHAT THIS IS NOT
+
+  NOT A GATE and not a live change. The words are the registration's three.
+  The cap replay only removes sim trades; a refused trade does not release
+  later entries the engine suppressed while it was held.
+
+  elapsed 5s

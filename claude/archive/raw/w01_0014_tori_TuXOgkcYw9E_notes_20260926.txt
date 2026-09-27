@@ -1,0 +1,41 @@
+W01-0014 · Tori Trades video TuXOgkcYw9E — timestamped notes (paraphrased, not a transcript)
+Video: "Once you master this strategy, trading becomes EASY" · Tori Trades · 2026-09-24 · 21:01
+Source: YouTube auto-generated English captions, read in full 0:00-21:01 on 2026-09-26.
+
+0:00  Pitch: small losses, always with the trend, big upside; works on any chart/timeframe; small accounts.
+0:43  Lines drawn with TradingView's ray tool (point A, point B, extends one way).
+1:25  Down lines join lower highs; up lines join higher lows. Steepness = speed of the trend.
+2:07  A line alone is worthless; top-down analysis is the step people skip. Start on the MONTHLY chart.
+2:49  First down line: point A = highest point on the monthly chart.
+3:31  Rule 1: price must not intersect the line (a line that price has "poked through" is wrong, even if it
+      has many touches). Rule 2: every line must connect to the previous one. Timeframes: monthly, weekly,
+      daily, 4H, 1H, down to 15-minute.
+4:15  Connection rule: the previous line's point B (last touch) is the next line's point A.
+4:57  Second down line drawn from the first line's point B. First up line: point A = lowest point on screen.
+5:39  Monthly done. Move down timeframes; nudge lines to be more precise on each lower timeframe.
+6:20  Weekly: add a steeper up line and a steeper down line, same rules (connect, max touches, no crossing).
+7:45  Daily: adjust, add steeper up line. 4H: adjust, add steeper again. 1H: tidy.
+8:28  15-minute: adjust; now at real-time price. Price reacts to a line in one of two ways: respects
+      (bounces) or violates (breaks through). This video teaches the BOUNCE ("trend line bounce setup").
+9:55  Why low risk: you enter as close to the line as possible, so if the line breaks, the loss is the
+      smallest it can be.
+10:38 Entry criterion: price must at least get at or near the line. Example: crude oil, 15-minute, replay.
+11:20 Price reaches the up line -> it becomes the "action line" once price reacts to it -> buy 1 contract.
+12:02 Stop: loss happens only if price violates the line. CL: $420 risk. Micro crude is 1/10 the size.
+12:46 MCL same entry: $50, or $42 with a tighter stop, if the "safety line" breaks.
+13:28 Up $57 (MCL) / $580 (CL). Aim is to hold for the whole trend, not take a quick profit.
+14:11 Exit = when price violates the line. Move the stop each time price makes a new swing low along the line.
+14:54 Went from +$1,000 to near break-even in two candles; still in, because the line held. Only exit on a
+      violation.
+15:40 New swing low -> stop moved below it; locked in about +$1,550 (CL) worst case.
+16:24 Same on MCL: stop under the new higher low.
+17:08 Bonus: a later touch of the line = second entry if you missed the first; same risk.
+17:52 Keep trailing under each swing low. The stop must always be on the other side of the line, never above
+      it; price has to break the line to hit it.
+18:34 Price closes on the other side of the line -> close the trade manually (or the stop is hit).
+      CL result +$4,000 exactly, risk was $420.
+19:16 MCL: stop hit, +$387, risk was $42.
+20:00 Challenge: naked chart, top-down, connected lines, trade on 1H / 15m / 5m, wait for price at the
+      line, size the small loss, hold to the break.
+
+Not covered: trading the break ("violation") setup; percentage risk rules; targets.

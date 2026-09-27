@@ -1,0 +1,123 @@
+W11-0024 STEP 1 -- MARKOV REGIME CLAIMS: VERIFICATION REPORT (2026-09-23)
+==============================================================================
+Start capital for $ columns: $22,129. Costs: SPY 1.0bp, BTC 10.0bp per unit traded.
+Negatives in brackets. Multiple = ending equity / starting equity (1.00x = flat).
+
+#### SPY  data 2000-01-03 .. 2026-09-22 (6720 rows)
+Fidelity: published walk_forward_backtest Sharpe 0.1702 vs ours 0.1702  (n=6447)
+Stickiness (diagonal of transition matrix, full sample):  bear / sideways / bull
+  overlapping_1day_diag            78.7%   93.4%   71.6%
+  shuffled_returns_1day_diag       81.8%   91.3%   84.0%
+  nonoverlap_20day_diag            16.5%   82.5%   10.8%
+  nonoverlap_chain_diag            14.3%   81.9%    8.8%
+  stationary_mix                    9.7%   79.1%   11.3%
+Share of days each engine takes the SAME position as the no-Markov rule (short if 20d<-5%, else long):
+  v1_published               93.5%
+  v2_all                      6.3%
+  v2_chain                    4.1%
+  v2_hold20                  14.4%
+  simple_rule_no_markov     100.0%
+  v1_long_only               84.0%
+  v2_all_long_only            6.2%
+  v1 vs v2_all agreement: 11.9%
+Transition matrix one_step_overlapping (rows from Bear/Side/Bull -> cols to Bear/Side/Bull):  78.7  21.3   0.0 |   2.6  93.4   4.0 |   0.1  28.2  71.6
+Transition matrix twenty_step (rows from Bear/Side/Bull -> cols to Bear/Side/Bull):  16.5  50.1  33.4 |   8.9  82.5   8.7 |   9.0  80.2  10.8
+v1_position_by_state: Bear long 0% short 100%; Sideways long 92% short 8%; Bull long 100% short 0%
+v2_position_by_state: Bear long 99% short 1%; Sideways long 0% short 100%; Bull long 54% short 34%
+
+-- window full_2000_2026
+  engine                         from         to    gross      net      B&H  netCAGR B&H CAGR  netSh B&H Sh netMaxDD trades       W/L     net $ P&L     B&H $ P&L
+  v1_published             2001-01-31 2026-09-21    1.44x    1.36x    5.64x     1.2%     7.0%   0.16   0.45  (60.8%)    260    88/172        $8,072      $102,773
+  v2_all                   2001-01-31 2026-09-21    0.22x    0.20x    5.64x   (6.1%)     7.0%  -0.23   0.45  (85.7%)    481   238/243     ($17,646)      $102,773
+  v2_chain                 2001-01-31 2026-09-21    0.18x    0.17x    5.64x   (6.6%)     7.0%  -0.28   0.45  (87.2%)    138     79/59     ($18,279)      $102,773
+  v2_hold20                2001-01-31 2026-09-21    0.17x    0.16x    5.64x   (6.8%)     7.0%  -0.28   0.45  (93.2%)     72     35/37     ($18,499)      $102,773
+  simple_rule_no_markov    2001-01-31 2026-09-21    1.43x    1.36x    5.64x     1.2%     7.0%   0.16   0.45  (51.0%)    239    85/154        $7,938      $102,773
+  v1_long_only             2001-01-31 2026-09-21    3.53x    3.43x    5.64x     4.9%     7.0%   0.42   0.45  (45.3%)    131     56/75       $53,873      $102,773
+  v2_all_long_only         2001-01-31 2026-09-21    1.44x    1.38x    5.64x     1.3%     7.0%   0.16   0.45  (33.2%)    226    135/91        $8,345      $102,773
+  v1_long_only_lag1        2001-02-01 2026-09-21    4.37x    4.26x    5.61x     5.8%     7.0%   0.48   0.45  (44.8%)    131     66/65       $72,044      $101,949
+  v1_published_lag1        2001-02-01 2026-09-21    2.25x    2.14x    5.61x     3.0%     7.0%   0.25   0.45  (54.8%)    260   114/146       $25,146      $101,949
+  v2_all_lag1              2001-02-01 2026-09-21    0.21x    0.19x    5.61x   (6.2%)     7.0%  -0.24   0.45  (84.9%)    481   239/242     ($17,815)      $101,949
+  v1 legs: long days 84% -> 3.53x; short days 15% -> 0.41x; summed daily cost drag 5.2% (gross -> net multiple shows the real hit)
+  v1 last trades: Short 2025-04-16 (4.0%); Long 2025-04-24 18.6%; Short 2026-03-20 (1.1%); Long 2026-03-23 0.2%; Short 2026-03-25 0.8%; Long 2026-03-31 18.9%
+
+-- window last_10y
+  engine                         from         to    gross      net      B&H  netCAGR B&H CAGR  netSh B&H Sh netMaxDD trades       W/L     net $ P&L     B&H $ P&L
+  v1_published             2016-09-22 2026-09-21    1.45x    1.43x    3.56x     3.6%    13.6%   0.29   0.80  (34.1%)     95     34/61        $9,417       $56,673
+  v2_all                   2016-09-22 2026-09-21    0.54x    0.51x    3.56x   (6.6%)    13.6%  -0.29   0.80  (59.7%)    258   123/135     ($10,884)       $56,673
+  v2_chain                 2016-09-22 2026-09-21    0.48x    0.47x    3.56x   (7.2%)    13.6%  -0.33   0.80  (56.0%)     98     60/38     ($11,651)       $56,673
+  v2_hold20                2016-09-22 2026-09-21    0.33x    0.32x    3.56x  (10.7%)    13.6%  -0.54   0.80  (75.7%)     32     12/20     ($14,953)       $56,673
+  simple_rule_no_markov    2016-09-22 2026-09-21    1.45x    1.43x    3.56x     3.6%    13.6%   0.29   0.80  (34.1%)     95     34/61        $9,417       $56,673
+  v1_long_only             2016-09-22 2026-09-21    2.43x    2.41x    3.56x     9.2%    13.6%   0.70   0.80  (27.3%)     48     25/23       $31,114       $56,673
+  v2_all_long_only         2016-09-22 2026-09-21    1.51x    1.48x    3.56x     4.0%    13.6%   0.37   0.80  (26.3%)    126     80/46       $10,535       $56,673
+  v1_long_only_lag1        2016-09-22 2026-09-21    3.08x    3.05x    3.56x    11.8%    13.6%   0.87   0.80  (25.4%)     48     27/21       $45,324       $56,673
+  v1_published_lag1        2016-09-22 2026-09-21    2.33x    2.29x    3.56x     8.7%    13.6%   0.55   0.80  (31.7%)     95     44/51       $28,493       $56,673
+  v2_all_lag1              2016-09-22 2026-09-21    0.47x    0.45x    3.56x   (7.7%)    13.6%  -0.36   0.80  (60.6%)    258   128/130     ($12,213)       $56,673
+  v1 legs: long days 92% -> 2.43x; short days 8% -> 0.60x; summed daily cost drag 1.9% (gross -> net multiple shows the real hit)
+  v1 last trades: Short 2025-04-16 (4.0%); Long 2025-04-24 18.6%; Short 2026-03-20 (1.1%); Long 2026-03-23 0.2%; Short 2026-03-25 0.8%; Long 2026-03-31 18.9%
+
+#### BTC  data 2010-07-18 .. 2026-05-23 (5789 rows)
+Fidelity: published walk_forward_backtest Sharpe 0.9869 vs ours 0.9869  (n=5516)
+Stickiness (diagonal of transition matrix, full sample):  bear / sideways / bull
+  overlapping_1day_diag            86.9%   74.0%   90.4%
+  shuffled_returns_1day_diag       87.5%   64.3%   91.3%
+  nonoverlap_20day_diag            35.6%   29.6%   48.1%
+  nonoverlap_chain_diag            31.6%   30.1%   49.2%
+  stationary_mix                   29.4%   28.0%   42.6%
+Share of days each engine takes the SAME position as the no-Markov rule (short if 20d<-5%, else long):
+  v1_published               88.8%
+  v2_all                     99.0%
+  v2_chain                   77.9%
+  v2_hold20                  75.0%
+  simple_rule_no_markov     100.0%
+  v1_long_only               59.2%
+  v2_all_long_only           70.4%
+  v1 vs v2_all agreement: 87.8%
+Transition matrix one_step_overlapping (rows from Bear/Side/Bull -> cols to Bear/Side/Bull):  86.9  11.7   1.4 |  12.7  74.0  13.3 |   0.7   9.0  90.4
+Transition matrix twenty_step (rows from Bear/Side/Bull -> cols to Bear/Side/Bull):  35.6  30.1  34.4 |  27.8  29.6  42.6 |  26.3  25.6  48.1
+v1_position_by_state: Bear long 0% short 100%; Sideways long 60% short 38%; Bull long 100% short 0%
+v2_position_by_state: Bear long 2% short 97%; Sideways long 100% short 0%; Bull long 100% short 0%
+
+-- window 10y_to_2026-05
+  engine                         from         to    gross      net      B&H  netCAGR B&H CAGR  netSh B&H Sh netMaxDD trades       W/L     net $ P&L     B&H $ P&L
+  v1_published             2016-05-23 2026-05-22   16.54x    9.16x  172.49x    24.8%    67.3%   0.66   1.10  (74.9%)    296    93/203      $180,555    $3,794,849
+  v2_all                   2016-05-23 2026-05-22   22.37x   13.01x  172.49x    29.2%    67.3%   0.72   1.10  (76.1%)    271    85/186      $265,854    $3,794,849
+  v2_chain                 2016-05-23 2026-05-22   39.03x   36.72x  172.49x    43.4%    67.3%   0.88   1.10  (89.0%)     31     13/18      $790,391    $3,794,849
+  v2_hold20                2016-05-23 2026-05-22  210.86x  183.90x  172.49x    68.4%    67.3%   1.11   1.10  (67.4%)     69     30/39    $4,047,294    $3,794,849
+  simple_rule_no_markov    2016-05-23 2026-05-22   24.84x   14.40x  172.49x    30.5%    67.3%   0.73   1.10  (74.9%)    273    86/187      $296,424    $3,794,849
+  v1_long_only             2016-05-23 2026-05-22  140.17x  104.14x  172.49x    59.1%    67.3%   1.17   1.10  (69.0%)    149     53/96    $2,282,432    $3,794,849
+  v2_all_long_only         2016-05-23 2026-05-22  168.60x  128.29x  172.49x    62.4%    67.3%   1.19   1.10  (69.0%)    137     46/91    $2,816,903    $3,794,849
+  v1_long_only_lag1        2016-05-23 2026-05-22   81.31x   60.45x  172.49x    50.7%    67.3%   1.05   1.10  (73.2%)    149     66/83    $1,315,537    $3,794,849
+  v1_published_lag1        2016-05-23 2026-05-22    5.14x    2.85x  172.49x    11.0%    67.3%   0.49   1.10  (86.3%)    296   122/174       $40,830    $3,794,849
+  v2_all_lag1              2016-05-23 2026-05-22   11.72x    6.82x  172.49x    21.2%    67.3%   0.62   1.10  (86.3%)    271   117/154      $128,778    $3,794,849
+  v1 legs: long days 66% -> 140.17x; short days 34% -> 0.12x; summed daily cost drag 59.1% (gross -> net multiple shows the real hit)
+  v1 last trades: Short 2026-01-29 18.3%; Long 2026-02-25 (1.6%); Short 2026-02-28 (3.1%); Long 2026-03-02 (2.9%); Short 2026-04-02 (7.4%); Long 2026-04-07 6.3%
+
+-- window since_2014-09_(yfinance_start)
+  engine                         from         to    gross      net      B&H  netCAGR B&H CAGR  netSh B&H Sh netMaxDD trades       W/L     net $ P&L     B&H $ P&L
+  v1_published             2014-09-17 2026-05-22   14.38x    7.28x  167.90x    18.5%    55.0%   0.59   0.99  (74.9%)    341   110/231      $138,875    $3,693,349
+  v2_all                   2014-09-17 2026-05-22   26.91x   13.91x  167.90x    25.3%    55.0%   0.67   0.99  (76.1%)    330   108/222      $285,677    $3,693,349
+  v2_chain                 2014-09-17 2026-05-22   46.95x   39.24x  167.90x    36.9%    55.0%   0.81   0.99  (89.0%)     90     36/54      $846,320    $3,693,349
+  v2_hold20                2014-09-17 2026-05-22  240.38x  203.00x  167.90x    57.6%    55.0%   1.01   0.99  (67.4%)     85     36/49    $4,469,974    $3,693,349
+  simple_rule_no_markov    2014-09-17 2026-05-22   29.88x   15.39x  167.90x    26.3%    55.0%   0.68   0.99  (74.9%)    332   109/223      $318,351    $3,693,349
+  v1_long_only             2014-09-17 2026-05-22  171.50x  121.92x  167.90x    50.8%    55.0%   1.08   0.99  (69.0%)    171    62/109    $2,675,763    $3,693,349
+  v2_all_long_only         2014-09-17 2026-05-22  223.03x  160.13x  167.90x    54.4%    55.0%   1.11   0.99  (69.0%)    166    56/110    $3,521,302    $3,693,349
+  v1_long_only_lag1        2014-09-17 2026-05-22  119.78x   85.20x  167.90x    46.3%    55.0%   1.02   0.99  (73.2%)    171     73/98    $1,863,370    $3,693,349
+  v1_published_lag1        2014-09-17 2026-05-22    6.01x    3.04x  167.90x    10.0%    55.0%   0.48   0.99  (86.3%)    341   141/200       $45,137    $3,693,349
+  v2_all_lag1              2014-09-17 2026-05-22   13.64x    7.05x  167.90x    18.2%    55.0%   0.58   0.99  (86.3%)    330   144/186      $133,920    $3,693,349
+  v1 legs: long days 62% -> 171.50x; short days 38% -> 0.08x; summed daily cost drag 68.1% (gross -> net multiple shows the real hit)
+  v1 last trades: Short 2026-01-29 18.3%; Long 2026-02-25 (1.6%); Short 2026-02-28 (3.1%); Long 2026-03-02 (2.9%); Short 2026-04-02 (7.4%); Long 2026-04-07 6.3%
+
+-- window full_2011_2026
+  engine                         from         to    gross      net      B&H  netCAGR B&H CAGR  netSh B&H Sh netMaxDD trades       W/L     net $ P&L     B&H $ P&L
+  v1_published             2011-04-16 2026-05-2217,330.00x7,321.40x73,206.06x    80.2%   109.8%   1.12   1.30  (77.6%)    431   148/283  $161,993,069$1,619,954,748
+  v2_all                   2011-04-16 2026-05-222,463.02x1,093.11x73,206.06x    58.9%   109.8%   0.97   1.30  (88.2%)    405   136/269   $24,167,354$1,619,954,748
+  v2_chain                 2011-04-16 2026-05-2214,186.66x10,675.62x73,206.06x    84.7%   109.8%   1.16   1.30  (89.0%)    142     57/85  $236,218,650$1,619,954,748
+  v2_hold20                2011-04-16 2026-05-2240,830.96x32,993.13x73,206.06x    99.1%   109.8%   1.23   1.30  (90.9%)    107     45/62  $730,082,812$1,619,954,748
+  simple_rule_no_markov    2011-04-16 2026-05-227,877.61x3,441.25x73,206.06x    71.4%   109.8%   1.06   1.30  (85.2%)    413   140/273   $76,129,298$1,619,954,748
+  v1_long_only             2011-04-16 2026-05-22367,355.10x238,146.03x73,206.06x   126.9%   109.8%   1.59   1.30  (69.0%)    217    84/133$5,269,911,351$1,619,954,748
+  v2_all_long_only         2011-04-16 2026-05-22121,916.96x81,137.83x73,206.06x   111.3%   109.8%   1.44   1.30  (82.2%)    204    72/132$1,795,476,933$1,619,954,748
+  v1_long_only_lag1        2011-04-17 2026-05-22182,922.48x118,668.73x69,773.54x   116.7%   109.2%   1.51   1.30  (73.2%)    217    95/122$2,625,998,105$1,543,996,547
+  v1_published_lag1        2011-04-17 2026-05-224,117.97x1,737.38x69,773.54x    63.8%   109.2%   1.01   1.30  (86.3%)    431   180/251   $38,424,270$1,543,996,547
+  v2_all_lag1              2011-04-17 2026-05-224,068.24x1,808.73x69,773.54x    64.3%   109.2%   1.01   1.30  (92.0%)    405   182/223   $40,003,202$1,543,996,547
+  v1 legs: long days 59% -> 367,355.10x; short days 40% -> 0.05x; summed daily cost drag 86.1% (gross -> net multiple shows the real hit)
+  v1 last trades: Short 2026-01-29 18.3%; Long 2026-02-25 (1.6%); Short 2026-02-28 (3.1%); Long 2026-03-02 (2.9%); Short 2026-04-02 (7.4%); Long 2026-04-07 6.3%
