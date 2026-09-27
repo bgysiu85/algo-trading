@@ -1,0 +1,55 @@
+Alpaca IEX coverage probe -- W07-0012 subitem 2
+
+  symbols_sampled: 40
+  symbols_ever_delisted: 20
+  dates_sampled: 20
+  pairs_to_pull: 334
+  pairs_skipped_no_eod_or_not_member: 466
+
+SYMBOLS ALPACA REJECTED OUTRIGHT (HTTP 400, not a coverage gap -- 1 of 40 sampled; excluded from every table below)
+  NFX_OLD (ever delisted)
+
+COVERAGE BY BUCKET (all sampled symbol-days)
+  bucket      hit   backfill   missing      n
+  open      22.9%       0.0%     77.1%    327
+  midday    33.9%       8.9%     57.2%    327
+  close     39.4%       3.7%     56.9%    327
+
+COVERAGE -- ever delisted from the index (10 symbols, 282 symbol-day-buckets)
+  open      14.9%       0.0%     85.1%     94
+  midday    20.2%       2.1%     77.7%     94
+  close     22.3%       0.0%     77.7%     94
+
+COVERAGE -- still current (18 symbols, 699 symbol-day-buckets)
+  open      26.2%       0.0%     73.8%    233
+  midday    39.5%      11.6%     48.9%    233
+  close     46.4%       5.2%     48.5%    233
+
+CLOSE-BUCKET PRICE vs pit_universe.py's EOD CLOSE, in bps (|gap|)
+  n=141  median=16.61  p90=51.92  max=108.28
+
+SYMBOLS WITH THE MOST MISSING BUCKETS (top 10)
+  BKH       34/51 bucket-days missing
+  AZO       34/51 bucket-days missing
+  GNTX      33/51 bucket-days missing
+  AVB      (ever delisted)  33/51 bucket-days missing
+  AVY       32/51 bucket-days missing
+  RL        31/51 bucket-days missing
+  EVRG      31/51 bucket-days missing
+  WWD       31/51 bucket-days missing
+  YUM       31/51 bucket-days missing
+  GPC       30/51 bucket-days missing
+
+This report measures coverage; it does not decide. Subitem 4 (Ben) reviews it and approves the EODHD top-up only if the gap is material.
+
+-- Appended by Build & test chat, 2026-09-25: coverage by year (missing %, pooled across buckets), computed from alpaca_coverage_obs.csv:
+2016: 100.0% (n=132)
+2017: 100.0% (n=252)
+2018: 100.0% (n=66)
+2019: 100.0% (n=54)
+2020: 57.4% (n=108)
+2021: 16.7% (n=54)
+2022: 13.5% (n=156)
+2023: 24.1% (n=54)
+2025: 21.6% (n=51)
+2026: 9.3% (n=54)

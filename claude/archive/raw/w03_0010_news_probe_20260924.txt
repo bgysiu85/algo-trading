@@ -1,0 +1,79 @@
+W03-0010 news probe - run 2026-09-24 03:59 UTC
+symbols: WHLR, IPDN, SMTK, DCOY, TNMG, GRML, HAO, KIDZ
+
+== 1. ALPACA HISTORICAL NEWS (Benzinga) ==
+oldest headline for these symbols: HTTP 200 2015-01-05T11:48:16Z Professional Diversity Reports Q4 Revenue of $8.30M vs $7.52M Est
+  WHLR   HTTP 200  latest-50 headlines: 50  flagged: 5  e.g. [REVERSE_SPLIT] 2026-09-17 Wheeler Real Estate Investment Trust Announces 1-For-9 Reverse Stock Split Effec
+  IPDN   HTTP 200  latest-50 headlines: 50  flagged: 1  e.g. [OFFERING_PRICED] 2026-08-12 Professional Diversity Network Prices $2M Public Offering Of 7.14M Units At $0.2
+  SMTK   HTTP 200  latest-50 headlines: 50  flagged: 1  e.g. [REVERSE_SPLIT] 2026-08-19 Smartkem Announces 1-For-50 Reverse Stock Split To Support Continued Nasdaq Trad
+  DCOY   HTTP 200  latest-50 headlines: 46  flagged: 1  e.g. [REVERSE_SPLIT] 2026-03-05 Decoy Therapeutics Announces 1‑For‑12 Reverse Stock Split Effective March 6
+  TNMG   HTTP 200  latest-50 headlines: 50  flagged: 1  e.g. [REVERSE_SPLIT] 2026-09-03 TNL Mediagene To Implement 1-for-8 Share Consolidation Effective September 8
+  GRML   HTTP 200  latest-50 headlines: 50  flagged: 3  e.g. [OFFERING_PRICED] 2026-08-26 Greenland Mines Prices Its $20M Public Offering Of 4M Shares
+  HAO    HTTP 200  latest-50 headlines: 50  flagged: 3  e.g. [REVERSE_SPLIT] 2026-08-12 Haoxi Health Technology Announces 1-For-20 Reverse Share Split Effective August
+  KIDZ   HTTP 200  latest-50 headlines: 50  flagged: 1  e.g. [REVERSE_SPLIT] 2026-08-11 KIDZ AI Announces 1-For-15 Reverse Stock Split Of Outstanding Class A And Class
+
+== 2. ALPACA LIVE NEWS WEBSOCKET ==
+connect: [{"T":"success","msg":"connected"}]
+auth: [{"T":"success","msg":"authenticated"}]
+subscribe: [{"T":"subscription","news":["*"]}]
+  live: 2026-09-23T07:37:29Z GOOG,GOOGL | Kash Patel Among Those Exposed: ShinyHunters Says It Hacked FBI Website, Stole Information of &#39;A
+live headlines received in 45s: 1 (0 is normal outside US hours; the auth/subscribe lines are what matter)
+
+== 3. HEADLINE RULES OVER THE LAST 30 DAYS (all symbols, capped 2,000) ==
+HTTP 200; headlines scanned: 2000; flagged: ATM 1, DELIST_NOTICE 5, OFFERING_PRICED 11, OFFERING_PROPOSED 3, REVERSE_SPLIT 6
+  [OFFERING_PROPOSED] 2026-09-23T21:06 VKTX                 Viking Therapeutics Stock Drops In After Hours on Proposed Public Offerings
+  [DELIST_NOTICE] 2026-09-23T20:53 SQNS                 Sequans Communications Receives NYSE Non-Compliance Notice Regarding Market Capitalization
+  [REVERSE_SPLIT] 2026-09-23T20:31 GPMT                 Granite Point Mortgage Trust Announces 1-For-10 Reverse Stock Split, Effective Oct. 5
+  [REVERSE_SPLIT] 2026-09-23T20:31 GMEX                 GMEX Robotics Announces 1-For-9 Reverse Stock Split Effective September 28
+  [DELIST_NOTICE] 2026-09-23T20:02 IMCC                 IM Cannabis Says It Received Nasdaq Notice Of Regained Compliance With Minimum Bid Price R
+  [REVERSE_SPLIT] 2026-09-23T14:30 RPGL                 Republic Power Group Announces 1-For-16 Reverse Share Split, Effective September 25
+  [REVERSE_SPLIT] 2026-09-23T13:36 BTLN                 Brightline Interactive Announces 1-For-8 Reverse Stock Split, Effective September 28, 2026
+  [OFFERING_PRICED] 2026-09-23T13:02 MAAS                 Maase Announces ~$50M PIPE Agreement For 3,878,856 Shares Priced At $12.89 Per Share
+  [OFFERING_PRICED] 2026-09-23T13:02 GM,PCG               PG&E And GM Energy Announce Bundle Offering New GM EV Buyers No-Cost Home Charger, $15 Mon
+  [REVERSE_SPLIT] 2026-09-23T12:56 GCDT                 Green Circle Decarbonize Technology Announces 1-For-6 Share Consolidation, Effective Octob
+
+== 4. EDGAR (SEC filings) ==
+  WHLR   Wheeler Real Estate Investment fetched  dilution/split filings, last 90d: 70
+         2026-09-17T20:18:43  424B3    DILUTION
+         2026-09-17T20:16:27  424B3    DILUTION
+         2026-09-17T20:13:40  424B3    DILUTION
+         2026-09-17T20:10:29  424B3    DILUTION
+         2026-09-17T20:07:04  8-K      8-K 3.03,5.03
+  IPDN   Professional Diversity Network fetched  dilution/split filings, last 90d: 9
+         2026-09-11T20:59:26  8-K      8-K 3.03,5.03
+         2026-08-13T20:37:21  8-K      8-K 1.01
+         2026-08-13T13:44:25  424B4    DILUTION
+         2026-08-13T04:15:18  EFFECT   DILUTION
+         2026-07-28T20:22:14  S-1/A    DILUTION
+  SMTK   SmartKem, Inc.                 fetched  dilution/split filings, last 90d: 12
+         2026-09-18T20:55:10  S-3      DILUTION
+         2026-09-18T20:54:55  S-1      DILUTION
+         2026-09-14T12:55:14  8-K      8-K 3.01
+         2026-08-21T20:05:19  8-K      8-K 5.03
+         2026-08-03T11:06:02  8-K      8-K 1.01
+  DCOY   Decoy Therapeutics Inc.        fetched  dilution/split filings, last 90d: 8
+         2026-09-23T17:02:00  8-K      8-K 1.01,3.02
+         2026-08-04T20:59:49  DEF 14A  PROXY (check for reverse split)
+         2026-08-04T20:08:02  DEFA14A  PROXY (check for reverse split)
+         2026-07-24T20:05:58  PRE 14A  PROXY (check for reverse split)
+         2026-07-20T04:15:15  EFFECT   DILUTION
+  TNMG   TNL Mediagene                  fetched  dilution/split filings, last 90d: 0
+  GRML   Greenland Mines Ltd            fetched  dilution/split filings, last 90d: 10
+         2026-09-23T17:23:19  424B5    DILUTION
+         2026-09-23T17:08:53  8-K      8-K 1.01
+         2026-09-23T09:28:10  424B5    DILUTION
+         2026-09-04T21:25:10  8-K      8-K 1.01,3.02,5.03
+         2026-08-27T21:00:26  8-K      8-K 1.01
+  HAO    Haoxi Health Technology Ltd    fetched  dilution/split filings, last 90d: 1
+         2026-07-13T14:30:28  424B5    DILUTION
+  KIDZ   KIDZ AI Inc.                   fetched  dilution/split filings, last 90d: 10
+         2026-09-17T20:30:28  8-K      8-K 1.01,3.02
+         2026-09-10T20:30:41  8-K      8-K 3.03,5.03
+         2026-08-21T21:00:40  DEF 14A  PROXY (check for reverse split)
+         2026-08-11T12:30:43  8-K      8-K 3.03
+         2026-08-03T20:30:24  PRE 14A  PROXY (check for reverse split)
+  latest-filings feed 424B5 : 14 entries, newest is 396.5 min old
+  latest-filings feed 8-K   : 40 entries, newest is 389.1 min old
+
+Headline rules are a first draft for eyeballing; the study registers its own.
+SHARES/FILINGS: EDGAR ticker map is current-day, not point-in-time.
