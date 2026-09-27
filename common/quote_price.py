@@ -43,10 +43,15 @@ WHICH TAPE: PRICE SEVERAL, BUY ONE
 "MBP-1" is a schema, and more than one dataset serves a top of book. They are
 not the same book. XNAS.ITCH's is Nasdaq's own; EQUS.MINI's is a blend of
 venues (and on 2026-09-06 read 2.7x wider than XNAS.BASIC's on the same
-fills); XNAS.BASIC's consolidated schemas are the tape that friction work
-trusted. Which is right is a question for the registration, not for this
-tool. This tool puts the price of each beside the others so the choice is made
-with the numbers in view.
+fills, and separately measured at a median 4.8% of consolidated volume,
+PROGRAM_INDEX SS3) -- known-bad for this purpose, kept here only as the
+losing comparator. EQUS.MAX (Databento's newer "combine every proprietary
+feed into a synthetic NBBO" product, released 2025 Q2, never before priced
+in this repo) is added 2026-09-28 (W03-0014) as the actual consolidated
+candidate this round is testing. XNAS.BASIC's consolidated schemas are the
+tape that friction work trusted. Which is right is a question for the
+registration, not for this tool. This tool puts the price of each beside the
+others so the choice is made with the numbers in view.
 
 Sample mode prices a fixed crc32 sample of symbol-days per candidate and
 scales up. Pricing every window for four candidates is ~30,000 sequential
@@ -105,6 +110,8 @@ CANDIDATES = (
     ("XNAS.BASIC", "cmbp-1"),
     ("XNAS.BASIC", "cbbo-1s"),
     ("EQUS.MINI", "mbp-1"),
+    ("EQUS.MAX", "mbp-1"),
+    ("EQUS.MAX", "bbo-1s"),
 )
 
 
