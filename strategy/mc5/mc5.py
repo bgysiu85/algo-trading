@@ -449,7 +449,8 @@ def backtest_session(df, session_date, tz,
                      entry_gate: "pd.Series | None" = None,
                      profit_floor: "tuple[int, int] | None" = None,
                      entry_rsi_roc: float | None = None,
-                     session_end: "dtime | None" = None) -> list[Trade]:
+                     session_end: "dtime | None" = None,
+                     max_hold_bars: int | None = None) -> list[Trade]:
     """Run one pre-market session on 5-minute bars.
 
     Accepts 1-minute OR 5-minute bars and resamples if needed, so this can be
@@ -480,9 +481,19 @@ def backtest_session(df, session_date, tz,
     bit-identical. Hand it 1-minute-stamped bars and it is reindexed onto the
     5-minute index, so the caller must stamp it on the bars this engine
     trades (`to_5m` of the frame), not on the 1-minute tape.
+
+    `max_hold_bars` is the time cap, in FIVE-MINUTE bars, with exactly the
+    contract of `mcl.backtest_session`'s parameter of the same name
+    (REGISTERED_time_cap.md, W03-0004): a position open that many bars is
+    sold at that bar's close, reason "hold_cap". It is LAST in the exit
+    order -- the trail, the window close and the apex exit all win a tie --
+    `0` is the tightest cap rather than "off", and `None` is bit-identical
+    to this function before the parameter existed.
     """
     if skip_entries < 0:
         raise ValueError(f"skip_entries must be >= 0, got {skip_entries}")
+    if max_hold_bars is not None and max_hold_bars < 0:
+        raise ValueError(f"max_hold_bars must be >= 0 or None, got {max_hold_bars}")
     check_profit_floor(profit_floor)
     # THE WINDOW. `None` is SESSION_END, bit-identical to this function before
     # the parameter existed. The full-day study (REGISTERED_mc5_full_day.md)
@@ -592,6 +603,13 @@ def backtest_session(df, session_date, tz,
         elif apex and bool(row["exit_sig"]):
             exit_px, exit_reason = (float(row["close"]) - SLIPPAGE_TICKS * TICK,
                                     EXIT_SIGNAL_REASON)
+        elif (max_hold_bars is not None
+                and i - pos["entry_i"] >= max_hold_bars):
+            # TIME CAP (W03-0004). Last, for the reason given on mcl.py's copy
+            # of this rule: an exit that already had a cause keeps its label.
+            # `is not None`, not truthiness -- 0 must mean the tightest cap.
+            exit_px, exit_reason = (float(row["close"]) - SLIPPAGE_TICKS * TICK,
+                                    "hold_cap")
 
         # Armed on this bar's high after this bar's exits were decided: the
         # floor first acts on the NEXT bar. The entry bar never reaches here.
