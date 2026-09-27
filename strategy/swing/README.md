@@ -310,6 +310,22 @@ reset time, then re-run the exact same command once it resets. Resumability
 (an existing `intraday/<code>.csv` is skipped) means this picks up exactly
 where it stopped, no repeat calls.
 
+**Per-call timing, because the printed estimate is a floor, not a real
+estimate**: the same 2026-09-27 run also took ~1.5 days against a
+147.6-minute "estimated wall clock". That estimate (`cost_lines()`) only
+ever counted `INTRADAY_PACE_S`'s 0.2s post-call pause — never the real
+network round-trip, and never `pit_universe.http_fetch_factory`'s own
+retry/backoff on a throttled (HTTP 429) or transient (5xx) response, which
+can add up to +30s to a single call (2s, 4s, 8s, 16s across up to 4
+retries) invisibly, since that backoff happens *inside* one `fetch()` call.
+`stage_pull` now times every call directly: any call slower than
+`SLOW_CALL_THRESHOLD_S` (5s) is counted as probably rate-limit-throttled,
+and the timestamped progress line (every 20 symbols) reports elapsed wall
+clock, running average seconds/call, and that count — so a slow run shows
+*why* while it's happening rather than only after it crashes or finishes.
+`cost_lines()`'s printed estimate now says plainly that it is a best-case
+floor.
+
 Same conventions as `pit_universe.py` and `alpaca_coverage_probe.py`: no repo
 imports beyond `pit_universe` (the EODHD fetch factory and key handling) and
 `reversal_v0` (the point-in-time universe loader and its guards) — both

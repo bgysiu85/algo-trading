@@ -172,6 +172,50 @@ def test_stage_pull_gaps_survive_a_later_symbols_fetch_crashing(tmp_path: Path):
     assert not (tmp_path / "intraday" / "ZZZ.csv").exists()   # crashed first
 
 
+def test_stage_pull_times_calls_and_counts_slow_ones(tmp_path: Path):
+    """2026-09-27: a real pull took ~1.5 days against a 147.6-minute
+    estimate; there was no way to tell after the fact whether that was real
+    network latency or pit_universe.http_fetch_factory's own retry backoff
+    on a throttled (HTTP 429) response, since that backoff happens INSIDE a
+    single fetch() call. stage_pull now times every call directly and
+    counts any call slower than slow_threshold_s as probably-throttled."""
+    spells = [P.Spell("sp500", "AAA", "Alpha", D(2016, 1, 1), None, True, False)]
+    day1, day2 = D(2020, 6, 15), D(2020, 6, 16)
+    write_eod(tmp_path / "eod" / "AAA.csv",
+             {day1.isoformat(): 10.0, day2.isoformat(): 10.1})
+    plan, _ = I.build_plan(spells, tmp_path)
+
+    fast_stats = I.stage_pull(
+        lambda code, first, last: [bar(day1, "13:30", 10.0)],
+        plan, tmp_path, log=lambda m: None)
+    assert fast_stats["slow_calls"] == 0
+    assert fast_stats["fetch_seconds_total"] >= 0.0
+
+    tmp_path2 = tmp_path / "second"
+    write_eod(tmp_path2 / "eod" / "AAA.csv",
+             {day1.isoformat(): 10.0, day2.isoformat(): 10.1})
+    plan2, _ = I.build_plan(spells, tmp_path2)
+
+    def slow_fetch(code, first, last):
+        import time
+        time.sleep(0.02)
+        return [bar(day1, "13:30", 10.0)]
+
+    slow_stats = I.stage_pull(slow_fetch, plan2, tmp_path2, log=lambda m: None,
+                              slow_threshold_s=0.01)
+    assert slow_stats["slow_calls"] == 1
+    assert slow_stats["slowest_call_s"] >= 0.02
+    assert slow_stats["fetch_seconds_total"] >= 0.02
+
+
+def test_cost_lines_flags_estimate_as_floor_not_a_real_estimate():
+    summary = {"codes_total": 900, "codes_skipped_existing": 100,
+              "codes_to_pull": 800, "api_calls": 4000, "symbol_days": 200000}
+    joined = "\n".join(I.cost_lines(summary))
+    assert "best-case FLOOR" in joined
+    assert "1.5 days" in joined
+
+
 def test_stage_pull_appends_gaps_across_resumed_runs(tmp_path: Path):
     spells1 = [P.Spell("sp500", "AAA", "Alpha", D(2016, 1, 1), None, True, False)]
     day1, day2 = D(2020, 6, 15), D(2020, 6, 16)
