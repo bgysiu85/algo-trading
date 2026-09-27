@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import random
 from pathlib import Path
 
 import pytest
@@ -80,6 +81,39 @@ def test_code_index_on():
     assert L.code_index_on(universe, "AAA", cal[3]) == "sp500"
     assert L.code_index_on(universe, "CCC", cal[3]) == "sp400"
     assert L.code_index_on(universe, "ZZZ", cal[3]) is None
+
+
+# --------------------------------------------------------------------------
+# 2026-09-27 perf fix: spells_by_code / eligible_by_day caching must be
+# transparent -- same answers as the original full-scan/recompute path,
+# only cheaper. This is the fix for Ben's report_layer run that was still
+# computing after 9+ hours on real production-scale data (2,945 trading
+# days, 1,537 codes, ~1,844 membership spells): random_decile_control's
+# 2,000-draws-x-3-N-values loop was recomputing eligible_on() from scratch
+# on every draw, and score_trades' code_index_on was a linear scan over
+# every spell on every trade -- both independent of the draw/trade and
+# therefore pure repeated waste at scale, invisible at this test file's
+# tiny synthetic scale.
+# --------------------------------------------------------------------------
+
+def test_spells_by_code_groups_by_code_and_matches_full_scan():
+    universe, cal = make_universe()
+    sbc = L.spells_by_code(universe)
+    assert set(sbc) == {"AAA", "BBB", "CCC"}
+    assert {s.code for s in sbc["AAA"]} == {"AAA"}
+    for code in ("AAA", "BBB", "CCC", "ZZZ"):
+        for day in (cal[0], cal[3], cal[-1]):
+            assert (L.code_index_on(universe, code, day, spells_by_code_index=sbc)
+                   == L.code_index_on(universe, code, day))
+
+
+def test_score_trades_with_precomputed_spell_index_matches_default():
+    universe, cal, store, trades, rows_default, n_no_bench_default = build_scored()
+    sbc = L.spells_by_code(universe)
+    rows_cached, n_no_bench_cached = L.score_trades(
+        trades, universe, store, spells_by_code_index=sbc)
+    assert rows_cached == rows_default
+    assert n_no_bench_cached == n_no_bench_default
 
 
 # --------------------------------------------------------------------------
@@ -252,6 +286,46 @@ def test_cluster_bootstrap_empty_is_none():
     assert result["pct_positive"] is None and result["months"] == 0
 
 
+def test_cluster_bootstrap_perf_fix_matches_original_brute_force_sum():
+    """2026-09-27 perf fix: the resample loop now sums PRECOMPUTED per-month
+    totals instead of re-walking every trade in every picked month on every
+    resample. Prove that on a case with SEVERAL weighted trades sharing the
+    same month (the case the fix actually changes the code path for) it
+    gives the byte-identical answer as the original brute-force sum,
+    reimplemented here inline from the ORIGINAL algorithm so this test does
+    not just check the function against itself."""
+    rows = [
+        {"entry_date": D(2026, 1, 5), "f": 0.01, "weight": 1.0},
+        {"entry_date": D(2026, 1, 20), "f": -0.02, "weight": 0.5},
+        {"entry_date": D(2026, 1, 28), "f": 0.03, "weight": 1.0},
+        {"entry_date": D(2026, 2, 3), "f": 0.005, "weight": 2.0},
+        {"entry_date": D(2026, 2, 15), "f": -0.01, "weight": 1.0},
+        {"entry_date": D(2026, 3, 1), "f": -0.04, "weight": 1.0},
+        {"entry_date": D(2026, 3, 12), "f": 0.02, "weight": 1.0},
+        {"entry_date": D(2026, 3, 22), "f": 0.01, "weight": 0.25},
+    ]
+    resamples, seed = 500, 20260927
+
+    # the ORIGINAL (pre-fix) brute-force algorithm, reimplemented directly
+    groups: dict[tuple, list[tuple]] = {}
+    for r in rows:
+        key = (r["entry_date"].year, r["entry_date"].month)
+        groups.setdefault(key, []).append((r["f"], r["weight"]))
+    keys = sorted(groups)
+    rng = random.Random(seed)
+    n_positive_brute = 0
+    for _ in range(resamples):
+        picked = [rng.choice(keys) for _ in keys]
+        total = sum(v * w for k in picked for v, w in groups[k])
+        if total > 0:
+            n_positive_brute += 1
+    expected = {"resamples": resamples, "months": len(keys),
+               "pct_positive": round(100 * n_positive_brute / resamples, 2)}
+
+    result = L.cluster_bootstrap_by_month(rows, "f", resamples=resamples, seed=seed)
+    assert result == expected
+
+
 # --------------------------------------------------------------------------
 # random_decile_picks / random_decile_control
 # --------------------------------------------------------------------------
@@ -263,6 +337,18 @@ def test_random_decile_picks_matches_actual_decile_size():
     assert len(rnd[cal[2]]) == 1
     assert rnd[cal[2]][0] in {"AAA", "BBB", "CCC"}
     assert rnd[cal[3]] == []
+
+
+def test_random_decile_picks_with_precomputed_eligible_by_day_matches_default():
+    universe, cal = make_universe()
+    picks = {cal[2]: ["AAA"], cal[4]: ["BBB", "CCC"], cal[3]: []}
+    elig_by_day = {day: sorted(R.eligible_on(universe, day, index=None))
+                  for day in cal if picks.get(day)}
+    for seed in (1, 2, 3, 42):
+        default = L.random_decile_picks(universe, cal, picks, None, seed)
+        cached = L.random_decile_picks(universe, cal, picks, None, seed,
+                                       eligible_by_day=elig_by_day)
+        assert cached == default
 
 
 def test_random_decile_control_reproducible_and_shaped():
@@ -279,6 +365,63 @@ def test_random_decile_control_reproducible_and_shaped():
                                   draws=8, seed=9)
     assert rc1 == rc2
     assert rc1["draws"] == 8
+
+
+def test_random_decile_control_internal_caching_matches_manual_uncached_draws():
+    """random_decile_control now precomputes eligible_by_day and a
+    spells_by_code index ONCE and reuses them across all draws (the perf
+    fix). Prove that gives the identical result to manually replaying the
+    same draws with the ORIGINAL uncached calls -- the cache must be purely
+    a speed optimisation, never a behaviour change."""
+    universe, cal = make_universe()
+    store = {
+        "AAA": {(cal[i], "midday"): (100 + i, "HIT") for i in range(len(cal))},
+        "BBB": {(cal[i], "midday"): (50 - i * 0.1, "HIT") for i in range(len(cal))},
+        "CCC": {(cal[i], "midday"): (30 + i * 0.05, "HIT") for i in range(len(cal))},
+    }
+    picks = {cal[2]: ["AAA"]}
+    seed, draws = 9, 8
+    rc = L.random_decile_control(universe, cal, store, picks, "midday", 2,
+                                 draws=draws, seed=seed)
+
+    # manual replay using ONLY the original (pre-fix) uncached code paths
+    manual_cache: dict = {}
+    manual_means = []
+    for d in range(draws):
+        rnd_picks = L.random_decile_picks(universe, cal, picks, None, seed + d)
+        trades, _ = F.build_trades(rnd_picks, cal, store, "midday", 2)
+        rows, _ = L.score_trades(trades, universe, store, cache=manual_cache)
+        m = L.mean_of(rows, "mr_bucket")
+        if m is not None:
+            manual_means.append(m)
+    expected_mean = (sum(manual_means) / len(manual_means)) if manual_means else None
+    assert rc["draws_with_a_result"] == len(manual_means)
+    if expected_mean is None:
+        assert rc["mean_of_draw_means"] is None
+    else:
+        assert rc["mean_of_draw_means"] == pytest.approx(expected_mean)
+
+
+def test_random_decile_control_logs_progress_and_a_final_line():
+    """2026-09-27: same progress-logging fix as run_grid, for the far
+    longer-running random-decile control loop -- proof it logs at least the
+    final draw and stays silent by default."""
+    universe, cal = make_universe()
+    store = {
+        "AAA": {(cal[i], "midday"): (100 + i, "HIT") for i in range(len(cal))},
+        "BBB": {(cal[i], "midday"): (50 - i * 0.1, "HIT") for i in range(len(cal))},
+        "CCC": {(cal[i], "midday"): (30 + i * 0.05, "HIT") for i in range(len(cal))},
+    }
+    picks = {cal[2]: ["AAA"]}
+    lines: list[str] = []
+    rc = L.random_decile_control(universe, cal, store, picks, "midday", 2,
+                                 draws=8, seed=9, log=lines.append)
+    assert lines  # at least one progress line was logged
+    assert "draw 8/8" in lines[-1]
+    # default (no log passed) stays silent, same result either way
+    rc_silent = L.random_decile_control(universe, cal, store, picks, "midday", 2,
+                                        draws=8, seed=9)
+    assert rc == rc_silent
 
 
 def test_random_decile_control_no_result_when_nothing_priced():
@@ -326,6 +469,24 @@ def test_ensemble_cell_pools_sleeves_at_one_third_weight():
     assert len(ens["rows"]) == total_rows
     if ens["rows"]:
         assert all(abs(r["weight"] - 1.0 / 3.0) < 1e-9 for r in ens["rows"])
+
+
+def test_run_grid_logs_one_line_per_cell_plus_a_final_summary():
+    """2026-09-27: run_grid gained an optional `log` callback so a real run
+    is never silent -- proof it fires once per cell (in order) plus a final
+    summary line, and stays silent by default (self-test/existing callers
+    unaffected)."""
+    universe, cal, prices, store = make_full_pit()
+    lines: list[str] = []
+    grid = L.run_grid(universe, prices, cal, store, log=lines.append)
+    n_cells = len(R.K_VALUES) * len(R.BUCKETS) * len(R.N_VALUES)
+    assert len(lines) == n_cells + 1  # one per cell, plus the final summary
+    assert all(f"grid cell {i}/{n_cells}" in lines[i - 1] for i in range(1, n_cells + 1))
+    assert "complete" in lines[-1]
+    # default (no log passed) stays silent -- no behaviour change for
+    # existing callers (self-test, run_cell-based tests, etc.)
+    grid_silent = L.run_grid(universe, prices, cal, store)
+    assert grid_silent["cells"].keys() == grid["cells"].keys()
 
 
 def test_run_grid_has_every_cell_and_ensemble():

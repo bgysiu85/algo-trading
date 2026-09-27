@@ -102,6 +102,7 @@ import json
 import random
 import statistics
 import sys
+import time
 from pathlib import Path
 from typing import Iterable
 
@@ -135,12 +136,35 @@ RANDOM_DECILE_SEED = 20260926  # distinct from BOOTSTRAP_SEED, also fixed
 # friction / cost model
 # ----------------------------------------------------------------------------
 
-def code_index_on(universe: R.Universe, code: str, day: dt.date) -> str | None:
+def spells_by_code(universe: R.Universe) -> dict[str, list]:
+    """Group `universe.spells` by code once, so a per-trade lookup only ever
+    scans THAT code's own (typically 1-3) spells instead of the whole
+    membership file. At real scale (~1,844 spells, thousands of trades) the
+    difference is the whole ballgame: without this index, `code_index_on`
+    was a `for s in universe.spells` linear scan called once PER TRADE, in
+    both `score_trades` (18 real grid cells) and every one of the random-
+    decile control's 6,000+ draws -- billions of wasted comparisons that
+    only became visible at production scale, never at the 14-day/3-code
+    synthetic scale the self-test and unit tests exercised."""
+    out: dict[str, list] = {}
+    for s in universe.spells:
+        out.setdefault(s.code, []).append(s)
+    return out
+
+
+def code_index_on(universe: R.Universe, code: str, day: dt.date,
+                  spells_by_code_index: dict[str, list] | None = None
+                  ) -> str | None:
     """Which index's spell covers `code` on `day` -- there should be exactly
     one for a code with a real trade on that day; the first match is used if
-    more than one somehow does (a straddling data artefact, not expected)."""
-    for s in universe.spells:
-        if s.code == code and s.covers(day):
+    more than one somehow does (a straddling data artefact, not expected).
+    Pass a pre-built `spells_by_code_index` (see `spells_by_code`) to avoid
+    re-scanning the full spell list; falls back to the original full scan
+    when not given, so existing callers are unaffected."""
+    candidates = (spells_by_code_index.get(code, []) if spells_by_code_index is not None
+                 else [s for s in universe.spells if s.code == code])
+    for s in candidates:
+        if s.covers(day):
             return s.index
     return None
 
@@ -220,20 +244,28 @@ SCORE_FIELDS = (
 
 
 def score_trades(trades: list[F.Trade], universe: R.Universe, store: dict,
-                 index: str | None = None, cache: dict | None = None
+                 index: str | None = None, cache: dict | None = None,
+                 spells_by_code_index: dict[str, list] | None = None
                  ) -> tuple[list[dict], int]:
     """Every trade becomes one row: raw return, the pick-independent
     benchmark, and net/market-relative return (cash-funded and 2:1 levered)
     at all three friction levels. Returns (rows, n_no_benchmark) -- a trade
     whose entry-date eligible universe has no priced benchmark is still
     scored for net return but carries None for every market-relative field,
-    counted rather than dropped (same discipline as `fill_engine.Unfilled`)."""
+    counted rather than dropped (same discipline as `fill_engine.Unfilled`).
+
+    `spells_by_code_index` (see `spells_by_code`) is built once here if not
+    given by the caller -- either way it is built AT MOST ONCE per call to
+    this function, never once per trade, which is what made the per-trade
+    `code_index_on` lookup an O(spells) scan on every one of thousands of
+    trades before this fix."""
     if cache is None:
         cache = {}
     rows: list[dict] = []
     n_no_benchmark = 0
+    sbc = spells_by_code_index if spells_by_code_index is not None else spells_by_code(universe)
     for t in trades:
-        t_index = code_index_on(universe, t.code, t.entry_date)
+        t_index = code_index_on(universe, t.code, t.entry_date, spells_by_code_index=sbc)
         bench = universe_eligible_bucket_return(
             universe, store, t.entry_date, t.exit_date, t.bucket,
             index=index, cache=cache)
@@ -325,7 +357,23 @@ def cluster_bootstrap_by_month(rows: list[dict], field: str,
                                 seed: int = BOOTSTRAP_SEED) -> dict:
     """Resample calendar-MONTH blocks of (weighted) values, 2,000 times,
     seeded (spec S3 item 5). Reports the share of resamples whose total is
-    positive -- the number spec S4 criterion 4 reads against its >=95% bar."""
+    positive -- the number spec S4 criterion 4 reads against its >=95% bar.
+
+    PERF (2026-09-27): resampling a month block means "add that month's
+    total again" -- the total does not care WHICH of that month's trades
+    contributed what, only the sum. The original loop re-iterated every
+    trade in every picked month on EVERY one of `resamples` draws, an
+    O(resamples x total_trades) cost that was invisible on this module's
+    tiny synthetic self-test data (a handful of trades) but dominated a
+    real production run (measured: ~93% of one real grid cell's wall time,
+    ~26s of ~28s, on a 300-trading-day/25,867-trade slice of Ben's real
+    W07-0012 dataset -- and the real run uses the FULL ~2,945-day/
+    ~259,000-trade calendar). Precomputing each month's own total ONCE
+    turns the per-resample cost into a sum over `len(keys)` precomputed
+    numbers instead of over every trade in the picked months --
+    O(resamples x months + total_trades) instead of
+    O(resamples x total_trades) -- algebraically the identical sum, so the
+    result (and every seeded reproducibility guarantee) is unchanged."""
     groups: dict[tuple, list[tuple]] = {}
     for r in rows:
         v = r.get(field)
@@ -336,11 +384,12 @@ def cluster_bootstrap_by_month(rows: list[dict], field: str,
     keys = sorted(groups)
     if not keys:
         return {"resamples": resamples, "months": 0, "pct_positive": None}
+    month_totals = {k: sum(v * w for v, w in vs) for k, vs in groups.items()}
     rng = random.Random(seed)
     n_positive = 0
     for _ in range(resamples):
         picked = [rng.choice(keys) for _ in keys]
-        total = sum(v * w for k in picked for v, w in groups[k])
+        total = sum(month_totals[k] for k in picked)
         if total > 0:
             n_positive += 1
     return {"resamples": resamples, "months": len(keys),
@@ -352,11 +401,21 @@ def cluster_bootstrap_by_month(rows: list[dict], field: str,
 # ----------------------------------------------------------------------------
 
 def random_decile_picks(universe: R.Universe, calendar: list, picks: dict,
-                        index: str | None, seed: int) -> dict:
+                        index: str | None, seed: int,
+                        eligible_by_day: dict | None = None) -> dict:
     """Same-sized decile as `picks[day]`, drawn at random (not by rank) from
     that day's eligible universe -- the selection control spec item 6 asks
     for. A day whose eligible universe is no bigger than the actual decile
-    just takes the whole eligible set (nothing to randomise)."""
+    just takes the whole eligible set (nothing to randomise).
+
+    `eligible_on(universe, day, index=index)` does not depend on the draw at
+    all -- only on (day, index) -- so recomputing it inside this function on
+    every one of `random_decile_control`'s thousands of draws is pure waste
+    (a linear scan over every membership spell, per day, per draw). Pass a
+    precomputed `eligible_by_day` (day -> sorted eligible codes) to skip that
+    entirely; falls back to computing it here when not given, so this
+    function's existing self-test call (without the cache) still works
+    unchanged, just without the speedup."""
     rng = random.Random(seed)
     out: dict = {}
     for day in calendar:
@@ -364,7 +423,8 @@ def random_decile_picks(universe: R.Universe, calendar: list, picks: dict,
         if k == 0:
             out[day] = []
             continue
-        elig = sorted(R.eligible_on(universe, day, index=index))
+        elig = (eligible_by_day.get(day, []) if eligible_by_day is not None
+                else sorted(R.eligible_on(universe, day, index=index)))
         out[day] = elig if len(elig) <= k else rng.sample(elig, k)
     return out
 
@@ -375,21 +435,50 @@ def random_decile_control(universe: R.Universe, calendar: list, store: dict,
                           draws: int = RANDOM_DECILE_DRAWS,
                           seed: int = RANDOM_DECILE_SEED,
                           level: str = "bucket",
-                          cache: dict | None = None) -> dict:
+                          cache: dict | None = None, log=None) -> dict:
     """2,000 seeded draws (spec S3 item 6), same N/costs/bucket as the real
     cell, scored at market-relative `level` (the deployed friction level by
     default). Reuses `fill_engine.build_trades` and the same pick-
-    independent benchmark cache the real grid uses."""
+    independent benchmark cache the real grid uses.
+
+    Performance: `eligible_on(day, index)` and the per-code membership index
+    are both independent of the draw, so both are computed ONCE here and
+    reused across every draw, instead of once per draw (2,000+ times) --
+    see `random_decile_picks` and `spells_by_code`'s docstrings for why that
+    matters at production scale. This is still a genuinely heavy loop at
+    real scale (2,000 draws x however many N-values the caller asks for,
+    each one replaying `build_trades`/`score_trades` over the full multi-
+    year calendar) -- there is no further algorithmic shortcut for it the
+    way there was for `cluster_bootstrap_by_month`, since each draw's
+    trades really are different. `log` (e.g. `print`) gets one progress
+    line every ~5% of draws so a real run is never silent for hours with
+    no way to tell "still working" from "hung" -- see `run_grid`'s
+    docstring for the same reasoning."""
+    if log is None:
+        log = lambda msg: None
     if cache is None:
         cache = {}
+    t0 = time.monotonic()
+    eligible_by_day = {day: sorted(R.eligible_on(universe, day, index=index))
+                       for day in calendar if picks.get(day)}
+    sbc = spells_by_code(universe)
     draw_means = []
+    report_every = max(1, draws // 20)
     for d in range(draws):
-        rnd_picks = random_decile_picks(universe, calendar, picks, index, seed + d)
+        rnd_picks = random_decile_picks(universe, calendar, picks, index, seed + d,
+                                        eligible_by_day=eligible_by_day)
         trades, _unfilled = F.build_trades(rnd_picks, calendar, store, bucket, n)
-        rows, _n_no_bench = score_trades(trades, universe, store, index=index, cache=cache)
+        rows, _n_no_bench = score_trades(trades, universe, store, index=index, cache=cache,
+                                         spells_by_code_index=sbc)
         m = mean_of(rows, f"mr_{level}")
         if m is not None:
             draw_means.append(m)
+        if (d + 1) % report_every == 0 or (d + 1) == draws:
+            elapsed = time.monotonic() - t0
+            rate = elapsed / (d + 1)
+            remaining = rate * (draws - (d + 1))
+            log(f"random-decile control (bucket={bucket} n={n}): draw {d+1}/{draws}, "
+                f"{elapsed:.1f}s elapsed, ~{remaining:.1f}s remaining ({rate:.3f}s/draw)")
     if not draw_means:
         return {"draws": draws, "draws_with_a_result": 0,
                 "mean_of_draw_means": None, "pct_draws_positive": None}
@@ -461,22 +550,37 @@ def ensemble_cell(sleeves: list[dict]) -> dict:
 
 
 def run_grid(universe: R.Universe, prices: dict, calendar: list, store: dict,
-            index: str | None = None) -> dict:
+            index: str | None = None, log=None) -> dict:
     """The full 2 K x 3 N x 3 bucket = 18-cell grid, unranked, plus the
-    ensemble per (K, bucket) -- spec S3 item 7, G7 ("no best-cell table")."""
+    ensemble per (K, bucket) -- spec S3 item 7, G7 ("no best-cell table").
+
+    `log` (a callable taking one string, e.g. `print`) gets one line per
+    cell as it finishes -- optional, defaults to no output at all, so
+    self-test/unit tests stay silent unless a caller asks for progress.
+    Added 2026-09-27: before this, a real run gave zero indication of
+    progress for however long the whole grid took, which is exactly what
+    left Ben unable to tell a genuinely-still-computing run from a hung
+    one after 9+ hours."""
+    if log is None:
+        log = lambda msg: None
+    t0 = time.monotonic()
     cache: dict = {}
     cells = {}
-    for k in R.K_VALUES:
-        for bucket in R.BUCKETS:
-            for n in R.N_VALUES:
-                cells[(k, bucket, n)] = run_cell(
-                    universe, prices, calendar, store, k, n, bucket,
-                    index=index, cache=cache)
+    all_cells = [(k, bucket, n) for k in R.K_VALUES for bucket in R.BUCKETS
+                for n in R.N_VALUES]
+    for i, (k, bucket, n) in enumerate(all_cells, start=1):
+        cells[(k, bucket, n)] = run_cell(
+            universe, prices, calendar, store, k, n, bucket,
+            index=index, cache=cache)
+        log(f"grid cell {i}/{len(all_cells)} (K={k} {bucket} N={n}) done "
+            f"-- {len(cells[(k, bucket, n)]['rows'])} trades, "
+            f"{time.monotonic()-t0:.1f}s elapsed")
     ensembles = {}
     for k in R.K_VALUES:
         for bucket in R.BUCKETS:
             sleeves = [cells[(k, bucket, n)] for n in R.N_VALUES]
             ensembles[(k, bucket)] = ensemble_cell(sleeves)
+    log(f"grid + ensembles complete, {time.monotonic()-t0:.1f}s total")
     return {"cells": cells, "ensembles": ensembles}
 
 
@@ -523,15 +627,31 @@ def coverage_report(universe: R.Universe, prices: dict, calendar: list,
 
 def run(pit_dir: Path = DEFAULT_PIT_DIR, index: str | None = None,
        random_control_cells: list[tuple] | None = None,
-       random_control_draws: int = RANDOM_DECILE_DRAWS) -> dict:
+       random_control_draws: int = RANDOM_DECILE_DRAWS, log=None) -> dict:
+    """`log` (a callable taking one string; default `print` with a
+    timestamp) reports progress through each stage -- added 2026-09-27
+    alongside the perf fixes to `cluster_bootstrap_by_month` and the
+    per-draw eligible-set/spell-index recompute, so a real run is never
+    silent for hours with no way to tell "still working" from "hung"
+    (which is exactly what happened to the run this fixes)."""
+    if log is None:
+        def log(msg: str) -> None:
+            print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+    t_start = time.monotonic()
+    log("loading universe/prices/calendar/intraday store...")
     universe = R.load_universe(pit_dir)
     all_codes = sorted({s.code for s in universe.spells})
     prices = R.load_prices(all_codes, pit_dir / "eod")
     calendar = R.trading_calendar(prices)
     store = F.load_intraday_store(all_codes, pit_dir / F.INTRADAY_SUBDIR)
+    log(f"loaded: {len(universe.spells)} spells, {len(calendar)} trading days, "
+        f"{len(prices)} codes w/ eod, {len(store)} codes w/ intraday "
+        f"({time.monotonic()-t_start:.1f}s so far)")
 
-    grid = run_grid(universe, prices, calendar, store, index=index)
+    log("starting the 18-cell K x N x bucket grid...")
+    grid = run_grid(universe, prices, calendar, store, index=index, log=log)
 
+    log("computing coverage/counts...")
     picks_by_k = {k: R.daily_picks(universe, prices, calendar, k, index=index)
                   for k in R.K_VALUES}
     coverage = coverage_report(universe, prices, calendar, picks_by_k,
@@ -542,13 +662,16 @@ def run(pit_dir: Path = DEFAULT_PIT_DIR, index: str | None = None,
         # criterion 5 is judged at the deployed cell) -- callers can pass a
         # wider list (e.g. all 18 cells) at the cost of runtime.
         random_control_cells = [(5, "midday", n) for n in R.N_VALUES]
+    log(f"starting the random-decile control: {len(random_control_cells)} cell(s) x "
+        f"{random_control_draws} draws each")
     rc_cache: dict = {}
     random_controls = {}
     for (k, bucket, n) in random_control_cells:
         random_controls[(k, bucket, n)] = random_decile_control(
             universe, calendar, store, picks_by_k[k], bucket, n, index=index,
-            draws=random_control_draws, cache=rc_cache)
+            draws=random_control_draws, cache=rc_cache, log=log)
 
+    log(f"run() complete, {time.monotonic()-t_start:.1f}s total")
     return {
         "pit_dir": str(pit_dir), "index": index,
         "window": [calendar[0].isoformat(), calendar[-1].isoformat()],
@@ -704,6 +827,17 @@ def self_test() -> list[str]:
     assert code_index_on(universe, "ZZZ", cal[3]) is None
     assert commission_bps_for(None) == DEFAULT_COMMISSION_BPS
 
+    # -- spells_by_code / code_index_on's indexed path (perf fix) gives the
+    # IDENTICAL answer as the original full-scan path, for every code
+    # including one with no spell at all --------------------------------
+    sbc_test = spells_by_code(universe)
+    assert set(sbc_test) == {"AAA", "BBB", "CCC"}
+    assert all(s.code == "AAA" for s in sbc_test["AAA"])
+    for code in ("AAA", "BBB", "CCC", "ZZZ"):
+        for day in (cal[0], cal[3], cal[-1]):
+            assert (code_index_on(universe, code, day, spells_by_code_index=sbc_test)
+                   == code_index_on(universe, code, day))
+
     # -- universe_eligible_bucket_return: equal-weight over ALL eligible codes
     # with both prices, pick-independent, and cached ------------------------
     store = {
@@ -781,6 +915,16 @@ def self_test() -> list[str]:
     assert len(rnd_picks[cal[2]]) == len(picks[cal[2]])
     assert set(rnd_picks[cal[2]]) <= {"AAA", "BBB", "CCC"}
 
+    # -- random_decile_picks with a precomputed eligible_by_day (the perf
+    # fix) gives the IDENTICAL result as recomputing eligible_on() inline,
+    # for the same seed -- proof the cache changes nothing about what gets
+    # picked, only how many times eligible_on() is called ------------------
+    elig_by_day_test = {day: sorted(R.eligible_on(universe, day, index=None))
+                        for day in cal if picks.get(day)}
+    rnd_picks_cached = random_decile_picks(universe, cal, picks, None, seed=7,
+                                           eligible_by_day=elig_by_day_test)
+    assert rnd_picks_cached == rnd_picks
+
     # -- random_decile_control: runs, reproducible with the same seed -------
     rc = random_decile_control(universe, cal, store, picks, "midday", 2,
                                draws=5, seed=11, cache={})
@@ -848,7 +992,13 @@ def self_test() -> list[str]:
            "aggregation (proven with an ensemble's 1/3-weighted pool), "
            "by-half/by-year, drop-top-N's n/a case, the seeded cluster "
            "bootstrap and random-decile control's reproducibility, the "
-           "full grid+ensemble, and coverage/counts all behaved as specified"]
+           "full grid+ensemble, coverage/counts, the 2026-09-27 perf fixes "
+           "(per-code spell index and per-day eligible-set cache instead of "
+           "recomputing them every draw/trade, and cluster_bootstrap_by_month "
+           "summing precomputed per-month totals instead of re-walking every "
+           "trade on every resample -- all byte-identical to the original "
+           "slow path), and the new optional progress logging on run_grid "
+           "and random_decile_control all behaved as specified"]
 
 
 # ----------------------------------------------------------------------------
