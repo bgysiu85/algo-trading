@@ -270,3 +270,45 @@ an unadjusted or too-shallow archive.
 This registration's thresholds and reading rules (§2, §4, §5) are unchanged by this amendment —
 only the data-source question for B/R is open. Tag G proceeds under the existing registration
 without modification.
+
+---
+
+## 10. PRE-RUN AMENDMENT — 2026-09-27, Build & test chat: Databento split-guard heuristic (Ben's decision on §9)
+
+**Ben's decision, in his words (subitem 3, W03-0012): "let's go with databento."** Option B from §9: Tag B and Tag R's daily history comes from Databento's `ohlcv-1d` bars, corrected for stock splits by a heuristic rather than a real corporate-actions table (which this project does not have). Fixed here, before the heuristic is coded, per the same G1 discipline as §0.
+
+**Data source.** `common/dbn_io.daily_frame(archive, dataset)` — already-owned infrastructure, already used to build `regular_close.json` and read by several other modules. Default `--daily-dataset XNAS.ITCH` (Nasdaq-listed, 2018-05-01 forward per `common/overnight_pull.py`'s job list — the deepest of the three daily-bar datasets already on the pull plan, and the same dataset Tag G already reads for pre-market bars). `--daily-dataset` doubles as the override for a different dataset string if Ben wants one (this replaces the placeholder `--daily-source` flag named in §9 before this option was picked — §9's own hard CLI refusal for `--tags B`/`--tags R` is also lifted now that a default exists; a symbol-day with too little history still reads that tag False, per §2's own rule, not a crash). **Whether this needs a new pull is an open, honest question this registration does not pre-guess**: the real run reports actual daily-history coverage over the PIT universe (§2's own "less than 252 days... reads TAG_B/R = False... documented as a limitation" already covers a short/missing history symbol-by-symbol); if coverage is materially short, Build & test chat prices an exact `common.databento_fetch --dataset <x> --schemas ohlcv-1d --confirm` pull (estimate first, per that tool's own spending guard) rather than assuming either way.
+
+**The split-guard heuristic, exact rule:**
+
+```
+CANDIDATE FACTORS = {2, 3, 4, 5, 6, 8, 10, 1/2, 1/3, 1/4, 1/5, 1/6, 1/8, 1/10}
+PRICE_TOL  = 3.0%      (multiplicative tolerance around a candidate factor)
+VOLUME_TOL = 25.0%     (wider: volume also carries that day's real trading activity)
+
+For consecutive daily bars (day t-1, day t), both RAW (as printed, not yet adjusted):
+  price_ratio  = close[t-1] / close[t]
+  volume_ratio = volume[t]  / volume[t-1]
+  a split of factor R is detected at day t when, for some R in CANDIDATE FACTORS:
+    | price_ratio / R  - 1 | * 100 <= PRICE_TOL   AND
+    | volume_ratio / R - 1 | * 100 <= VOLUME_TOL
+
+When detected: every bar STRICTLY BEFORE day t (within the queried lookback
+window only -- not reaching further back) is rescaled to day t's scale:
+  close, high, low  /= R
+  volume             *= R
+Applied walking the window in ASCENDING date order, off the RAW day-t-1/day-t
+pair each time (not the partially-adjusted series), so multiple splits in one
+window compound correctly and each detection is independent of an earlier
+one's adjustment.
+```
+
+**Why price AND volume, not price alone.** Tag B and Tag R exist to find genuine, organic spike days and green runs -- exactly the kind of huge single-day move a split-detector must NOT eat. A real spike (buying pressure) does not carry a compensating INVERSE move in raw share volume; a split mechanically does (half the price, roughly double the share count, because the share count itself changed, not the dollars traded). Requiring both conditions in the SAME direction is what separates a mechanical artefact from a real move Dux's setups are built to catch. A large price jump that does not also carry a matching inverse volume jump is left alone, untouched, exactly as printed -- including a large jump that happens to fall near a candidate ratio on price alone.
+
+**Residual risk, named rather than hidden:** a genuine move whose price and volume both happen to fall inside both tolerance bands, purely coincidentally, would be misread as a split and incorrectly rescaled. Both conditions holding simultaneously and independently is a tight joint probability, and this is the same class of heuristic used industry-wide absent a corporate-actions feed, but it is not zero risk, and no attempt is made to hide that here. If Tag B or R's real-run numbers look driven by one or two extreme symbol-days, checking those specific days against a real split calendar by hand is the first thing to do before trusting the verdict, and the CSV drop-top-N reading (§4 item 4) already exists to surface exactly this kind of concentration.
+
+**Scope: this heuristic touches nothing already shipped.** Tag G is untouched. The original spike-day / green-run thresholds (§2) are untouched -- only the daily bars they read are now split-guard-adjusted Databento bars instead of the (non-existent) "split-adjusted IB bar_cache" §3 wrongly assumed.
+
+**Unit-testing requirement (this amendment's own G1-equivalent gate):** `detect_split` and `adjust_for_splits` are unit-tested against hand-built fixtures before Tag B/R run against the real book: a true-positive 2-for-1 forward split, a true-positive 1-for-10 reverse split, a genuine large organic move that must NOT be flagged (matching price magnitude but wrong-direction or absent volume signature), the exact tolerance boundaries (3.0% price, 25.0% volume), and a multi-split window (two splits in one 252-day lookback) to confirm compounding rescales correctly.
+
+**Implementation note, fixed here before `run_day` calls it (not a change to either tag's rule):** `common.dux_veto._trailing_window` queries the SAME 252-session lookback depth (`TAG_B_LOOKBACK`) for both Tag B and Tag R's daily-history read, ending on the session immediately before the entry date and split-guard-adjusted to that session's scale. §2 only states this bound for Tag B; Tag R's own rule has no lookback depth of its own (a qualifying run must sit immediately adjacent to the first-red-day, which must itself be the session right before entry), so 252 sessions is generous headroom for any realistic run length, applied purely as a practical compute bound. A symbol-day whose trailing window is empty or, for Tag R, has fewer than 2 sessions, reads that tag False for that entry (§2's own documented-limitation clause), tracked and reported as a coverage diagnostic in the real run's output rather than silently assumed.

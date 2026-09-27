@@ -12,10 +12,15 @@ import pytest
 from common.dux_veto import (
     DailyBar,
     TAG_B_DOLLAR_BLOCK,
+    TAG_B_LOOKBACK,
     TAG_G_GAP_PCT,
     TAG_G_PREMKT_VOL,
+    _dollar_block_tagged,
     _green_run_ending_at,
     _is_run_day,
+    _spike_metrics,
+    _trailing_window,
+    books_and_pairs,
     dollar_block_sensitivity,
     tag_crowded_gap,
     tag_dollar_block,
@@ -351,4 +356,147 @@ class TestTagPostFirstRedDay:
         daily = _daily([("d0", 10.0, 100, 9.5)])
         tagged, detail = tag_post_first_red_day(daily, entry_date="d1")
         assert tagged is False
-        assert detail["run_start"] is None
+
+
+# =============================== real-archive wiring (Tag B/R) ====================
+# `_spike_metrics`/`_dollar_block_tagged` is the refactor `run_day` relies on to
+# avoid re-scanning the daily window on every bar (and, for the sensitivity
+# reading, at every threshold); `_trailing_window` is the slicing +
+# split-guard-adjustment step between the raw archive and the tag functions;
+# `books_and_pairs` is what turns a `--tags` selection into the BOOKS/PAIRED
+# structure `run_day` and `main` build the real study from. None of this
+# changes `tag_dollar_block`/`tag_post_first_red_day` themselves -- the
+# TestTagDollarBlock / TestTagPostFirstRedDay classes above are untouched and
+# still exercise those functions directly.
+
+class TestSpikeMetricsRefactor:
+    def test_matches_tag_dollar_block_when_tagged(self):
+        daily = [
+            DailyBar("2026-01-01", close=9.0, volume=100, high=9.1, low=8.9),
+            DailyBar("2026-01-02", close=15.0, volume=10_000_000, high=20.0, low=10.0),
+        ]
+        entry_running_high = 15.3  # within +/-5% of the 15.0 trapped_level
+        want = tag_dollar_block(daily, entry_running_high)
+        metrics = _spike_metrics(daily)
+        got = (_dollar_block_tagged(metrics, entry_running_high), *metrics)
+        assert got == want
+        assert want[0] is True
+
+    def test_matches_tag_dollar_block_when_no_spike(self):
+        daily = [DailyBar("2026-01-01", close=9.0, volume=100, high=9.1, low=8.9)]
+        want = tag_dollar_block(daily, entry_running_high=100.0)
+        assert want == (False, None, None)
+        assert _spike_metrics(daily) is None
+        # _dollar_block_tagged must also read "no metrics" as untagged, not raise
+        assert _dollar_block_tagged(None, 100.0) is False
+
+    def test_matches_tag_dollar_block_out_of_band(self):
+        daily = [
+            DailyBar("2026-01-01", close=9.0, volume=100, high=9.1, low=8.9),
+            DailyBar("2026-01-02", close=15.0, volume=10_000_000, high=20.0, low=10.0),
+        ]
+        entry_running_high = 50.0  # far outside the +/-5% band
+        want = tag_dollar_block(daily, entry_running_high)
+        metrics = _spike_metrics(daily)
+        got = (_dollar_block_tagged(metrics, entry_running_high), *metrics)
+        assert got == want
+        assert want[0] is False
+
+    def test_metrics_reused_across_several_thresholds_matches_sensitivity(self):
+        # this is exactly how run_day evaluates TAG_B_SENSITIVITY per bar
+        # without re-scanning the daily window at each threshold
+        daily = [DailyBar("2026-01-01", close=20.0, volume=7_000_000, high=22.0, low=10.0)]
+        metrics = _spike_metrics(daily)
+        want = dollar_block_sensitivity(daily, entry_running_high=20.0)
+        got = {t: _dollar_block_tagged(metrics, 20.0, threshold=t) for t in want}
+        assert got == want
+
+
+class TestTrailingWindow:
+    def _bars(self, dates: list[str]) -> list[DailyBar]:
+        return [DailyBar(d, close=10.0 + i, volume=1_000.0 + i, high=10.5 + i, low=9.5 + i)
+                for i, d in enumerate(dates)]
+
+    def test_empty_input_returns_empty(self):
+        assert _trailing_window([], "2026-01-10") == []
+
+    def test_excludes_the_entry_date_itself_and_later(self):
+        bars = self._bars(["2026-01-01", "2026-01-02", "2026-01-03"])
+        out = _trailing_window(bars, "2026-01-02")
+        assert [b.date for b in out] == ["2026-01-01"]
+
+    def test_no_prior_history_returns_empty(self):
+        bars = self._bars(["2026-01-05", "2026-01-06"])
+        assert _trailing_window(bars, "2026-01-01") == []
+
+    def test_respects_the_lookback_cap(self):
+        dates = [f"2026-01-{d:02d}" for d in range(1, 11)]  # 10 sessions
+        bars = self._bars(dates)
+        out = _trailing_window(bars, "2026-01-11", lookback=3)
+        assert [b.date for b in out] == dates[-3:]
+
+    def test_shorter_history_than_lookback_returns_all_of_it(self):
+        bars = self._bars(["2026-01-01", "2026-01-02"])
+        out = _trailing_window(bars, "2026-01-05", lookback=252)
+        assert len(out) == 2
+
+    def test_applies_split_guard_adjustment_anchored_to_the_window(self):
+        # a 2-for-1 split between the two bars in the window; the window
+        # ends strictly before entry_date, so adjustment anchors to the
+        # LAST bar actually in the window (2026-01-02), not to anything
+        # after entry_date, even if `bars` itself continues past entry.
+        bars = [
+            DailyBar("2026-01-01", close=100.0, volume=1_000_000.0, high=101.0, low=99.0),
+            DailyBar("2026-01-02", close=50.0, volume=2_000_000.0, high=51.0, low=49.0),
+            DailyBar("2026-01-03", close=51.0, volume=1_100_000.0, high=52.0, low=50.0),
+        ]
+        out = _trailing_window(bars, "2026-01-03")
+        assert [b.date for b in out] == ["2026-01-01", "2026-01-02"]
+        assert out[0].close == pytest.approx(50.0)   # 2026-01-01 rescaled to 2026-01-02's scale
+        assert out[1].close == pytest.approx(50.0)   # 2026-01-02 itself, untouched
+
+    def test_a_later_split_does_not_contaminate_an_earlier_entrys_window(self):
+        # the split lands AFTER the queried entry_date -- _trailing_window
+        # must never see it, since it only ever looks at bars strictly
+        # before entry_date.
+        bars = [
+            DailyBar("2026-01-01", close=100.0, volume=1_000_000.0, high=101.0, low=99.0),
+            DailyBar("2026-01-02", close=101.0, volume=1_050_000.0, high=102.0, low=100.0),
+            DailyBar("2026-01-03", close=50.0, volume=2_100_000.0, high=51.0, low=49.0),  # split here
+        ]
+        out = _trailing_window(bars, "2026-01-03")
+        assert [b.date for b in out] == ["2026-01-01", "2026-01-02"]
+        assert out[0].close == pytest.approx(100.0)  # unrescaled -- the split is not in this window
+        assert out[1].close == pytest.approx(101.0)
+
+
+class TestBooksAndPairs:
+    def test_single_tag_g_only(self):
+        books, paired = books_and_pairs(["G"])
+        assert books == (
+            ("MCL", "mcl", None), ("MCL-duxG", "mcl", "G"),
+            ("MC5", "mc5", None), ("MC5-duxG", "mc5", "G"),
+        )
+        assert paired == (("MCL", "MCL-duxG"), ("MC5", "MC5-duxG"))
+
+    def test_all_three_tags(self):
+        books, paired = books_and_pairs(["G", "B", "R"])
+        names = [b[0] for b in books]
+        assert names == [
+            "MCL", "MCL-duxG", "MCL-duxB", "MCL-duxR",
+            "MC5", "MC5-duxG", "MC5-duxB", "MC5-duxR",
+        ]
+        assert len(paired) == 6
+        assert ("MCL", "MCL-duxB") in paired
+        assert ("MC5", "MC5-duxR") in paired
+
+    def test_baseline_has_no_gate_tag(self):
+        books, _ = books_and_pairs(["B"])
+        baseline = {name: tag for name, _, tag in books if tag is None}
+        assert set(baseline) == {"MCL", "MC5"}
+
+    def test_gated_name_encodes_its_own_tag_letter(self):
+        books, _ = books_and_pairs(["B", "R"])
+        for name, _, tag in books:
+            if tag is not None:
+                assert name == f"{name.split('-dux')[0]}-dux{tag}"
