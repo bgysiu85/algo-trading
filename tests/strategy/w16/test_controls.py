@@ -99,3 +99,72 @@ def test_c_b3_zero_flips_produces_nothing():
     bars = {"2024-06-06": _full_session("2024-06-06")}
     legs = CT.c_b3_draw({"2024-06-06": 0}, bars, draw_idx=0)
     assert legs == []
+
+
+# ---------------------------------------------------------------------
+# performance caches: must be bit-identical to the uncached (original)
+# path -- these are pure speed optimizations, not behavior changes. See
+# controls.py's module docstring / c_o3_draw docstring for why they exist
+# (measured ~116h/market for B2's control before o3_candidates_cache).
+# ---------------------------------------------------------------------
+
+def test_c_b1_naive_cache_matches_uncached_across_draws():
+    real = [{"date": "2024-06-06", "market": "ES", "direction": "long",
+            "stop_dist": 1.0, "voided": False},
+           {"date": "2024-06-07", "market": "ES", "direction": "short",
+            "stop_dist": 2.0, "voided": False}]
+    bars = {"2024-06-06": _full_session("2024-06-06"),
+           "2024-06-07": _full_session("2024-06-07", price=150.0)}
+    cache = CT.naive_time_cache(bars, {t["date"] for t in real})
+    for draw in range(10):
+        uncached = CT.c_b1_draw(real, bars, draw_idx=draw)
+        cached = CT.c_b1_draw(real, bars, draw_idx=draw, naive_cache=cache)
+        assert cached == uncached
+
+
+def test_c_b3_naive_cache_matches_uncached_across_draws():
+    bars = {"2024-06-06": _full_session("2024-06-06"),
+           "2024-06-07": _full_session("2024-06-07", price=150.0)}
+    flip_counts = {"2024-06-06": 3, "2024-06-07": 2}
+    cache = CT.naive_time_cache(bars, flip_counts.keys(), sort=True)
+    for draw in range(10):
+        uncached = CT.c_b3_draw(flip_counts, bars, draw_idx=draw)
+        cached = CT.c_b3_draw(flip_counts, bars, draw_idx=draw, naive_cache=cache)
+        assert cached == uncached
+
+
+def _synthetic_full_index(n=2000, start="2024-06-01 00:00"):
+    idx = pd.date_range(start, periods=n, freq="1min", tz="UTC")
+    price = pd.Series(np.linspace(100.0, 120.0, n), index=idx)
+    return idx, price
+
+
+def test_o3_candidates_cache_matches_uncached_across_draws():
+    full_index, price_at = _synthetic_full_index()
+    real_b2 = [{"market": "ES", "voided": False, "hold_length": "90min"},
+              {"market": "ES", "voided": False, "hold_length": "90min"},
+              {"market": "ES", "voided": False, "hold_length": "45min"},
+              {"market": "ES", "voided": True, "hold_length": "90min"}]
+    cache = CT.o3_candidates_cache(real_b2, full_index)
+    # one cache entry per unique non-voided length, not one per trade
+    assert set(cache.keys()) == {pd.Timedelta("90min"), pd.Timedelta("45min")}
+    for draw in range(10):
+        uncached = CT.c_o3_draw(real_b2, full_index, price_at, draw_idx=draw)
+        cached = CT.c_o3_draw(real_b2, full_index, price_at, draw_idx=draw,
+                              candidates_cache=cache)
+        assert cached == uncached
+
+
+def test_o3_candidates_cache_handles_a_length_not_present_in_the_cache():
+    """A cache built from a different (e.g. training-only) trade list than
+    the one passed to c_o3_draw must fall back to the uncached computation
+    for any length it doesn't have, not silently drop those trades."""
+    full_index, price_at = _synthetic_full_index()
+    cache = CT.o3_candidates_cache(
+        [{"market": "ES", "voided": False, "hold_length": "90min"}], full_index)
+    real_b2 = [{"market": "ES", "voided": False, "hold_length": "45min"}]
+    uncached = CT.c_o3_draw(real_b2, full_index, price_at, draw_idx=0)
+    cached = CT.c_o3_draw(real_b2, full_index, price_at, draw_idx=0,
+                          candidates_cache=cache)
+    assert cached == uncached
+    assert len(cached) == 1

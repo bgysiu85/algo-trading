@@ -34,12 +34,14 @@ def draw_rng(draw_idx: int) -> np.random.Generator:
 # ---------------------------------------------------------------------
 
 def c_b1_draw(real_trades: list[dict], session_bars: dict[str, pd.DataFrame],
-             draw_idx: int) -> list[dict]:
+             draw_idx: int, *, naive_cache: dict | None = None) -> list[dict]:
     """One draw: for each real (non-voided) B1 trade, a control trade on
     the SAME day, SAME long/short mix, SAME stop distance in points and
     SAME 2:1 target, but entered at a uniformly random bar start in
     10:01..15:29 rather than at the real trigger (sec 7.1's C-B1 row).
-    `session_bars[date]` must be that date's RTH-windowed, sorted bars."""
+    `session_bars[date]` must be that date's RTH-windowed, sorted bars.
+    `naive_cache` (optional, see `naive_time_cache`): {date: naive_index}
+    precomputed once by the caller and shared across all 1,000 draws."""
     rng = draw_rng(draw_idx)
     out = []
     for rt in real_trades:
@@ -47,8 +49,11 @@ def c_b1_draw(real_trades: list[dict], session_bars: dict[str, pd.DataFrame],
             continue
         date_str = rt["date"]
         bars = session_bars[date_str]
-        from strategy.w16.readback import local_naive_et
-        naive = local_naive_et(bars.index)
+        if naive_cache is not None:
+            naive = naive_cache[date_str]
+        else:
+            from strategy.w16.readback import local_naive_et
+            naive = local_naive_et(bars.index)
         t = naive.time
         window_mask = (t >= dtime(10, 1)) & (t <= dtime(15, 29))
         candidates = np.where(window_mask)[0]
@@ -104,7 +109,8 @@ def c_o2_trades(real_b2_trades: list[dict], session_bars: dict[str, pd.DataFrame
 # ---------------------------------------------------------------------
 
 def c_o3_draw(real_b2_trades: list[dict], full_index: pd.DatetimeIndex,
-             price_at: "pd.Series", draw_idx: int) -> list[dict]:
+             price_at: "pd.Series", draw_idx: int, *,
+             candidates_cache: dict | None = None) -> list[dict]:
     """One draw: for each real (non-voided) B2 trade, a long hold of
     EXACTLY the same wall-clock length, starting at a uniformly random
     minute of `full_index` such that both the start and the (start +
@@ -117,7 +123,15 @@ def c_o3_draw(real_b2_trades: list[dict], full_index: pd.DatetimeIndex,
     session's own open, so the OPEN/CLOSE distinction B2 itself uses does
     not apply here -- the close of whichever bar is drawn is used at both
     ends, which is what "starting at a uniformly random minute" means when
-    the minute need not be a session boundary)."""
+    the minute need not be a session boundary).
+    `candidates_cache` (optional, see `o3_candidates_cache`): {length:
+    (candidates, end_positions)} precomputed once by the caller and shared
+    across all 1,000 draws -- valid start/end positions depend only on
+    `full_index` and `length`, not on draw_idx, so recomputing them with an
+    O(len(full_index)) array op per trade per draw (the original behaviour
+    when this is omitted) does not scale to a multi-year archive: measured
+    at ~116h for one market's 1,000 draws at real archive scale before
+    this cache existed."""
     rng = draw_rng(draw_idx)
     idx_arr = full_index.values
     out = []
@@ -129,10 +143,13 @@ def c_o3_draw(real_b2_trades: list[dict], full_index: pd.DatetimeIndex,
         if length is None:
             continue
         length = pd.Timedelta(length)
-        end_positions = np.searchsorted(idx_arr, idx_arr + np.timedelta64(length))
-        valid = (end_positions < len(idx_arr)) & (idx_arr[np.clip(end_positions, 0, len(idx_arr) - 1)]
-                                                  == (idx_arr + np.timedelta64(length)))
-        candidates = np.where(valid)[0]
+        if candidates_cache is not None and length in candidates_cache:
+            candidates, end_positions = candidates_cache[length]
+        else:
+            end_positions = np.searchsorted(idx_arr, idx_arr + np.timedelta64(length))
+            valid = (end_positions < len(idx_arr)) & (idx_arr[np.clip(end_positions, 0, len(idx_arr) - 1)]
+                                                      == (idx_arr + np.timedelta64(length)))
+            candidates = np.where(valid)[0]
         if len(candidates) == 0:
             continue
         pos = int(rng.integers(0, len(candidates)))
@@ -153,18 +170,24 @@ def c_o3_draw(real_b2_trades: list[dict], full_index: pd.DatetimeIndex,
 # ---------------------------------------------------------------------
 
 def c_b3_draw(real_flip_counts: dict[str, int], session_bars: dict[str, pd.DataFrame],
-             draw_idx: int) -> list[dict]:
+             draw_idx: int, *, naive_cache: dict | None = None) -> list[dict]:
     """One draw: for each day B3 had `n` real flips, `n` position changes
     at uniformly random bar closes 09:31..15:57, first side random, flat
-    at the session's own close (sec 7.1's C-B3 row)."""
+    at the session's own close (sec 7.1's C-B3 row).
+    `naive_cache` (optional, see `naive_time_cache`, built with `sort=True`
+    to match the `.sort_index()` below): {date: naive_index} precomputed
+    once by the caller and shared across all 1,000 draws."""
     rng = draw_rng(draw_idx)
     out = []
     for date_str, n_flips in real_flip_counts.items():
         if n_flips <= 0:
             continue
         bars = session_bars[date_str].sort_index()
-        from strategy.w16.readback import local_naive_et
-        naive = local_naive_et(bars.index)
+        if naive_cache is not None:
+            naive = naive_cache[date_str]
+        else:
+            from strategy.w16.readback import local_naive_et
+            naive = local_naive_et(bars.index)
         t = naive.time
         window_mask = (t >= dtime(9, 31)) & (t <= dtime(15, 57))
         candidates = np.where(window_mask)[0]
@@ -194,3 +217,50 @@ def c_b3_draw(real_flip_counts: dict[str, int], session_bars: dict[str, pd.DataF
                     "fill_kind": "market_or_stop", "reason": "flat_at_close"})
         out.extend(legs)
     return out
+
+# ---------------------------------------------------------------------
+# performance caches -- build once, share across all 1,000 draws
+# ---------------------------------------------------------------------
+
+def naive_time_cache(session_bars: dict[str, pd.DataFrame], dates, *,
+                     sort: bool = False) -> dict:
+    """{date: naive_index}, for `c_b1_draw`/`c_b3_draw`'s `naive_cache`.
+    `sort=True` matches c_b3_draw's own `.sort_index()`; `sort=False`
+    (default) matches c_b1_draw, which trusts session_bars is already
+    sorted. Computing this once per date instead of once per trade per
+    draw is what turns an O(n_trades * n_draws) tz conversion into
+    O(n_dates)."""
+    from strategy.w16.readback import local_naive_et
+    cache = {}
+    for date_str in dates:
+        if date_str not in session_bars:
+            continue
+        bars = session_bars[date_str]
+        idx = bars.sort_index().index if sort else bars.index
+        cache[date_str] = local_naive_et(idx)
+    return cache
+
+
+def o3_candidates_cache(real_b2_trades: list[dict], full_index: pd.DatetimeIndex) -> dict:
+    """{length: (candidates, end_positions)}, for `c_o3_draw`'s
+    `candidates_cache` -- one entry per unique hold length across
+    `real_b2_trades`, computed once (not once per trade per draw). See
+    `c_o3_draw`'s docstring for why this matters at archive scale."""
+    idx_arr = full_index.values
+    cache: dict = {}
+    for rt in real_b2_trades:
+        if rt.get("voided"):
+            continue
+        length = rt.get("hold_length")
+        if length is None:
+            continue
+        length = pd.Timedelta(length)
+        if length in cache:
+            continue
+        end_positions = np.searchsorted(idx_arr, idx_arr + np.timedelta64(length))
+        valid = (end_positions < len(idx_arr)) & (idx_arr[np.clip(end_positions, 0, len(idx_arr) - 1)]
+                                                  == (idx_arr + np.timedelta64(length)))
+        candidates = np.where(valid)[0]
+        cache[length] = (candidates, end_positions)
+    return cache
+

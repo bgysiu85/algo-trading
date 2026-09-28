@@ -359,22 +359,26 @@ def compute_controls(baseline: str, market: str, *, frames=None, trades=None,
     random_nets: list[float] = []
     deterministic_net = None
     if baseline == "B1":
+        naive_cache = CTRL.naive_time_cache(frames, {t["date"] for t in trades})
         for i in range(n_draws):
-            draw = CTRL.c_b1_draw(trades, frames, i)
+            draw = CTRL.c_b1_draw(trades, frames, i, naive_cache=naive_cache)
             random_nets.append(summarize(price_all(draw, level))["net"])
             if progress and (i + 1) % 100 == 0:
                 print(f"    C-B1 {market}: {i + 1}/{n_draws} draws")
     elif baseline == "B2":
+        candidates_cache = CTRL.o3_candidates_cache(trades, full_index)
         for i in range(n_draws):
-            draw = CTRL.c_o3_draw(trades, full_index, price_at, i)
+            draw = CTRL.c_o3_draw(trades, full_index, price_at, i,
+                                  candidates_cache=candidates_cache)
             random_nets.append(summarize(price_all(draw, level))["net"])
             if progress and (i + 1) % 100 == 0:
                 print(f"    C-O3 {market}: {i + 1}/{n_draws} draws")
         o2 = CTRL.c_o2_trades(trades, frames)
         deterministic_net = summarize(price_all(o2, level))["net"]
     elif baseline == "B3":
+        naive_cache = CTRL.naive_time_cache(frames, flip_counts.keys(), sort=True)
         for i in range(n_draws):
-            legs = CTRL.c_b3_draw(flip_counts, frames, i)
+            legs = CTRL.c_b3_draw(flip_counts, frames, i, naive_cache=naive_cache)
             for leg in legs:
                 leg["market"] = market
             draw = SIG.pair_b3_legs(legs)
