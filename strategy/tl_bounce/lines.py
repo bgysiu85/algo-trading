@@ -36,9 +36,12 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from common.tl_v0_lines import atr14, find_pivots, walk_line_and_breaks
+from common.tl_v0_lines import BUFFER_MULT, atr14, find_pivots, walk_line_and_breaks
 from strategy.htf import bars as B
 from strategy.tl_bounce.spec import ATR_LEN, PIVOT_L, PIVOT_R, TOUCH_BUF, X1_BUF
+
+assert X1_BUF == BUFFER_MULT   # sec 2.1's registered default and the shared
+                                # module's own default must not silently drift apart
 
 
 @dataclass
@@ -65,14 +68,20 @@ def atr_gated(h, lo, c, atr_len: int = ATR_LEN) -> np.ndarray:
     return a
 
 
-def entry_lines(o, h, lo, c, *, R: int = PIVOT_R, atr_len: int = ATR_LEN) -> EntryLines:
-    """Build both line kinds on one back-adjusted entry-chart OHLC series."""
+def entry_lines(o, h, lo, c, *, R: int = PIVOT_R, atr_len: int = ATR_LEN,
+                x1_buf: float = X1_BUF) -> EntryLines:
+    """Build both line kinds on one back-adjusted entry-chart OHLC series.
+    `x1_buf` overrides the close-through/birth-validity buffer (default
+    X1_BUF, sec 2.1's registered 0.10 x ATR) -- added for sec 3's 27-cell
+    neighbour grid (W15-0016), which varies it as one of three dimensions;
+    every other caller (G2, the real engine's main run) leaves it at the
+    default and is unaffected."""
     n = len(c)
     a = atr_gated(h, lo, c, atr_len)
     pivots_low = find_pivots(lo, R, "low")
     pivots_high = find_pivots(h, R, "high")
-    sup, sup_breaks = walk_line_and_breaks(n, pivots_low, R, c, a, "low")
-    res, res_breaks = walk_line_and_breaks(n, pivots_high, R, c, a, "high")
+    sup, sup_breaks = walk_line_and_breaks(n, pivots_low, R, c, a, "low", buffer_mult=x1_buf)
+    res, res_breaks = walk_line_and_breaks(n, pivots_high, R, c, a, "high", buffer_mult=x1_buf)
     # a line cannot be armed (or break) before ATR is known
     sup = np.where(np.isnan(a), np.nan, sup)
     res = np.where(np.isnan(a), np.nan, res)

@@ -79,11 +79,18 @@ def build_line_series(n, pivots, R, closes, atr, kind):
     return line
 
 
-def walk_line_and_breaks(n, pivots, R, closes, atr, kind):
+def walk_line_and_breaks(n, pivots, R, closes, atr, kind, buffer_mult=BUFFER_MULT):
     """Bar-by-bar state walk matching Pine's tlCore() exactly (AT-113 / G3):
     a line goes cold (resOn/supOn := false) the instant it breaks, and can
     ONLY re-arm on the next confirmed pivot pair that revalidates -- it does
     NOT keep extrapolating and re-testing.
+
+    `buffer_mult` overrides the module-level BUFFER_MULT for BOTH the birth-
+    validity check and the break/line-end threshold (sec note: "X1 and the
+    line's end are the same event" -- one buffer, both jobs). Default
+    reproduces every existing call site's behaviour unchanged; added for
+    REGISTERED_tl_bounce.md sec 3's neighbour grid, which varies this buffer
+    (0.05/0.10/0.20 x ATR) as one of its three dimensions -- W15-0016.
 
     build_line_series() + break_events() above do NOT do this: the line
     array keeps extending forward from the last validated pair regardless of
@@ -122,11 +129,11 @@ def walk_line_and_breaks(n, pivots, R, closes, atr, kind):
                         for k in range(p1 + 1, j):
                             lv = v2 + slope * (k - p2)
                             if kind == "high":
-                                if closes[k] - lv > BUFFER_MULT * atr[k]:
+                                if closes[k] - lv > buffer_mult * atr[k]:
                                     valid = False
                                     break
                             else:
-                                if lv - closes[k] > BUFFER_MULT * atr[k]:
+                                if lv - closes[k] > buffer_mult * atr[k]:
                                     valid = False
                                     break
                     active = (p2, v2, slope) if valid else None
@@ -139,11 +146,11 @@ def walk_line_and_breaks(n, pivots, R, closes, atr, kind):
             lv = ref_val + slope * (j - ref_idx)
             line[j] = lv
             if kind == "high":
-                if closes[j] - lv > BUFFER_MULT * atr[j]:
+                if closes[j] - lv > buffer_mult * atr[j]:
                     breaks[j] = True
                     on = False
             else:
-                if lv - closes[j] > BUFFER_MULT * atr[j]:
+                if lv - closes[j] > buffer_mult * atr[j]:
                     breaks[j] = True
                     on = False
     return line, breaks
