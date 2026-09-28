@@ -76,7 +76,7 @@ def test_confirm_downloads_all_four_files_and_writes_manifest(tmp_path):
     for p in _all_paths(tmp_path):
         assert p.exists() and p.read_bytes() == b"DBN-fake"
         assert not p.with_name(p.name + ".part").exists()
-    m = json.loads(F.manifest_path(tmp_path).read_text())
+    m = json.loads(F.manifest_path(tmp_path).read_text(encoding="utf-8"))
     assert set(m["roots"]) == set(F.ROOTS)
     assert set(m["schemas"]) == set(F.SCHEMAS)
     assert m["start"] == "2010-06-06" and m["end"] == "2026-09-26"
@@ -174,7 +174,7 @@ def test_failed_job_is_scrubbed_and_others_still_complete(tmp_path):
     c.timeseries.get_range = flaky
     rc = F.main(["--archive", str(tmp_path), "--confirm"], client=c)
     assert rc == 1
-    m = json.loads(F.manifest_path(tmp_path).read_text())
+    m = json.loads(F.manifest_path(tmp_path).read_text(encoding="utf-8"))
     assert "x" * 30 not in json.dumps(m), "key-shaped text must be scrubbed"
     assert len(m["files_pulled"]) == 3
     assert m["files_failed"] == ["NQ ohlcv-1m"]
