@@ -1,0 +1,7 @@
+{
+  "candidate": "DVP-v1-NQ",
+  "spent_at": "2026-09-28T13:50:10Z",
+  "lock_from": "2024-01-02",
+  "n_locked_days": 686,
+  "note": "The W16 DVP-v0 holdout is spent. Any further figure quoted from 2024-01-02 onward, for DVP-NQ or any of its controls, grid neighbours or reported variants, is in-sample and is not a holdout result, whatever it is called."
+}
