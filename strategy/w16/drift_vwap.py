@@ -60,8 +60,8 @@ from strategy.w16.signals import TICK, _gapped, _held_id, _naive_et
 # compute_p_ref() below is what the pre-flight calls to print the number
 # that Amendment A then pins here -- it is not read by any P&L path.
 # ---------------------------------------------------------------------
-P_REF_NQ = None
-P_REF_ES = None
+P_REF_NQ = 13034.25   # Amendment A (PRE-RUN, 2026-09-28): G2 pre-flight, cbbb7cf
+P_REF_ES = 4082.0     # Amendment A (PRE-RUN, 2026-09-28): reported-only ES variant
 
 TRAIN_START_2020 = "2020-01-02"
 TRAIN_END_2023 = "2023-12-29"

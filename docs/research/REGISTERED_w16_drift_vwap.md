@@ -23,6 +23,35 @@ not only the helper extract in `claude/raw/w11_0034_iqcapital_extracts_20260928.
 
 ---
 
+### Amendment A — PRE-RUN, 2026-09-28 (P_ref pinned; one prose correction; one counting fix. No P&L exists yet)
+
+**P_ref, from the G2 pre-flight** (`D:\Trading\Claude outputs\w16_0006_preflight.json`, run 2026-09-28 13:05 UTC on
+commit cbbb7cf; median 09:30 1-minute open over XNYS trading sessions 2020-01-02 → 2023-12-29):
+
+| Market | P_ref | Long stop / target | Short stop / target |
+|---|---|---|---|
+| **NQ** (scored) | **13,034.25** | 0.6138% / 0.3069% of the fill | 0.6138% / 0.3836% of the fill |
+| ES (reported only) | **4,082.00** | 80/40/50 × F ÷ 4,082 (§3.6) | |
+
+Pinned in `strategy/w16/drift_vwap.py` as `P_REF_NQ = 13034.25`, `P_REF_ES = 4082.0`. Neither is changed again.
+
+**Pre-flight read (no P&L):** 3,407 NQ training sessions, 3 skipped (all 2020), 3,397 with at least one trigger,
+51,059 triggers. The upper bound on entries is 13,540 (3.97 a day, capped at 4 before G-loss and one-at-a-time).
+First trigger of the day: 1,848 long, 1,549 short. **Stop / target per MNQ (median): 2010 $23.50 / $13.50, 2016
+$55.00 / $30.50, 2023 $181.00 / $95.00.** Well above the 300-trade floor.
+
+**Correction to §3.5's prose (not a rule change):** "costs are about 3% of the target" holds only at 2020s prices.
+Because the stop and target scale with price, an L2 round trip on MNQ (~$2.38–$2.88) is **about 20% of the median
+target in 2010** and about 9% in 2016. So costs weigh most in the early years, and criterion 2 (both halves) and the
+by-year table will show it. This is a consequence of the registered scaling, recorded now, before any result.
+
+**Counting fix (code, before any P&L):** the first pre-flight grouped the Globex archive by ET date and counted
+Sundays and exchange holidays as "sessions skipped". Only XNYS trading days now count (SB-v0 §2, inherited by §2
+here). The replication block's trades per day is per trading session, which matches how Conti's ~2.8 is computed.
+Commit cbbb7cf. P_ref was the same before and after the fix.
+
+---
+
 ## In plain terms
 
 Conti's rule waits until Nasdaq futures have a clear intraday drift. On the 15-minute chart, three things must all be
