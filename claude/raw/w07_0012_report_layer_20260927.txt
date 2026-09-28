@@ -1,0 +1,54 @@
+SWING-v0 S3 report layer (W07-0012 subitem 6) -- 2015-01-02 to 2026-09-18
+
+DEPLOYED CELL (K=5, midday, N-ensemble) -- headline
+  cash-funded:
+    measured   n=722733  mean market-relative net = 15.57 bps
+    bucket     n=722733  mean market-relative net = 14.94 bps
+    stress     n=722733  mean market-relative net = 8.85 bps
+  2:1 levered (never the headline):
+    measured   n=722733  mean market-relative net = 66.78 bps
+    bucket     n=722733  mean market-relative net = 65.52 bps
+    stress     n=722733  mean market-relative net = 53.34 bps
+  fill summary: {'picks': 778998, 'filled': 722733, 'unfilled': 56265}
+  cluster bootstrap (bucket level, by calendar month): 97.7% of 2000 resamples positive (141 months)
+  drop-top-1 (bucket level): 0.0012338971728447252
+  drop-top-3 (bucket level): 0.001128515771192537
+  drop-top-5 (bucket level): 0.0010475819151520068
+
+RANDOM-DECILE CONTROL (spec S3 item 6, S4 criterion 5)
+  K=5 midday N=5: 0.0% of 2000 draws had a positive mean market-relative net return
+  K=5 midday N=10: 0.0% of 2000 draws had a positive mean market-relative net return
+  K=5 midday N=20: 0.15% of 2000 draws had a positive mean market-relative net return
+
+FULL K x N x BUCKET GRID (unranked -- spec S3 item 7 / G7)
+  K=5 close  N= 5: n=241980  mean market-relative net (bucket-specific) = 6.69 bps
+  K=5 close  N=10: n=241195  mean market-relative net (bucket-specific) = 8.88 bps
+  K=5 close  N=20: n=239574  mean market-relative net (bucket-specific) = 24.85 bps
+  K=5 midday N= 5: n=241975  mean market-relative net (bucket-specific) = 8.02 bps
+  K=5 midday N=10: n=241189  mean market-relative net (bucket-specific) = 11.19 bps
+  K=5 midday N=20: n=239569  mean market-relative net (bucket-specific) = 25.71 bps
+  K=5 open   N= 5: n=237059  mean market-relative net (bucket-specific) = 4.68 bps
+  K=5 open   N=10: n=236273  mean market-relative net (bucket-specific) = 6.55 bps
+  K=5 open   N=20: n=234599  mean market-relative net (bucket-specific) = 20.92 bps
+  K=10 close  N= 5: n=241499  mean market-relative net (bucket-specific) = 3.80 bps
+  K=10 close  N=10: n=240704  mean market-relative net (bucket-specific) = 8.25 bps
+  K=10 close  N=20: n=238954  mean market-relative net (bucket-specific) = 22.00 bps
+  K=10 midday N= 5: n=241495  mean market-relative net (bucket-specific) = 5.07 bps
+  K=10 midday N=10: n=240702  mean market-relative net (bucket-specific) = 9.50 bps
+  K=10 midday N=20: n=238951  mean market-relative net (bucket-specific) = 22.52 bps
+  K=10 open   N= 5: n=236691  mean market-relative net (bucket-specific) = 0.99 bps
+  K=10 open   N=10: n=235921  mean market-relative net (bucket-specific) = 4.56 bps
+  K=10 open   N=20: n=234087  mean market-relative net (bucket-specific) = 17.26 bps
+
+COVERAGE / COUNTS (spec S3 items 8-9)
+  hindsight-guard rejections: 0 (must be exactly zero -- 5327505 pairs checked)
+  suspect-leak guard: 35 spells confirmed absent
+  codes covered: 1515
+  K=5: decile size min/median/max = 0/89/91, no-trade days = 5
+  K=10: decile size min/median/max = 0/89/91, no-trade days = 10
+  caveat: No separate 'published counts' artefact exists on disk to cross-check membership.csv against beyond the file pair itself -- this reports what load_universe()/check_universe_files() already verified (spell-count parity between membership.csv and suspects.csv, W07-0002's own outputs), not an independent third source.
+
+CAVEATS
+  - Commission is a documented simplification (bps by cap tier, swing_preflight S3.5's upper bound), not an exact per-share fee -- see the module docstring.
+  - Stress friction is read as 2x the bucket-specific level's full total (spread+commission), one of two readings the spec leaves open.
+  - This report does not spend the holdout (spec S6) and is not the deployed cell's final result.
