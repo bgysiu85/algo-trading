@@ -91,7 +91,10 @@ def build_rows(archive_1h, *, engine_start: str | None = None) -> pd.DataFrame:
     mask = ((t >= pd.Timestamp(WINDOW_START, tz="UTC")) &
             (t <= pd.Timestamp(WINDOW_END, tz="UTC"))).to_numpy()
     df = pd.DataFrame({
-        "t_open": t, "sup": sig.sup, "res": sig.res,
+        "t_open": t, "held_id": entry_raw["held_id"].to_numpy(),
+        "open": entry_raw["open"].to_numpy(), "high": entry_raw["high"].to_numpy(),
+        "low": entry_raw["low"].to_numpy(), "close": entry_raw["close"].to_numpy(),
+        "sup": sig.sup, "res": sig.res,
         "touch_long": sig.touch_long.astype(int),
         "touch_short": sig.touch_short.astype(int),
         "sup_break": sig.sup_breaks.astype(int),
