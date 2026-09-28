@@ -52,6 +52,7 @@ from strategy.w16 import dvp_holdout as H
 from strategy.w16 import runner as R
 from strategy.w16.costs import FULL_TO_MICRO, POINT_VALUE, pnl_dollars, trade_cost
 from strategy.w16.preflight import load_root_bars, session_frames
+from strategy.w16.sessions import is_xnys_trading_day
 
 LEVELS = R.LEVELS                       # ("L1", "L2", "L3")
 SCORE_LEVEL = "L2"
@@ -76,6 +77,16 @@ REPL_TRADES_PER_DAY_BAND = (1.5, 4.0)
 REPL_AVG_WIN_TARGET = 866.0
 REPL_AVG_LOSS_TARGET = -1300.0
 REPL_BAND_TOLERANCE = 0.25
+
+
+
+def trading_dates(frames) -> list[str]:
+    """Sorted session dates that are XNYS trading days. SB-v0 sec 2 (inherited
+    by DVP-v0 sec 2): "Days the XNYS calendar lists as closed ... don't count."
+    The ET-date grouping of the Globex archive also yields Sundays and exchange
+    holidays; without this filter they were counted as "sessions skipped"
+    (first pre-flight, 2026-09-28) -- no trades, but wrong counts."""
+    return [d for d in sorted(frames.keys()) if is_xnys_trading_day(d)]
 
 
 def require_p_ref(market: str) -> float:
@@ -120,7 +131,7 @@ def run_preflight(archive) -> dict:
     for market in ("NQ", "ES"):
         df_1m = load_root_bars(archive, market)
         frames = session_frames(df_1m)
-        all_dates = sorted(frames.keys())
+        all_dates = trading_dates(frames)
         train_dates, n_locked, _ = H.split_dates(all_dates)
         train_dates = sorted(train_dates)
 
@@ -481,12 +492,16 @@ def run_replication(frames: dict[str, pd.DataFrame], market: str, *, trigger_min
     """sec 7.3: Conti's LITERAL rule (p_ref=None -- unscaled points), his
     own guardrails, on 2020-01-02 -> 2023-12-29 only, priced per 1 (full)
     NQ/ES contract, at L0 and L2, against his stated figures."""
-    dates = [d for d in frames if REPLICATION_START <= d <= REPLICATION_END]
+    dates = [d for d in trading_dates(frames) if REPLICATION_START <= d <= REPLICATION_END]
     trades = D.generate_dvp_trades(frames, market, dates, p_ref=None, loss_rule="total",
                                    scale=1.0, trigger_minutes=trigger_minutes)
-    n_days = len({t["date"] for t in trades if not t.get("voided")})
+    n_trade_days = len({t["date"] for t in trades if not t.get("voided")})
+    # Conti's ~2.8/day = >4,000 trades / ~1,410 trading days (2021 -> Aug 2026):
+    # per TRADING SESSION, not per day that happened to trade.
+    n_days = len(dates)
     out = {"market": market, "trigger_minutes": trigger_minutes,
-          "date_range": [REPLICATION_START, REPLICATION_END], "n_sessions_with_trade_days": n_days}
+          "date_range": [REPLICATION_START, REPLICATION_END], "n_trading_sessions": n_days,
+          "n_sessions_with_trade_days": n_trade_days}
     for level in ("L0", "L2"):
         # price per 1 FULL contract (NQ/ES) -- strategy.w16.runner.price_trade
         # always converts to the MICRO via FULL_TO_MICRO, which is wrong
@@ -566,7 +581,7 @@ def run_backtest(archive, *, spend_holdout: str | None = None,
 
     df_1m = load_root_bars(archive, market)
     frames = session_frames(df_1m)
-    all_dates = sorted(frames.keys())
+    all_dates = trading_dates(frames)
 
     if spend_holdout:
         dates, n_held, label = H.split_dates(all_dates, spend=True, candidate=spend_holdout)
@@ -648,7 +663,7 @@ def run_backtest(archive, *, spend_holdout: str | None = None,
             try:
                 df_es = load_root_bars(archive, "ES")
                 frames_es = session_frames(df_es)
-                es_dates, _, _ = H.split_dates(sorted(frames_es.keys()))
+                es_dates, _, _ = H.split_dates(trading_dates(frames_es))
                 es_trades = D.generate_dvp_trades(frames_es, "ES", es_dates, p_ref=D.P_REF_ES,
                                                   loss_rule="total")
                 variants["es"] = R.summarize(R.price_all(es_trades, SCORE_LEVEL))

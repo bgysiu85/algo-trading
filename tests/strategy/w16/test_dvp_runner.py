@@ -242,3 +242,40 @@ def test_preflight_runtime_smoke(monkeypatch):
     assert "NQ" in report["markets"] and "ES" in report["markets"]
     import json
     json.dumps(report, default=str)
+
+
+# ---------------------------------------------------------------------
+# 2026-09-28 fix after the first real pre-flight: XNYS-closed dates
+# (Sundays, exchange holidays such as Good Friday) must not count
+# (SB-v0 sec 2, inherited by DVP-v0 sec 2).
+# ---------------------------------------------------------------------
+
+def _frames_for(dates):
+    return {d: trend_session(d, direction="long", slope=1.0, dip_windows=["10:35"]).sort_index()
+            for d in dates}
+
+
+def test_trading_dates_drops_sunday_and_good_friday():
+    # 2021-04-02 = Good Friday (XNYS closed), 2021-04-04 = Sunday
+    frames = _frames_for(["2021-04-01", "2021-04-02", "2021-04-04", "2021-04-05"])
+    assert DR.trading_dates(frames) == ["2021-04-01", "2021-04-05"]
+
+
+def test_compute_p_ref_ignores_a_good_friday_session_with_a_0930_bar():
+    base = _frames_for(["2021-04-01", "2021-04-05", "2021-04-06"])
+    p0 = D.compute_p_ref(base, "NQ")
+    gf = trend_session("2021-04-02", direction="long", slope=1.0, dip_windows=["10:35"]).sort_index()
+    gf = gf.copy()
+    gf[["open", "high", "low", "close"]] = gf[["open", "high", "low", "close"]] * 3.0
+    with_gf = dict(base)
+    with_gf["2021-04-02"] = gf
+    assert D.compute_p_ref(with_gf, "NQ") == p0
+
+
+def test_replication_trades_per_day_is_per_trading_session():
+    frames = _frames_for(["2021-06-01", "2021-06-02", "2021-06-03", "2021-06-06"])  # 06-06 = Sunday
+    out = DR.run_replication(frames, "NQ")
+    assert out["n_trading_sessions"] == 3
+    n = out["L2"]["n_trades"]
+    if n:
+        assert out["L2"]["trades_per_day"] == n / 3

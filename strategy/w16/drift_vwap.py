@@ -47,8 +47,8 @@ from datetime import time as dtime
 import numpy as np
 import pandas as pd
 
-from strategy.w16.sessions import (has_valid_open, resample_session_bars,
-                                   session_close_time)
+from strategy.w16.sessions import (has_valid_open, is_xnys_trading_day,
+                                   resample_session_bars, session_close_time)
 from strategy.w16.signals import TICK, _gapped, _held_id, _naive_et
 
 # ---------------------------------------------------------------------
@@ -733,6 +733,8 @@ def compute_p_ref(frames: dict[str, pd.DataFrame], market: str) -> float | None:
     for date_str in sorted(frames):
         if date_str < TRAIN_START_2020 or date_str > TRAIN_END_2023:
             continue
+        if not is_xnys_trading_day(date_str):     # SB-v0 sec 2: XNYS-closed days don't count
+            continue                              # (e.g. a Good Friday Globex session with a 09:30 bar)
         day = frames[date_str]
         if day.empty:
             continue
