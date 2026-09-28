@@ -31,7 +31,7 @@ def test_training_side_excludes_2024_onward():
 
 
 def test_only_dvp_nq_may_spend_it():
-    assert DH.ALLOWED_CANDIDATES == {"DVP-NQ"}
+    assert DH.ALLOWED_CANDIDATES == {"DVP-NQ", "DVP-v1-NQ"}
     for bad in ("DVP", "DVP-ES", "dvp-nq", "B1-NQ", "C-D1-NQ", "DVP-NQ-15min"):
         with pytest.raises(SystemExit):
             DH.split_dates(DATES, spend=True, candidate=bad)
@@ -111,3 +111,12 @@ def test_describe_reports_both_halves_split_on_training_only():
     assert desc["lock_from"] == "2024-01-02"
     assert desc["both_halves_split"] < "2024-01-02"
     assert desc["n_train"] + desc["n_locked"] == desc["n_total"]
+
+
+def test_v1_spends_once_and_then_dvp_nq_is_refused():
+    keep, _, label = DH.split_dates(DATES, spend=True, candidate="DVP-v1-NQ")
+    assert keep and all(d >= "2024-01-02" for d in keep) and "LOCKED" in label
+    assert DH.read_ledger()["candidate"] == "DVP-v1-NQ"
+    for again in ("DVP-v1-NQ", "DVP-NQ"):
+        with pytest.raises(SystemExit):
+            DH.split_dates(DATES, spend=True, candidate=again)

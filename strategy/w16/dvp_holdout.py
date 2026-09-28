@@ -50,7 +50,11 @@ LOCK_FROM = "2024-01-02"
 LEDGER_PATH = ROOT / "holdout_w16_dvp.json"
 
 CANDIDATE = "DVP-NQ"
-ALLOWED_CANDIDATES = frozenset({CANDIDATE})
+# DVP-v1 (REGISTERED_w16_drift_vwap_v1.md, Ben's W16-0010 decision "B", 2026-09-28):
+# Conti's literal rule, out-of-sample, spends this same window -- still ONCE:
+# whichever candidate spends first, the other is refused by the ledger check.
+CANDIDATE_V1 = "DVP-v1-NQ"
+ALLOWED_CANDIDATES = frozenset({CANDIDATE, CANDIDATE_V1})
 
 # Cut files this module refuses to be handed, by name (sec 8: "refused by
 # name from every other line's ledger"). Built from strategy.w16.holdout's
