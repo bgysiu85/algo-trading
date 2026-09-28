@@ -57,8 +57,19 @@ def _raw_as_adj(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def build_rows(archive_1h) -> pd.DataFrame:
+def build_rows(archive_1h, *, engine_start: str | None = None) -> pd.DataFrame:
     df_1h = B.load_1h(archive_1h)
+    if engine_start is not None:
+        # DIAGNOSTIC (2026-09-28, first real G3 diff): a Pine indicator only
+        # "remembers" back to whatever bar the chart has loaded when it's
+        # added -- if that's later than this script's own archive start,
+        # the two engines build genuinely different trade/line histories by
+        # the comparison window (an open position or an armed line can
+        # persist indefinitely), which is not a code bug but an unfair
+        # comparison. This truncates the PYTHON side to start no earlier
+        # than the Pine side's own first loaded bar, so both walks share
+        # the same warm-up.
+        df_1h = df_1h[df_1h.index >= pd.Timestamp(engine_start, tz="UTC")]
     entry_raw = _raw_as_adj(B.resample(df_1h, "4H"))
     higher_raw = _raw_as_adj(B.daily(df_1h))
 
@@ -95,6 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="G3: TL-bounce Pine<->Python parity export (no P&L)")
     ap.add_argument("--archive", type=Path, default=None)
     ap.add_argument("--out", type=Path, default=OUT_CSV)
+    ap.add_argument("--engine-start", type=str, default=None,
+                    help="truncate the 1H archive to start no earlier than "
+                         "this date (diagnostic: match the Pine chart's own "
+                         "first loaded bar so both engines share one "
+                         "warm-up history -- see build_rows docstring)")
     return ap
 
 
@@ -105,7 +121,7 @@ def main(argv=None) -> int:
     from common.tsmom_fetch import default_archive
     archive = a.archive or default_archive()
 
-    df = build_rows(archive)
+    df = build_rows(archive, engine_start=a.engine_start)
     a.out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(a.out, index=False)
     print(f"G3 -- TL-bounce parity export: {len(df)} 4-hour bars, "
