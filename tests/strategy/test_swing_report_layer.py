@@ -572,6 +572,44 @@ def test_format_report_mentions_key_sections():
     assert "index=sp500" in text
 
 
+def test_format_report_prints_by_half_and_by_year_for_deployed_cell():
+    # spec S3 items 2-3 / S4 criterion 2: format_report's printed text must
+    # surface the same by_half/by_year figures run_cell/ensemble_cell already
+    # compute (2026-09-28 fix -- these were computed into the result dict all
+    # along but never echoed in the human-readable report, so a real run's
+    # console/text output silently omitted both halves and every-year
+    # breakdown that the spec requires).
+    universe, cal, prices, store = make_full_pit()
+    grid = L.run_grid(universe, prices, cal, store)
+    result = {
+        "window": [cal[0].isoformat(), cal[-1].isoformat()],
+        "grid": grid,
+        "random_decile_control": {},
+        "coverage": {"hindsight_guard_rejections": 0, "hindsight_guard_pairs_checked": 0,
+                    "suspect_leak_guard_spells_confirmed_absent": 0, "n_codes_covered": 3,
+                    "by_k": {}, "caveat": "n/a"},
+    }
+    text = L.format_report(result)
+    dep = grid["ensembles"][(5, "midday")]
+    half = dep["cash_funded"]["by_half"]["bucket"]
+    yr = dep["cash_funded"]["by_year"]["bucket"]
+
+    assert "first half" in text and "second half" in text
+    assert half["median_date"] in text
+    for half_name in ("first_half", "second_half"):
+        agg = half[half_name]
+        expected = f"n={agg['n']:>6}" if agg["n"] else "n=     0"
+        assert expected in text
+        if agg["mean"] is not None:
+            assert f"{agg['mean']*10000:.2f} bps" in text
+
+    assert "by calendar year (bucket level, none omitted):" in text
+    for year, agg in yr.items():
+        assert str(year) in text
+        if agg["mean"] is not None:
+            assert f"{agg['mean']*10000:.2f} bps" in text
+
+
 # --------------------------------------------------------------------------
 # CLI gate
 # --------------------------------------------------------------------------
