@@ -26,16 +26,17 @@ trades, #9 >=300 trades. `--skip-controls` skips #5's 1,000 draws for a
 fast sanity pass on trade counts and net before committing to the full run
 (#5 then reports `None`, not False).
 
-NOT built here, on purpose: #8 (neighbour grid, sec 7.3) needs
-re-parameterized versions of the B1/B2/B3 rules (range length, target
-ratio, bar size, ...) that do not exist yet -- building those is a
-separate, materially larger piece of work than re-running the registered
-rule (a new board item tracks it), and REGISTERED sec 7.3 is explicit that
-"the grid never replaces the registered rule", so its absence does not
-block reading #1-#7/#9 on the registered cells. `score_cell`'s return dict
-has `neighbour_grid_share` explicitly `None` until a caller supplies it,
-rather than a silently omitted key that could be mistaken for "not
-applicable".
+Also built (board W16-0005): #8 (neighbour grid, sec 7.3) -- re-parameterized
+B1/B2/B3 variants (range length, target ratio, entry/exit clock time, bar
+size, flip-confirmation count) via strategy.w16.grid, on the SAME
+detection functions as the registered rule (strategy.w16.signals, now
+parameterized) and the SAME pricing as the registered run (price_all /
+summarize below). `run_cell` runs all 9 cells and supplies the resulting
+`neighbour_grid_share` to `score_cell`; `--skip-grid` skips it for a fast
+sanity pass, same shape as `--skip-controls`. `score_cell`'s return dict
+has `neighbour_grid_share` explicitly `None` when the caller withheld it
+(`--skip-grid`), rather than a silently omitted key that could be mistaken
+for "not applicable".
 """
 from __future__ import annotations
 
@@ -67,40 +68,61 @@ ACCOUNT_USD = 22129.0              # sec 2 -- the project's standard account
 # trade generation (one baseline, one market, training or holdout dates)
 # ---------------------------------------------------------------------
 
-def generate_b1_trades(frames: dict[str, pd.DataFrame], market: str, dates) -> list[dict]:
+def generate_b1_trades(frames: dict[str, pd.DataFrame], market: str, dates, *,
+                       target_r: float = 2.0, range_minutes: int = 30) -> list[dict]:
+    """target_r/range_minutes: sec 7.3 grid dimensions (registered 2.0/30,
+    the defaults) -- passed straight through to SIG.orb_session so the
+    grid (strategy.w16.grid) generates trades through this SAME function,
+    not a copy of it. Board W16-0005."""
     out = []
     for date_str in sorted(dates):
         if date_str not in frames:
             continue
-        res = SIG.orb_session(frames[date_str], date_str, market=market)
+        res = SIG.orb_session(frames[date_str], date_str, market=market,
+                              target_r=target_r, range_minutes=range_minutes)
         if res["skipped"] or res["trade"] is None:
             continue
         out.append(res["trade"])
     return out
 
 
-def generate_b2_trades(frames: dict[str, pd.DataFrame], market: str, ordered_days: list[str]) -> list[dict]:
+def generate_b2_trades(frames: dict[str, pd.DataFrame], market: str, ordered_days: list[str], *,
+                       entry_time=None, exit_time=None) -> list[dict]:
+    """entry_time/exit_time: sec 7.3 grid dimensions (registered None/None,
+    meaning the registered 15:59-close/09:30-open rule -- see
+    SIG.overnight_trade). `frames` must be wide enough to contain the
+    requested clock times when they are given (strategy.w16.sessions.
+    session_frames_wide, not the RTH-only session_frames) -- the registered
+    call (entry_time=exit_time=None) works with either. Board W16-0005."""
     out = []
     for a, b in zip(ordered_days, ordered_days[1:]):
         if a not in frames or b not in frames:
             continue
-        res = SIG.overnight_trade(frames[a], frames[b], a, b, market=market)
+        res = SIG.overnight_trade(frames[a], frames[b], a, b, market=market,
+                                  entry_time=entry_time, exit_time=exit_time)
         if res["skipped"]:
             continue
         t = res["trade"]
-        t["hold_length"] = str(pd.Timestamp(frames[b].sort_index().index[0])
-                                - pd.Timestamp(frames[a].sort_index().index[-1]))
-        t["entry_time"] = str(frames[a].sort_index().index[-1])
+        t["hold_length"] = str(pd.Timestamp(t["exit_bar_time"]) - pd.Timestamp(t["entry_bar_time"]))
+        t["entry_time"] = t["entry_bar_time"]
         out.append(t)
     return out
 
 
-def generate_b3_trades(frames: dict[str, pd.DataFrame], market: str, dates) -> list[dict]:
+def generate_b3_trades(frames: dict[str, pd.DataFrame], market: str, dates, *,
+                       flip_confirm: int = 1) -> list[dict]:
+    """flip_confirm: sec 7.3 grid dimension 2 (registered 1, the default)
+    -- passed straight through to SIG.vwap_flip_session. `frames` may hold
+    N-minute resampled bars (strategy.w16.sessions.resample_session_bars)
+    for the grid's bar-size dimension; this function does not care, it
+    only calls vwap_flip_session on whatever frame each date maps to.
+    Board W16-0005."""
     out = []
     for date_str in sorted(dates):
         if date_str not in frames:
             continue
-        res = SIG.vwap_flip_session(frames[date_str], date_str, market=market)
+        res = SIG.vwap_flip_session(frames[date_str], date_str, market=market,
+                                    flip_confirm=flip_confirm)
         if res["skipped"]:
             continue
         out.extend(SIG.pair_b3_legs(res["legs"]))
@@ -395,7 +417,8 @@ def compute_controls(baseline: str, market: str, *, frames=None, trades=None,
 # ---------------------------------------------------------------------
 
 def run_cell(baseline: str, market: str, archive, *, spend_holdout_candidate: str | None = None,
-            compute_controls_flag: bool = True, n_control_draws: int = N_DRAWS) -> dict:
+            compute_controls_flag: bool = True, n_control_draws: int = N_DRAWS,
+            compute_grid_flag: bool = True) -> dict:
     df_1m = load_root_bars(archive, market)
     frames = session_frames(df_1m)
     all_dates = sorted(frames.keys())
@@ -451,14 +474,23 @@ def run_cell(baseline: str, market: str, archive, *, spend_holdout_candidate: st
             "deterministic": control_deterministic,
         }
 
+    neighbour_grid = None
+    if compute_grid_flag:
+        from strategy.w16 import grid as GRID
+        neighbour_grid = GRID.run_neighbour_grid(baseline, market, archive,
+                                                 df_1m=df_1m, frames=frames)
+    neighbour_grid_share = neighbour_grid["share_positive"] if neighbour_grid else None
+
     result.update(score_cell(priced_by_level, control_nets=control_nets,
-                             control_deterministic=control_deterministic))
+                             control_deterministic=control_deterministic,
+                             neighbour_grid_share=neighbour_grid_share))
     result["by_level"] = {lvl: summarize(rows) for lvl, rows in priced_by_level.items()}
     l2 = priced_by_level["L2"]
     result["exit_reasons"] = exit_reason_counts(l2)
     result["sample_trades"] = sample_trades(l2)
     result["account_view"] = account_view(l2, baseline, market)
     result["control_summary"] = control_summary
+    result["neighbour_grid"] = neighbour_grid
     return result
 
 
@@ -472,6 +504,9 @@ def main(argv=None) -> int:
     ap.add_argument("--skip-controls", action="store_true",
                     help="Skip the 1,000-draw control comparison (sec 9 #5) -- fast sanity "
                          "pass on trade counts/net before committing to the full run.")
+    ap.add_argument("--skip-grid", action="store_true",
+                    help="Skip the sec 7.3 neighbour grid (sec 9 #8, 9 cells per baseline) "
+                         "-- fast sanity pass; #8 then reports None, not False.")
     ap.add_argument("--n-control-draws", type=int, default=N_DRAWS,
                     help=f"Control draws per cell (registered: {N_DRAWS}). Lower only for a "
                          "quick look; the registered pass bar needs the full count.")
@@ -497,7 +532,8 @@ def main(argv=None) -> int:
             report[f"{baseline}-{market}"] = run_cell(
                 baseline, market, archive,
                 compute_controls_flag=not a.skip_controls,
-                n_control_draws=a.n_control_draws)
+                n_control_draws=a.n_control_draws,
+                compute_grid_flag=not a.skip_grid)
     for key, cell in report.items():
         s = cell["by_level"]["L2"]
         ctrl = cell.get("control_summary")

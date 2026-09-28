@@ -48,7 +48,7 @@ from datetime import time as dtime
 import numpy as np
 import pandas as pd
 
-from strategy.w16.sessions import (has_valid_open, orb_time_exit,
+from strategy.w16.sessions import (add_minutes, has_valid_open, orb_time_exit,
                                    session_close_time, session_window_mask)
 
 TICK = 0.25          # index points (strategy.w16.costs.TICK_POINTS)
@@ -67,19 +67,46 @@ def _held_id(df: pd.DataFrame) -> np.ndarray:
     return np.full(len(df), -1)
 
 
+def _bar_at_time(bars: pd.DataFrame, t: dtime):
+    """The (single) row of `bars` whose ET local time equals `t` exactly,
+    or None if there is no such bar (a gap, or `t` outside the frame) --
+    W16-0005's sec 7.3 B2 grid (entry/exit at a clock time other than the
+    registered bar position) needs an exact lookup, not "nearest"."""
+    naive = _naive_et(bars)
+    mask = naive.time == t
+    idx = np.flatnonzero(mask)
+    if len(idx) == 0:
+        return None
+    return bars.iloc[idx[0]]
+
+
+def _row_held_id(row) -> int:
+    if "held_id" in row.index:
+        return row["held_id"]
+    if "instrument_id" in row.index:
+        return row["instrument_id"]
+    return -1
+
+
 # ---------------------------------------------------------------------
 # B1 -- opening-range breakout (long + short, 2:1)
 # ---------------------------------------------------------------------
 
 def orb_session(df_session: pd.DataFrame, date_str: str, *, market: str,
-                target_r: float = 2.0) -> dict:
+                target_r: float = 2.0, range_minutes: int = 30) -> dict:
     """One session's B1 outcome. `df_session` is that date's bars, RTH-
     windowed for that date already (strategy.w16.sessions.session_window_mask
     applied by the caller) and sorted ascending. Returns
     {"skipped": bool, "range_high", "range_low", "range_width", "trade": dict|None}.
     `trade` is None iff no trigger fired in the entry window; a trigger
     always produces exactly one trade record (entered, voided, or -- if the
-    archive is missing bars past the trigger -- flagged "incomplete")."""
+    archive is missing bars past the trigger -- flagged "incomplete").
+
+    `range_minutes` (REGISTERED sec 7.3 grid dimension 1, registered 30):
+    the opening range is built from bars starting 09:30 for this many
+    minutes instead of the fixed 30; the entry window starts the instant
+    the range ends and keeps the SAME end (orb_time_exit's own "...15:28",
+    unrelated to range length) at every range length. W16-0005."""
     if not has_valid_open(df_session):
         return {"skipped": True, "range_high": None, "range_low": None,
                 "range_width": None, "trade": None}
@@ -88,7 +115,8 @@ def orb_session(df_session: pd.DataFrame, date_str: str, *, market: str,
     naive = _naive_et(bars)
     t = naive.time
 
-    range_mask = (t >= dtime(9, 30)) & (t < dtime(10, 0))
+    range_end = add_minutes(dtime(9, 30), range_minutes)
+    range_mask = (t >= dtime(9, 30)) & (t < range_end)
     range_bars = bars[range_mask]
     H = float(range_bars["high"].max())
     L = float(range_bars["low"].min())
@@ -96,7 +124,7 @@ def orb_session(df_session: pd.DataFrame, date_str: str, *, market: str,
 
     exit_t = orb_time_exit(date_str)
     exit_minutes = exit_t.hour * 60 + exit_t.minute
-    entry_start = dtime(10, 0)
+    entry_start = range_end
     entry_end_minutes = exit_minutes - 2                # "...15:28" = 15:30 - 2
     entry_end = dtime(entry_end_minutes // 60, entry_end_minutes % 60)
     entry_mask = (t >= entry_start) & (t <= entry_end)
@@ -196,24 +224,51 @@ def _gapped(open_px: float, stop: float, direction: str) -> bool:
 # ---------------------------------------------------------------------
 
 def overnight_trade(df_day: pd.DataFrame, df_next_day: pd.DataFrame,
-                    date_str: str, next_date_str: str, *, market: str) -> dict:
+                    date_str: str, next_date_str: str, *, market: str,
+                    entry_time: dtime | None = None,
+                    exit_time: dtime | None = None) -> dict:
     """One (day, next trading day) pair. Both frames are that date's RTH-
-    windowed bars. Returns a trade dict, or a dict with "skipped": True if
-    either session has no usable close/open bar."""
+    windowed bars (or, when entry_time/exit_time are given, WIDENED-window
+    bars -- strategy.w16.sessions.session_frames_wide). Returns a trade
+    dict, or a dict with "skipped": True if either session has no usable
+    close/open bar.
+
+    entry_time/exit_time (REGISTERED sec 7.3 grid dimensions, registered
+    None/None -- meaning "the last bar of df_day" / "the first bar of
+    df_next_day", exactly the registered 15:59-close/09:30-open rule,
+    unchanged from before these parameters existed). Given explicitly
+    (grid only, W16-0005), the entry fill is the CLOSE of the bar starting
+    one minute before entry_time and the exit fill is the OPEN of the bar
+    starting exactly at exit_time -- an exact clock-time lookup, so a day
+    missing that bar (most often an early close asked for a 16:15 entry)
+    is skipped rather than guessed at."""
     if df_day.empty or df_next_day.empty:
         return {"skipped": True, "reason": "missing session bars", "trade": None}
     day_sorted = df_day.sort_index()
     next_sorted = df_next_day.sort_index()
-    entry_bar = day_sorted.iloc[-1]           # the 15:59 (or early-close) bar
-    exit_bar = next_sorted.iloc[0]            # the 09:30 bar
-    entry_held = _held_id(day_sorted)[-1]
-    exit_held = _held_id(next_sorted)[0]
+
+    if entry_time is None:
+        entry_row = day_sorted.iloc[-1]           # the 15:59 (or early-close) bar
+    else:
+        entry_row = _bar_at_time(day_sorted, add_minutes(entry_time, -1))
+        if entry_row is None:
+            return {"skipped": True, "reason": "no bar at requested entry time", "trade": None}
+    if exit_time is None:
+        exit_row = next_sorted.iloc[0]             # the 09:30 bar
+    else:
+        exit_row = _bar_at_time(next_sorted, exit_time)
+        if exit_row is None:
+            return {"skipped": True, "reason": "no bar at requested exit time", "trade": None}
+
+    entry_held = _row_held_id(entry_row)
+    exit_held = _row_held_id(exit_row)
     voided = bool(entry_held != exit_held)
     trade = {
         "date": date_str, "next_date": next_date_str, "market": market,
         "baseline": "B2", "direction": "long",
-        "entry_price": float(entry_bar["close"]), "exit_price": float(exit_bar["open"]),
+        "entry_price": float(entry_row["close"]), "exit_price": float(exit_row["open"]),
         "entry_fill_kind": "market_or_stop", "exit_fill_kind": "market_or_stop",
+        "entry_bar_time": str(entry_row.name), "exit_bar_time": str(exit_row.name),
         "voided": voided,
         "void_reason": ("roll spans the hold (different instrument_id)" if voided else None),
     }
@@ -234,15 +289,25 @@ def _session_vwap(bars: pd.DataFrame) -> np.ndarray:
     return vwap
 
 
-def vwap_flip_session(df_session: pd.DataFrame, date_str: str, *, market: str) -> dict:
+def vwap_flip_session(df_session: pd.DataFrame, date_str: str, *, market: str,
+                      flip_confirm: int = 1) -> dict:
     """One session's B3 outcome: {"skipped", "n_flips", "trades": [...]}.
-    `df_session` is that date's RTH-windowed bars, sorted ascending. Every
-    element of "trades" is one leg (an entry, or a flip's paired exit+entry,
-    or the final flat-at-close exit) -- REGISTERED sec 3.3: "A reversal is
-    two trades: the exit of one and the entry of the next, each charged its
-    own fees and slippage." Legs are later paired into round-trip trades by
-    the caller (adjacent exit/entry legs at the same flip share nothing but
-    chronology, so pairing is the runner's job, not this function's)."""
+    `df_session` is that date's RTH-windowed bars, sorted ascending (or,
+    for a bar-size grid cell, strategy.w16.sessions.resample_session_bars'
+    output -- this function does not care what the bar length is, only
+    that each row is one bar). Every element of "trades" is one leg (an
+    entry, or a flip's paired exit+entry, or the final flat-at-close exit)
+    -- REGISTERED sec 3.3: "A reversal is two trades: the exit of one and
+    the entry of the next, each charged its own fees and slippage." Legs
+    are later paired into round-trip trades by the caller (adjacent
+    exit/entry legs at the same flip share nothing but chronology, so
+    pairing is the runner's job, not this function's).
+
+    flip_confirm (REGISTERED sec 7.3 grid dimension 2, registered 1): a
+    flip only fires after this many CONSECUTIVE signal-window closes on
+    the new side. flip_confirm=1 fires on the very first qualifying close
+    -- exactly the registered rule, unchanged from before this parameter
+    existed. W16-0005."""
     if not has_valid_open(df_session):
         return {"skipped": True, "n_flips": 0, "legs": []}
 
@@ -261,6 +326,8 @@ def vwap_flip_session(df_session: pd.DataFrame, date_str: str, *, market: str) -
     n = len(bars)
 
     position = None            # "long" | "short" | None
+    pending_side = None         # confirmation tracker for flip_confirm > 1
+    pending_count = 0
     legs = []
     n_flips = 0
     for i in range(n):
@@ -270,7 +337,12 @@ def vwap_flip_session(df_session: pd.DataFrame, date_str: str, *, market: str) -
             continue
         want = "long" if closes[i] > vwap[i] else ("short" if closes[i] < vwap[i] else None)
         if want is None or want == position:
+            pending_side, pending_count = None, 0
             continue
+        pending_count = pending_count + 1 if want == pending_side else 1
+        pending_side = want
+        if pending_count < flip_confirm:
+            continue                      # not enough consecutive closes yet
         fill_idx = i + 1
         if fill_idx >= n:
             continue                      # nothing left to fill on; not a flip
@@ -287,6 +359,7 @@ def vwap_flip_session(df_session: pd.DataFrame, date_str: str, *, market: str) -
                     "fill_kind": "market_or_stop", "reason": "flip"})
         position = want
         n_flips += 1
+        pending_side, pending_count = None, 0
 
     if position is not None:
         last_close = float(closes[-1])

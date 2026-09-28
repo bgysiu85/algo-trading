@@ -5,6 +5,7 @@ a one-bar shift (in timing, or in which bar a value is read from) breaks.
 REGISTERED_w16_session_baselines.md sec 3 (the rules) and sec 6.3 (G4)."""
 from __future__ import annotations
 
+from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -305,3 +306,151 @@ def test_vwap_signal_uses_only_bars_up_to_and_including_t():
     first_b = SIG.pair_b3_legs(res_b["legs"])[0]
     assert first_a["entry_time"] == first_b["entry_time"]
     assert first_a["direction"] == first_b["direction"]
+
+
+# ---------------------------------------------------------------------
+# W16-0005 -- sec 7.3 neighbour grid parameters: B1 range_minutes, B2
+# entry_time/exit_time, B3 flip_confirm. Same functions, same look-ahead
+# guards, one extra dimension each -- registered default unchanged.
+# ---------------------------------------------------------------------
+
+def _range_bars(date, minutes, *, h=100.0, l=99.0, minute_open=99.5):
+    """Like _opening_range but any length, starting 09:30 -- REGISTERED
+    range_minutes=30 is _opening_range's own special case."""
+    rows = []
+    for i in range(minutes):
+        total = 30 + i
+        hh, mm = 9 + total // 60, total % 60
+        rows.append((hh, mm, minute_open, h if i == 0 else minute_open + 0.01,
+                    l if i == 1 else minute_open - 0.01, minute_open, 100))
+    return rows
+
+
+def _fill_rows(start_hh, start_mm, end_hh, end_mm, price=101):
+    """Flat filler bars, one per minute, [start, end) by clock time."""
+    rows = []
+    for total in range(start_hh * 60 + start_mm, end_hh * 60 + end_mm):
+        hh, mm = divmod(total, 60)
+        rows.append((hh, mm, price, price, price, price, 10))
+    return rows
+
+
+def test_orb_range_minutes_15_uses_only_first_15_bars():
+    """With range_minutes=15 an extreme high at 09:45 (the 16th minute)
+    must NOT move the range, and the entry window must already be open by
+    09:45 -- both would be false under the registered 30-minute range."""
+    date = "2024-06-06"
+    rows = _range_bars(date, 15, h=100.0, l=99.0)                # 09:30..09:44
+    rows += [(9, 45, 99.5, 500.0, 99.4, 100.2, 50)]               # would move H under a 30-min range
+    rows += [(9, 46, 100.3, 100.4, 100.2, 100.35, 50)]            # fill bar for the 09:45 trigger
+    rows += _fill_rows(9, 47, 15, 30)
+    df = _bars(date, rows)
+    res = SIG.orb_session(df, date, market="ES", range_minutes=15)
+    assert res["range_high"] == pytest.approx(100.0)             # NOT 500.0
+    trade = res["trade"]
+    assert trade is not None and not trade["voided"]
+    assert trade["fill_price"] == pytest.approx(100.3)
+
+
+def test_orb_range_minutes_60_extends_range_and_delays_entry():
+    """With range_minutes=60 a bar at 10:15 (inside a 60-min range) DOES
+    move the range high; a bar at 10:30 (just outside it) does not."""
+    date = "2024-06-06"
+    rows = _range_bars(date, 60, h=100.0, l=99.0)                 # 09:30..10:29
+    rows[45] = (10, 15, 99.5, 250.0, 99.4, 99.6, 50)              # total=75 -> 10:15, inside
+    rows.append((10, 30, 99.5, 999.0, 99.4, 99.6, 50))            # just outside
+    rows += _fill_rows(10, 31, 15, 30)
+    df = _bars(date, rows)
+    res = SIG.orb_session(df, date, market="ES", range_minutes=60)
+    assert res["range_high"] == pytest.approx(250.0)
+    assert res["range_high"] != pytest.approx(999.0)
+
+
+def test_orb_target_r_grid_value_changes_target_only():
+    """target_r=1.5 vs the registered 2.0 changes the target distance and
+    nothing else about the trade (same fill, same stop)."""
+    date = "2024-06-06"
+    rows = _opening_range(date, h=100.0, l=99.0)
+    rows += [(10, 0, 99.5, 100.5, 99.4, 100.2, 50)]
+    rows += [(10, 1, 100.3, 100.4, 100.2, 100.35, 50)]
+    rows += _fill_rows(10, 2, 15, 30)
+    df = _bars(date, rows)
+    trade_reg = SIG.orb_session(df, date, market="ES", target_r=2.0)["trade"]
+    trade_15 = SIG.orb_session(df, date, market="ES", target_r=1.5)["trade"]
+    assert trade_reg["fill_price"] == pytest.approx(trade_15["fill_price"])
+    assert trade_reg["stop"] == pytest.approx(trade_15["stop"])
+    assert trade_15["target"] == pytest.approx(100.3 + 1.5 * 1.3)
+    assert trade_15["target"] != pytest.approx(trade_reg["target"])
+
+
+def test_overnight_trade_default_still_uses_last_and_first_bar():
+    """entry_time/exit_time left at their default (None) must reproduce
+    the registered rule exactly -- unchanged from before these parameters
+    existed."""
+    day = _one_bar("2024-06-06", 15, 59, 100.0)
+    next_day = pd.concat([_one_bar("2024-06-07", 9, 30, 101.0),
+                         _one_bar("2024-06-07", 9, 31, 101.5)])
+    res = SIG.overnight_trade(day, next_day, "2024-06-06", "2024-06-07", market="ES")
+    trade = res["trade"]
+    assert trade["entry_price"] == pytest.approx(100.0)
+    assert trade["exit_price"] == pytest.approx(101.0)
+    assert "entry_bar_time" in trade and "exit_bar_time" in trade
+
+
+def test_overnight_trade_custom_entry_exit_times():
+    """entry_time=15:45 reads the CLOSE of the 15:44 bar (not the 15:59
+    one); exit_time=09:45 reads the OPEN of the 09:45 bar (not the 09:30
+    one) -- REGISTERED sec 7.3 B2 grid."""
+    day = pd.concat([_one_bar("2024-06-06", 15, 44, 90.0),
+                    _one_bar("2024-06-06", 15, 59, 100.0)])   # registered bar -- must be ignored
+    next_day = pd.concat([_one_bar("2024-06-07", 9, 30, 101.0),
+                         _one_bar("2024-06-07", 9, 45, 102.0)])
+    res = SIG.overnight_trade(day, next_day, "2024-06-06", "2024-06-07", market="ES",
+                              entry_time=dtime(15, 45), exit_time=dtime(9, 45))
+    trade = res["trade"]
+    assert trade["entry_price"] == pytest.approx(90.0)
+    assert trade["exit_price"] == pytest.approx(102.0)
+
+
+def test_overnight_trade_skips_when_requested_bar_missing():
+    """An early-close day (or any gap) simply has no bar at the requested
+    clock time -- skipped, not guessed at."""
+    day = _one_bar("2024-06-06", 15, 59, 100.0)               # no 15:44 bar
+    next_day = _one_bar("2024-06-07", 9, 30, 101.0)
+    res = SIG.overnight_trade(day, next_day, "2024-06-06", "2024-06-07", market="ES",
+                              entry_time=dtime(15, 45))
+    assert res["skipped"]
+
+
+def test_vwap_flip_confirm_1_matches_registered_default():
+    date = "2024-06-06"
+    rows = [(9, 30, 100.0, 100.0, 100.0, 100.0, 100),
+           (9, 31, 110.0, 110.0, 110.0, 110.0, 100)]
+    rows += _fill_rows(9, 32, 16, 0, price=110)
+    df = _bars(date, rows)
+    default = SIG.vwap_flip_session(df, date, market="ES")
+    explicit = SIG.vwap_flip_session(df, date, market="ES", flip_confirm=1)
+    assert default["n_flips"] == explicit["n_flips"] == 1
+
+
+def test_vwap_flip_confirm_requires_consecutive_closes_on_new_side():
+    """flip_confirm=2 must not fire on a single flickering close: close
+    goes above VWAP for one bar, back below for one bar, then above again
+    and STAYS -- confirm=1 flips three times (on every qualifying close);
+    confirm=2 only fires once, on the sustained move."""
+    date = "2024-06-06"
+    rows = [(9, 30, 100, 100, 100, 100, 100),
+           (9, 31, 110, 110, 110, 110, 100),
+           (9, 32, 100, 100, 100, 100, 100),
+           (9, 33, 110, 110, 110, 110, 100)]
+    rows += _fill_rows(9, 34, 16, 0, price=110)
+    df = _bars(date, rows)
+
+    res1 = SIG.vwap_flip_session(df, date, market="ES", flip_confirm=1)
+    res2 = SIG.vwap_flip_session(df, date, market="ES", flip_confirm=2)
+
+    assert res1["n_flips"] == 3
+    assert res2["n_flips"] == 1
+    trades2 = SIG.pair_b3_legs(res2["legs"])
+    assert len(trades2) == 1
+    assert trades2[0]["direction"] == "long"

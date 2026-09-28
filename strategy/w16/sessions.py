@@ -237,3 +237,77 @@ def has_valid_open(df_session: pd.DataFrame, *, gap_minutes: int = 5) -> bool:
         if b - a > gap_minutes:
             return False
     return True
+
+
+# ---------------------------------------------------------------------
+# W16-0005 -- sec 7.3 neighbour grid: clock-time arithmetic, a widened B2
+# window, and N-minute resampling for B3. See strategy/w16/grid.py.
+# ---------------------------------------------------------------------
+
+def add_minutes(t: dtime, minutes: int) -> dtime:
+    """`t` shifted by `minutes` (may be negative), wrapping at 24h. Shared
+    by strategy.w16.signals (sec 7.3 B1 range length; B2 entry/exit clock
+    times) and this module's own session_window_mask_wide."""
+    total = (t.hour * 60 + t.minute + minutes) % (24 * 60)
+    return dtime(total // 60, total % 60)
+
+
+def session_window_mask_wide(df_day: pd.DataFrame, date_str: str, *,
+                             pad_start_minutes: int = 45, pad_end_minutes: int = 45):
+    """Like session_window_mask, but widened by a clock-time margin on
+    both ends -- REGISTERED sec 7.3's B2 grid needs bars slightly outside
+    the registered RTH window (entry in {15:45, 16:00, 16:15}; exit in
+    {09:15, 09:30, 09:45}, against the registered 15:59-close/09:30-open).
+    45 minutes each side covers every grid value with room to spare. A day
+    where the wanted clock time simply has no bar (an early close asked
+    for a 16:15 entry, say) is left to the caller to skip -- this function
+    only says which bars of `df_day` are IN the widened window, same
+    contract as session_window_mask. Board W16-0005."""
+    naive = local_naive_et(df_day.index)
+    start = add_minutes(EARLY_CLOSE_START, -pad_start_minutes)
+    close = session_close_time(date_str)
+    end = add_minutes(close, pad_end_minutes)
+    t = naive.time
+    if start <= end:
+        return (t >= start) & (t < end)
+    return (t >= start) | (t < end)          # padding wrapped past midnight (not expected at 45 min)
+
+
+def session_frames_wide(df_1m: pd.DataFrame, *, pad_start_minutes: int = 45,
+                        pad_end_minutes: int = 45) -> dict[str, pd.DataFrame]:
+    """{date_str: that date's WIDENED-window, sorted bars} -- see
+    session_window_mask_wide. Board W16-0005."""
+    out = {}
+    for date_str, day in split_by_session(df_1m):
+        mask = session_window_mask_wide(day, date_str, pad_start_minutes=pad_start_minutes,
+                                        pad_end_minutes=pad_end_minutes)
+        out[date_str] = day[mask].sort_index()
+    return out
+
+
+def resample_session_bars(df_session: pd.DataFrame, bar_minutes: int) -> pd.DataFrame:
+    """`df_session`'s 1-minute bars regrouped into `bar_minutes`-minute
+    bars, anchored to the session's own first bar timestamp -- REGISTERED
+    sec 7.3 B3 grid dimension 1 (bar size in {1, 2, 5}; registered 1).
+    OHLCV aggregation: open=first, high=max, low=min, close=last,
+    volume=sum; held_id (or instrument_id) carried from each group's first
+    bar so voided-by-roll detection still works on resampled bars.
+    `bar_minutes <= 1` (or an empty frame) returns `df_session` unchanged
+    -- the registered rule's own bar size, not a copy. Board W16-0005."""
+    if bar_minutes <= 1 or df_session.empty:
+        return df_session
+    bars = df_session.sort_index()
+    grouped = bars.resample(f"{bar_minutes}min", origin=bars.index[0], label="left", closed="left")
+    agg = {
+        "open": grouped["open"].first(),
+        "high": grouped["high"].max(),
+        "low": grouped["low"].min(),
+        "close": grouped["close"].last(),
+        "volume": grouped["volume"].sum(),
+    }
+    id_col = "held_id" if "held_id" in bars.columns else (
+        "instrument_id" if "instrument_id" in bars.columns else None)
+    if id_col:
+        agg[id_col] = grouped[id_col].first()
+    out = pd.DataFrame(agg)
+    return out.dropna(subset=["open"])

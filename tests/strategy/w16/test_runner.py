@@ -303,3 +303,51 @@ def test_run_cell_wires_controls_and_reporting_end_to_end(monkeypatch, synthetic
     result = R.run_cell("B1", "ES", None, compute_controls_flag=False)
     assert result["control_summary"] is None
     assert result["criteria"]["5_beats_control"] is None
+
+
+# ---------------------------------------------------------------------
+# W16-0005 -- generate_bN_trades pass the grid's extra dimensions through
+# to strategy.w16.signals unchanged (same function, not a copy).
+# ---------------------------------------------------------------------
+
+def test_generate_b1_trades_passes_range_minutes_and_target_r_through(synthetic_frames):
+    date_list = sorted(synthetic_frames.keys())
+    default_trades = R.generate_b1_trades(synthetic_frames, "ES", date_list)
+    grid_trades = R.generate_b1_trades(synthetic_frames, "ES", date_list,
+                                       target_r=2.0, range_minutes=30)
+    # registered defaults, passed explicitly, must match the implicit defaults
+    assert len(default_trades) == len(grid_trades)
+    for a, b in zip(default_trades, grid_trades):
+        assert a.get("fill_price") == b.get("fill_price")
+        assert a.get("target") == b.get("target")
+
+
+def test_generate_b3_trades_passes_flip_confirm_through(synthetic_frames):
+    date_list = sorted(synthetic_frames.keys())
+    default_trades = R.generate_b3_trades(synthetic_frames, "ES", date_list)
+    explicit_trades = R.generate_b3_trades(synthetic_frames, "ES", date_list, flip_confirm=1)
+    assert len(default_trades) == len(explicit_trades)
+
+
+def test_generate_b2_trades_entry_exit_time_kwargs_reach_signals(synthetic_frames):
+    """A B2 grid call with an entry/exit time synthetic_frames cannot
+    satisfy (no bars outside the 60-bar fixture window) must simply drop
+    to zero trades, not raise -- proof the kwargs really reach
+    SIG.overnight_trade rather than being silently ignored."""
+    from datetime import time as dtime
+    date_list = sorted(synthetic_frames.keys())
+    trades = R.generate_b2_trades(synthetic_frames, "ES", date_list,
+                                  entry_time=dtime(16, 15), exit_time=dtime(9, 45))
+    assert trades == []
+
+
+def test_generate_b2_trades_default_hold_length_and_entry_time_fields(synthetic_frames):
+    """hold_length/entry_time (sec 5 reporting fields, not used by pricing)
+    must still reflect the ACTUAL fill bars after the entry_bar_time/
+    exit_bar_time refactor -- not silently dropped or wrong."""
+    date_list = sorted(synthetic_frames.keys())
+    trades = R.generate_b2_trades(synthetic_frames, "ES", date_list)
+    assert trades
+    for t in trades:
+        assert t["entry_time"] == t["entry_bar_time"]
+        assert pd.Timestamp(t["exit_bar_time"]) > pd.Timestamp(t["entry_bar_time"])
