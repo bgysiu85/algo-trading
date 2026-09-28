@@ -219,16 +219,25 @@ def session_window_mask(df_day: pd.DataFrame, date_str: str):
     return (t >= EARLY_CLOSE_START) & (t < close)
 
 
-def has_valid_open(df_session: pd.DataFrame, *, gap_minutes: int = 5) -> bool:
+def has_valid_open(df_session: pd.DataFrame, *, gap_minutes: int = 5,
+                   window_end: dtime = dtime(10, 0)) -> bool:
     """REGISTERED sec 2: "A session missing its 09:30 bar or with a gap >
     5 min inside 09:30-10:00 is skipped by ORB and VWAP and counted."
-    `df_session` is already RTH-windowed (session_window_mask applied)."""
+    `df_session` is already RTH-windowed (session_window_mask applied).
+
+    `window_end` (default 10:00, the registered SB-v0 window -- unchanged
+    behaviour for every existing caller): the end of the gap-check window.
+    REGISTERED_w16_drift_vwap.md sec 2's own day-skip rule needs the same
+    check widened to 09:30-10:30 (DVP-v0's VWAP and 1-hour change both need
+    the first hour, not just the first half hour) -- strategy.w16.drift_vwap
+    passes window_end=dtime(10, 30) rather than reimplementing this gap
+    scan. Board W16-0006."""
     if df_session.empty:
         return False
     naive = local_naive_et(df_session.index)
     if naive.time.min() != EARLY_CLOSE_START:
         return False
-    first_hour = df_session[(naive.time >= EARLY_CLOSE_START) & (naive.time < dtime(10, 0))]
+    first_hour = df_session[(naive.time >= EARLY_CLOSE_START) & (naive.time < window_end)]
     if first_hour.empty:
         return False
     minutes = sorted((local_naive_et(first_hour.index).hour * 60

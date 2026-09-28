@@ -67,6 +67,7 @@ REFUSED_CUT_NAMES = {
     "tl_v0_holdout_spent.json",                                 # TL-v0
     "holdout_htf_ben.json", "holdout_htf_ben_v1.json",          # HTF-Ben v0/v1
     "holdout_htf_ben_v2.json",                                  # HTF-Ben v2
+    "holdout_w16_dvp.json",                                      # W16 DVP-v0 (drift-VWAP pullback)
 }
 
 
