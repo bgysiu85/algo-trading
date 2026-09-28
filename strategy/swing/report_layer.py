@@ -749,6 +749,18 @@ def format_report(result: dict, index: str | None = None) -> str:
             dtn = dep["cash_funded"]["drop_top_n"]["bucket"][dn]
             L.append(f"  drop-top-{dn} (bucket level): "
                      f"{dtn if isinstance(dtn, str) else dtn['mean']}")
+        half = dep["cash_funded"]["by_half"]["bucket"]
+        for half_name in ("first_half", "second_half"):
+            agg = half[half_name]
+            mean_str = f"{agg['mean']*10000:.2f} bps" if agg["mean"] is not None else "n/a"
+            L.append(f"  {half_name.replace('_', ' ')} (bucket level, split at "
+                     f"{half['median_date']}): n={agg['n']:>6}  "
+                     f"mean market-relative net = {mean_str}")
+        yr = dep["cash_funded"]["by_year"]["bucket"]
+        L.append("  by calendar year (bucket level, none omitted):")
+        for year, agg in yr.items():
+            mean_str = f"{agg['mean']*10000:.2f} bps" if agg["mean"] is not None else "n/a"
+            L.append(f"    {year}: n={agg['n']:>6}  mean market-relative net = {mean_str}")
     else:
         L.append("  (no K=5/midday ensemble in this result)")
     L.append("")
@@ -985,6 +997,7 @@ def self_test() -> list[str]:
     }
     text = format_report(result)
     assert "DEPLOYED CELL" in text and "RANDOM-DECILE CONTROL" in text
+    assert "first half" in text and "second half" in text and "by calendar year" in text
 
     return ["self-test passed: friction levels (measured all-in, bucket-"
            "specific spread+commission, 2x stress), financing, the pick-"
