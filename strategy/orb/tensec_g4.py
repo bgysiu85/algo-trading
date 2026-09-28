@@ -107,17 +107,29 @@ def load_trades(path: str | Path) -> pd.DataFrame:
     return df
 
 
-def trigger_window(day: str, trigger_sec: float) -> tuple[datetime, datetime]:
-    """[trigger bar start - 60s, trigger bar end + 60s), ET -> UTC. Section
-    3.2/6.1: the trigger bar is `t1_trigger_sec` for `TRIGGER_BAR_SEC`
-    seconds; the window is 60s either side of the BAR, not the fill."""
+def bar_bounds(day: str, trigger_sec: float) -> tuple[datetime, datetime]:
+    """[bar_start, bar_end) in UTC for a T1 trigger bar itself -- no padding.
+    Shared by `trigger_window` (this module's own +-60s padded pull window)
+    and `strategy.orb.tensec_hq1` (G5/H-Q1, which reads the bar's own
+    boundaries directly), so the bar arithmetic lives in exactly one place
+    rather than being re-derived twice and risking the two silently
+    disagreeing (PROGRAM_INDEX: the MC5 four-minute window shift was exactly
+    this kind of duplicated-arithmetic drift)."""
     sod = int(trigger_sec)
     d = date.fromisoformat(day)
     bar_start = datetime(d.year, d.month, d.day, tzinfo=ET) + timedelta(seconds=sod)
     bar_end = bar_start + timedelta(seconds=TRIGGER_BAR_SEC)
+    return bar_start.astimezone(UTC), bar_end.astimezone(UTC)
+
+
+def trigger_window(day: str, trigger_sec: float) -> tuple[datetime, datetime]:
+    """[trigger bar start - 60s, trigger bar end + 60s), ET -> UTC. Section
+    3.2/6.1: the trigger bar is `t1_trigger_sec` for `TRIGGER_BAR_SEC`
+    seconds; the window is 60s either side of the BAR, not the fill."""
+    bar_start, bar_end = bar_bounds(day, trigger_sec)
     lo = bar_start - timedelta(seconds=BEFORE_SEC)
     hi = bar_end + timedelta(seconds=AFTER_SEC)
-    return lo.astimezone(UTC), hi.astimezone(UTC)
+    return lo, hi
 
 
 def windows(df: pd.DataFrame, edge: date, holdout_start: date) -> list[Window]:
