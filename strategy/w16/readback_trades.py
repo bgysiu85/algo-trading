@@ -125,11 +125,30 @@ def day_coverage(pulled_days: list[str], readable_days: list[str],
             "passed": not missing and not empty}
 
 
+def restrict_to_pulled_days(owned_1m: pd.DataFrame, pulled_days: list[str]) -> pd.DataFrame:
+    """Keep only the owned 1-minute bars that fall on a day `fetch_trades`
+    actually pulled. The owned `ohlcv-1m` archive spans years; the trades
+    pull only covers `pulled_days` (~313 recent days) -- comparing against
+    the FULL bar history would count every minute outside the pull window
+    as a "miss" (trades_volume=0 vs a real bar_volume), which is not a
+    trades/bars disagreement, just bars that were never priced or pulled
+    as trades in the first place. Bar-anchored still means "every minute
+    the bar says exists" (see the module docstring) -- restricted first to
+    the days that are actually comparable."""
+    if owned_1m.empty or not pulled_days:
+        return owned_1m.iloc[0:0]
+    pulled = set(pulled_days)
+    days = owned_1m.index.strftime("%Y-%m-%d")
+    return owned_1m[days.isin(pulled)]
+
+
 def run_root(day_frames: dict, owned_1m: pd.DataFrame, root: str,
               pulled_days: list[str]) -> dict:
     """The whole gate for one root, given already-loaded per-day trades
     frames (already filtered to this root's symbol) and the owned 1-minute
-    bar frame (already filtered to this root, `strategy.w16.fetch`'s file)."""
+    bar frame (already filtered to this root, `strategy.w16.fetch`'s file --
+    may still span the bar archive's FULL history; restricted here to
+    `pulled_days` before comparison, see `restrict_to_pulled_days`)."""
     readable_days = [d for d, df in day_frames.items() if df is not None]
     empty_days = [d for d, df in day_frames.items() if df is not None and df.empty]
     coverage = day_coverage(pulled_days, readable_days, empty_days)
@@ -139,6 +158,7 @@ def run_root(day_frames: dict, owned_1m: pd.DataFrame, root: str,
     side = aggressor_side_stats(all_trades)
 
     trades_vol = minute_volume_from_trades(all_trades)
+    owned_1m = restrict_to_pulled_days(owned_1m, pulled_days)
     bar_vol = owned_1m["volume"] if "volume" in owned_1m.columns else pd.Series(dtype="int64")
     agreement = minute_agreement(trades_vol, bar_vol)
 

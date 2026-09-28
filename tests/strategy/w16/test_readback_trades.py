@@ -157,6 +157,33 @@ class TestDayCoverage:
         assert out["missing_days"] == []
 
 
+class TestRestrictToPulledDays:
+    def test_empty_owned_1m_stays_empty(self):
+        out = R.restrict_to_pulled_days(
+            pd.DataFrame({"volume": []}, index=pd.DatetimeIndex([])), ["2026-09-08"])
+        assert out.empty
+
+    def test_no_pulled_days_gives_empty(self):
+        idx = pd.DatetimeIndex([pd.Timestamp("2026-09-08 14:30", tz="UTC")])
+        owned = pd.DataFrame({"volume": [10]}, index=idx)
+        out = R.restrict_to_pulled_days(owned, [])
+        assert out.empty
+
+    def test_drops_bars_outside_the_pulled_window(self):
+        """The regression case: the owned ohlcv-1m archive spans years, the
+        trades pull only covers `pulled_days` -- a bar from outside that
+        window must not survive to be compared (and counted as a false
+        miss, trades_volume=0 vs a real bar_volume)."""
+        idx = pd.DatetimeIndex([
+            pd.Timestamp("2010-06-07 00:00", tz="UTC"),   # long before the pull
+            pd.Timestamp("2026-09-08 14:30", tz="UTC"),   # inside the pull
+        ])
+        owned = pd.DataFrame({"volume": [206, 10]}, index=idx)
+        out = R.restrict_to_pulled_days(owned, ["2026-09-08"])
+        assert len(out) == 1
+        assert out.index[0] == pd.Timestamp("2026-09-08 14:30", tz="UTC")
+
+
 class TestRunRoot:
     def test_all_checks_passing_gives_an_overall_pass(self):
         day_frames = {"2026-09-08": _trades(
@@ -175,3 +202,20 @@ class TestRunRoot:
         out = R.run_root(day_frames, owned_1m, "ES", ["2026-09-08", "2026-09-09"])
         assert not out["passed"]
         assert not out["coverage"]["passed"]
+
+    def test_bars_outside_the_pull_window_are_not_counted_as_misses(self):
+        """The exact bug found on the real archive: owned_1m carrying years
+        of history (2010 onward) alongside the 2026 pull must not manufacture
+        misses for every out-of-window minute."""
+        day_frames = {"2026-09-08": _trades(
+            {"2026-09-08 14:30": [10]}, sides={"2026-09-08 14:30": ["B"]})}
+        idx = pd.DatetimeIndex([
+            pd.Timestamp("2010-06-07 00:00", tz="UTC"),
+            pd.Timestamp("2026-09-08 14:30", tz="UTC"),
+        ])
+        owned_1m = pd.DataFrame({"volume": [206, 10]}, index=idx)
+        out = R.run_root(day_frames, owned_1m, "ES", ["2026-09-08"])
+        ag = out["minute_volume_agreement"]
+        assert ag["n_compared"] == 1
+        assert ag["n_within_tol"] == 1
+        assert out["passed"]
