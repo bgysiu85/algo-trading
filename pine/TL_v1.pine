@@ -1,0 +1,237 @@
+//@version=6
+// TL-v1 · Tori Trades' own extreme-anchor line construction + A+ checklist (W15-0019).
+// Indicator only: draws her line, marks A+ entries. Computes NO profit and loss.
+// Rules: docs/research/REGISTERED_tl_v1.md sec 2.2-2.3.
+//
+// DELIVERED AS A FILE. NEVER PASTE THIS INTO BEN'S PINE EDITOR FROM A CHAT
+// (REGISTERED_tl_v1.md sec 5.1 gate G3 and sec 7's own words) -- Ben pastes it himself.
+//
+// PARITY STATUS (G3): this file has NOT yet been bar-by-bar diffed against
+// common/tl_v1_lines.py on CL1! daily 2015-2019 (back-adjustment off), the
+// gate REGISTERED_tl_v1.md sec 5.1 G3 requires before any TL-v1 P&L is run.
+// That comparison is the next step on this board item (W15-0019) -- see the
+// handover doc. Read this file as a careful first coding of sec 2.2-2.3, not
+// as a cleared gate.
+//
+//  L1 Window   -- only pivots whose bar lies in the last 250 bars count
+//  L2 Anchor A -- the window's pivots in price order, extreme first; the
+//                 first one a valid line can be built from wins
+//  L3 Point B  -- among later pivots, the FLATTEST valid line (slope closest
+//                 to zero on the correct side: negative for resistance,
+//                 positive for support)
+//  L4 Never crossed -- invalid if any close from A to now sits beyond the
+//                 line by more than 0.10 x ATR at that bar
+//  L5 Span limit -- A to now <= 400 bars
+//  A1 Touches >= 3, A2 span > 1 week, A3 ER(20) >= this market's training q25
+//     (the q25 value is a PRE-RUN input here, written from the Python
+//     pre-flight's own report -- see the "A+ checklist" group below; Pine
+//     cannot read the training-only percentile itself)
+indicator("TL-v1 · Her line + A+ checklist (coded)", shorttitle = "TL-v1", overlay = true,
+         max_lines_count = 500, max_labels_count = 500, max_bars_back = 2000)
+
+grpL = "Line geometry (sec 2.2 -- fix before any return is seen)"
+pivLen   = input.int(5, "Pivot size L = R", options = [3, 5, 8], group = grpL)
+atrLen   = input.int(14, "ATR length", minval = 1, group = grpL)
+window   = input.int(250, "Window W (bars)", minval = 20, group = grpL)
+maxSpan  = input.int(400, "Max span A to now (bars)", minval = 20, group = grpL)
+crossBuf = input.float(0.10, "Never-crossed / break buffer x ATR", minval = 0, step = 0.05, group = grpL)
+
+grpA = "A+ checklist (sec 2.3)"
+touchLen  = input.int(2, "Touch pivot size L = R", group = grpA)
+touchBuf  = input.float(0.25, "Touch buffer x ATR", minval = 0, step = 0.05, group = grpA)
+minTouch  = input.int(3, "Min touches (A1)", minval = 1, group = grpA)
+minSpanD  = input.int(7, "Min span, calendar days (A2)", minval = 1, group = grpA)
+erLen     = input.int(20, "ER length (A3)", minval = 2, group = grpA)
+erQ25     = input.float(0.30, "This market's training ER q25 (from the Python pre-flight report -- PRE-RUN)", minval = 0, maxval = 1, step = 0.01, group = grpA)
+
+grpD = "Display"
+showLabels = input.bool(true, "A+ entry labels", group = grpD)
+showTable  = input.bool(true, "Stats table", group = grpD)
+
+MAXP = 60  // pivots kept in the rolling window array -- generous vs. 250 bars / pivLen
+
+var array<int>   phBar = array.new_int()
+var array<float> phVal = array.new_float()
+var array<int>   plBar = array.new_int()
+var array<float> plVal = array.new_float()
+// touch pivots (separate, smaller L=R)
+var array<int>   thBar = array.new_int()
+var array<float> thVal = array.new_float()
+var array<int>   tlBar = array.new_int()
+var array<float> tlVal = array.new_float()
+
+a = ta.atr(atrLen)
+ph = ta.pivothigh(high, pivLen, pivLen)
+pl = ta.pivotlow(low, pivLen, pivLen)
+th = ta.pivothigh(high, touchLen, touchLen)
+tl_ = ta.pivotlow(low, touchLen, touchLen)
+
+// ER(20): |close[t]-close[t-n]| / sum(|close[i]-close[i-1]|, i in (t-n, t])
+erNum = math.abs(close - close[erLen])
+erDen = 0.0
+for i = 0 to erLen - 1
+    erDen += math.abs(close[i] - close[i + 1])
+erV = erDen > 0 ? erNum / erDen : na
+
+f_push(idArr, valArr, b, v) =>
+    array.push(idArr, b)
+    array.push(valArr, v)
+    if array.size(idArr) > MAXP
+        array.shift(idArr)
+        array.shift(valArr)
+
+if not na(ph)
+    f_push(phBar, phVal, bar_index - pivLen, ph)
+if not na(pl)
+    f_push(plBar, plVal, bar_index - pivLen, pl)
+if not na(th)
+    f_push(thBar, thVal, bar_index - touchLen, th)
+if not na(tl_)
+    f_push(tlBar, tlVal, bar_index - touchLen, tl_)
+
+// L1-L5: find the extreme-anchor / flattest-valid-B pair. kindRes = true for
+// resistance (extreme = highest price, slope must be negative), false for
+// support (extreme = lowest price, slope must be positive).
+lineAt(int b1, float p1, int b2, float p2, int x) =>
+    p1 + (p2 - p1) / (b2 - b1) * (x - b1)
+
+findPair(array<int> idArr, array<float> valArr, bool kindRes) =>
+    int bestA = na
+    float bestVA = na
+    int bestB = na
+    float bestVB = na
+    float bestSlope = na
+    int sz = array.size(idArr)
+    // candidate order: extreme price first (L2)
+    int order0 = 0
+    if sz >= 2
+        // build a simple index order sorted by price (extreme first) via
+        // selection -- sz is small (<= MAXP), a full sort is cheap
+        var array<int> idxOrder = array.new_int()
+        array.clear(idxOrder)
+        for i = 0 to sz - 1
+            array.push(idxOrder, i)
+        // selection sort by price, extreme first
+        for i = 0 to sz - 2
+            int bestIdx = i
+            for j = i + 1 to sz - 1
+                float vi = array.get(valArr, array.get(idxOrder, bestIdx))
+                float vj = array.get(valArr, array.get(idxOrder, j))
+                bool better = kindRes ? vj > vi : vj < vi
+                if better
+                    bestIdx := j
+            if bestIdx != i
+                int tmp = array.get(idxOrder, i)
+                array.set(idxOrder, i, array.get(idxOrder, bestIdx))
+                array.set(idxOrder, bestIdx, tmp)
+        bool found = false
+        for oi = 0 to sz - 1
+            if found
+                continue
+            int ia = array.get(idxOrder, oi)
+            int pA = array.get(idArr, ia)
+            float vA = array.get(valArr, ia)
+            if bar_index - pA > window
+                continue
+            float localBestSlope = na
+            int localBestB = na
+            float localBestVB = na
+            for jb = 0 to sz - 1
+                int pB = array.get(idArr, jb)
+                float vB = array.get(valArr, jb)
+                if pB <= pA or pB - pA > maxSpan
+                    continue
+                float slope = (vB - vA) / (pB - pA)
+                bool dirOk = kindRes ? slope < 0 : slope > 0
+                if not dirOk
+                    continue
+                bool valid = true
+                for k = pA to bar_index
+                    float lv = lineAt(pA, vA, pB, vB, k)
+                    float cl = close[bar_index - k]
+                    if kindRes and (cl - lv > crossBuf * a)
+                        valid := false
+                    if not kindRes and (lv - cl > crossBuf * a)
+                        valid := false
+                if valid
+                    if na(localBestSlope) or math.abs(slope) < math.abs(localBestSlope)
+                        localBestSlope := slope
+                        localBestB := pB
+                        localBestVB := vB
+            if not na(localBestB)
+                bestA := pA
+                bestVA := vA
+                bestB := localBestB
+                bestVB := localBestVB
+                bestSlope := localBestSlope
+                found := true
+    [bestA, bestVA, bestB, bestVB, bestSlope]
+
+[resA, resVA, resB, resVB, resSlope] = findPair(phBar, phVal, true)
+[supA, supVA, supB, supVB, supSlope] = findPair(plBar, plVal, false)
+
+resOn = not na(resB)
+supOn = not na(supB)
+resV = resOn ? lineAt(resA, resVA, resB, resVB, bar_index) : na
+supV = supOn ? lineAt(supA, supVA, supB, supVB, bar_index) : na
+
+upBrkRaw = resOn and (close - resV > crossBuf * a)
+dnBrkRaw = supOn and (supV - close > crossBuf * a)
+
+// A1 touches: confirmed touch pivots from A's bar to bar_index-1, within
+// touchBuf x ATR of the line's value at that pivot's bar.
+countTouches(array<int> tIdArr, array<float> tValArr, int pA, bool kindRes) =>
+    int cnt = 0
+    if not na(pA)
+        for i = 0 to array.size(tIdArr) - 1
+            int pb = array.get(tIdArr, i)
+            float vb = array.get(tValArr, i)
+            if pb >= pA and pb <= bar_index - 1
+                float lv = kindRes ? (resOn ? lineAt(resA, resVA, resB, resVB, pb) : na)
+                                    : (supOn ? lineAt(supA, supVA, supB, supVB, pb) : na)
+                if not na(lv)
+                    if kindRes and vb >= lv - touchBuf * a
+                        cnt += 1
+                    if not kindRes and vb <= lv + touchBuf * a
+                        cnt += 1
+    cnt
+
+resTouches = upBrkRaw ? countTouches(thBar, thVal, resA, true) : na
+supTouches = dnBrkRaw ? countTouches(tlBar, tlVal, supA, false) : na
+
+resSpanDays = (upBrkRaw and not na(resA)) ? (time - time[bar_index - resA]) / 86400000.0 : na
+supSpanDays = (dnBrkRaw and not na(supA)) ? (time - time[bar_index - supA]) / 86400000.0 : na
+
+a1Res = upBrkRaw and not na(resTouches) and resTouches >= minTouch
+a2Res = upBrkRaw and not na(resSpanDays) and resSpanDays >= minSpanD
+a3Res = upBrkRaw and not na(erV) and erV >= erQ25
+aPlusLong = upBrkRaw and a1Res and a2Res and a3Res
+
+a1Sup = dnBrkRaw and not na(supTouches) and supTouches >= minTouch
+a2Sup = dnBrkRaw and not na(supSpanDays) and supSpanDays >= minSpanD
+a3Sup = dnBrkRaw and not na(erV) and erV >= erQ25
+aPlusShort = dnBrkRaw and a1Sup and a2Sup and a3Sup
+
+plot(resOn ? resV : na, "Resistance (her line)", color = color.new(color.red, 0), linewidth = 1)
+plot(supOn ? supV : na, "Support (her line)", color = color.new(color.teal, 0), linewidth = 1)
+plotshape(aPlusLong, "A+ long", shape.triangleup, location.belowbar, color.lime, size = size.small)
+plotshape(aPlusShort, "A+ short", shape.triangledown, location.abovebar, color.red, size = size.small)
+plotshape(upBrkRaw and not aPlusLong, "Break, not A+ (long)", shape.xcross, location.belowbar, color.new(color.gray, 40), size = size.tiny)
+plotshape(dnBrkRaw and not aPlusShort, "Break, not A+ (short)", shape.xcross, location.abovebar, color.new(color.gray, 40), size = size.tiny)
+
+if showLabels and aPlusLong
+    label.new(bar_index, low, "A+ long\ntouches " + str.tostring(resTouches) + "\nspan " + str.tostring(resSpanDays, "#") + "d\nER " + str.tostring(erV, "#.##"), color = color.new(color.lime, 10), style = label.style_label_up, size = size.small)
+if showLabels and aPlusShort
+    label.new(bar_index, high, "A+ short\ntouches " + str.tostring(supTouches) + "\nspan " + str.tostring(supSpanDays, "#") + "d\nER " + str.tostring(erV, "#.##"), color = color.new(color.red, 10), style = label.style_label_down, size = size.small)
+
+alertcondition(aPlusLong, "TL-v1 A+ long", "TL-v1: A+ long entry")
+alertcondition(aPlusShort, "TL-v1 A+ short", "TL-v1: A+ short entry")
+
+var table tb = table.new(position.top_right, 2, 4, bgcolor = color.new(color.black, 15), border_width = 1)
+if showTable and barstate.islast
+    table.cell(tb, 0, 0, "TL-v1 · L=R " + str.tostring(pivLen) + " · ER q25 input " + str.tostring(erQ25), text_color = color.white, text_size = size.small)
+    table.cell(tb, 1, 0, "counts only — no P&L", text_color = color.yellow, text_size = size.small)
+    table.cell(tb, 0, 1, "Active line: res / sup", text_color = color.white, text_size = size.small)
+    table.cell(tb, 1, 1, (resOn ? "on" : "off") + " / " + (supOn ? "on" : "off"), text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 2, "PARITY (G3)", text_color = color.orange, text_size = size.small)
+    table.cell(tb, 1, 2, "NOT YET CLEARED — see file header", text_color = color.orange, text_size = size.small)
