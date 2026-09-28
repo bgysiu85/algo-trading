@@ -45,11 +45,20 @@ not the same book. XNAS.ITCH's is Nasdaq's own; EQUS.MINI's is a blend of
 venues (and on 2026-09-06 read 2.7x wider than XNAS.BASIC's on the same
 fills, and separately measured at a median 4.8% of consolidated volume,
 PROGRAM_INDEX SS3) -- known-bad for this purpose, kept here only as the
-losing comparator. EQUS.MAX (Databento's newer "combine every proprietary
-feed into a synthetic NBBO" product, released 2025 Q2, never before priced
-in this repo) is added 2026-09-28 (W03-0014) as the actual consolidated
-candidate this round is testing. XNAS.BASIC's consolidated schemas are the
-tape that friction work trusted. Which is right is a question for the
+losing comparator. "EQUS.MAX" was tried 2026-09-28 (W03-0014) on the strength
+of Databento's own marketing blog but does not exist as a dataset code on
+this account (400 validation_failed) -- `metadata.list_datasets()` confirms
+Databento sells no single full-SIP/true-consolidated-NBBO product here.
+DBEQ.BASIC (their free multi-venue bundle: IEX TOPS + NYSE Chicago Integrated
++ NYSE National BBO/Trades, since 2024-04-01) is added in EQUS.MAX's place as
+the next thing worth pricing, though it may turn out to be the same ~5%-ADV
+class of problem as EQUS.MINI -- that is what this run is for. A genuine NBBO
+here would mean reconstructing it from all individual venue top-of-book feeds
+(XNAS.ITCH, XNYS.PILLAR, ARCX.PILLAR, EDGA/EDGX/BATS/BATY.PITCH, IEXG.TOPS,
+XASE.PILLAR, XCHI.PILLAR, XCIS.TRADESBBO, MEMX.MEMOIR, EPRL.DOM) and merging
+best-of-book across them -- a much larger build, not a dataset swap; not
+attempted here without Ben's sign-off. XNAS.BASIC's consolidated schemas are
+the tape that friction work trusted. Which is right is a question for the
 registration, not for this tool. This tool puts the price of each beside the
 others so the choice is made with the numbers in view.
 
@@ -110,8 +119,7 @@ CANDIDATES = (
     ("XNAS.BASIC", "cmbp-1"),
     ("XNAS.BASIC", "cbbo-1s"),
     ("EQUS.MINI", "mbp-1"),
-    ("EQUS.MAX", "mbp-1"),
-    ("EQUS.MAX", "bbo-1s"),
+    ("DBEQ.BASIC", "mbp-1"),
 )
 
 
