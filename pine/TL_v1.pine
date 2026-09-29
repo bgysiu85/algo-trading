@@ -13,6 +13,12 @@
 // handover doc. Read this file as a careful first coding of sec 2.2-2.3, not
 // as a cleared gate.
 //
+// FIX 2026-09-29: countTouches()'s two-line ternary (kindRes ? ... : ...
+// split across a continuation line) failed to compile in Ben's editor
+// (CE10013, "expecting set \":\""), most likely paste-mangled indentation
+// breaking Pine's line-continuation rule. Collapsed to one physical line --
+// no logic change, same expression. Re-paste this file over the old one.
+//
 //  L1 Window   -- only pivots whose bar lies in the last 250 bars count
 //  L2 Anchor A -- the window's pivots in price order, extreme first; the
 //                 first one a valid line can be built from wins
@@ -187,8 +193,7 @@ countTouches(array<int> tIdArr, array<float> tValArr, int pA, bool kindRes) =>
             int pb = array.get(tIdArr, i)
             float vb = array.get(tValArr, i)
             if pb >= pA and pb <= bar_index - 1
-                float lv = kindRes ? (resOn ? lineAt(resA, resVA, resB, resVB, pb) : na)
-                                    : (supOn ? lineAt(supA, supVA, supB, supVB, pb) : na)
+                float lv = kindRes ? (resOn ? lineAt(resA, resVA, resB, resVB, pb) : na) : (supOn ? lineAt(supA, supVA, supB, supVB, pb) : na)
                 if not na(lv)
                     if kindRes and vb >= lv - touchBuf * a
                         cnt += 1
