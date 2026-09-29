@@ -531,33 +531,32 @@ def generate_tmb_trades(frames: dict[str, pd.DataFrame], market: str, dates, *,
 # sides.
 # ---------------------------------------------------------------------
 
-def _crt_stop_fill(window: pd.DataFrame, level_hi: float, level_lo: float):
+def _crt_stop_fill(window: pd.DataFrame, level: float, direction: str):
     """First 1-minute bar (chronological) in `window` whose high/low
-    crosses either stop level. Returns (direction, fill_ts, fill_price)
-    or (None, None, None) if neither triggers; direction is "both" (a
-    void, sec 3.4: "a C2 that sweeps both sides is not a setup" is a
-    DIFFERENT both-side case -- this is C3's OWN both-levels case, not
-    explicitly named in sec 3.4 but handled the same defensive way NRS's
-    identical situation is: sec 3.5's "voided and counted")."""
+    crosses the ONE resting stop this setup's own direction places (sec
+    3.4 Entry: "Bullish: a buy stop at H2 + 1 tick ... Bearish: sell stop
+    at L2 - 1 tick" -- ONE order, matching the setup's own side, never
+    both at once, unlike NRS's simultaneous OCO pair (sec 3.5). There is
+    therefore no "both levels hit" case here; a window that elapses with
+    neither triggering is a dead setup (sec 3.4: "If C3 does not trigger,
+    the setup is dead"). Returns (fill_ts, fill_price) or (None, None)."""
     for ts, row in window.iterrows():
         hi, lo, op = float(row["high"]), float(row["low"]), float(row["open"])
-        hit_hi = hi >= level_hi
-        hit_lo = lo <= level_lo
-        if hit_hi and hit_lo:
-            return "both", ts, None
-        if hit_hi:
-            return "long", ts, max(op, level_hi)
-        if hit_lo:
-            return "short", ts, min(op, level_lo)
-    return None, None, None
+        if direction == "long" and hi >= level:
+            return ts, max(op, level)
+        if direction == "short" and lo <= level:
+            return ts, min(op, level)
+    return None, None
 
 
 def _crt_series_events(bars_n: pd.DataFrame, day1m: pd.DataFrame, window_end: dtime, period_minutes: int):
     """Every setup on one series (15/30/60-min day-session bars): C1=bar
     i, C2=bar i+1, C3=bar i+2. Returns a list of dicts, each either
-    {"kind": "both_sweep", ...} (counted, never a trade) or {"kind":
-    "setup", "direction", "H1", "L1", "fill_time"|None, "fill_price"|None,
-    "void": bool}."""
+    {"kind": "both_sweep", ...} (counted, never a trade -- C1/C2's OWN
+    both-side sweep, sec 3.4: "a C2 that sweeps both sides is not a
+    setup") or {"kind": "setup", "direction", "H1", "L1",
+    "fill_time"|None, "fill_price"|None} -- fill_time is None for a dead
+    setup (C3's window elapsed with no trigger)."""
     highs = bars_n["high"].to_numpy(dtype=float)
     lows = bars_n["low"].to_numpy(dtype=float)
     closes = bars_n["close"].to_numpy(dtype=float)
@@ -583,13 +582,10 @@ def _crt_series_events(bars_n: pd.DataFrame, day1m: pd.DataFrame, window_end: dt
         window = day1m_sorted[(day1m_sorted.index >= c3_start) & (day1m_sorted.index < c3_end)]
         naive_win = _naive_et(window)
         window = window[naive_win.time < window_end]
-        level_hi = round_tick(H2 + TICK)
-        level_lo = round_tick(L2 - TICK)
-        kind, fill_ts, fill_price = _crt_stop_fill(window, level_hi, level_lo)
+        level = round_tick(H2 + TICK) if direction == "long" else round_tick(L2 - TICK)
+        fill_ts, fill_price = _crt_stop_fill(window, level, direction)
         events.append({"i": i, "period": period_minutes, "kind": "setup", "direction": direction,
-                      "H1": H1, "L1": L1, "fill_time": fill_ts,
-                      "fill_price": fill_price if kind == direction else None,
-                      "void": kind == "both"})
+                      "H1": H1, "L1": L1, "fill_time": fill_ts, "fill_price": fill_price})
     return events
 
 
@@ -607,38 +603,24 @@ def generate_crt_trades(frames: dict[str, pd.DataFrame], market: str, dates, *,
             continue
         day1m = day.sort_index()
 
+        # C1/C2's own both-side sweep (a DIFFERENT case from any C3 entry
+        # question -- sec 3.4: "a C2 that sweeps both sides is not a
+        # setup") is counted but never reaches `candidates`; a dead setup
+        # (C3's window elapsed with no trigger, fill_time None) is simply
+        # excluded below, per "If C3 does not trigger, the setup is dead".
         candidates = []
-        void_events = []
         for period in (15, 30, 60):
             bars_n = resample_session_bars(day, period)
             if len(bars_n) < 3:
                 continue
             for ev in _crt_series_events(bars_n, day1m, window_end, period):
-                if ev["kind"] != "setup":
-                    continue
-                if ev["void"]:
-                    void_events.append(ev)
-                elif ev["fill_time"] is not None:
+                if ev["kind"] == "setup" and ev["fill_time"] is not None:
                     candidates.append(ev)
 
-        # A void C3 (both levels hit in one 1-minute bar) is itself a filled
-        # event in time -- it can still be the day's EARLIEST outcome, ending
-        # the day, even though it opens no position (sec 3.4 gives no
-        # explicit rule for this exact case; treated the same defensive way
-        # sec 3.5 treats NRS's identical situation: "voided and counted").
-        all_events = candidates + [dict(v, fill_price=None) for v in void_events]
-        if not all_events:
+        if not candidates:
             continue
-        all_events.sort(key=lambda e: (e["fill_time"], period_priority[e["period"]]))
-        winner = all_events[0]
-
-        if winner.get("fill_price") is None and winner.get("void"):
-            trades.append({"date": date_str, "market": market, "baseline": "CRT",
-                          "direction": None, "voided": True,
-                          "void_reason": "C3 bar reached both stop levels",
-                          "period_minutes": winner["period"],
-                          "fill_time": str(winner["fill_time"])})
-            continue
+        candidates.sort(key=lambda e: (e["fill_time"], period_priority[e["period"]]))
+        winner = candidates[0]
 
         direction = winner["direction"]
         H1, L1 = winner["H1"], winner["L1"]
