@@ -306,3 +306,10 @@ which is in the rules.* I'd be glad to be wrong.
   holdouts, and the count-only pre-flight for both methods. Build & test chat, Sonnet · High; runs
   on Ben's PC.
 - **Backtest and Result doc:** new items once G2 has been read.
+
+### Amendment — PRE-RUN, 2026-09-29 (readings made while coding; before any pre-flight or P&L is read)
+1. Zigzag leg counting uses ATR[O] (the registered ATR) as its threshold.
+2. Sizing: the grade sets risk 0.5/1/2%; shorts are half size; the flat-1% variant ignores grade on both sides.
+3. A profit target that lies on the wrong side of the fill is dropped (the trade runs on stop/trail only).
+4. The trail (prior-bar low/high) is applied at every close including the entry bar; a same-bar stop is taken at the stop.
+5. Volume coverage (G1) is scored on held-contract volume > 0 over training bars; a market below 99% has G-volume scored "no" throughout, via a committed amendment before the run (runner exit code 3 otherwise).

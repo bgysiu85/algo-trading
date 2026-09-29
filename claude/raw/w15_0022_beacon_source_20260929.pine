@@ -1,0 +1,61 @@
+//@version=4
+study("Beacon - Anthony Crudele's Indicator", overlay=true)
+
+//==INPUTS AND VARIABLES==//
+bb_length = input(type=input.integer, title="Bollinger Band Length", defval=20)
+bb_stddev = input(type=input.integer, title="Bollinger Band Std Dev", defval=3)
+var float bb_resistance = 0.0
+var float bb_support = 0.0
+var float bb_peak_minor = 0.0
+var float bb_valley_minor = 0.0
+var float bb_peak_major = 0.0
+var float bb_valley_major = 0.0
+var float line_70 = 0.0
+var float line_50 = 0.0
+var float line_30 = 0.0
+var new_peak = false
+var new_valley = false
+
+//==CALCULATE BOLLINGER BAND VALUES==//
+[bb_middle, bb_upper, bb_lower] = bb(close,bb_length,bb_stddev)
+
+//==CALCULATE PEAKS & VALLEYS...SET AS RESISTANCE & SUPPORT==//
+//==MINOR PEAK==//
+if bb_upper[1]>bb_upper[2] and bb_upper<bb_upper[1] 
+    bb_peak_minor := bb_upper[1]
+
+//==MINOR VALLEY==//
+if bb_lower[1]<bb_lower[2] and bb_lower>bb_lower[1]
+    bb_valley_minor := bb_lower[1]
+    
+//A MINOR PEAK BECOMES A MAJOR PEAK IF:
+//   1. IT IS HIGHER THAN THE PREVIOUS MAJOR PEAK
+//   2. A NEW MAJOR VALLEY JUST FORMED
+
+if bb_peak_minor>bb_peak_major[1]
+    new_peak:=true
+    
+if bb_valley_minor<bb_valley_major[1]
+    new_valley:=true
+
+//==MAJOR PEAK==//
+if bb_peak_minor>bb_peak_major[1] or new_valley==true
+    bb_peak_major := bb_peak_minor
+
+//==MAJOR VALLEY==//
+if bb_valley_minor<bb_valley_major[1] or new_peak==true
+    bb_valley_major := bb_valley_minor
+    
+new_peak:=false
+new_valley:=false
+
+line_70 := bb_valley_major+(bb_peak_major-bb_valley_major)*0.7
+line_50 := bb_peak_major-(bb_peak_major-bb_valley_major)/2
+line_30 := bb_valley_major+(bb_peak_major-bb_valley_major)*0.3
+
+//==PLOTS==//
+plot(bb_peak_major, offset=-1, style=plot.style_circles, title="Resistance Level" , color=color.red, linewidth=2)
+plot(bb_valley_major, offset=-1, style=plot.style_circles, color=color.blue, title="Support Level", linewidth=2)
+plot(line_70, style=plot.style_circles, color=color.red, title="70 Line", offset=-1, linewidth=2)
+plot(line_50, style=plot.style_circles, color=color.yellow, title="50 Line", offset=-1, linewidth=2)
+plot(line_30, style=plot.style_circles, color=color.blue, title="30 Line", offset=-1, linewidth=2)

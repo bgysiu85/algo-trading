@@ -320,3 +320,64 @@ be wrong.
 - **Subitem 5:** build (state machine, three arms, controls, grid, guards, holdout) plus the
   count-only pre-flight. Build & test chat, Sonnet · High; runs on Ben's PC.
 - Backtest and Result doc: new items after G2 is read.
+
+
+---
+
+## 12. Amendments
+
+### Amendment A — PRE-RUN, 2026-09-29, gate G6 (Beacon source read)
+
+**Written before any bar of any market has been read and before any pre-flight.** It is the G6 / §2.5 write-up.
+Source read: TradingView script `av4XyaCS` (Pine v4, defaults length 20 / SD 3), saved unchanged as
+`claude/raw/w15_0022_beacon_source_20260929.pine`.
+
+**What Beacon does.**
+- Minor peak = a local maximum of the upper band, `U[1] > U[2]` and `U < U[1]`, taking the value `U[1]`
+  (confirmed one bar late, so nothing looks ahead). Minor valley = the mirror on the lower band.
+- Major peak / valley = a running pair. A minor peak above the previous major peak becomes the major
+  peak; a minor valley below the previous major valley becomes the major valley. When a new extreme
+  forms on one side, the *other* side is reset to its latest minor value.
+- Lines: `line_70 = valley + 0.7 H`, `line_50` = midpoint, `line_30 = valley + 0.3 H`, with H = major
+  peak − major valley. The Fib is on **band values**, as §0 and §2.4 say.
+
+**Where it agrees with §2.4.** Band values, not price; the anchors are the upper-band peak and the
+lower-band trough; levels at 30 / 50 / 70. Bollinger 20 / 3 SD with a population SD.
+
+**Where it differs, and what is decided.**
+1. **Labelling, not a rule.** Beacon counts levels *up from the valley*. §2.4 counts *down from the
+   peak* after an up-trend. So §2.4's `line30 = U* − 0.30 H` is Beacon's **"70 Line"**, §2.4's `line50`
+   is Beacon's "50 Line", and §2.4's `line0` is Beacon's peak. Crudele's spoken "close below 30%, target
+   50%" for a short after an up-trend is only consistent with §2.4's orientation (Beacon's "30 Line"
+   sits below the 50 line, so a short whose target is the 50 line would have to trade *up*). No change.
+2. **Anchors.** Beacon's peak and valley are always-on pivot anchors on the band history, with the
+   cross-reset above. §2.3 / §2.4 anchor on `U*` = max U and `L*` = min L **since the T episode began**,
+   frozen when the bands come in. These can differ (for example, Beacon's peak can be a lower minor peak
+   after a new valley forms).
+
+**Decision (made before any data, without reference to any result).** The **primary is unchanged**:
+`U* / L*` since T began, frozen at "bands come in". Reason: Ben approved §11 as drafted; the MR arm is
+defined as *the fade after a T episode*, and Beacon's pair has no notion of a T episode, so adopting it
+as the primary would mean re-registering how the arm is armed. The Beacon coding is added as a reported
+variant instead, which §2.5 allows.
+
+**New reported variant (added to §2.6, never ranked, cannot spend the holdout): "MR-Beacon".**
+Same arming trigger as the primary (a completed T episode, then the bands come in). At the bar the
+bands come in, the Fib anchors are Beacon's **major peak and major valley as of that close**, computed
+from the band history of that market with the exact rules above (initial values as in the Pine source;
+segment start = first bar with a full 20-bar window). H = peak − valley, and everything else is as
+§2.4 (entry on a close through the 30% line counted down from the peak, target 50%, close-back exit, hard
+stop at the peak, 10-bar time stop, 0.5% risk). If H is not positive, or the Beacon peak is not above the
+current close, the arm is skipped and counted. Nothing else in the study changes.
+
+**Test added to G4.** The Beacon pair is coded once, from the Pine semantics above, and one-bar-shift
+guarded like the other indicators.
+
+### Amendment B — PRE-RUN, 2026-09-29 (readings made while coding; before any pre-flight or P&L is read)
+These are clarifications of how ambiguous wording was coded. None was chosen by looking at data (none has been run).
+1. **MR trigger on the arm close.** The MR arm arms at the bar the bands come in and may trigger on a close through the 30% line from that bar onward, so a trigger can fire almost immediately after "bands in". Coded literally; the pre-flight reports MR arms, triggers and expiries so Ben can see how often this happens. Not changed after seeing counts unless re-registered.
+2. **State priority MR > T > C > N**, exclusive, one state per bar.
+3. **Population SD (ddof=0)** for the Bollinger bands, matching Pine.
+4. **T target = earlier-episode target only when it lies beyond the fill**; otherwise no target (counted as "T signals with no target").
+5. **Risk per trade**: T 1%, MR 0.5%, C 1% of the $22,129 fractional book; one position per market.
+6. **Look-ahead (G4)** is tested by truncation invariance and mutation-tested.
