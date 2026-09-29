@@ -1,0 +1,1439 @@
+date,time_et,event,kind,note
+2010-01-06,10:30,EIA_WPSR,scheduled,rule-based
+2010-01-08,08:30,NFP,scheduled,BLS schedule page
+2010-01-13,10:30,EIA_WPSR,scheduled,rule-based
+2010-01-15,08:30,CPI,scheduled,BLS schedule page
+2010-01-21,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2010-01-27,10:30,EIA_WPSR,scheduled,rule-based
+2010-01-27,14:00,FOMC,scheduled,federalreserve.gov calendars
+2010-02-03,10:30,EIA_WPSR,scheduled,rule-based
+2010-02-05,08:30,NFP,scheduled,BLS schedule page
+2010-02-10,10:30,EIA_WPSR,scheduled,rule-based
+2010-02-18,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2010-02-19,08:30,CPI,scheduled,BLS schedule page
+2010-02-24,10:30,EIA_WPSR,scheduled,rule-based
+2010-03-03,10:30,EIA_WPSR,scheduled,rule-based
+2010-03-05,08:30,NFP,scheduled,BLS schedule page
+2010-03-10,10:30,EIA_WPSR,scheduled,rule-based
+2010-03-16,14:00,FOMC,scheduled,federalreserve.gov calendars
+2010-03-17,10:30,EIA_WPSR,scheduled,rule-based
+2010-03-18,08:30,CPI,scheduled,BLS schedule page
+2010-03-24,10:30,EIA_WPSR,scheduled,rule-based
+2010-03-31,10:30,EIA_WPSR,scheduled,rule-based
+2010-04-02,08:30,NFP,scheduled,BLS schedule page
+2010-04-07,10:30,EIA_WPSR,scheduled,rule-based
+2010-04-14,08:30,CPI,scheduled,BLS schedule page
+2010-04-14,10:30,EIA_WPSR,scheduled,rule-based
+2010-04-21,10:30,EIA_WPSR,scheduled,rule-based
+2010-04-28,10:30,EIA_WPSR,scheduled,rule-based
+2010-04-28,14:00,FOMC,scheduled,federalreserve.gov calendars
+2010-05-05,10:30,EIA_WPSR,scheduled,rule-based
+2010-05-07,08:30,NFP,scheduled,BLS schedule page
+2010-05-09,,FOMC_UNSCHEDULED,unscheduled,unscheduled conference call (Sunday; no policy announcement)
+2010-05-12,10:30,EIA_WPSR,scheduled,rule-based
+2010-05-19,08:30,CPI,scheduled,BLS schedule page
+2010-05-19,10:30,EIA_WPSR,scheduled,rule-based
+2010-05-26,10:30,EIA_WPSR,scheduled,rule-based
+2010-06-03,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2010-06-04,08:30,NFP,scheduled,BLS schedule page
+2010-06-09,10:30,EIA_WPSR,scheduled,rule-based
+2010-06-16,10:30,EIA_WPSR,scheduled,rule-based
+2010-06-17,08:30,CPI,scheduled,BLS schedule page
+2010-06-23,10:30,EIA_WPSR,scheduled,rule-based
+2010-06-23,14:00,FOMC,scheduled,federalreserve.gov calendars
+2010-06-30,10:30,EIA_WPSR,scheduled,rule-based
+2010-07-02,08:30,NFP,scheduled,BLS schedule page
+2010-07-08,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2010-07-14,10:30,EIA_WPSR,scheduled,rule-based
+2010-07-16,08:30,CPI,scheduled,BLS schedule page
+2010-07-21,10:30,EIA_WPSR,scheduled,rule-based
+2010-07-28,10:30,EIA_WPSR,scheduled,rule-based
+2010-08-04,10:30,EIA_WPSR,scheduled,rule-based
+2010-08-06,08:30,NFP,scheduled,BLS schedule page
+2010-08-10,14:00,FOMC,scheduled,federalreserve.gov calendars
+2010-08-11,10:30,EIA_WPSR,scheduled,rule-based
+2010-08-13,08:30,CPI,scheduled,BLS schedule page
+2010-08-18,10:30,EIA_WPSR,scheduled,rule-based
+2010-08-25,10:30,EIA_WPSR,scheduled,rule-based
+2010-09-01,10:30,EIA_WPSR,scheduled,rule-based
+2010-09-03,08:30,NFP,scheduled,BLS schedule page
+2010-09-09,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2010-09-15,10:30,EIA_WPSR,scheduled,rule-based
+2010-09-17,08:30,CPI,scheduled,BLS schedule page
+2010-09-21,14:00,FOMC,scheduled,federalreserve.gov calendars
+2010-09-22,10:30,EIA_WPSR,scheduled,rule-based
+2010-09-29,10:30,EIA_WPSR,scheduled,rule-based
+2010-10-06,10:30,EIA_WPSR,scheduled,rule-based
+2010-10-08,08:30,NFP,scheduled,BLS schedule page
+2010-10-14,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2010-10-15,08:30,CPI,scheduled,BLS schedule page
+2010-10-15,,FOMC_UNSCHEDULED,unscheduled,unscheduled conference call (no policy announcement)
+2010-10-20,10:30,EIA_WPSR,scheduled,rule-based
+2010-10-27,10:30,EIA_WPSR,scheduled,rule-based
+2010-11-03,10:30,EIA_WPSR,scheduled,rule-based
+2010-11-03,14:00,FOMC,scheduled,federalreserve.gov calendars
+2010-11-05,08:30,NFP,scheduled,BLS schedule page
+2010-11-10,10:30,EIA_WPSR,scheduled,rule-based
+2010-11-17,08:30,CPI,scheduled,BLS schedule page
+2010-11-17,10:30,EIA_WPSR,scheduled,rule-based
+2010-11-24,10:30,EIA_WPSR,scheduled,rule-based
+2010-12-01,10:30,EIA_WPSR,scheduled,rule-based
+2010-12-03,08:30,NFP,scheduled,BLS schedule page
+2010-12-08,10:30,EIA_WPSR,scheduled,rule-based
+2010-12-14,14:00,FOMC,scheduled,federalreserve.gov calendars
+2010-12-15,08:30,CPI,scheduled,BLS schedule page
+2010-12-15,10:30,EIA_WPSR,scheduled,rule-based
+2010-12-22,10:30,EIA_WPSR,scheduled,rule-based
+2010-12-29,10:30,EIA_WPSR,scheduled,rule-based
+2011-01-05,10:30,EIA_WPSR,scheduled,rule-based
+2011-01-07,08:30,NFP,scheduled,BLS schedule page
+2011-01-12,10:30,EIA_WPSR,scheduled,rule-based
+2011-01-14,08:30,CPI,scheduled,BLS schedule page
+2011-01-20,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2011-01-26,10:30,EIA_WPSR,scheduled,rule-based
+2011-01-26,14:00,FOMC,scheduled,federalreserve.gov calendars
+2011-02-02,10:30,EIA_WPSR,scheduled,rule-based
+2011-02-04,08:30,NFP,scheduled,BLS schedule page
+2011-02-09,10:30,EIA_WPSR,scheduled,rule-based
+2011-02-16,10:30,EIA_WPSR,scheduled,rule-based
+2011-02-17,08:30,CPI,scheduled,BLS schedule page
+2011-02-24,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2011-03-02,10:30,EIA_WPSR,scheduled,rule-based
+2011-03-04,08:30,NFP,scheduled,BLS schedule page
+2011-03-09,10:30,EIA_WPSR,scheduled,rule-based
+2011-03-15,14:00,FOMC,scheduled,federalreserve.gov calendars
+2011-03-16,10:30,EIA_WPSR,scheduled,rule-based
+2011-03-17,08:30,CPI,scheduled,BLS schedule page
+2011-03-23,10:30,EIA_WPSR,scheduled,rule-based
+2011-03-30,10:30,EIA_WPSR,scheduled,rule-based
+2011-04-01,08:30,NFP,scheduled,BLS schedule page
+2011-04-06,10:30,EIA_WPSR,scheduled,rule-based
+2011-04-13,10:30,EIA_WPSR,scheduled,rule-based
+2011-04-15,08:30,CPI,scheduled,BLS schedule page
+2011-04-20,10:30,EIA_WPSR,scheduled,rule-based
+2011-04-27,10:30,EIA_WPSR,scheduled,rule-based
+2011-04-27,14:00,FOMC,scheduled,federalreserve.gov calendars
+2011-05-04,10:30,EIA_WPSR,scheduled,rule-based
+2011-05-06,08:30,NFP,scheduled,BLS schedule page
+2011-05-11,10:30,EIA_WPSR,scheduled,rule-based
+2011-05-13,08:30,CPI,scheduled,BLS schedule page
+2011-05-18,10:30,EIA_WPSR,scheduled,rule-based
+2011-05-25,10:30,EIA_WPSR,scheduled,rule-based
+2011-06-02,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2011-06-03,08:30,NFP,scheduled,BLS schedule page
+2011-06-08,10:30,EIA_WPSR,scheduled,rule-based
+2011-06-15,08:30,CPI,scheduled,BLS schedule page
+2011-06-15,10:30,EIA_WPSR,scheduled,rule-based
+2011-06-22,10:30,EIA_WPSR,scheduled,rule-based
+2011-06-22,14:00,FOMC,scheduled,federalreserve.gov calendars
+2011-06-29,10:30,EIA_WPSR,scheduled,rule-based
+2011-07-07,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2011-07-08,08:30,NFP,scheduled,BLS schedule page
+2011-07-13,10:30,EIA_WPSR,scheduled,rule-based
+2011-07-15,08:30,CPI,scheduled,BLS schedule page
+2011-07-20,10:30,EIA_WPSR,scheduled,rule-based
+2011-07-27,10:30,EIA_WPSR,scheduled,rule-based
+2011-08-01,,FOMC_UNSCHEDULED,unscheduled,unscheduled conference call (no policy announcement)
+2011-08-03,10:30,EIA_WPSR,scheduled,rule-based
+2011-08-05,08:30,NFP,scheduled,BLS schedule page
+2011-08-09,14:00,FOMC,scheduled,federalreserve.gov calendars
+2011-08-10,10:30,EIA_WPSR,scheduled,rule-based
+2011-08-17,10:30,EIA_WPSR,scheduled,rule-based
+2011-08-18,08:30,CPI,scheduled,BLS schedule page
+2011-08-24,10:30,EIA_WPSR,scheduled,rule-based
+2011-08-31,10:30,EIA_WPSR,scheduled,rule-based
+2011-09-02,08:30,NFP,scheduled,BLS schedule page
+2011-09-08,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2011-09-14,10:30,EIA_WPSR,scheduled,rule-based
+2011-09-15,08:30,CPI,scheduled,BLS schedule page
+2011-09-21,10:30,EIA_WPSR,scheduled,rule-based
+2011-09-21,14:00,FOMC,scheduled,federalreserve.gov calendars
+2011-09-28,10:30,EIA_WPSR,scheduled,rule-based
+2011-10-05,10:30,EIA_WPSR,scheduled,rule-based
+2011-10-07,08:30,NFP,scheduled,BLS schedule page
+2011-10-13,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2011-10-19,08:30,CPI,scheduled,BLS schedule page
+2011-10-19,10:30,EIA_WPSR,scheduled,rule-based
+2011-10-26,10:30,EIA_WPSR,scheduled,rule-based
+2011-11-02,10:30,EIA_WPSR,scheduled,rule-based
+2011-11-02,14:00,FOMC,scheduled,federalreserve.gov calendars
+2011-11-04,08:30,NFP,scheduled,BLS schedule page
+2011-11-09,10:30,EIA_WPSR,scheduled,rule-based
+2011-11-16,08:30,CPI,scheduled,BLS schedule page
+2011-11-16,10:30,EIA_WPSR,scheduled,rule-based
+2011-11-23,10:30,EIA_WPSR,scheduled,rule-based
+2011-11-28,,FOMC_UNSCHEDULED,unscheduled,unscheduled conference call (no policy announcement)
+2011-11-30,10:30,EIA_WPSR,scheduled,rule-based
+2011-12-02,08:30,NFP,scheduled,BLS schedule page
+2011-12-07,10:30,EIA_WPSR,scheduled,rule-based
+2011-12-13,14:00,FOMC,scheduled,federalreserve.gov calendars
+2011-12-14,10:30,EIA_WPSR,scheduled,rule-based
+2011-12-16,08:30,CPI,scheduled,BLS schedule page
+2011-12-21,10:30,EIA_WPSR,scheduled,rule-based
+2011-12-29,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2012-01-05,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2012-01-06,08:30,NFP,scheduled,BLS schedule page
+2012-01-11,10:30,EIA_WPSR,scheduled,rule-based
+2012-01-19,08:30,CPI,scheduled,BLS schedule page
+2012-01-19,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2012-01-25,10:30,EIA_WPSR,scheduled,rule-based
+2012-01-25,14:00,FOMC,scheduled,federalreserve.gov calendars
+2012-02-01,10:30,EIA_WPSR,scheduled,rule-based
+2012-02-03,08:30,NFP,scheduled,BLS schedule page
+2012-02-08,10:30,EIA_WPSR,scheduled,rule-based
+2012-02-15,10:30,EIA_WPSR,scheduled,rule-based
+2012-02-17,08:30,CPI,scheduled,BLS schedule page
+2012-02-23,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2012-02-29,10:30,EIA_WPSR,scheduled,rule-based
+2012-03-07,10:30,EIA_WPSR,scheduled,rule-based
+2012-03-09,08:30,NFP,scheduled,BLS schedule page
+2012-03-13,14:00,FOMC,scheduled,federalreserve.gov calendars
+2012-03-14,10:30,EIA_WPSR,scheduled,rule-based
+2012-03-16,08:30,CPI,scheduled,BLS schedule page
+2012-03-21,10:30,EIA_WPSR,scheduled,rule-based
+2012-03-28,10:30,EIA_WPSR,scheduled,rule-based
+2012-04-04,10:30,EIA_WPSR,scheduled,rule-based
+2012-04-06,08:30,NFP,scheduled,BLS schedule page
+2012-04-11,10:30,EIA_WPSR,scheduled,rule-based
+2012-04-13,08:30,CPI,scheduled,BLS schedule page
+2012-04-18,10:30,EIA_WPSR,scheduled,rule-based
+2012-04-25,10:30,EIA_WPSR,scheduled,rule-based
+2012-04-25,14:00,FOMC,scheduled,federalreserve.gov calendars
+2012-05-02,10:30,EIA_WPSR,scheduled,rule-based
+2012-05-04,08:30,NFP,scheduled,BLS schedule page
+2012-05-09,10:30,EIA_WPSR,scheduled,rule-based
+2012-05-15,08:30,CPI,scheduled,BLS schedule page
+2012-05-16,10:30,EIA_WPSR,scheduled,rule-based
+2012-05-23,10:30,EIA_WPSR,scheduled,rule-based
+2012-05-31,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2012-06-01,08:30,NFP,scheduled,BLS schedule page
+2012-06-06,10:30,EIA_WPSR,scheduled,rule-based
+2012-06-13,10:30,EIA_WPSR,scheduled,rule-based
+2012-06-14,08:30,CPI,scheduled,BLS schedule page
+2012-06-20,10:30,EIA_WPSR,scheduled,rule-based
+2012-06-20,14:00,FOMC,scheduled,federalreserve.gov calendars
+2012-06-27,10:30,EIA_WPSR,scheduled,rule-based
+2012-07-05,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2012-07-06,08:30,NFP,scheduled,BLS schedule page
+2012-07-11,10:30,EIA_WPSR,scheduled,rule-based
+2012-07-17,08:30,CPI,scheduled,BLS schedule page
+2012-07-18,10:30,EIA_WPSR,scheduled,rule-based
+2012-07-25,10:30,EIA_WPSR,scheduled,rule-based
+2012-08-01,10:30,EIA_WPSR,scheduled,rule-based
+2012-08-01,14:00,FOMC,scheduled,federalreserve.gov calendars
+2012-08-03,08:30,NFP,scheduled,BLS schedule page
+2012-08-08,10:30,EIA_WPSR,scheduled,rule-based
+2012-08-15,08:30,CPI,scheduled,BLS schedule page
+2012-08-15,10:30,EIA_WPSR,scheduled,rule-based
+2012-08-22,10:30,EIA_WPSR,scheduled,rule-based
+2012-08-29,10:30,EIA_WPSR,scheduled,rule-based
+2012-09-06,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2012-09-07,08:30,NFP,scheduled,BLS schedule page
+2012-09-12,10:30,EIA_WPSR,scheduled,rule-based
+2012-09-13,14:00,FOMC,scheduled,federalreserve.gov calendars
+2012-09-14,08:30,CPI,scheduled,BLS schedule page
+2012-09-19,10:30,EIA_WPSR,scheduled,rule-based
+2012-09-26,10:30,EIA_WPSR,scheduled,rule-based
+2012-10-03,10:30,EIA_WPSR,scheduled,rule-based
+2012-10-05,08:30,NFP,scheduled,BLS schedule page
+2012-10-11,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2012-10-16,08:30,CPI,scheduled,BLS schedule page
+2012-10-17,10:30,EIA_WPSR,scheduled,rule-based
+2012-10-24,10:30,EIA_WPSR,scheduled,rule-based
+2012-10-24,14:00,FOMC,scheduled,federalreserve.gov calendars
+2012-10-31,10:30,EIA_WPSR,scheduled,rule-based
+2012-11-02,08:30,NFP,scheduled,BLS schedule page
+2012-11-07,10:30,EIA_WPSR,scheduled,rule-based
+2012-11-15,08:30,CPI,scheduled,BLS schedule page
+2012-11-15,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2012-11-21,10:30,EIA_WPSR,scheduled,rule-based
+2012-11-28,10:30,EIA_WPSR,scheduled,rule-based
+2012-12-05,10:30,EIA_WPSR,scheduled,rule-based
+2012-12-07,08:30,NFP,scheduled,BLS schedule page
+2012-12-12,10:30,EIA_WPSR,scheduled,rule-based
+2012-12-12,14:00,FOMC,scheduled,federalreserve.gov calendars
+2012-12-14,08:30,CPI,scheduled,BLS schedule page
+2012-12-19,10:30,EIA_WPSR,scheduled,rule-based
+2012-12-27,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2013-01-03,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2013-01-04,08:30,NFP,scheduled,BLS schedule page
+2013-01-09,10:30,EIA_WPSR,scheduled,rule-based
+2013-01-16,08:30,CPI,scheduled,BLS schedule page
+2013-01-16,10:30,EIA_WPSR,scheduled,rule-based
+2013-01-24,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2013-01-30,10:30,EIA_WPSR,scheduled,rule-based
+2013-01-30,14:00,FOMC,scheduled,federalreserve.gov calendars
+2013-02-01,08:30,NFP,scheduled,BLS schedule page
+2013-02-06,10:30,EIA_WPSR,scheduled,rule-based
+2013-02-13,10:30,EIA_WPSR,scheduled,rule-based
+2013-02-21,08:30,CPI,scheduled,BLS schedule page
+2013-02-21,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2013-02-27,10:30,EIA_WPSR,scheduled,rule-based
+2013-03-06,10:30,EIA_WPSR,scheduled,rule-based
+2013-03-08,08:30,NFP,scheduled,BLS schedule page
+2013-03-13,10:30,EIA_WPSR,scheduled,rule-based
+2013-03-15,08:30,CPI,scheduled,BLS schedule page
+2013-03-20,10:30,EIA_WPSR,scheduled,rule-based
+2013-03-20,14:00,FOMC,scheduled,federalreserve.gov calendars
+2013-03-27,10:30,EIA_WPSR,scheduled,rule-based
+2013-04-03,10:30,EIA_WPSR,scheduled,rule-based
+2013-04-05,08:30,NFP,scheduled,BLS schedule page
+2013-04-10,10:30,EIA_WPSR,scheduled,rule-based
+2013-04-16,08:30,CPI,scheduled,BLS schedule page
+2013-04-17,10:30,EIA_WPSR,scheduled,rule-based
+2013-04-24,10:30,EIA_WPSR,scheduled,rule-based
+2013-05-01,10:30,EIA_WPSR,scheduled,rule-based
+2013-05-01,14:00,FOMC,scheduled,federalreserve.gov calendars
+2013-05-03,08:30,NFP,scheduled,BLS schedule page
+2013-05-08,10:30,EIA_WPSR,scheduled,rule-based
+2013-05-15,10:30,EIA_WPSR,scheduled,rule-based
+2013-05-16,08:30,CPI,scheduled,BLS schedule page
+2013-05-22,10:30,EIA_WPSR,scheduled,rule-based
+2013-05-30,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2013-06-05,10:30,EIA_WPSR,scheduled,rule-based
+2013-06-07,08:30,NFP,scheduled,BLS schedule page
+2013-06-12,10:30,EIA_WPSR,scheduled,rule-based
+2013-06-18,08:30,CPI,scheduled,BLS schedule page
+2013-06-19,10:30,EIA_WPSR,scheduled,rule-based
+2013-06-19,14:00,FOMC,scheduled,federalreserve.gov calendars
+2013-06-26,10:30,EIA_WPSR,scheduled,rule-based
+2013-07-03,10:30,EIA_WPSR,scheduled,rule-based
+2013-07-05,08:30,NFP,scheduled,BLS schedule page
+2013-07-10,10:30,EIA_WPSR,scheduled,rule-based
+2013-07-16,08:30,CPI,scheduled,BLS schedule page
+2013-07-17,10:30,EIA_WPSR,scheduled,rule-based
+2013-07-24,10:30,EIA_WPSR,scheduled,rule-based
+2013-07-31,10:30,EIA_WPSR,scheduled,rule-based
+2013-07-31,14:00,FOMC,scheduled,federalreserve.gov calendars
+2013-08-02,08:30,NFP,scheduled,BLS schedule page
+2013-08-07,10:30,EIA_WPSR,scheduled,rule-based
+2013-08-14,10:30,EIA_WPSR,scheduled,rule-based
+2013-08-15,08:30,CPI,scheduled,BLS schedule page
+2013-08-21,10:30,EIA_WPSR,scheduled,rule-based
+2013-08-28,10:30,EIA_WPSR,scheduled,rule-based
+2013-09-05,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2013-09-06,08:30,NFP,scheduled,BLS schedule page
+2013-09-11,10:30,EIA_WPSR,scheduled,rule-based
+2013-09-17,08:30,CPI,scheduled,BLS schedule page
+2013-09-18,10:30,EIA_WPSR,scheduled,rule-based
+2013-09-18,14:00,FOMC,scheduled,federalreserve.gov calendars
+2013-09-25,10:30,EIA_WPSR,scheduled,rule-based
+2013-10-02,10:30,EIA_WPSR,scheduled,rule-based
+2013-10-09,10:30,EIA_WPSR,scheduled,rule-based
+2013-10-16,,FOMC_UNSCHEDULED,unscheduled,unscheduled conference call (no policy announcement)
+2013-10-17,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2013-10-22,08:30,NFP,scheduled,BLS schedule page
+2013-10-23,10:30,EIA_WPSR,scheduled,rule-based
+2013-10-30,08:30,CPI,scheduled,BLS schedule page
+2013-10-30,10:30,EIA_WPSR,scheduled,rule-based
+2013-10-30,14:00,FOMC,scheduled,federalreserve.gov calendars
+2013-11-06,10:30,EIA_WPSR,scheduled,rule-based
+2013-11-08,08:30,NFP,scheduled,BLS schedule page
+2013-11-14,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2013-11-20,08:30,CPI,scheduled,BLS schedule page
+2013-11-20,10:30,EIA_WPSR,scheduled,rule-based
+2013-11-27,10:30,EIA_WPSR,scheduled,rule-based
+2013-12-04,10:30,EIA_WPSR,scheduled,rule-based
+2013-12-06,08:30,NFP,scheduled,BLS schedule page
+2013-12-11,10:30,EIA_WPSR,scheduled,rule-based
+2013-12-17,08:30,CPI,scheduled,BLS schedule page
+2013-12-18,10:30,EIA_WPSR,scheduled,rule-based
+2013-12-18,14:00,FOMC,scheduled,federalreserve.gov calendars
+2013-12-26,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2014-01-02,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2014-01-08,10:30,EIA_WPSR,scheduled,rule-based
+2014-01-10,08:30,NFP,scheduled,BLS schedule page
+2014-01-15,10:30,EIA_WPSR,scheduled,rule-based
+2014-01-16,08:30,CPI,scheduled,BLS schedule page
+2014-01-23,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2014-01-29,10:30,EIA_WPSR,scheduled,rule-based
+2014-01-29,14:00,FOMC,scheduled,federalreserve.gov calendars
+2014-02-05,10:30,EIA_WPSR,scheduled,rule-based
+2014-02-07,08:30,NFP,scheduled,BLS schedule page
+2014-02-12,10:30,EIA_WPSR,scheduled,rule-based
+2014-02-20,08:30,CPI,scheduled,BLS schedule page
+2014-02-20,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2014-02-26,10:30,EIA_WPSR,scheduled,rule-based
+2014-03-04,,FOMC_UNSCHEDULED,unscheduled,unscheduled conference call (no policy announcement)
+2014-03-05,10:30,EIA_WPSR,scheduled,rule-based
+2014-03-07,08:30,NFP,scheduled,BLS schedule page
+2014-03-12,10:30,EIA_WPSR,scheduled,rule-based
+2014-03-18,08:30,CPI,scheduled,BLS schedule page
+2014-03-19,10:30,EIA_WPSR,scheduled,rule-based
+2014-03-19,14:00,FOMC,scheduled,federalreserve.gov calendars
+2014-03-26,10:30,EIA_WPSR,scheduled,rule-based
+2014-04-02,10:30,EIA_WPSR,scheduled,rule-based
+2014-04-04,08:30,NFP,scheduled,BLS schedule page
+2014-04-09,10:30,EIA_WPSR,scheduled,rule-based
+2014-04-15,08:30,CPI,scheduled,BLS schedule page
+2014-04-16,10:30,EIA_WPSR,scheduled,rule-based
+2014-04-23,10:30,EIA_WPSR,scheduled,rule-based
+2014-04-30,10:30,EIA_WPSR,scheduled,rule-based
+2014-04-30,14:00,FOMC,scheduled,federalreserve.gov calendars
+2014-05-02,08:30,NFP,scheduled,BLS schedule page
+2014-05-07,10:30,EIA_WPSR,scheduled,rule-based
+2014-05-14,10:30,EIA_WPSR,scheduled,rule-based
+2014-05-15,08:30,CPI,scheduled,BLS schedule page
+2014-05-21,10:30,EIA_WPSR,scheduled,rule-based
+2014-05-29,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2014-06-04,10:30,EIA_WPSR,scheduled,rule-based
+2014-06-06,08:30,NFP,scheduled,BLS schedule page
+2014-06-11,10:30,EIA_WPSR,scheduled,rule-based
+2014-06-17,08:30,CPI,scheduled,BLS schedule page
+2014-06-18,10:30,EIA_WPSR,scheduled,rule-based
+2014-06-18,14:00,FOMC,scheduled,federalreserve.gov calendars
+2014-06-25,10:30,EIA_WPSR,scheduled,rule-based
+2014-07-02,10:30,EIA_WPSR,scheduled,rule-based
+2014-07-03,08:30,NFP,scheduled,BLS schedule page
+2014-07-09,10:30,EIA_WPSR,scheduled,rule-based
+2014-07-16,10:30,EIA_WPSR,scheduled,rule-based
+2014-07-22,08:30,CPI,scheduled,BLS schedule page
+2014-07-23,10:30,EIA_WPSR,scheduled,rule-based
+2014-07-30,10:30,EIA_WPSR,scheduled,rule-based
+2014-07-30,14:00,FOMC,scheduled,federalreserve.gov calendars
+2014-08-01,08:30,NFP,scheduled,BLS schedule page
+2014-08-06,10:30,EIA_WPSR,scheduled,rule-based
+2014-08-13,10:30,EIA_WPSR,scheduled,rule-based
+2014-08-19,08:30,CPI,scheduled,BLS schedule page
+2014-08-20,10:30,EIA_WPSR,scheduled,rule-based
+2014-08-27,10:30,EIA_WPSR,scheduled,rule-based
+2014-09-04,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2014-09-05,08:30,NFP,scheduled,BLS schedule page
+2014-09-10,10:30,EIA_WPSR,scheduled,rule-based
+2014-09-17,08:30,CPI,scheduled,BLS schedule page
+2014-09-17,10:30,EIA_WPSR,scheduled,rule-based
+2014-09-17,14:00,FOMC,scheduled,federalreserve.gov calendars
+2014-09-24,10:30,EIA_WPSR,scheduled,rule-based
+2014-10-01,10:30,EIA_WPSR,scheduled,rule-based
+2014-10-03,08:30,NFP,scheduled,BLS schedule page
+2014-10-08,10:30,EIA_WPSR,scheduled,rule-based
+2014-10-16,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2014-10-22,08:30,CPI,scheduled,BLS schedule page
+2014-10-22,10:30,EIA_WPSR,scheduled,rule-based
+2014-10-29,10:30,EIA_WPSR,scheduled,rule-based
+2014-10-29,14:00,FOMC,scheduled,federalreserve.gov calendars
+2014-11-05,10:30,EIA_WPSR,scheduled,rule-based
+2014-11-07,08:30,NFP,scheduled,BLS schedule page
+2014-11-13,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2014-11-19,10:30,EIA_WPSR,scheduled,rule-based
+2014-11-20,08:30,CPI,scheduled,BLS schedule page
+2014-11-26,10:30,EIA_WPSR,scheduled,rule-based
+2014-12-03,10:30,EIA_WPSR,scheduled,rule-based
+2014-12-05,08:30,NFP,scheduled,BLS schedule page
+2014-12-10,10:30,EIA_WPSR,scheduled,rule-based
+2014-12-17,08:30,CPI,scheduled,BLS schedule page
+2014-12-17,10:30,EIA_WPSR,scheduled,rule-based
+2014-12-17,14:00,FOMC,scheduled,federalreserve.gov calendars
+2014-12-24,10:30,EIA_WPSR,scheduled,rule-based
+2014-12-31,10:30,EIA_WPSR,scheduled,rule-based
+2015-01-07,10:30,EIA_WPSR,scheduled,rule-based
+2015-01-09,08:30,NFP,scheduled,BLS schedule page
+2015-01-14,10:30,EIA_WPSR,scheduled,rule-based
+2015-01-16,08:30,CPI,scheduled,BLS schedule page
+2015-01-22,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2015-01-28,10:30,EIA_WPSR,scheduled,rule-based
+2015-01-28,14:00,FOMC,scheduled,federalreserve.gov calendars
+2015-02-04,10:30,EIA_WPSR,scheduled,rule-based
+2015-02-06,08:30,NFP,scheduled,BLS schedule page
+2015-02-11,10:30,EIA_WPSR,scheduled,rule-based
+2015-02-19,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2015-02-25,10:30,EIA_WPSR,scheduled,rule-based
+2015-02-26,08:30,CPI,scheduled,BLS schedule page
+2015-03-04,10:30,EIA_WPSR,scheduled,rule-based
+2015-03-06,08:30,NFP,scheduled,BLS schedule page
+2015-03-11,10:30,EIA_WPSR,scheduled,rule-based
+2015-03-18,10:30,EIA_WPSR,scheduled,rule-based
+2015-03-18,14:00,FOMC,scheduled,federalreserve.gov calendars
+2015-03-24,08:30,CPI,scheduled,BLS schedule page
+2015-03-25,10:30,EIA_WPSR,scheduled,rule-based
+2015-04-01,10:30,EIA_WPSR,scheduled,rule-based
+2015-04-03,08:30,NFP,scheduled,BLS schedule page
+2015-04-08,10:30,EIA_WPSR,scheduled,rule-based
+2015-04-15,10:30,EIA_WPSR,scheduled,rule-based
+2015-04-17,08:30,CPI,scheduled,BLS schedule page
+2015-04-22,10:30,EIA_WPSR,scheduled,rule-based
+2015-04-29,10:30,EIA_WPSR,scheduled,rule-based
+2015-04-29,14:00,FOMC,scheduled,federalreserve.gov calendars
+2015-05-06,10:30,EIA_WPSR,scheduled,rule-based
+2015-05-08,08:30,NFP,scheduled,BLS schedule page
+2015-05-13,10:30,EIA_WPSR,scheduled,rule-based
+2015-05-20,10:30,EIA_WPSR,scheduled,rule-based
+2015-05-22,08:30,CPI,scheduled,BLS schedule page
+2015-05-28,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2015-06-03,10:30,EIA_WPSR,scheduled,rule-based
+2015-06-05,08:30,NFP,scheduled,BLS schedule page
+2015-06-10,10:30,EIA_WPSR,scheduled,rule-based
+2015-06-17,10:30,EIA_WPSR,scheduled,rule-based
+2015-06-17,14:00,FOMC,scheduled,federalreserve.gov calendars
+2015-06-18,08:30,CPI,scheduled,BLS schedule page
+2015-06-24,10:30,EIA_WPSR,scheduled,rule-based
+2015-07-01,10:30,EIA_WPSR,scheduled,rule-based
+2015-07-02,08:30,NFP,scheduled,BLS schedule page
+2015-07-08,10:30,EIA_WPSR,scheduled,rule-based
+2015-07-15,10:30,EIA_WPSR,scheduled,rule-based
+2015-07-17,08:30,CPI,scheduled,BLS schedule page
+2015-07-22,10:30,EIA_WPSR,scheduled,rule-based
+2015-07-29,10:30,EIA_WPSR,scheduled,rule-based
+2015-07-29,14:00,FOMC,scheduled,federalreserve.gov calendars
+2015-08-05,10:30,EIA_WPSR,scheduled,rule-based
+2015-08-07,08:30,NFP,scheduled,BLS schedule page
+2015-08-12,10:30,EIA_WPSR,scheduled,rule-based
+2015-08-19,08:30,CPI,scheduled,BLS schedule page
+2015-08-19,10:30,EIA_WPSR,scheduled,rule-based
+2015-08-26,10:30,EIA_WPSR,scheduled,rule-based
+2015-09-02,10:30,EIA_WPSR,scheduled,rule-based
+2015-09-04,08:30,NFP,scheduled,BLS schedule page
+2015-09-10,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2015-09-16,08:30,CPI,scheduled,BLS schedule page
+2015-09-16,10:30,EIA_WPSR,scheduled,rule-based
+2015-09-17,14:00,FOMC,scheduled,federalreserve.gov calendars
+2015-09-23,10:30,EIA_WPSR,scheduled,rule-based
+2015-09-30,10:30,EIA_WPSR,scheduled,rule-based
+2015-10-02,08:30,NFP,scheduled,BLS schedule page
+2015-10-07,10:30,EIA_WPSR,scheduled,rule-based
+2015-10-15,08:30,CPI,scheduled,BLS schedule page
+2015-10-15,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2015-10-21,10:30,EIA_WPSR,scheduled,rule-based
+2015-10-28,10:30,EIA_WPSR,scheduled,rule-based
+2015-10-28,14:00,FOMC,scheduled,federalreserve.gov calendars
+2015-11-04,10:30,EIA_WPSR,scheduled,rule-based
+2015-11-06,08:30,NFP,scheduled,BLS schedule page
+2015-11-12,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2015-11-17,08:30,CPI,scheduled,BLS schedule page
+2015-11-18,10:30,EIA_WPSR,scheduled,rule-based
+2015-11-25,10:30,EIA_WPSR,scheduled,rule-based
+2015-12-02,10:30,EIA_WPSR,scheduled,rule-based
+2015-12-04,08:30,NFP,scheduled,BLS schedule page
+2015-12-09,10:30,EIA_WPSR,scheduled,rule-based
+2015-12-15,08:30,CPI,scheduled,BLS schedule page
+2015-12-16,10:30,EIA_WPSR,scheduled,rule-based
+2015-12-16,14:00,FOMC,scheduled,federalreserve.gov calendars
+2015-12-23,10:30,EIA_WPSR,scheduled,rule-based
+2015-12-30,10:30,EIA_WPSR,scheduled,rule-based
+2016-01-06,10:30,EIA_WPSR,scheduled,rule-based
+2016-01-08,08:30,NFP,scheduled,BLS schedule page
+2016-01-13,10:30,EIA_WPSR,scheduled,rule-based
+2016-01-20,08:30,CPI,scheduled,BLS schedule page
+2016-01-21,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2016-01-27,10:30,EIA_WPSR,scheduled,rule-based
+2016-01-27,14:00,FOMC,scheduled,federalreserve.gov calendars
+2016-02-03,10:30,EIA_WPSR,scheduled,rule-based
+2016-02-05,08:30,NFP,scheduled,BLS schedule page
+2016-02-10,10:30,EIA_WPSR,scheduled,rule-based
+2016-02-18,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2016-02-19,08:30,CPI,scheduled,BLS schedule page
+2016-02-24,10:30,EIA_WPSR,scheduled,rule-based
+2016-03-02,10:30,EIA_WPSR,scheduled,rule-based
+2016-03-04,08:30,NFP,scheduled,BLS schedule page
+2016-03-09,10:30,EIA_WPSR,scheduled,rule-based
+2016-03-16,08:30,CPI,scheduled,BLS schedule page
+2016-03-16,10:30,EIA_WPSR,scheduled,rule-based
+2016-03-16,14:00,FOMC,scheduled,federalreserve.gov calendars
+2016-03-23,10:30,EIA_WPSR,scheduled,rule-based
+2016-03-30,10:30,EIA_WPSR,scheduled,rule-based
+2016-04-01,08:30,NFP,scheduled,BLS schedule page
+2016-04-06,10:30,EIA_WPSR,scheduled,rule-based
+2016-04-13,10:30,EIA_WPSR,scheduled,rule-based
+2016-04-14,08:30,CPI,scheduled,BLS schedule page
+2016-04-20,10:30,EIA_WPSR,scheduled,rule-based
+2016-04-27,10:30,EIA_WPSR,scheduled,rule-based
+2016-04-27,14:00,FOMC,scheduled,federalreserve.gov calendars
+2016-05-04,10:30,EIA_WPSR,scheduled,rule-based
+2016-05-06,08:30,NFP,scheduled,BLS schedule page
+2016-05-11,10:30,EIA_WPSR,scheduled,rule-based
+2016-05-17,08:30,CPI,scheduled,BLS schedule page
+2016-05-18,10:30,EIA_WPSR,scheduled,rule-based
+2016-05-25,10:30,EIA_WPSR,scheduled,rule-based
+2016-06-02,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2016-06-03,08:30,NFP,scheduled,BLS schedule page
+2016-06-08,10:30,EIA_WPSR,scheduled,rule-based
+2016-06-15,10:30,EIA_WPSR,scheduled,rule-based
+2016-06-15,14:00,FOMC,scheduled,federalreserve.gov calendars
+2016-06-16,08:30,CPI,scheduled,BLS schedule page
+2016-06-22,10:30,EIA_WPSR,scheduled,rule-based
+2016-06-29,10:30,EIA_WPSR,scheduled,rule-based
+2016-07-07,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2016-07-08,08:30,NFP,scheduled,BLS schedule page
+2016-07-13,10:30,EIA_WPSR,scheduled,rule-based
+2016-07-15,08:30,CPI,scheduled,BLS schedule page
+2016-07-20,10:30,EIA_WPSR,scheduled,rule-based
+2016-07-27,10:30,EIA_WPSR,scheduled,rule-based
+2016-07-27,14:00,FOMC,scheduled,federalreserve.gov calendars
+2016-08-03,10:30,EIA_WPSR,scheduled,rule-based
+2016-08-05,08:30,NFP,scheduled,BLS schedule page
+2016-08-10,10:30,EIA_WPSR,scheduled,rule-based
+2016-08-16,08:30,CPI,scheduled,BLS schedule page
+2016-08-17,10:30,EIA_WPSR,scheduled,rule-based
+2016-08-24,10:30,EIA_WPSR,scheduled,rule-based
+2016-08-31,10:30,EIA_WPSR,scheduled,rule-based
+2016-09-02,08:30,NFP,scheduled,BLS schedule page
+2016-09-08,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2016-09-14,10:30,EIA_WPSR,scheduled,rule-based
+2016-09-16,08:30,CPI,scheduled,BLS schedule page
+2016-09-21,10:30,EIA_WPSR,scheduled,rule-based
+2016-09-21,14:00,FOMC,scheduled,federalreserve.gov calendars
+2016-09-28,10:30,EIA_WPSR,scheduled,rule-based
+2016-10-05,10:30,EIA_WPSR,scheduled,rule-based
+2016-10-07,08:30,NFP,scheduled,BLS schedule page
+2016-10-13,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2016-10-18,08:30,CPI,scheduled,BLS schedule page
+2016-10-19,10:30,EIA_WPSR,scheduled,rule-based
+2016-10-26,10:30,EIA_WPSR,scheduled,rule-based
+2016-11-02,10:30,EIA_WPSR,scheduled,rule-based
+2016-11-02,14:00,FOMC,scheduled,federalreserve.gov calendars
+2016-11-04,08:30,NFP,scheduled,BLS schedule page
+2016-11-09,10:30,EIA_WPSR,scheduled,rule-based
+2016-11-16,10:30,EIA_WPSR,scheduled,rule-based
+2016-11-17,08:30,CPI,scheduled,BLS schedule page
+2016-11-23,10:30,EIA_WPSR,scheduled,rule-based
+2016-11-30,10:30,EIA_WPSR,scheduled,rule-based
+2016-12-02,08:30,NFP,scheduled,BLS schedule page
+2016-12-07,10:30,EIA_WPSR,scheduled,rule-based
+2016-12-14,10:30,EIA_WPSR,scheduled,rule-based
+2016-12-14,14:00,FOMC,scheduled,federalreserve.gov calendars
+2016-12-15,08:30,CPI,scheduled,BLS schedule page
+2016-12-21,10:30,EIA_WPSR,scheduled,rule-based
+2016-12-29,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2017-01-05,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2017-01-06,08:30,NFP,scheduled,BLS schedule page
+2017-01-11,10:30,EIA_WPSR,scheduled,rule-based
+2017-01-18,08:30,CPI,scheduled,BLS schedule page
+2017-01-19,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2017-01-25,10:30,EIA_WPSR,scheduled,rule-based
+2017-02-01,10:30,EIA_WPSR,scheduled,rule-based
+2017-02-01,14:00,FOMC,scheduled,federalreserve.gov calendars
+2017-02-03,08:30,NFP,scheduled,BLS schedule page
+2017-02-08,10:30,EIA_WPSR,scheduled,rule-based
+2017-02-15,08:30,CPI,scheduled,BLS schedule page
+2017-02-15,10:30,EIA_WPSR,scheduled,rule-based
+2017-02-23,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2017-03-01,10:30,EIA_WPSR,scheduled,rule-based
+2017-03-08,10:30,EIA_WPSR,scheduled,rule-based
+2017-03-10,08:30,NFP,scheduled,BLS schedule page
+2017-03-15,08:30,CPI,scheduled,BLS schedule page
+2017-03-15,10:30,EIA_WPSR,scheduled,rule-based
+2017-03-15,14:00,FOMC,scheduled,federalreserve.gov calendars
+2017-03-22,10:30,EIA_WPSR,scheduled,rule-based
+2017-03-29,10:30,EIA_WPSR,scheduled,rule-based
+2017-04-05,10:30,EIA_WPSR,scheduled,rule-based
+2017-04-07,08:30,NFP,scheduled,BLS schedule page
+2017-04-12,10:30,EIA_WPSR,scheduled,rule-based
+2017-04-14,08:30,CPI,scheduled,BLS schedule page
+2017-04-19,10:30,EIA_WPSR,scheduled,rule-based
+2017-04-26,10:30,EIA_WPSR,scheduled,rule-based
+2017-05-03,10:30,EIA_WPSR,scheduled,rule-based
+2017-05-03,14:00,FOMC,scheduled,federalreserve.gov calendars
+2017-05-05,08:30,NFP,scheduled,BLS schedule page
+2017-05-10,10:30,EIA_WPSR,scheduled,rule-based
+2017-05-12,08:30,CPI,scheduled,BLS schedule page
+2017-05-17,10:30,EIA_WPSR,scheduled,rule-based
+2017-05-24,10:30,EIA_WPSR,scheduled,rule-based
+2017-06-01,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2017-06-02,08:30,NFP,scheduled,BLS schedule page
+2017-06-07,10:30,EIA_WPSR,scheduled,rule-based
+2017-06-14,08:30,CPI,scheduled,BLS schedule page
+2017-06-14,10:30,EIA_WPSR,scheduled,rule-based
+2017-06-14,14:00,FOMC,scheduled,federalreserve.gov calendars
+2017-06-21,10:30,EIA_WPSR,scheduled,rule-based
+2017-06-28,10:30,EIA_WPSR,scheduled,rule-based
+2017-07-06,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2017-07-07,08:30,NFP,scheduled,BLS schedule page
+2017-07-12,10:30,EIA_WPSR,scheduled,rule-based
+2017-07-14,08:30,CPI,scheduled,BLS schedule page
+2017-07-19,10:30,EIA_WPSR,scheduled,rule-based
+2017-07-26,10:30,EIA_WPSR,scheduled,rule-based
+2017-07-26,14:00,FOMC,scheduled,federalreserve.gov calendars
+2017-08-02,10:30,EIA_WPSR,scheduled,rule-based
+2017-08-04,08:30,NFP,scheduled,BLS schedule page
+2017-08-09,10:30,EIA_WPSR,scheduled,rule-based
+2017-08-11,08:30,CPI,scheduled,BLS schedule page
+2017-08-16,10:30,EIA_WPSR,scheduled,rule-based
+2017-08-23,10:30,EIA_WPSR,scheduled,rule-based
+2017-08-30,10:30,EIA_WPSR,scheduled,rule-based
+2017-09-01,08:30,NFP,scheduled,BLS schedule page
+2017-09-07,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2017-09-13,10:30,EIA_WPSR,scheduled,rule-based
+2017-09-14,08:30,CPI,scheduled,BLS schedule page
+2017-09-20,10:30,EIA_WPSR,scheduled,rule-based
+2017-09-20,14:00,FOMC,scheduled,federalreserve.gov calendars
+2017-09-27,10:30,EIA_WPSR,scheduled,rule-based
+2017-10-04,10:30,EIA_WPSR,scheduled,rule-based
+2017-10-06,08:30,NFP,scheduled,BLS schedule page
+2017-10-12,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2017-10-13,08:30,CPI,scheduled,BLS schedule page
+2017-10-18,10:30,EIA_WPSR,scheduled,rule-based
+2017-10-25,10:30,EIA_WPSR,scheduled,rule-based
+2017-11-01,10:30,EIA_WPSR,scheduled,rule-based
+2017-11-01,14:00,FOMC,scheduled,federalreserve.gov calendars
+2017-11-03,08:30,NFP,scheduled,BLS schedule page
+2017-11-08,10:30,EIA_WPSR,scheduled,rule-based
+2017-11-15,08:30,CPI,scheduled,BLS schedule page
+2017-11-15,10:30,EIA_WPSR,scheduled,rule-based
+2017-11-22,10:30,EIA_WPSR,scheduled,rule-based
+2017-11-29,10:30,EIA_WPSR,scheduled,rule-based
+2017-12-06,10:30,EIA_WPSR,scheduled,rule-based
+2017-12-08,08:30,NFP,scheduled,BLS schedule page
+2017-12-13,08:30,CPI,scheduled,BLS schedule page
+2017-12-13,10:30,EIA_WPSR,scheduled,rule-based
+2017-12-13,14:00,FOMC,scheduled,federalreserve.gov calendars
+2017-12-20,10:30,EIA_WPSR,scheduled,rule-based
+2017-12-28,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2018-01-04,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2018-01-05,08:30,NFP,scheduled,BLS schedule page
+2018-01-10,10:30,EIA_WPSR,scheduled,rule-based
+2018-01-12,08:30,CPI,scheduled,BLS schedule page
+2018-01-18,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2018-01-24,10:30,EIA_WPSR,scheduled,rule-based
+2018-01-31,10:30,EIA_WPSR,scheduled,rule-based
+2018-01-31,14:00,FOMC,scheduled,federalreserve.gov calendars
+2018-02-02,08:30,NFP,scheduled,BLS schedule page
+2018-02-07,10:30,EIA_WPSR,scheduled,rule-based
+2018-02-14,08:30,CPI,scheduled,BLS schedule page
+2018-02-14,10:30,EIA_WPSR,scheduled,rule-based
+2018-02-22,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2018-02-28,10:30,EIA_WPSR,scheduled,rule-based
+2018-03-07,10:30,EIA_WPSR,scheduled,rule-based
+2018-03-09,08:30,NFP,scheduled,BLS schedule page
+2018-03-13,08:30,CPI,scheduled,BLS schedule page
+2018-03-14,10:30,EIA_WPSR,scheduled,rule-based
+2018-03-21,10:30,EIA_WPSR,scheduled,rule-based
+2018-03-21,14:00,FOMC,scheduled,federalreserve.gov calendars
+2018-03-28,10:30,EIA_WPSR,scheduled,rule-based
+2018-04-04,10:30,EIA_WPSR,scheduled,rule-based
+2018-04-06,08:30,NFP,scheduled,BLS schedule page
+2018-04-11,08:30,CPI,scheduled,BLS schedule page
+2018-04-11,10:30,EIA_WPSR,scheduled,rule-based
+2018-04-18,10:30,EIA_WPSR,scheduled,rule-based
+2018-04-25,10:30,EIA_WPSR,scheduled,rule-based
+2018-05-02,10:30,EIA_WPSR,scheduled,rule-based
+2018-05-02,14:00,FOMC,scheduled,federalreserve.gov calendars
+2018-05-04,08:30,NFP,scheduled,BLS schedule page
+2018-05-09,10:30,EIA_WPSR,scheduled,rule-based
+2018-05-10,08:30,CPI,scheduled,BLS schedule page
+2018-05-16,10:30,EIA_WPSR,scheduled,rule-based
+2018-05-23,10:30,EIA_WPSR,scheduled,rule-based
+2018-05-31,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2018-06-01,08:30,NFP,scheduled,BLS schedule page
+2018-06-06,10:30,EIA_WPSR,scheduled,rule-based
+2018-06-12,08:30,CPI,scheduled,BLS schedule page
+2018-06-13,10:30,EIA_WPSR,scheduled,rule-based
+2018-06-13,14:00,FOMC,scheduled,federalreserve.gov calendars
+2018-06-20,10:30,EIA_WPSR,scheduled,rule-based
+2018-06-27,10:30,EIA_WPSR,scheduled,rule-based
+2018-07-05,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2018-07-06,08:30,NFP,scheduled,BLS schedule page
+2018-07-11,10:30,EIA_WPSR,scheduled,rule-based
+2018-07-12,08:30,CPI,scheduled,BLS schedule page
+2018-07-18,10:30,EIA_WPSR,scheduled,rule-based
+2018-07-25,10:30,EIA_WPSR,scheduled,rule-based
+2018-08-01,10:30,EIA_WPSR,scheduled,rule-based
+2018-08-01,14:00,FOMC,scheduled,federalreserve.gov calendars
+2018-08-03,08:30,NFP,scheduled,BLS schedule page
+2018-08-08,10:30,EIA_WPSR,scheduled,rule-based
+2018-08-10,08:30,CPI,scheduled,BLS schedule page
+2018-08-15,10:30,EIA_WPSR,scheduled,rule-based
+2018-08-22,10:30,EIA_WPSR,scheduled,rule-based
+2018-08-29,10:30,EIA_WPSR,scheduled,rule-based
+2018-09-06,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2018-09-07,08:30,NFP,scheduled,BLS schedule page
+2018-09-12,10:30,EIA_WPSR,scheduled,rule-based
+2018-09-13,08:30,CPI,scheduled,BLS schedule page
+2018-09-19,10:30,EIA_WPSR,scheduled,rule-based
+2018-09-26,10:30,EIA_WPSR,scheduled,rule-based
+2018-09-26,14:00,FOMC,scheduled,federalreserve.gov calendars
+2018-10-03,10:30,EIA_WPSR,scheduled,rule-based
+2018-10-05,08:30,NFP,scheduled,BLS schedule page
+2018-10-11,08:30,CPI,scheduled,BLS schedule page
+2018-10-11,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2018-10-17,10:30,EIA_WPSR,scheduled,rule-based
+2018-10-24,10:30,EIA_WPSR,scheduled,rule-based
+2018-10-31,10:30,EIA_WPSR,scheduled,rule-based
+2018-11-02,08:30,NFP,scheduled,BLS schedule page
+2018-11-07,10:30,EIA_WPSR,scheduled,rule-based
+2018-11-08,14:00,FOMC,scheduled,federalreserve.gov calendars
+2018-11-14,08:30,CPI,scheduled,BLS schedule page
+2018-11-15,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2018-11-21,10:30,EIA_WPSR,scheduled,rule-based
+2018-11-28,10:30,EIA_WPSR,scheduled,rule-based
+2018-12-05,10:30,EIA_WPSR,scheduled,rule-based
+2018-12-07,08:30,NFP,scheduled,BLS schedule page
+2018-12-12,08:30,CPI,scheduled,BLS schedule page
+2018-12-12,10:30,EIA_WPSR,scheduled,rule-based
+2018-12-19,10:30,EIA_WPSR,scheduled,rule-based
+2018-12-19,14:00,FOMC,scheduled,federalreserve.gov calendars
+2018-12-27,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2019-01-03,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2019-01-04,08:30,NFP,scheduled,BLS schedule page
+2019-01-09,10:30,EIA_WPSR,scheduled,rule-based
+2019-01-11,08:30,CPI,scheduled,BLS schedule page
+2019-01-16,10:30,EIA_WPSR,scheduled,rule-based
+2019-01-24,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2019-01-30,10:30,EIA_WPSR,scheduled,rule-based
+2019-01-30,14:00,FOMC,scheduled,federalreserve.gov calendars
+2019-02-01,08:30,NFP,scheduled,BLS schedule page
+2019-02-06,10:30,EIA_WPSR,scheduled,rule-based
+2019-02-13,08:30,CPI,scheduled,BLS schedule page
+2019-02-13,10:30,EIA_WPSR,scheduled,rule-based
+2019-02-21,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2019-02-27,10:30,EIA_WPSR,scheduled,rule-based
+2019-03-06,10:30,EIA_WPSR,scheduled,rule-based
+2019-03-08,08:30,NFP,scheduled,BLS schedule page
+2019-03-12,08:30,CPI,scheduled,BLS schedule page
+2019-03-13,10:30,EIA_WPSR,scheduled,rule-based
+2019-03-20,10:30,EIA_WPSR,scheduled,rule-based
+2019-03-20,14:00,FOMC,scheduled,federalreserve.gov calendars
+2019-03-27,10:30,EIA_WPSR,scheduled,rule-based
+2019-04-03,10:30,EIA_WPSR,scheduled,rule-based
+2019-04-05,08:30,NFP,scheduled,BLS schedule page
+2019-04-10,08:30,CPI,scheduled,BLS schedule page
+2019-04-10,10:30,EIA_WPSR,scheduled,rule-based
+2019-04-17,10:30,EIA_WPSR,scheduled,rule-based
+2019-04-24,10:30,EIA_WPSR,scheduled,rule-based
+2019-05-01,10:30,EIA_WPSR,scheduled,rule-based
+2019-05-01,14:00,FOMC,scheduled,federalreserve.gov calendars
+2019-05-03,08:30,NFP,scheduled,BLS schedule page
+2019-05-08,10:30,EIA_WPSR,scheduled,rule-based
+2019-05-10,08:30,CPI,scheduled,BLS schedule page
+2019-05-15,10:30,EIA_WPSR,scheduled,rule-based
+2019-05-22,10:30,EIA_WPSR,scheduled,rule-based
+2019-05-30,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2019-06-05,10:30,EIA_WPSR,scheduled,rule-based
+2019-06-07,08:30,NFP,scheduled,BLS schedule page
+2019-06-12,08:30,CPI,scheduled,BLS schedule page
+2019-06-12,10:30,EIA_WPSR,scheduled,rule-based
+2019-06-19,10:30,EIA_WPSR,scheduled,rule-based
+2019-06-19,14:00,FOMC,scheduled,federalreserve.gov calendars
+2019-06-26,10:30,EIA_WPSR,scheduled,rule-based
+2019-07-03,10:30,EIA_WPSR,scheduled,rule-based
+2019-07-05,08:30,NFP,scheduled,BLS schedule page
+2019-07-10,10:30,EIA_WPSR,scheduled,rule-based
+2019-07-11,08:30,CPI,scheduled,BLS schedule page
+2019-07-17,10:30,EIA_WPSR,scheduled,rule-based
+2019-07-24,10:30,EIA_WPSR,scheduled,rule-based
+2019-07-31,10:30,EIA_WPSR,scheduled,rule-based
+2019-07-31,14:00,FOMC,scheduled,federalreserve.gov calendars
+2019-08-02,08:30,NFP,scheduled,BLS schedule page
+2019-08-07,10:30,EIA_WPSR,scheduled,rule-based
+2019-08-13,08:30,CPI,scheduled,BLS schedule page
+2019-08-14,10:30,EIA_WPSR,scheduled,rule-based
+2019-08-21,10:30,EIA_WPSR,scheduled,rule-based
+2019-08-28,10:30,EIA_WPSR,scheduled,rule-based
+2019-09-05,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2019-09-06,08:30,NFP,scheduled,BLS schedule page
+2019-09-11,10:30,EIA_WPSR,scheduled,rule-based
+2019-09-12,08:30,CPI,scheduled,BLS schedule page
+2019-09-18,10:30,EIA_WPSR,scheduled,rule-based
+2019-09-18,14:00,FOMC,scheduled,federalreserve.gov calendars
+2019-09-25,10:30,EIA_WPSR,scheduled,rule-based
+2019-10-02,10:30,EIA_WPSR,scheduled,rule-based
+2019-10-04,,FOMC_UNSCHEDULED,unscheduled,unscheduled conference call (no policy change announced)
+2019-10-04,08:30,NFP,scheduled,BLS schedule page
+2019-10-09,10:30,EIA_WPSR,scheduled,rule-based
+2019-10-10,08:30,CPI,scheduled,BLS schedule page
+2019-10-17,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2019-10-23,10:30,EIA_WPSR,scheduled,rule-based
+2019-10-30,10:30,EIA_WPSR,scheduled,rule-based
+2019-10-30,14:00,FOMC,scheduled,federalreserve.gov calendars
+2019-11-01,08:30,NFP,scheduled,BLS schedule page
+2019-11-06,10:30,EIA_WPSR,scheduled,rule-based
+2019-11-13,08:30,CPI,scheduled,BLS schedule page
+2019-11-14,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2019-11-20,10:30,EIA_WPSR,scheduled,rule-based
+2019-11-27,10:30,EIA_WPSR,scheduled,rule-based
+2019-12-04,10:30,EIA_WPSR,scheduled,rule-based
+2019-12-06,08:30,NFP,scheduled,BLS schedule page
+2019-12-11,08:30,CPI,scheduled,BLS schedule page
+2019-12-11,10:30,EIA_WPSR,scheduled,rule-based
+2019-12-11,14:00,FOMC,scheduled,federalreserve.gov calendars
+2019-12-18,10:30,EIA_WPSR,scheduled,rule-based
+2019-12-26,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2020-01-02,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2020-01-08,10:30,EIA_WPSR,scheduled,rule-based
+2020-01-10,08:30,NFP,scheduled,BLS schedule page
+2020-01-14,08:30,CPI,scheduled,BLS schedule page
+2020-01-15,10:30,EIA_WPSR,scheduled,rule-based
+2020-01-23,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2020-01-29,10:30,EIA_WPSR,scheduled,rule-based
+2020-01-29,14:00,FOMC,scheduled,federalreserve.gov calendars
+2020-02-05,10:30,EIA_WPSR,scheduled,rule-based
+2020-02-07,08:30,NFP,scheduled,BLS schedule page
+2020-02-12,10:30,EIA_WPSR,scheduled,rule-based
+2020-02-13,08:30,CPI,scheduled,BLS schedule page
+2020-02-20,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2020-02-26,10:30,EIA_WPSR,scheduled,rule-based
+2020-03-02,,FOMC_UNSCHEDULED,unscheduled,unscheduled conference call (rate cut announced 2020-03-03)
+2020-03-04,10:30,EIA_WPSR,scheduled,rule-based
+2020-03-06,08:30,NFP,scheduled,BLS schedule page
+2020-03-11,08:30,CPI,scheduled,BLS schedule page
+2020-03-11,10:30,EIA_WPSR,scheduled,rule-based
+2020-03-15,,FOMC_UNSCHEDULED,unscheduled,unscheduled meeting (Sunday; rates to zero + QE)
+2020-03-18,10:30,EIA_WPSR,scheduled,rule-based
+2020-03-25,10:30,EIA_WPSR,scheduled,rule-based
+2020-04-01,10:30,EIA_WPSR,scheduled,rule-based
+2020-04-03,08:30,NFP,scheduled,BLS schedule page
+2020-04-08,10:30,EIA_WPSR,scheduled,rule-based
+2020-04-10,08:30,CPI,scheduled,BLS schedule page
+2020-04-15,10:30,EIA_WPSR,scheduled,rule-based
+2020-04-22,10:30,EIA_WPSR,scheduled,rule-based
+2020-04-29,10:30,EIA_WPSR,scheduled,rule-based
+2020-04-29,14:00,FOMC,scheduled,federalreserve.gov calendars
+2020-05-06,10:30,EIA_WPSR,scheduled,rule-based
+2020-05-08,08:30,NFP,scheduled,BLS schedule page
+2020-05-12,08:30,CPI,scheduled,BLS schedule page
+2020-05-13,10:30,EIA_WPSR,scheduled,rule-based
+2020-05-20,10:30,EIA_WPSR,scheduled,rule-based
+2020-05-28,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2020-06-03,10:30,EIA_WPSR,scheduled,rule-based
+2020-06-05,08:30,NFP,scheduled,BLS schedule page
+2020-06-10,08:30,CPI,scheduled,BLS schedule page
+2020-06-10,10:30,EIA_WPSR,scheduled,rule-based
+2020-06-10,14:00,FOMC,scheduled,federalreserve.gov calendars
+2020-06-17,10:30,EIA_WPSR,scheduled,rule-based
+2020-06-24,10:30,EIA_WPSR,scheduled,rule-based
+2020-07-01,10:30,EIA_WPSR,scheduled,rule-based
+2020-07-02,08:30,NFP,scheduled,BLS schedule page
+2020-07-08,10:30,EIA_WPSR,scheduled,rule-based
+2020-07-14,08:30,CPI,scheduled,BLS schedule page
+2020-07-15,10:30,EIA_WPSR,scheduled,rule-based
+2020-07-22,10:30,EIA_WPSR,scheduled,rule-based
+2020-07-29,10:30,EIA_WPSR,scheduled,rule-based
+2020-07-29,14:00,FOMC,scheduled,federalreserve.gov calendars
+2020-08-05,10:30,EIA_WPSR,scheduled,rule-based
+2020-08-07,08:30,NFP,scheduled,BLS schedule page
+2020-08-12,08:30,CPI,scheduled,BLS schedule page
+2020-08-12,10:30,EIA_WPSR,scheduled,rule-based
+2020-08-19,10:30,EIA_WPSR,scheduled,rule-based
+2020-08-26,10:30,EIA_WPSR,scheduled,rule-based
+2020-09-02,10:30,EIA_WPSR,scheduled,rule-based
+2020-09-04,08:30,NFP,scheduled,BLS schedule page
+2020-09-10,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2020-09-11,08:30,CPI,scheduled,BLS schedule page
+2020-09-16,10:30,EIA_WPSR,scheduled,rule-based
+2020-09-16,14:00,FOMC,scheduled,federalreserve.gov calendars
+2020-09-23,10:30,EIA_WPSR,scheduled,rule-based
+2020-09-30,10:30,EIA_WPSR,scheduled,rule-based
+2020-10-02,08:30,NFP,scheduled,BLS schedule page
+2020-10-07,10:30,EIA_WPSR,scheduled,rule-based
+2020-10-13,08:30,CPI,scheduled,BLS schedule page
+2020-10-15,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2020-10-21,10:30,EIA_WPSR,scheduled,rule-based
+2020-10-28,10:30,EIA_WPSR,scheduled,rule-based
+2020-11-04,10:30,EIA_WPSR,scheduled,rule-based
+2020-11-05,14:00,FOMC,scheduled,federalreserve.gov calendars
+2020-11-06,08:30,NFP,scheduled,BLS schedule page
+2020-11-12,08:30,CPI,scheduled,BLS schedule page
+2020-11-12,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2020-11-18,10:30,EIA_WPSR,scheduled,rule-based
+2020-11-25,10:30,EIA_WPSR,scheduled,rule-based
+2020-12-02,10:30,EIA_WPSR,scheduled,rule-based
+2020-12-04,08:30,NFP,scheduled,BLS schedule page
+2020-12-09,10:30,EIA_WPSR,scheduled,rule-based
+2020-12-10,08:30,CPI,scheduled,BLS schedule page
+2020-12-16,10:30,EIA_WPSR,scheduled,rule-based
+2020-12-16,14:00,FOMC,scheduled,federalreserve.gov calendars
+2020-12-23,10:30,EIA_WPSR,scheduled,rule-based
+2020-12-30,10:30,EIA_WPSR,scheduled,rule-based
+2021-01-06,10:30,EIA_WPSR,scheduled,rule-based
+2021-01-08,08:30,NFP,scheduled,BLS schedule page
+2021-01-13,08:30,CPI,scheduled,BLS schedule page
+2021-01-13,10:30,EIA_WPSR,scheduled,rule-based
+2021-01-21,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2021-01-27,10:30,EIA_WPSR,scheduled,rule-based
+2021-01-27,14:00,FOMC,scheduled,federalreserve.gov calendars
+2021-02-03,10:30,EIA_WPSR,scheduled,rule-based
+2021-02-05,08:30,NFP,scheduled,BLS schedule page
+2021-02-10,08:30,CPI,scheduled,BLS schedule page
+2021-02-10,10:30,EIA_WPSR,scheduled,rule-based
+2021-02-18,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2021-02-24,10:30,EIA_WPSR,scheduled,rule-based
+2021-03-03,10:30,EIA_WPSR,scheduled,rule-based
+2021-03-05,08:30,NFP,scheduled,BLS schedule page
+2021-03-10,08:30,CPI,scheduled,BLS schedule page
+2021-03-10,10:30,EIA_WPSR,scheduled,rule-based
+2021-03-17,10:30,EIA_WPSR,scheduled,rule-based
+2021-03-17,14:00,FOMC,scheduled,federalreserve.gov calendars
+2021-03-24,10:30,EIA_WPSR,scheduled,rule-based
+2021-03-31,10:30,EIA_WPSR,scheduled,rule-based
+2021-04-02,08:30,NFP,scheduled,BLS schedule page
+2021-04-07,10:30,EIA_WPSR,scheduled,rule-based
+2021-04-13,08:30,CPI,scheduled,BLS schedule page
+2021-04-14,10:30,EIA_WPSR,scheduled,rule-based
+2021-04-21,10:30,EIA_WPSR,scheduled,rule-based
+2021-04-28,10:30,EIA_WPSR,scheduled,rule-based
+2021-04-28,14:00,FOMC,scheduled,federalreserve.gov calendars
+2021-05-05,10:30,EIA_WPSR,scheduled,rule-based
+2021-05-07,08:30,NFP,scheduled,BLS schedule page
+2021-05-12,08:30,CPI,scheduled,BLS schedule page
+2021-05-12,10:30,EIA_WPSR,scheduled,rule-based
+2021-05-19,10:30,EIA_WPSR,scheduled,rule-based
+2021-05-26,10:30,EIA_WPSR,scheduled,rule-based
+2021-06-03,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2021-06-04,08:30,NFP,scheduled,BLS schedule page
+2021-06-09,10:30,EIA_WPSR,scheduled,rule-based
+2021-06-10,08:30,CPI,scheduled,BLS schedule page
+2021-06-16,10:30,EIA_WPSR,scheduled,rule-based
+2021-06-16,14:00,FOMC,scheduled,federalreserve.gov calendars
+2021-06-23,10:30,EIA_WPSR,scheduled,rule-based
+2021-06-30,10:30,EIA_WPSR,scheduled,rule-based
+2021-07-02,08:30,NFP,scheduled,BLS schedule page
+2021-07-08,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2021-07-13,08:30,CPI,scheduled,BLS schedule page
+2021-07-14,10:30,EIA_WPSR,scheduled,rule-based
+2021-07-21,10:30,EIA_WPSR,scheduled,rule-based
+2021-07-28,10:30,EIA_WPSR,scheduled,rule-based
+2021-07-28,14:00,FOMC,scheduled,federalreserve.gov calendars
+2021-08-04,10:30,EIA_WPSR,scheduled,rule-based
+2021-08-06,08:30,NFP,scheduled,BLS schedule page
+2021-08-11,08:30,CPI,scheduled,BLS schedule page
+2021-08-11,10:30,EIA_WPSR,scheduled,rule-based
+2021-08-18,10:30,EIA_WPSR,scheduled,rule-based
+2021-08-25,10:30,EIA_WPSR,scheduled,rule-based
+2021-09-01,10:30,EIA_WPSR,scheduled,rule-based
+2021-09-03,08:30,NFP,scheduled,BLS schedule page
+2021-09-09,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2021-09-14,08:30,CPI,scheduled,BLS schedule page
+2021-09-15,10:30,EIA_WPSR,scheduled,rule-based
+2021-09-22,10:30,EIA_WPSR,scheduled,rule-based
+2021-09-22,14:00,FOMC,scheduled,federalreserve.gov calendars
+2021-09-29,10:30,EIA_WPSR,scheduled,rule-based
+2021-10-06,10:30,EIA_WPSR,scheduled,rule-based
+2021-10-08,08:30,NFP,scheduled,BLS schedule page
+2021-10-13,08:30,CPI,scheduled,BLS schedule page
+2021-10-14,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2021-10-20,10:30,EIA_WPSR,scheduled,rule-based
+2021-10-27,10:30,EIA_WPSR,scheduled,rule-based
+2021-11-03,10:30,EIA_WPSR,scheduled,rule-based
+2021-11-03,14:00,FOMC,scheduled,federalreserve.gov calendars
+2021-11-05,08:30,NFP,scheduled,BLS schedule page
+2021-11-10,08:30,CPI,scheduled,BLS schedule page
+2021-11-10,10:30,EIA_WPSR,scheduled,rule-based
+2021-11-17,10:30,EIA_WPSR,scheduled,rule-based
+2021-11-24,10:30,EIA_WPSR,scheduled,rule-based
+2021-12-01,10:30,EIA_WPSR,scheduled,rule-based
+2021-12-03,08:30,NFP,scheduled,BLS schedule page
+2021-12-08,10:30,EIA_WPSR,scheduled,rule-based
+2021-12-10,08:30,CPI,scheduled,BLS schedule page
+2021-12-15,10:30,EIA_WPSR,scheduled,rule-based
+2021-12-15,14:00,FOMC,scheduled,federalreserve.gov calendars
+2021-12-22,10:30,EIA_WPSR,scheduled,rule-based
+2021-12-29,10:30,EIA_WPSR,scheduled,rule-based
+2022-01-05,10:30,EIA_WPSR,scheduled,rule-based
+2022-01-07,08:30,NFP,scheduled,BLS schedule page
+2022-01-12,08:30,CPI,scheduled,BLS schedule page
+2022-01-12,10:30,EIA_WPSR,scheduled,rule-based
+2022-01-20,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2022-01-26,10:30,EIA_WPSR,scheduled,rule-based
+2022-01-26,14:00,FOMC,scheduled,federalreserve.gov calendars
+2022-02-02,10:30,EIA_WPSR,scheduled,rule-based
+2022-02-04,08:30,NFP,scheduled,BLS schedule page
+2022-02-09,10:30,EIA_WPSR,scheduled,rule-based
+2022-02-10,08:30,CPI,scheduled,BLS schedule page
+2022-02-16,10:30,EIA_WPSR,scheduled,rule-based
+2022-02-24,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2022-03-02,10:30,EIA_WPSR,scheduled,rule-based
+2022-03-04,08:30,NFP,scheduled,BLS schedule page
+2022-03-09,10:30,EIA_WPSR,scheduled,rule-based
+2022-03-10,08:30,CPI,scheduled,BLS schedule page
+2022-03-16,10:30,EIA_WPSR,scheduled,rule-based
+2022-03-16,14:00,FOMC,scheduled,federalreserve.gov calendars
+2022-03-23,10:30,EIA_WPSR,scheduled,rule-based
+2022-03-30,10:30,EIA_WPSR,scheduled,rule-based
+2022-04-01,08:30,NFP,scheduled,BLS schedule page
+2022-04-06,10:30,EIA_WPSR,scheduled,rule-based
+2022-04-12,08:30,CPI,scheduled,BLS schedule page
+2022-04-13,10:30,EIA_WPSR,scheduled,rule-based
+2022-04-20,10:30,EIA_WPSR,scheduled,rule-based
+2022-04-27,10:30,EIA_WPSR,scheduled,rule-based
+2022-05-04,10:30,EIA_WPSR,scheduled,rule-based
+2022-05-04,14:00,FOMC,scheduled,federalreserve.gov calendars
+2022-05-06,08:30,NFP,scheduled,BLS schedule page
+2022-05-11,08:30,CPI,scheduled,BLS schedule page
+2022-05-11,10:30,EIA_WPSR,scheduled,rule-based
+2022-05-18,10:30,EIA_WPSR,scheduled,rule-based
+2022-05-25,10:30,EIA_WPSR,scheduled,rule-based
+2022-06-02,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2022-06-03,08:30,NFP,scheduled,BLS schedule page
+2022-06-08,10:30,EIA_WPSR,scheduled,rule-based
+2022-06-10,08:30,CPI,scheduled,BLS schedule page
+2022-06-15,10:30,EIA_WPSR,scheduled,rule-based
+2022-06-15,14:00,FOMC,scheduled,federalreserve.gov calendars
+2022-06-23,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2022-06-29,10:30,EIA_WPSR,scheduled,rule-based
+2022-07-07,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2022-07-08,08:30,NFP,scheduled,BLS schedule page
+2022-07-13,08:30,CPI,scheduled,BLS schedule page
+2022-07-13,10:30,EIA_WPSR,scheduled,rule-based
+2022-07-20,10:30,EIA_WPSR,scheduled,rule-based
+2022-07-27,10:30,EIA_WPSR,scheduled,rule-based
+2022-07-27,14:00,FOMC,scheduled,federalreserve.gov calendars
+2022-08-03,10:30,EIA_WPSR,scheduled,rule-based
+2022-08-05,08:30,NFP,scheduled,BLS schedule page
+2022-08-10,08:30,CPI,scheduled,BLS schedule page
+2022-08-10,10:30,EIA_WPSR,scheduled,rule-based
+2022-08-17,10:30,EIA_WPSR,scheduled,rule-based
+2022-08-24,10:30,EIA_WPSR,scheduled,rule-based
+2022-08-31,10:30,EIA_WPSR,scheduled,rule-based
+2022-09-02,08:30,NFP,scheduled,BLS schedule page
+2022-09-08,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2022-09-13,08:30,CPI,scheduled,BLS schedule page
+2022-09-14,10:30,EIA_WPSR,scheduled,rule-based
+2022-09-21,10:30,EIA_WPSR,scheduled,rule-based
+2022-09-21,14:00,FOMC,scheduled,federalreserve.gov calendars
+2022-09-28,10:30,EIA_WPSR,scheduled,rule-based
+2022-10-05,10:30,EIA_WPSR,scheduled,rule-based
+2022-10-07,08:30,NFP,scheduled,BLS schedule page
+2022-10-13,08:30,CPI,scheduled,BLS schedule page
+2022-10-13,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2022-10-19,10:30,EIA_WPSR,scheduled,rule-based
+2022-10-26,10:30,EIA_WPSR,scheduled,rule-based
+2022-11-02,10:30,EIA_WPSR,scheduled,rule-based
+2022-11-02,14:00,FOMC,scheduled,federalreserve.gov calendars
+2022-11-04,08:30,NFP,scheduled,BLS schedule page
+2022-11-09,10:30,EIA_WPSR,scheduled,rule-based
+2022-11-10,08:30,CPI,scheduled,BLS schedule page
+2022-11-16,10:30,EIA_WPSR,scheduled,rule-based
+2022-11-23,10:30,EIA_WPSR,scheduled,rule-based
+2022-11-30,10:30,EIA_WPSR,scheduled,rule-based
+2022-12-02,08:30,NFP,scheduled,BLS schedule page
+2022-12-07,10:30,EIA_WPSR,scheduled,rule-based
+2022-12-13,08:30,CPI,scheduled,BLS schedule page
+2022-12-14,10:30,EIA_WPSR,scheduled,rule-based
+2022-12-14,14:00,FOMC,scheduled,federalreserve.gov calendars
+2022-12-21,10:30,EIA_WPSR,scheduled,rule-based
+2022-12-29,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2023-01-05,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2023-01-06,08:30,NFP,scheduled,BLS schedule page
+2023-01-11,10:30,EIA_WPSR,scheduled,rule-based
+2023-01-12,08:30,CPI,scheduled,BLS schedule page
+2023-01-19,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2023-01-25,10:30,EIA_WPSR,scheduled,rule-based
+2023-02-01,10:30,EIA_WPSR,scheduled,rule-based
+2023-02-01,14:00,FOMC,scheduled,federalreserve.gov calendars
+2023-02-03,08:30,NFP,scheduled,BLS schedule page
+2023-02-08,10:30,EIA_WPSR,scheduled,rule-based
+2023-02-14,08:30,CPI,scheduled,BLS schedule page
+2023-02-15,10:30,EIA_WPSR,scheduled,rule-based
+2023-02-23,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2023-03-01,10:30,EIA_WPSR,scheduled,rule-based
+2023-03-08,10:30,EIA_WPSR,scheduled,rule-based
+2023-03-10,08:30,NFP,scheduled,BLS schedule page
+2023-03-14,08:30,CPI,scheduled,BLS schedule page
+2023-03-15,10:30,EIA_WPSR,scheduled,rule-based
+2023-03-22,10:30,EIA_WPSR,scheduled,rule-based
+2023-03-22,14:00,FOMC,scheduled,federalreserve.gov calendars
+2023-03-29,10:30,EIA_WPSR,scheduled,rule-based
+2023-04-05,10:30,EIA_WPSR,scheduled,rule-based
+2023-04-07,08:30,NFP,scheduled,BLS schedule page
+2023-04-12,08:30,CPI,scheduled,BLS schedule page
+2023-04-12,10:30,EIA_WPSR,scheduled,rule-based
+2023-04-19,10:30,EIA_WPSR,scheduled,rule-based
+2023-04-26,10:30,EIA_WPSR,scheduled,rule-based
+2023-05-03,10:30,EIA_WPSR,scheduled,rule-based
+2023-05-03,14:00,FOMC,scheduled,federalreserve.gov calendars
+2023-05-05,08:30,NFP,scheduled,BLS schedule page
+2023-05-10,08:30,CPI,scheduled,BLS schedule page
+2023-05-10,10:30,EIA_WPSR,scheduled,rule-based
+2023-05-17,10:30,EIA_WPSR,scheduled,rule-based
+2023-05-24,10:30,EIA_WPSR,scheduled,rule-based
+2023-06-01,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2023-06-02,08:30,NFP,scheduled,BLS schedule page
+2023-06-07,10:30,EIA_WPSR,scheduled,rule-based
+2023-06-13,08:30,CPI,scheduled,BLS schedule page
+2023-06-14,10:30,EIA_WPSR,scheduled,rule-based
+2023-06-14,14:00,FOMC,scheduled,federalreserve.gov calendars
+2023-06-22,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2023-06-28,10:30,EIA_WPSR,scheduled,rule-based
+2023-07-06,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2023-07-07,08:30,NFP,scheduled,BLS schedule page
+2023-07-12,08:30,CPI,scheduled,BLS schedule page
+2023-07-12,10:30,EIA_WPSR,scheduled,rule-based
+2023-07-19,10:30,EIA_WPSR,scheduled,rule-based
+2023-07-26,10:30,EIA_WPSR,scheduled,rule-based
+2023-07-26,14:00,FOMC,scheduled,federalreserve.gov calendars
+2023-08-02,10:30,EIA_WPSR,scheduled,rule-based
+2023-08-04,08:30,NFP,scheduled,BLS schedule page
+2023-08-09,10:30,EIA_WPSR,scheduled,rule-based
+2023-08-10,08:30,CPI,scheduled,BLS schedule page
+2023-08-16,10:30,EIA_WPSR,scheduled,rule-based
+2023-08-23,10:30,EIA_WPSR,scheduled,rule-based
+2023-08-30,10:30,EIA_WPSR,scheduled,rule-based
+2023-09-01,08:30,NFP,scheduled,BLS schedule page
+2023-09-07,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2023-09-13,08:30,CPI,scheduled,BLS schedule page
+2023-09-13,10:30,EIA_WPSR,scheduled,rule-based
+2023-09-20,10:30,EIA_WPSR,scheduled,rule-based
+2023-09-20,14:00,FOMC,scheduled,federalreserve.gov calendars
+2023-09-27,10:30,EIA_WPSR,scheduled,rule-based
+2023-10-04,10:30,EIA_WPSR,scheduled,rule-based
+2023-10-06,08:30,NFP,scheduled,BLS schedule page
+2023-10-12,08:30,CPI,scheduled,BLS schedule page
+2023-10-12,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2023-10-18,10:30,EIA_WPSR,scheduled,rule-based
+2023-10-25,10:30,EIA_WPSR,scheduled,rule-based
+2023-11-01,10:30,EIA_WPSR,scheduled,rule-based
+2023-11-01,14:00,FOMC,scheduled,federalreserve.gov calendars
+2023-11-03,08:30,NFP,scheduled,BLS schedule page
+2023-11-08,10:30,EIA_WPSR,scheduled,rule-based
+2023-11-14,08:30,CPI,scheduled,BLS schedule page
+2023-11-15,10:30,EIA_WPSR,scheduled,rule-based
+2023-11-22,10:30,EIA_WPSR,scheduled,rule-based
+2023-11-29,10:30,EIA_WPSR,scheduled,rule-based
+2023-12-06,10:30,EIA_WPSR,scheduled,rule-based
+2023-12-08,08:30,NFP,scheduled,BLS schedule page
+2023-12-12,08:30,CPI,scheduled,BLS schedule page
+2023-12-13,10:30,EIA_WPSR,scheduled,rule-based
+2023-12-13,14:00,FOMC,scheduled,federalreserve.gov calendars
+2023-12-20,10:30,EIA_WPSR,scheduled,rule-based
+2023-12-28,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2024-01-04,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2024-01-05,08:30,NFP,scheduled,BLS schedule page
+2024-01-10,10:30,EIA_WPSR,scheduled,rule-based
+2024-01-11,08:30,CPI,scheduled,BLS schedule page
+2024-01-18,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2024-01-24,10:30,EIA_WPSR,scheduled,rule-based
+2024-01-31,10:30,EIA_WPSR,scheduled,rule-based
+2024-01-31,14:00,FOMC,scheduled,federalreserve.gov calendars
+2024-02-02,08:30,NFP,scheduled,BLS schedule page
+2024-02-07,10:30,EIA_WPSR,scheduled,rule-based
+2024-02-13,08:30,CPI,scheduled,BLS schedule page
+2024-02-14,10:30,EIA_WPSR,scheduled,rule-based
+2024-02-22,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2024-02-28,10:30,EIA_WPSR,scheduled,rule-based
+2024-03-06,10:30,EIA_WPSR,scheduled,rule-based
+2024-03-08,08:30,NFP,scheduled,BLS schedule page
+2024-03-12,08:30,CPI,scheduled,BLS schedule page
+2024-03-13,10:30,EIA_WPSR,scheduled,rule-based
+2024-03-20,10:30,EIA_WPSR,scheduled,rule-based
+2024-03-20,14:00,FOMC,scheduled,federalreserve.gov calendars
+2024-03-27,10:30,EIA_WPSR,scheduled,rule-based
+2024-04-03,10:30,EIA_WPSR,scheduled,rule-based
+2024-04-05,08:30,NFP,scheduled,BLS schedule page
+2024-04-10,08:30,CPI,scheduled,BLS schedule page
+2024-04-10,10:30,EIA_WPSR,scheduled,rule-based
+2024-04-17,10:30,EIA_WPSR,scheduled,rule-based
+2024-04-24,10:30,EIA_WPSR,scheduled,rule-based
+2024-05-01,10:30,EIA_WPSR,scheduled,rule-based
+2024-05-01,14:00,FOMC,scheduled,federalreserve.gov calendars
+2024-05-03,08:30,NFP,scheduled,BLS schedule page
+2024-05-08,10:30,EIA_WPSR,scheduled,rule-based
+2024-05-15,08:30,CPI,scheduled,BLS schedule page
+2024-05-15,10:30,EIA_WPSR,scheduled,rule-based
+2024-05-22,10:30,EIA_WPSR,scheduled,rule-based
+2024-05-30,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2024-06-05,10:30,EIA_WPSR,scheduled,rule-based
+2024-06-07,08:30,NFP,scheduled,BLS schedule page
+2024-06-12,08:30,CPI,scheduled,BLS schedule page
+2024-06-12,10:30,EIA_WPSR,scheduled,rule-based
+2024-06-12,14:00,FOMC,scheduled,federalreserve.gov calendars
+2024-06-20,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2024-06-26,10:30,EIA_WPSR,scheduled,rule-based
+2024-07-03,10:30,EIA_WPSR,scheduled,rule-based
+2024-07-05,08:30,NFP,scheduled,BLS schedule page
+2024-07-10,10:30,EIA_WPSR,scheduled,rule-based
+2024-07-11,08:30,CPI,scheduled,BLS schedule page
+2024-07-17,10:30,EIA_WPSR,scheduled,rule-based
+2024-07-24,10:30,EIA_WPSR,scheduled,rule-based
+2024-07-31,10:30,EIA_WPSR,scheduled,rule-based
+2024-07-31,14:00,FOMC,scheduled,federalreserve.gov calendars
+2024-08-02,08:30,NFP,scheduled,BLS schedule page
+2024-08-07,10:30,EIA_WPSR,scheduled,rule-based
+2024-08-14,08:30,CPI,scheduled,BLS schedule page
+2024-08-14,10:30,EIA_WPSR,scheduled,rule-based
+2024-08-21,10:30,EIA_WPSR,scheduled,rule-based
+2024-08-28,10:30,EIA_WPSR,scheduled,rule-based
+2024-09-05,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2024-09-06,08:30,NFP,scheduled,BLS schedule page
+2024-09-11,08:30,CPI,scheduled,BLS schedule page
+2024-09-11,10:30,EIA_WPSR,scheduled,rule-based
+2024-09-18,10:30,EIA_WPSR,scheduled,rule-based
+2024-09-18,14:00,FOMC,scheduled,federalreserve.gov calendars
+2024-09-25,10:30,EIA_WPSR,scheduled,rule-based
+2024-10-02,10:30,EIA_WPSR,scheduled,rule-based
+2024-10-04,08:30,NFP,scheduled,BLS schedule page
+2024-10-09,10:30,EIA_WPSR,scheduled,rule-based
+2024-10-10,08:30,CPI,scheduled,BLS schedule page
+2024-10-17,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2024-10-23,10:30,EIA_WPSR,scheduled,rule-based
+2024-10-30,10:30,EIA_WPSR,scheduled,rule-based
+2024-11-01,08:30,NFP,scheduled,BLS schedule page
+2024-11-06,10:30,EIA_WPSR,scheduled,rule-based
+2024-11-07,14:00,FOMC,scheduled,federalreserve.gov calendars
+2024-11-13,08:30,CPI,scheduled,BLS schedule page
+2024-11-14,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2024-11-20,10:30,EIA_WPSR,scheduled,rule-based
+2024-11-27,10:30,EIA_WPSR,scheduled,rule-based
+2024-12-04,10:30,EIA_WPSR,scheduled,rule-based
+2024-12-06,08:30,NFP,scheduled,BLS schedule page
+2024-12-11,08:30,CPI,scheduled,BLS schedule page
+2024-12-11,10:30,EIA_WPSR,scheduled,rule-based
+2024-12-18,10:30,EIA_WPSR,scheduled,rule-based
+2024-12-18,14:00,FOMC,scheduled,federalreserve.gov calendars
+2024-12-26,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2025-01-02,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2025-01-08,10:30,EIA_WPSR,scheduled,rule-based
+2025-01-10,08:30,NFP,scheduled,BLS schedule page
+2025-01-15,08:30,CPI,scheduled,BLS schedule page
+2025-01-15,10:30,EIA_WPSR,scheduled,rule-based
+2025-01-23,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2025-01-29,10:30,EIA_WPSR,scheduled,rule-based
+2025-01-29,14:00,FOMC,scheduled,federalreserve.gov calendars
+2025-02-05,10:30,EIA_WPSR,scheduled,rule-based
+2025-02-07,08:30,NFP,scheduled,BLS schedule page
+2025-02-12,08:30,CPI,scheduled,BLS schedule page
+2025-02-12,10:30,EIA_WPSR,scheduled,rule-based
+2025-02-20,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2025-02-26,10:30,EIA_WPSR,scheduled,rule-based
+2025-03-05,10:30,EIA_WPSR,scheduled,rule-based
+2025-03-07,08:30,NFP,scheduled,BLS schedule page
+2025-03-12,08:30,CPI,scheduled,BLS schedule page
+2025-03-12,10:30,EIA_WPSR,scheduled,rule-based
+2025-03-19,10:30,EIA_WPSR,scheduled,rule-based
+2025-03-19,14:00,FOMC,scheduled,federalreserve.gov calendars
+2025-03-26,10:30,EIA_WPSR,scheduled,rule-based
+2025-04-02,10:30,EIA_WPSR,scheduled,rule-based
+2025-04-04,08:30,NFP,scheduled,BLS schedule page
+2025-04-09,10:30,EIA_WPSR,scheduled,rule-based
+2025-04-10,08:30,CPI,scheduled,BLS schedule page
+2025-04-16,10:30,EIA_WPSR,scheduled,rule-based
+2025-04-23,10:30,EIA_WPSR,scheduled,rule-based
+2025-04-30,10:30,EIA_WPSR,scheduled,rule-based
+2025-05-02,08:30,NFP,scheduled,BLS schedule page
+2025-05-07,10:30,EIA_WPSR,scheduled,rule-based
+2025-05-07,14:00,FOMC,scheduled,federalreserve.gov calendars
+2025-05-13,08:30,CPI,scheduled,BLS schedule page
+2025-05-14,10:30,EIA_WPSR,scheduled,rule-based
+2025-05-21,10:30,EIA_WPSR,scheduled,rule-based
+2025-05-28,,OPEC,scheduled,PARTIAL list: 39th OPEC and non-OPEC Ministerial Meeting
+2025-05-29,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2025-06-04,10:30,EIA_WPSR,scheduled,rule-based
+2025-06-06,08:30,NFP,scheduled,BLS schedule page
+2025-06-11,08:30,CPI,scheduled,BLS schedule page
+2025-06-11,10:30,EIA_WPSR,scheduled,rule-based
+2025-06-18,10:30,EIA_WPSR,scheduled,rule-based
+2025-06-18,14:00,FOMC,scheduled,federalreserve.gov calendars
+2025-06-25,10:30,EIA_WPSR,scheduled,rule-based
+2025-07-02,10:30,EIA_WPSR,scheduled,rule-based
+2025-07-03,08:30,NFP,scheduled,BLS schedule page
+2025-07-09,10:30,EIA_WPSR,scheduled,rule-based
+2025-07-15,08:30,CPI,scheduled,BLS schedule page
+2025-07-16,10:30,EIA_WPSR,scheduled,rule-based
+2025-07-23,10:30,EIA_WPSR,scheduled,rule-based
+2025-07-28,,OPEC,scheduled,PARTIAL list: 61st JMMC meeting
+2025-07-30,10:30,EIA_WPSR,scheduled,rule-based
+2025-07-30,14:00,FOMC,scheduled,federalreserve.gov calendars
+2025-08-01,08:30,NFP,scheduled,BLS schedule page
+2025-08-06,10:30,EIA_WPSR,scheduled,rule-based
+2025-08-12,08:30,CPI,scheduled,BLS schedule page
+2025-08-13,10:30,EIA_WPSR,scheduled,rule-based
+2025-08-20,10:30,EIA_WPSR,scheduled,rule-based
+2025-08-27,10:30,EIA_WPSR,scheduled,rule-based
+2025-09-04,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2025-09-05,08:30,NFP,scheduled,BLS schedule page
+2025-09-10,10:30,EIA_WPSR,scheduled,rule-based
+2025-09-11,08:30,CPI,scheduled,BLS schedule page
+2025-09-17,10:30,EIA_WPSR,scheduled,rule-based
+2025-09-17,14:00,FOMC,scheduled,federalreserve.gov calendars
+2025-09-24,10:30,EIA_WPSR,scheduled,rule-based
+2025-10-01,10:30,EIA_WPSR,scheduled,rule-based
+2025-10-08,10:30,EIA_WPSR,scheduled,rule-based
+2025-10-16,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2025-10-22,10:30,EIA_WPSR,scheduled,rule-based
+2025-10-24,08:30,CPI,scheduled,BLS schedule page
+2025-10-29,10:30,EIA_WPSR,scheduled,rule-based
+2025-10-29,14:00,FOMC,scheduled,federalreserve.gov calendars
+2025-11-05,10:30,EIA_WPSR,scheduled,rule-based
+2025-11-13,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2025-11-19,10:30,EIA_WPSR,scheduled,rule-based
+2025-11-20,08:30,NFP,scheduled,BLS schedule page
+2025-11-26,10:30,EIA_WPSR,scheduled,rule-based
+2025-11-30,,OPEC,scheduled,PARTIAL list: 40th OPEC and non-OPEC Ministerial Meeting
+2025-12-03,10:30,EIA_WPSR,scheduled,rule-based
+2025-12-10,10:30,EIA_WPSR,scheduled,rule-based
+2025-12-10,14:00,FOMC,scheduled,federalreserve.gov calendars
+2025-12-16,08:30,NFP,scheduled,BLS schedule page
+2025-12-17,10:30,EIA_WPSR,scheduled,rule-based
+2025-12-18,08:30,CPI,scheduled,BLS schedule page
+2025-12-29,10:30,EIA_WPSR,scheduled,rule-based
+2025-12-31,10:30,EIA_WPSR,scheduled,rule-based
+2026-01-07,10:30,EIA_WPSR,scheduled,rule-based
+2026-01-09,08:30,NFP,scheduled,BLS schedule page
+2026-01-13,08:30,CPI,scheduled,BLS schedule page
+2026-01-14,10:30,EIA_WPSR,scheduled,rule-based
+2026-01-22,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2026-01-28,10:30,EIA_WPSR,scheduled,rule-based
+2026-01-28,14:00,FOMC,scheduled,federalreserve.gov calendars
+2026-02-04,10:30,EIA_WPSR,scheduled,rule-based
+2026-02-11,10:30,EIA_WPSR,scheduled,rule-based
+2026-02-11,08:30,NFP,scheduled,BLS schedule page
+2026-02-13,08:30,CPI,scheduled,BLS schedule page
+2026-02-19,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2026-02-25,10:30,EIA_WPSR,scheduled,rule-based
+2026-03-04,10:30,EIA_WPSR,scheduled,rule-based
+2026-03-06,08:30,NFP,scheduled,BLS schedule page
+2026-03-11,08:30,CPI,scheduled,BLS schedule page
+2026-03-11,10:30,EIA_WPSR,scheduled,rule-based
+2026-03-18,10:30,EIA_WPSR,scheduled,rule-based
+2026-03-18,14:00,FOMC,scheduled,federalreserve.gov calendars
+2026-03-25,10:30,EIA_WPSR,scheduled,rule-based
+2026-04-01,10:30,EIA_WPSR,scheduled,rule-based
+2026-04-03,08:30,NFP,scheduled,BLS schedule page
+2026-04-08,10:30,EIA_WPSR,scheduled,rule-based
+2026-04-10,08:30,CPI,scheduled,BLS schedule page
+2026-04-15,10:30,EIA_WPSR,scheduled,rule-based
+2026-04-22,10:30,EIA_WPSR,scheduled,rule-based
+2026-04-29,10:30,EIA_WPSR,scheduled,rule-based
+2026-04-29,14:00,FOMC,scheduled,federalreserve.gov calendars
+2026-05-06,10:30,EIA_WPSR,scheduled,rule-based
+2026-05-08,08:30,NFP,scheduled,BLS schedule page
+2026-05-12,08:30,CPI,scheduled,BLS schedule page
+2026-05-13,10:30,EIA_WPSR,scheduled,rule-based
+2026-05-20,10:30,EIA_WPSR,scheduled,rule-based
+2026-05-28,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2026-06-03,10:30,EIA_WPSR,scheduled,rule-based
+2026-06-05,08:30,NFP,scheduled,BLS schedule page
+2026-06-10,08:30,CPI,scheduled,BLS schedule page
+2026-06-10,10:30,EIA_WPSR,scheduled,rule-based
+2026-06-17,10:30,EIA_WPSR,scheduled,rule-based
+2026-06-17,14:00,FOMC,scheduled,federalreserve.gov calendars
+2026-06-24,10:30,EIA_WPSR,scheduled,rule-based
+2026-07-01,10:30,EIA_WPSR,scheduled,rule-based
+2026-07-02,08:30,NFP,scheduled,BLS schedule page
+2026-07-08,10:30,EIA_WPSR,scheduled,rule-based
+2026-07-14,08:30,CPI,scheduled,BLS schedule page
+2026-07-15,10:30,EIA_WPSR,scheduled,rule-based
+2026-07-22,10:30,EIA_WPSR,scheduled,rule-based
+2026-07-29,10:30,EIA_WPSR,scheduled,rule-based
+2026-07-29,14:00,FOMC,scheduled,federalreserve.gov calendars
+2026-08-05,10:30,EIA_WPSR,scheduled,rule-based
+2026-08-07,08:30,NFP,scheduled,BLS schedule page
+2026-08-12,08:30,CPI,scheduled,BLS schedule page
+2026-08-12,10:30,EIA_WPSR,scheduled,rule-based
+2026-08-19,10:30,EIA_WPSR,scheduled,rule-based
+2026-08-26,10:30,EIA_WPSR,scheduled,rule-based
+2026-09-02,10:30,EIA_WPSR,scheduled,rule-based
+2026-09-04,08:30,NFP,scheduled,BLS schedule page
+2026-09-10,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2026-09-11,08:30,CPI,scheduled,BLS schedule page
+2026-09-16,10:30,EIA_WPSR,scheduled,rule-based
+2026-09-16,14:00,FOMC,scheduled,federalreserve.gov calendars
+2026-09-23,10:30,EIA_WPSR,scheduled,rule-based
+2026-09-30,10:30,EIA_WPSR,scheduled,rule-based
+2026-10-02,08:30,NFP,scheduled,BLS schedule page
+2026-10-07,10:30,EIA_WPSR,scheduled,rule-based
+2026-10-14,08:30,CPI,scheduled,BLS schedule page
+2026-10-15,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2026-10-21,10:30,EIA_WPSR,scheduled,rule-based
+2026-10-28,10:30,EIA_WPSR,scheduled,rule-based
+2026-11-04,10:30,EIA_WPSR,scheduled,rule-based
+2026-11-06,08:30,NFP,scheduled,BLS schedule page
+2026-11-10,08:30,CPI,scheduled,BLS schedule page
+2026-11-12,10:30,EIA_WPSR,scheduled,rule-based; holiday-shifted
+2026-11-18,10:30,EIA_WPSR,scheduled,rule-based
+2026-11-25,10:30,EIA_WPSR,scheduled,rule-based
+2026-12-02,10:30,EIA_WPSR,scheduled,rule-based
+2026-12-04,08:30,NFP,scheduled,BLS schedule page
+2026-12-09,10:30,EIA_WPSR,scheduled,rule-based
+2026-12-10,08:30,CPI,scheduled,BLS schedule page
+2026-12-16,10:30,EIA_WPSR,scheduled,rule-based
+2026-12-23,10:30,EIA_WPSR,scheduled,rule-based
+2026-12-30,10:30,EIA_WPSR,scheduled,rule-based
