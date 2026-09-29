@@ -19,8 +19,12 @@ so nothing else round-trips through an export.
 THIS HALF: loads the same window from the Databento archive through
 strategy.tl_v0.bars.load_market (the same loader, roll rule and holdout cut
 already used everywhere else on this board), runs it through
-common/tl_v1_lines.py's build_series() the normal way, and diffs the two
-line series bar-for-bar on the shared dates. A bar counts as matched when
+common/tl_v1_lines.py's build_series() on the RAW OHLC columns (ro/rh/rl/rc)
+-- NOT the difference-back-adjusted "signal series" (open/high/low/close)
+the real W15-0020 backtest uses -- because REGISTERED_tl_v1.md sec 5.1 G3
+explicitly says this comparison is run "back-adjustment off", to match what
+a raw TradingView export can actually be checked against. Diffs the two line
+series bar-for-bar on the shared dates. A bar counts as matched when
 both sides agree the line is off (both NaN) or agree it is on and the two
 values sit within --tol of each other (default 0.01, i.e. one cent on most
 CL price scales -- generous next to a 0.10xATR buffer already built into
@@ -102,12 +106,21 @@ def load_tv_export(csv_path: str) -> pd.DataFrame:
 
 
 def python_side(archive: str, root: str, pivlen: int) -> pd.DataFrame:
+    """REGISTERED_tl_v1.md sec 5.1 G3 says 'CL1! daily, 2015-2019,
+    back-adjustment OFF'. strategy/tl_v0/bars.py's frame carries both series:
+    open/high/low/close is the difference-back-adjusted SIGNAL series the
+    real W15-0020 backtest will use (deliberately, to keep roll-day gaps from
+    corrupting pivot/ATR detection across the full 2010-2021 training run) --
+    but that is not what G3 asks for, and not what a raw TradingView export
+    can be checked against. ro/rh/rl/rc are the RAW OHLC of the held
+    contract, matching Ben's back-adjustment-OFF chart bar for bar. G3 uses
+    the raw columns; W15-0020 will still use the adjusted ones (unchanged)."""
     from strategy.tl_v0.bars import load_market
     from strategy.tl_v0.spec import MARKETS
     m = MARKETS[root]
     mb, _c0 = load_market(archive, m)
     frame = mb.frame
-    o, h, lo, c = (frame[k].to_numpy(dtype=float) for k in ("open", "high", "low", "close"))
+    o, h, lo, c = (frame[k].to_numpy(dtype=float) for k in ("ro", "rh", "rl", "rc"))
     n = len(c)
     atr = atr14(h, lo, c)
     ph = find_pivots(h, pivlen, "high")

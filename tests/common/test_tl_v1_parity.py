@@ -6,7 +6,45 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from common.tl_v1_parity import diff, build_report, load_tv_export, _find_col, _parse_tv_time
+import sys
+import types
+from unittest.mock import patch
+
+from common.tl_v1_parity import (
+    diff, build_report, load_tv_export, _find_col, _parse_tv_time, python_side,
+)
+
+
+def test_python_side_uses_raw_ohlc_not_the_adjusted_signal_series():
+    # REGISTERED_tl_v1.md sec 5.1 G3 says this comparison runs "back-adjustment
+    # off" -- python_side must build the line from ro/rh/rl/rc (raw), never
+    # the difference-back-adjusted open/high/low/close strategy/tl_v0/bars.py
+    # also carries (that series is for the real W15-0020 backtest, not this
+    # gate). Regression form: the raw series has two clean high pivots (a
+    # valid anchor pair exists); the "adjusted" series is a pure monotonic
+    # ramp, which structurally cannot contain an interior pivot at all -- if
+    # python_side ever read the adjusted columns instead, the line would be
+    # all-NaN throughout.
+    n = 20
+    dates = pd.bdate_range("2016-01-04", periods=n)
+    rh = np.full(n, 100.0)
+    rh[4] = 110.0
+    rh[12] = 105.0
+    frame = pd.DataFrame({
+        "date": dates,
+        "ro": np.full(n, 97.0), "rh": rh, "rl": np.full(n, 95.0), "rc": np.full(n, 97.0),
+        "open": np.linspace(200.0, 300.0, n), "high": np.linspace(201.0, 301.0, n),
+        "low": np.linspace(199.0, 299.0, n), "close": np.linspace(200.0, 300.0, n),
+    })
+    fake_mb = types.SimpleNamespace(frame=frame)
+
+    with patch("strategy.tl_v0.spec.MARKETS", {"TEST": object()}), \
+         patch("strategy.tl_v0.bars.load_market", return_value=(fake_mb, None)):
+        out = python_side("unused-archive", "TEST", pivlen=2)
+
+    assert out["py_resV"].notna().any(), (
+        "no resistance line armed at all -- python_side is reading the "
+        "adjusted (monotonic, pivot-free) columns instead of the raw ones")
 
 
 def _dates(n, start="2016-01-04"):
