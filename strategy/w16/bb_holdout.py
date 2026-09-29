@@ -1,75 +1,63 @@
 #!/usr/bin/env python3
-"""The W16 session-baselines holdout: 2024-01-02 onward, locked, spent once,
-by exactly one of the six scored cells. Board W16-0003 subitem 3, gate G3.
-REGISTERED_w16_session_baselines.md sec 8.
+"""The W16 BB-v0 holdout: 2024-01-02 onward, locked, spent once, by exactly
+one of the six scored cells {ABD-NQ, SSS-NQ, TMB-NQ, CRT-NQ, NRS-ES, NRS-NQ}.
+Board W16-0008, gate G3. docs/research/REGISTERED_w16_bar_batch.md sec 8.
 
-    D:\\Trading\\.venv\\Scripts\\python.exe -m strategy.w16.holdout --status
-    D:\\Trading\\.venv\\Scripts\\python.exe -m strategy.w16.holdout --spend B2-ES
+    D:\\Trading\\.venv\\Scripts\\python.exe -m strategy.w16.bb_holdout --status
+    D:\\Trading\\.venv\\Scripts\\python.exe -m strategy.w16.bb_holdout --spend NRS-NQ
 
-WHY W16 CUTS ITS OWN LEDGER
+WHY BB-v0 CUTS ITS OWN LEDGER, SEPARATE FROM EVERY OTHER W16 LINE'S
 ------------------------------------------------------------------------
-Same reasoning as strategy/htf/holdout.py's own docstring: this is a
-separate registration on a separate market series (ES/NQ 1-minute bars, not
-CL 1-hour, not TSMOM's or TL-v0's daily ones), so reusing any other study's
-ledger would make one study's spend look like another's when none of the
-underlying data or code is shared. REFUSED_CUT_NAMES below lists every
-ledger this module has been told, by name, is not its own.
+sec 8: "Same dates as SB-v0 and DVP, but its own ledger, holdout_w16_bb.json.
+... Spent once, by one cell." This mirrors strategy.w16.holdout's (SB-v0)
+and strategy.w16.dvp_holdout's (DVP-v0/v1) own API 1:1 (split_dates/
+is_locked/describe/main --status/--spend) so a caller already familiar
+with either needs nothing new to use this one -- and REFUSED_CUT_NAMES is
+built the same way dvp_holdout.py builds its own: from SB-v0's own refused
+set (which a prior edit there already keeps in sync with every OTHER
+study's ledger, DVP's included) plus SB-v0's and DVP's own ledger names,
+minus this module's own name -- so a name added to any of those three
+lists going forward does not have to be hand-duplicated here.
 
-WHY THE CANDIDATE IS "B1-ES" ETC., NOT JUST "B1"
+SIX CANDIDATES, LIKE SB-v0's SIX, UNLIKE DVP-v0's ONE
 ------------------------------------------------------------------------
-Sec 8: "Spent once, by ONE CELL" -- and sec 9 scores six cells (B1, B2, B3 x
-ES, NQ) independently. Unlike HTF-Ben's holdout (spent by one candidate name
-covering two scenarios together, in one call), W16's six cells are never
-required to spend together -- exactly one of the six passes or the holdout
-goes unspent, and "which one" is itself part of what gets decided (sec 8:
-"If more than one passes, Ben chooses which ... If he leaves it to Claude,
-the cell with the highest training net per trade at L2 spends it"). So the
-candidate string names a (baseline, market) PAIR, and only one of the six
-valid pair-strings is ever accepted, once, ever.
-
-WHAT THIS DOES NOT PROTECT
-------------------------------------------------------------------------
-Same limits as strategy/htf/holdout.py: nothing here stops a caller loading
-the raw ES/NQ archive directly and reading bars from 2024-01-02 onward. The
-defence is that the backtest runner (strategy.w16.runner) takes its dates
-through `split_dates` and a test asserts that.
+sec 9 scores six cells (ABD-NQ, SSS-NQ, TMB-NQ, CRT-NQ, NRS-ES, NRS-NQ) --
+so ALLOWED_CANDIDATES is that six-way set, not a single string. Every ES
+variant except NRS-ES (ABD-ES, SSS-ES, TMB-ES, CRT-ES) is reported only
+(sec 1: "The ES versions of the first four are reported only") and can
+never spend this holdout.
 """
 from __future__ import annotations
 
 import argparse
 import json
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from strategy.w16 import dvp_holdout as DVP_HOLDOUT
+from strategy.w16 import holdout as SB_HOLDOUT
+
 ROOT = Path(__file__).resolve().parents[2]
 
-# Registered in docs/research/REGISTERED_w16_session_baselines.md sec 8,
-# BEFORE any backtest engine code for W16 existed. Changing it is a new
-# registration, not an edit.
+# Registered in REGISTERED_w16_bar_batch.md sec 8, same lock date as SB-v0's
+# and DVP's own LOCK_FROM -- BEFORE any BB-v0 backtest code existed.
+# Changing it is a new registration, not an edit.
 LOCK_FROM = "2024-01-02"
 
 # Own ledger -- see module docstring for why this cannot be another study's.
-LEDGER_PATH = ROOT / "holdout_w16_sb.json"
+LEDGER_PATH = ROOT / "holdout_w16_bb.json"
 
-BASELINES = ("B1", "B2", "B3")
-MARKETS = ("ES", "NQ")
-ALLOWED_CANDIDATES = frozenset(f"{b}-{m}" for b in BASELINES for m in MARKETS)
+CANDIDATES = ("ABD-NQ", "SSS-NQ", "TMB-NQ", "CRT-NQ", "NRS-ES", "NRS-NQ")
+ALLOWED_CANDIDATES = frozenset(CANDIDATES)
 
 # Cut files this module refuses to be handed, by name (sec 8: "refused by
-# name from every other line's ledger"), so a runner that reaches for the
-# wrong holdout gets a refusal instead of a quiet mismatch.
-REFUSED_CUT_NAMES = {
-    "holdout.json", "holdout_pairs_2026H2.json",              # equity (common/holdout.py)
-    "holdout_spy.json",                                         # SPY intraday (common/spy_intraday.py)
-    "holdout_h60.json",                                         # H60
-    "tsmom_holdout_spent.json",                                 # TSMOM
-    "tl_v0_holdout_spent.json",                                 # TL-v0
-    "holdout_htf_ben.json", "holdout_htf_ben_v1.json",          # HTF-Ben v0/v1
-    "holdout_htf_ben_v2.json",                                  # HTF-Ben v2
-    "holdout_w16_dvp.json",                                      # W16 DVP-v0 (drift-VWAP pullback)
-    "holdout_w16_bb.json",                                        # W16 BB-v0 (bar-only entry batch)
-}
+# name from every other line's ledger"). Built from SB-v0's own refused set
+# (already kept in sync with every OTHER study, DVP included) plus SB-v0's
+# and DVP's own ledger names, minus this module's own name.
+_OWN_NAME = "holdout_w16_bb.json"
+REFUSED_CUT_NAMES = frozenset(
+    (SB_HOLDOUT.REFUSED_CUT_NAMES | {SB_HOLDOUT.LEDGER_PATH.name, DVP_HOLDOUT.LEDGER_PATH.name})
+    - {_OWN_NAME})
 
 
 class HoldoutRefused(SystemExit):
@@ -92,9 +80,9 @@ def load_for(path) -> None:
     name = Path(path).name
     if name in REFUSED_CUT_NAMES:
         raise HoldoutRefused(
-            f"{name} is not W16's holdout. W16 cuts its own at "
-            f"strategy.w16.holdout.LOCK_FROM ({LOCK_FROM}); see "
-            "REGISTERED_w16_session_baselines.md sec 8.")
+            f"{name} is not BB-v0's holdout. BB-v0 cuts its own at "
+            f"strategy.w16.bb_holdout.LOCK_FROM ({LOCK_FROM}); see "
+            "REGISTERED_w16_bar_batch.md sec 8.")
 
 
 def read_ledger() -> dict | None:
@@ -109,10 +97,11 @@ def _write_ledger(candidate: str, n_locked: int) -> dict:
         "spent_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "lock_from": LOCK_FROM,
         "n_locked_days": n_locked,
-        "note": ("The W16 session-baselines holdout is spent. Any further "
-                 "figure quoted from 2024-01-02 onward, for any of the six "
-                 "cells (B1/B2/B3 x ES/NQ) or any control or grid neighbour, "
-                 "is in-sample and is not a holdout result, whatever it is called."),
+        "note": ("The W16 BB-v0 holdout is spent. Any further figure quoted "
+                 "from 2024-01-02 onward, for any of the six cells (ABD-NQ/"
+                 "SSS-NQ/TMB-NQ/CRT-NQ/NRS-ES/NRS-NQ) or any control, grid "
+                 "neighbour or reported variant, is in-sample and is not a "
+                 "holdout result, whatever it is called."),
     }
     LEDGER_PATH.write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
     return rec
@@ -121,10 +110,13 @@ def _write_ledger(candidate: str, n_locked: int) -> dict:
 def split_dates(dates, *, spend: bool = False, candidate: str | None = None,
                 limit: int | None = None):
     """(dates to use, how many were set aside, which side was taken). THE
-    ONE IMPLEMENTATION the backtest runner must call.
+    ONE IMPLEMENTATION strategy.w16.bb_runner must call.
 
     Default is the TRAINING side. `dates` is any iterable of date-like
-    strings or date-like objects, str()-able to "YYYY-MM-DD" or "YYYY-MM"."""
+    strings or date-like objects, str()-able to "YYYY-MM-DD" or "YYYY-MM".
+    `limit` is refused unconditionally (sec 12: "Reading the holdout ...
+    with --limit, or any narrowing flag ... is registered as NOT to be
+    done")."""
     dates = [str(d) for d in dates]
 
     if limit is not None:
@@ -145,14 +137,15 @@ def split_dates(dates, *, spend: bool = False, candidate: str | None = None,
 
     if candidate not in ALLOWED_CANDIDATES:
         raise HoldoutRefused(
-            f"{candidate!r} cannot spend the W16 holdout. Only one of "
+            f"{candidate!r} cannot spend the BB-v0 holdout. Only one of "
             f"{sorted(ALLOWED_CANDIDATES)} may (sec 9's six scored cells); "
-            "no control, no grid neighbour, no reported-only variant can.")
+            "no control, no grid neighbour, no reported-only variant "
+            "(including ABD-ES/SSS-ES/TMB-ES/CRT-ES) can.")
 
     prior = read_ledger()
     if prior:
         raise HoldoutRefused(
-            f"the W16 holdout was already spent by {prior['candidate']!r} "
+            f"the BB-v0 holdout was already spent by {prior['candidate']!r} "
             f"at {prior['spent_at']}. It is spent once. {candidate!r} cannot "
             f"have it.\nDelete {LEDGER_PATH.name} only if you intend that "
             "deletion to appear in a commit and be defended.")
@@ -178,14 +171,14 @@ def describe(dates) -> dict:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="The W16 session-baselines holdout: status and spend.")
+    ap = argparse.ArgumentParser(description="The W16 BB-v0 holdout: status and spend.")
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--spend", metavar="CANDIDATE",
                     help=f"record the holdout as spent by this cell (one of {sorted(ALLOWED_CANDIDATES)})")
     a = ap.parse_args(argv)
 
     rec = read_ledger()
-    print(f"W16 holdout: LOCKED from {LOCK_FROM} (REGISTERED_w16_session_baselines.md sec 8)")
+    print(f"BB-v0 holdout: LOCKED from {LOCK_FROM} (REGISTERED_w16_bar_batch.md sec 8)")
     print(f"ledger: {LEDGER_PATH}")
     if rec:
         print(f"  SPENT by {rec['candidate']!r} at {rec['spent_at']} ({rec['n_locked_days']} days)")
