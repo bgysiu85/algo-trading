@@ -97,6 +97,10 @@ this gate is measured and, if shipped, run against live.
   once run on the complete window set, that is reported and the pull stops — it does not
   silently switch tapes.
 
+**Status as of 2026-09-29 (§9): this remains the registered source. A dedicated search for a
+better, more consolidated candidate (W03-0011/W03-0014/W03-0015) was run and closed without
+finding one — see §9.**
+
 ## 4. What the study must measure and report (W03-0002 step 5)
 
 Same bar as the rest of this project's gate work (`REGISTERED_tl_v0.md` §3 pattern, adapted):
@@ -141,6 +145,15 @@ study answers the question cleanly, not so the answer is chosen in advance.
 - **A row is written on every refusal** (`SKIPPED_SPREAD`), so a refused entry stays visible
   and distinguishable from "the strategy never fired" — same discipline as `SKIPPED_DRIFT`,
   `SKIPPED_THIN_BAR` elsewhere in the trader.
+- **The backtest's own accounting of the gate's cost/benefit is measured on `XNAS.BASIC`
+  (Nasdaq-only top-of-book), not a true consolidated NBBO** (§9). It reads spread ~3x wider
+  than the live IB SMART-routed spread on this premarket small-cap universe, and has no quote
+  at all for 57% of live entries (treated as a refusal by the study). The W03-0002 74–76%
+  refusal / ~$100,821.51 cost-saved verdict describes what this backtest tape says, not
+  necessarily what the live gate actually saves. This does not touch the live path —
+  `spread_guard_ok()` in `trader.py` already uses the correct formula and a live-quality quote;
+  only the backtest's own accounting is in question, and it is accepted with this caveat rather
+  than re-measured further (§9).
 
 ## 7. Timeline
 
@@ -149,3 +162,52 @@ study answers the question cleanly, not so the answer is chosen in advance.
    mutation-test the gate (G2); run the study against the full point-in-time book; write the
    Result doc, raw `.txt`, and artifact page.
 3. **W03-0002 step 6 (Ben):** ship / study-only / close, per §5.
+
+## 8. Note found while registering (2026-09-23)
+
+Pre-existing, partly-uncommitted code at `common/entry_gates.py` (committed `f534337`
+"Create entry_gates.py study module for spread and volume gate measurement", plus uncommitted
+local edits) pre-dates this registration and conflicts with it:
+
+1. It still implements a **volume gate** — closed per §8 of `thin_tape_RESULT_20260919.md`
+   and out of scope for this registration (see header).
+2. It computes spread as an **ohlcv-1m surrogate**, `(high - low) / close`, rather than real
+   quotes — even though Ben approved and confirmed the MBP-1/`cbbo-1s` pull (step 3, done) at
+   $0 projected cost (§3 above).
+
+Left uncommitted on the device for the Build & test chat to reconcile against this
+registration before step 5 runs; not altered or committed here, since that is step 5's work.
+
+## 9. Consolidated-quote search — closed 2026-09-29 (W03-0011 → W03-0014 → W03-0015)
+
+**W03-0011** (2026-09-28) reconciled the backtest's `XNAS.BASIC`/`cbbo-1s` quote tape against
+the live 180-trade book and found the mismatch recorded in §6 above: ~3x wider spread
+(2.41% backtest mean vs 0.85% live mean) and no quote at all for 57% of live entries, because
+XNAS.BASIC is Nasdaq top-of-book only, not a consolidated NBBO. This put the W03-0002 verdict's
+accuracy in question and raised **W03-0014**: should the study be re-run on a more consolidated
+quote source?
+
+Every candidate consolidated source available on this Databento account/plan was checked and
+ruled out:
+
+- **EQUS.SUMMARY** — no bid/ask data at all (statistics/summary schema only).
+- **EQUS.MINI** — a documented poor proxy: 2.7x wider than XNAS.BASIC, ~4.8% of the
+  consolidated tape.
+- **EQUS.MAX** — does not exist (confirmed against `metadata.list_datasets()`, the account's
+  authoritative dataset list; an earlier assumption it existed, based on web research, was
+  wrong and corrected before any spend).
+- **DBEQ.BASIC** — priced, pulled, and the actual W03-0002 study methodology re-run on it in
+  full (**W03-0015**, `claude/w03_0015_dbeq_basic_RESULT_20260929.md`). Result: **worse** than
+  XNAS.BASIC, not better — 97.6%/97.1% refusal (MCL/MC5) vs XNAS.BASIC's 74.2%/75.9%, and
+  neither book clears the $4.26/trade margin threshold (MCL +4.17, MC5 +1.87 — both fail).
+
+**No true full-SIP consolidated-NBBO product exists on this account/plan.** Building one
+synthetically (merging ~10 individual venue top-of-book feeds — XNAS.ITCH, XNYS.PILLAR,
+ARCX.PILLAR, EDGA/EDGX/BATS/BATY.PITCH, IEXG.TOPS, XASE.PILLAR, XCHI.PILLAR, XCIS.TRADESBBO,
+MEMX.MEMOIR, EPRL.DOM) was offered as an option and **not funded**.
+
+**Ben's decision, 2026-09-29, in his words: "close the search."** §3/§6 above stand as written:
+`XNAS.BASIC`/`cbbo-1s` remains the registered quote source for this gate, the W03-0002
+verdict stands as backtest evidence with the §6 caveat attached, and it is not re-run against
+any other Databento source. This closes W03-0014 and W03-0015. Re-opening this line needs a
+new registration with a reason that is not this search already closed here.
