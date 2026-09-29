@@ -6,7 +6,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from common.tl_v1_parity import diff, build_report, load_tv_export, _find_col
+from common.tl_v1_parity import diff, build_report, load_tv_export, _find_col, _parse_tv_time
 
 
 def _dates(n, start="2016-01-04"):
@@ -37,6 +37,21 @@ def test_state_mismatch_when_one_side_armed_and_other_not():
     py = pd.DataFrame({"date": d, "py_resV": [100.0, 100.0, np.nan], "py_supV": [np.nan] * 3})
     merged = diff(tv, py, str(d[0].date()), str(d[-1].date()), tol=0.01)
     assert list(merged["res_state"]) == ["state_mismatch", "match_on", "state_mismatch"]
+
+
+def test_diff_no_overlap_reports_both_sides_actual_ranges():
+    tv_dates = _dates(5, start="2023-01-02")
+    py_dates = _dates(5, start="2016-01-04")
+    tv = pd.DataFrame({"date": tv_dates, "tv_resV": [100.0] * 5, "tv_supV": [np.nan] * 5})
+    py = pd.DataFrame({"date": py_dates, "py_resV": [100.0] * 5, "py_supV": [np.nan] * 5})
+    try:
+        diff(tv, py, "2015-01-01", "2019-12-31", tol=0.01)
+        assert False, "expected SystemExit"
+    except SystemExit as e:
+        msg = str(e)
+        assert "tv-csv covers" in msg and "2023-01-02" in msg
+        assert "python side covers" in msg and "2016-01-04" in msg
+        assert "Scroll/drag the chart back" in msg
 
 
 def test_diff_restricts_to_requested_window():
@@ -72,6 +87,28 @@ def test_find_col_matches_loosely_on_title_words():
     assert _find_col(cols, "resistance") == "Resistance (her line)"
     assert _find_col(cols, "support") == "Support (her line)"
     assert _find_col(cols, "time") == "time"
+
+
+def test_parse_tv_time_unix_seconds_lands_on_the_right_year_not_1970():
+    # 2015-01-01T00:00:00Z and 2019-12-31T00:00:00Z as UNIX SECONDS, exactly
+    # what TradingView's "Time format (UTC): UNIX timestamp" export option
+    # gives -- the regression this guards is pandas silently reading a bare
+    # integer column as NANOSECONDS since epoch (landing on 1970-01-01).
+    raw = pd.Series([1420070400, 1577750400])
+    ts = _parse_tv_time(raw)
+    assert ts.dt.year.tolist() == [2015, 2019]
+
+
+def test_load_tv_export_handles_unix_seconds_csv(tmp_path):
+    csv_path = tmp_path / "tv_unix.csv"
+    csv_path.write_text(
+        "time,open,high,low,close,Resistance (her line),Support (her line)\n"
+        "1420070400,50,51,49,50.5,,48.0\n"
+        "1420156800,50.5,52,50,51.5,55.0,\n"
+    )
+    df = load_tv_export(str(csv_path))
+    assert df["date"].dt.year.tolist() == [2015, 2015]
+    assert df.loc[0, "tv_supV"] == 48.0 and df.loc[1, "tv_resV"] == 55.0
 
 
 def test_load_tv_export_accepts_iso_time_and_loose_headers(tmp_path):

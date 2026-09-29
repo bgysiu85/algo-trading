@@ -64,6 +64,19 @@ def _find_col(columns, *needles: str) -> str | None:
     return None
 
 
+def _parse_tv_time(raw_time: pd.Series) -> pd.Series:
+    """TradingView's export offers 'UNIX timestamp' (bare seconds-since-epoch
+    integers) or a formatted date/time string, chosen in the export dialog.
+    pandas' default to_datetime() treats a bare integer column as
+    NANOSECONDS since epoch, not seconds -- silently landing every row at
+    1970-01-01 instead of raising. Detect the numeric case explicitly and
+    parse it with unit='s' so that mistake can't happen quietly again."""
+    numeric = pd.to_numeric(raw_time, errors="coerce")
+    if numeric.notna().all():
+        return pd.to_datetime(numeric, unit="s", utc=True, errors="coerce")
+    return pd.to_datetime(raw_time, utc=True, errors="coerce")
+
+
 def load_tv_export(csv_path: str) -> pd.DataFrame:
     """Ben's TradingView 'Export chart data' CSV. Column names vary slightly
     by TradingView version, so this matches loosely rather than by exact
@@ -79,10 +92,7 @@ def load_tv_export(csv_path: str) -> pd.DataFrame:
         raise SystemExit(
             f"tv-csv is missing column(s) {missing} -- got columns {list(raw.columns)}. "
             "Re-export with 'Resistance (her line)' and 'Support (her line)' both visible.")
-    ts = pd.to_datetime(raw[time_col], utc=True, errors="coerce")
-    if ts.isna().any():
-        # TradingView unix-seconds fallback
-        ts = pd.to_datetime(raw[time_col].astype(float), unit="s", utc=True, errors="coerce")
+    ts = _parse_tv_time(raw[time_col])
     out = pd.DataFrame({
         "date": ts.dt.tz_localize(None).dt.normalize(),
         "tv_resV": pd.to_numeric(raw[res_col], errors="coerce"),
@@ -115,9 +125,16 @@ def diff(tv: pd.DataFrame, py: pd.DataFrame, start: str, end: str, tol: float) -
     merged = tv.merge(py, on="date", how="inner")
     merged = merged[(merged["date"] >= start) & (merged["date"] <= end)].reset_index(drop=True)
     if merged.empty:
+        tv_lo, tv_hi = (str(tv["date"].min().date()), str(tv["date"].max().date())) if len(tv) else ("(empty)", "(empty)")
+        py_lo, py_hi = (str(py["date"].min().date()), str(py["date"].max().date())) if len(py) else ("(empty)", "(empty)")
         raise SystemExit(
-            f"no overlapping dates between the tv-csv and the Python side in [{start}, {end}] -- "
-            "check the TradingView export actually covers this range.")
+            f"no overlapping dates between the tv-csv and the Python side in [{start}, {end}].\n"
+            f"  tv-csv covers:      {tv_lo} .. {tv_hi}  ({len(tv)} rows)\n"
+            f"  python side covers: {py_lo} .. {py_hi}  ({len(py)} rows)\n"
+            "TradingView's chart-data export only includes bars already loaded into that\n"
+            "chart -- a fresh daily chart usually starts with only the last year or two in\n"
+            "memory. Scroll/drag the chart back until 2015 is visible (or zoom all the way\n"
+            "out) so those bars actually load, THEN re-export.")
 
     def _state(row, side):
         tv_v, py_v = row[f"tv_{side}V"], row[f"py_{side}V"]
