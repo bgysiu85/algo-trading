@@ -1,0 +1,150 @@
+SPREAD GATE STUDY
+
+  registered  docs/research/REGISTERED_spread_gate.md
+  universe    var/state/screen_pairs_pit.json   bars XNAS.BASIC
+  551 sessions   6,146 symbol-days   halves cut at 2025-08-07
+  100 shares   commission in, friction per round trip   elapsed 88.4s on 8 worker(s)
+
+  24 symbol-day(s) raised and were dropped from EVERY book:
+    PYPD 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    TPST 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    DGLY 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    KNW 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    NXTT 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    HKPD 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    KWM 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    SOGP 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    LPCN 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    BRTX 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    ELAB 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    SVRE 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    ALAR 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    ANIX 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    SNPX 2025-06-09: ValueError: cannot reindex on an axis with duplicate labels
+    KLTO 2025-06-10: ValueError: cannot reindex on an axis with duplicate labels
+    MEGL 2025-06-10: ValueError: cannot reindex on an axis with duplicate labels
+    MGNX 2025-06-10: ValueError: cannot reindex on an axis with duplicate labels
+    EVGN 2025-06-10: ValueError: cannot reindex on an axis with duplicate labels
+    GELS 2025-06-10: ValueError: cannot reindex on an axis with duplicate labels
+
+POPULATION CHECK
+
+  MCL trades here     3,941
+  published count     3,955   *** DOES NOT MATCH ***
+
+  A DIFFERENT BOOK FROM THE PUBLISHED ONE. The comparisons below are
+  still like-for-like (same run), but do not quote MCL's line as the
+  published figure until this reconciles.
+
+
+Spread gate (REGISTERED_spread_gate.md §1): refuse if (ask - bid) / mid >= 2.0%
+Quote source: DBEQ.BASIC / mbp-1 (re-run, not the registered source)
+Volume gate: CLOSED per thin_tape_RESULT_20260919.md §8 (not tested here)
+
+THE BOOKS
+
+  MCL
+    at $1.00  trades  3,941   net  (28,470.41)   per trade   (7.22)   per symbol-day  (4.63)
+    at $4.26  trades  3,941   net  (41,318.07)   per trade  (10.48)   per symbol-day  (6.72)
+    at $8.92  trades  3,941   net  (59,683.13)   per trade  (15.14)   per symbol-day  (9.71)
+    halves @ $4.26    early 1,650  (10.60)/t (17,492.11)   late 2,291  (10.40)/t (23,825.96)
+    drop top 3 @ $4.26  (43,188.33)   win rate 22.3%
+
+  MCL-spread
+    at $1.00  trades     99   net     (302.12)   per trade   (3.05)   per symbol-day  (0.05)
+    at $4.26  trades     99   net     (624.86)   per trade   (6.31)   per symbol-day  (0.10)
+    at $8.92  trades     99   net   (1,086.20)   per trade  (10.97)   per symbol-day  (0.18)
+    halves @ $4.26    early     0     0.00/t        0.00   late    99   (6.31)/t    (624.86)
+    drop top 3 @ $4.26     (870.96)   win rate 17.2%
+
+  MC5
+    at $1.00  trades  6,755   net  (67,897.24)   per trade  (10.05)   per symbol-day (11.05)
+    at $4.26  trades  6,755   net  (89,918.54)   per trade  (13.31)   per symbol-day (14.63)
+    at $8.92  trades  6,755   net (121,396.84)   per trade  (17.97)   per symbol-day (19.75)
+    halves @ $4.26    early 2,906  (14.64)/t (42,542.37)   late 3,849  (12.31)/t (47,376.17)
+    drop top 3 @ $4.26  (96,639.47)   win rate 21.3%
+
+  MC5-spread
+    at $1.00  trades    247   net   (2,019.67)   per trade   (8.18)   per symbol-day  (0.33)
+    at $4.26  trades    247   net   (2,824.89)   per trade  (11.44)   per symbol-day  (0.46)
+    at $8.92  trades    247   net   (3,975.91)   per trade  (16.10)   per symbol-day  (0.65)
+    halves @ $4.26    early     0     0.00/t        0.00   late   247  (11.44)/t  (2,824.89)
+    drop top 3 @ $4.26   (3,318.88)   win rate 19.8%
+
+COULD MCL-spread HAVE BOUND? (visible point-in-time names at the baseline's entry minutes)
+
+  baseline entries 3,941   where the gate could refuse 3,848 (97.6%)
+  visible names at signal:  
+
+THE VERDICT: MCL-spread against MCL (registered readings 1-5, $4.26)
+
+  1. per trade +4.17 (margin 4.26)   per symbol-day +6.62
+  2. early half  per trade +10.60  per symbol-day +2.85     late half  per trade +4.09  per symbol-day +3.77
+  3. drop-top-3 level  MCL-spread (870.96)  MCL (43,188.33)     drop-top-3 delta 39,903.73
+  4. cluster bootstrap on the delta  P(total > 0) = 1.000  [34,867.58, 46,429.72]  over 1,225 symbols
+  5. abstention control: 3,842 of 3,941 trades removed at random, 2000 draws
+       per trade      random p05 -6.41  p50 -0.23  p95 +7.87   the gate +4.17
+       per symbol-day random p05 +6.45  p50 +6.55  p95 +6.68   the gate +6.62
+
+  NOTHING: a half is empty in one of the books
+
+  cost: 10 of MCL's top-10 trades at $4.26 are absent from MCL-spread
+    QMMM   2025-09-09  09:19 ET      946.32
+    UPC    2026-06-29  08:50 ET      475.55
+    SQFT   2025-07-14  07:18 ET      448.39
+    EPSM   2025-10-01  08:12 ET      407.93
+    UPC    2025-10-08  06:55 ET      401.36
+    WBUY   2025-05-09  07:24 ET      398.55
+    TTRX   2025-10-09  07:43 ET      382.48
+    ARTL   2025-06-30  09:17 ET      357.91
+    HCAI   2026-05-18  05:42 ET      315.40
+    WSHP   2026-04-16  07:54 ET      307.62
+  cascade: 6 MCL-spread entries the baseline does not contain
+
+WHAT MCL-spread REFUSED OF MCL (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            3,848   net  (40,768.63)   per trade  (10.59)
+    losses avoided   2,988    (73,159.23)
+    winners lost       860      32,390.60
+
+COULD MC5-spread HAVE BOUND? (visible point-in-time names at the baseline's entry minutes)
+
+  baseline entries 6,755   where the gate could refuse 6,561 (97.1%)
+  visible names at signal:  
+
+THE VERDICT: MC5-spread against MC5 (registered readings 1-5, $4.26)
+
+  1. per trade +1.87 (margin 4.26)   per symbol-day +14.17
+  2. early half  per trade +14.64  per symbol-day +6.92     late half  per trade +0.87  per symbol-day +7.25
+  3. drop-top-3 level  MC5-spread (3,318.88)  MC5 (96,639.47)     drop-top-3 delta 85,582.18
+  4. cluster bootstrap on the delta  P(total > 0) = 1.000  [72,474.33, 99,830.23]  over 1,480 symbols
+  5. abstention control: 6,508 of 6,755 trades removed at random, 2000 draws
+       per trade      random p05 -5.80  p50 -0.69  p95 +6.24   the gate +1.87
+       per symbol-day random p05 +13.86  p50 +14.07  p95 +14.35   the gate +14.17
+
+  NOTHING: a half is empty in one of the books
+
+  cost: 10 of MC5's top-10 trades at $4.26 are absent from MC5-spread
+    UVIX   2026-07-01  04:20 ET    5,461.25
+    AEHL   2025-09-10  06:20 ET      640.33
+    WHLR   2024-09-06  04:05 ET      619.35
+    BTCT   2024-11-13  09:05 ET      520.35
+    WVVIP  2026-08-25  05:35 ET      504.36
+    MBX    2025-09-22  07:50 ET      493.34
+    LHAI   2025-07-25  05:50 ET      448.85
+    PLSM   2026-06-24  07:15 ET      448.35
+    UPC    2026-06-29  08:45 ET      443.35
+    ROLR   2026-01-14  08:20 ET      420.85
+  cascade: 53 MC5-spread entries the baseline does not contain
+
+WHAT MC5-spread REFUSED OF MC5 (exact: baseline trades whose entry bar the gate was False on)
+
+  refused            6,561   net  (87,806.72)   per trade  (13.38)
+    losses avoided   5,161   (154,368.92)
+    winners lost     1,400      66,562.20
+
+WHAT THIS IS NOT
+
+  NOT OUT OF SAMPLE. holdout.json has not been touched.
+  NOT A CAP MODEL. Each symbol-day runs alone (registration §5).
+  NOT A SEARCH. One N decides; the reported cell was declared before the run.
