@@ -40,13 +40,29 @@ from common.report_io import emit
 
 ET = ZoneInfo("America/New_York")
 PAIRS = "var/state/screen_pairs_pit.json"
-DATASET = "XNAS.BASIC"
-SCHEMA = "cbbo-1s"          # quote source, fixed in REGISTERED_spread_gate.md §3
+BARS_DATASET = "XNAS.BASIC"    # the MCL/MC5 engine's own bar tape -- NEVER
+# swap this for a quote-source experiment. Changing it changes which book is
+# being measured, not just what it's measured against, and breaks
+# comparability with the published W03-0002 result. build_tasks() below
+# reads BARS_DATASET/ohlcv-1m; nothing else.
+
+QUOTE_DATASET = "XNAS.BASIC"   # default quote source, fixed in
+QUOTE_SCHEMA = "cbbo-1s"       # REGISTERED_spread_gate.md §3. Override with
+# --quote-dataset/--quote-schema (W03-0014/W03-0015: re-running the gate on a
+# different consolidated tape, e.g. DBEQ.BASIC/mbp-1, without touching
+# BARS_DATASET). Threaded explicitly through each task tuple (not read as a
+# mutated global) because run_sessions() may fan out via
+# ProcessPoolExecutor, which on Windows (spawn) re-imports this module fresh
+# in every worker -- a global set in main() after that point would silently
+# not be seen by the workers.
+
 # cbbo-1s emits a consolidated snapshot every second by construction, so a
 # quote should exist within a second or two of any bar-close timestamp.
 # 5s (not quote_fill.py's 1,800s, which matches sparse trade PRINTS against
 # a per-date tbbo/tcbbo tape) keeps a stale quote from silently standing in
-# across a real gap in coverage.
+# across a real gap in coverage. Kept as one fixed tolerance across quote
+# sources -- a wider tolerance for a sparser tape would be choosing the
+# answer, not measuring it.
 TOLERANCE_S = 5
 REGISTERED = "docs/research/REGISTERED_spread_gate.md"
 
@@ -91,19 +107,29 @@ def trade_row(t, symbol: str, day: str, ordinal: int) -> dict:
     }
 
 
-def quote_window_path(archive: Path, day: str, symbol: str) -> Path:
-    """Where step 3's pull put this symbol-day's quotes.
+def quote_window_path(archive: Path, day: str, symbol: str,
+                       dataset: str = QUOTE_DATASET,
+                       schema: str = QUOTE_SCHEMA) -> Path:
+    """Where step 3's (or a later re-run's) pull put this symbol-day's quotes.
 
     Mirrors common.quote_price.window_path exactly -- ONE FILE PER
     (day, symbol), not the per-calendar-date archive that
     common.friction_quotes.quotes_for_date reads (that layout belongs to a
     different pull, common/quote_fill.py's tcbbo trade-with-quote tape, and
     does not apply to the window pull done for this registration).
+
+    `dataset`/`schema` default to the originally-registered XNAS.BASIC/
+    cbbo-1s so every existing caller (this module's own CLI default, and
+    claude/w03_0011_reconcile.py, which calls load_quote_window with no
+    dataset/schema of its own) is unaffected by a later re-run on a
+    different tape.
     """
-    return archive / DATASET / SCHEMA / "windows" / day / f"{symbol}.dbn.zst"
+    return archive / dataset / schema / "windows" / day / f"{symbol}.dbn.zst"
 
 
-def load_quote_window(archive: Path, day: str, symbol: str) -> pd.DataFrame:
+def load_quote_window(archive: Path, day: str, symbol: str,
+                       dataset: str = QUOTE_DATASET,
+                       schema: str = QUOTE_SCHEMA) -> pd.DataFrame:
     """This symbol-day's real top-of-book quotes, sorted by time.
 
     Empty (not an error) when the window file is absent or has no rows --
@@ -117,7 +143,7 @@ def load_quote_window(archive: Path, day: str, symbol: str) -> pd.DataFrame:
     """
     from common.dbn_io import read_dbn
 
-    p = quote_window_path(archive, day, symbol)
+    p = quote_window_path(archive, day, symbol, dataset, schema)
     if not p.exists() or p.stat().st_size == 0:
         return pd.DataFrame(columns=["ts", "bid", "ask"])
     out = read_dbn(p)
@@ -129,12 +155,11 @@ def load_quote_window(archive: Path, day: str, symbol: str) -> pd.DataFrame:
     missing = [c for c in keep if c not in out.columns]
     if missing:
         raise ValueError(
-            f"{p.name}: cbbo-1s window is missing {missing}. Columns "
-            f"present: {sorted(out.columns)}. This is the first real read "
-            "of this schema's output by entry_gates.py -- if the field "
-            "names differ from the tcbbo/cmbp-1 shape "
-            "common.friction_quotes.quotes_for_date already parses, this "
-            "loader needs updating to match, not a silent empty return."
+            f"{p.name}: {dataset}/{schema} window is missing {missing}. "
+            f"Columns present: {sorted(out.columns)}. If this schema's "
+            "field names differ from the mbp-1/cbbo-1s shape this loader "
+            "assumes (bid_px_00/ask_px_00, ts_recv or ts_event), it needs "
+            "updating to match, not a silent empty return."
         )
     out = out[keep].rename(
         columns={tcol: "ts", "bid_px_00": "bid", "ask_px_00": "ask"})
@@ -225,7 +250,8 @@ def run_day(args: tuple) -> tuple:
     """Run one session across all gated and baseline books.
 
     Args:
-        args: (paths list, day str, universe list, archive Path)
+        args: (paths list, day str, universe list, archive Path,
+               quote_dataset str, quote_schema str)
 
     Returns:
         (day, result dict, error string)
@@ -234,7 +260,7 @@ def run_day(args: tuple) -> tuple:
     from common.pit_h0 import first_seen_time
     from common.pit_strategy import build_frame, engine
 
-    paths, day, universe, archive = args
+    paths, day, universe, archive, quote_dataset, quote_schema = args
     engines = {name: engine(name) for name in ("mcl", "mc5")}
     parts = []
     
@@ -267,8 +293,10 @@ def run_day(args: tuple) -> tuple:
         df = df.sort_index(kind="mergesort")
         floor = first_seen_time(rec)
 
-        # Compute spread once per symbol-day, from step 3's real quote pull
-        quotes = load_quote_window(archive, day, rec["symbol"])
+        # Compute spread once per symbol-day, from step 3's (or a later
+        # re-run's) real quote pull
+        quotes = load_quote_window(archive, day, rec["symbol"],
+                                    quote_dataset, quote_schema)
         spread_arr = compute_spread(df, quotes)
 
         # ALL OR NONE: if any book raises, drop from all
@@ -324,6 +352,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="limit sessions for testing",
     )
+    p.add_argument(
+        "--quote-dataset",
+        type=str,
+        default=QUOTE_DATASET,
+        help=f"quote source dataset for the spread gate (default: {QUOTE_DATASET}). "
+             "Does NOT change BARS_DATASET -- the MCL/MC5 engine's own bar tape is "
+             "fixed regardless of this flag, so a re-run stays comparable to the "
+             "published W03-0002 book.",
+    )
+    p.add_argument(
+        "--quote-schema",
+        type=str,
+        default=QUOTE_SCHEMA,
+        help=f"quote source schema (default: {QUOTE_SCHEMA})",
+    )
     return p
 
 
@@ -335,17 +378,21 @@ def main():
     from common.databento_fetch import default_archive
 
     archive = default_archive()
-    tasks, by_date = G.build_tasks(PAIRS, archive, DATASET, args.limit)
-    # Same archive root serves the ohlcv-1m bars (build_tasks, above) and the
-    # cbbo-1s quote windows step 3 pulled (load_quote_window) -- one archive,
-    # two dataset/schema subtrees under it. Thread it into each task so
-    # run_day can read a symbol-day's quotes without a second CLI argument.
-    tasks = [(pp, d, u, archive) for pp, d, u in tasks]
+    tasks, by_date = G.build_tasks(PAIRS, archive, BARS_DATASET, args.limit)
+    # BARS_DATASET (the engine's own tape) never varies with --quote-dataset.
+    # quote_dataset/quote_schema are threaded through each task tuple
+    # explicitly -- not read off a mutated module global -- because
+    # run_sessions() may fan out over a ProcessPoolExecutor, and on Windows
+    # (spawn) each worker re-imports this module fresh, so a global set here
+    # in main() would silently not be seen by the workers.
+    tasks = [(pp, d, u, archive, args.quote_dataset, args.quote_schema)
+             for pp, d, u in tasks]
     jobs = G.jobs_from(args.jobs)
     
     print(f"Spread gate study: {len(tasks)} sessions, {jobs} workers")
-    print(f"  Threshold: {SPREAD_THRESHOLD:.1%} quoted spread (cbbo-1s)")
-    print(f"  Source: XNAS.BASIC/cbbo-1s (confirmed in step 3)")
+    print(f"  Threshold: {SPREAD_THRESHOLD:.1%} quoted spread")
+    print(f"  Bars: {BARS_DATASET}/ohlcv-1m (unchanged from the published book)")
+    print(f"  Quote source: {args.quote_dataset}/{args.quote_schema}")
     
     # Run across all sessions
     books, elapsed = G.run_sessions(run_day, tasks, jobs, "Entry gates")
@@ -409,12 +456,14 @@ def main():
         preamble=[
             "",
             f"Spread gate (REGISTERED_spread_gate.md §1): refuse if (ask - bid) / mid >= {SPREAD_THRESHOLD:.1%}",
-            f"Quote source: XNAS.BASIC / cbbo-1s (confirmed in step 3)",
+            f"Quote source: {args.quote_dataset} / {args.quote_schema}"
+            + (" (confirmed in step 3)" if (args.quote_dataset, args.quote_schema)
+               == (QUOTE_DATASET, QUOTE_SCHEMA) else " (re-run, not the registered source)"),
             f"Volume gate: CLOSED per thin_tape_RESULT_20260919.md §8 (not tested here)",
             "",
         ],
         universe=PAIRS,
-        dataset=DATASET,
+        dataset=BARS_DATASET,
     )
     
     txt_path = Path(args.csv).with_suffix(".txt")
@@ -431,8 +480,8 @@ def main():
         {
             "registered": REGISTERED,
             "spread_threshold": SPREAD_THRESHOLD,
-            "quote_source": "XNAS.BASIC/cbbo-1s",
-            "dataset": DATASET,
+            "quote_source": f"{args.quote_dataset}/{args.quote_schema}",
+            "bars_dataset": BARS_DATASET,
             "pairs": PAIRS,
         },
     )
