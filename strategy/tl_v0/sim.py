@@ -68,6 +68,7 @@ class Counts:
     no_stop: int = 0
     unfilled_at_end: int = 0
     entries: int = 0
+    not_aplus: int = 0          # TL-v1: a break that failed the A+ checklist (qual_* arrays only)
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -88,6 +89,11 @@ class SimInput:
     trail_short: np.ndarray
     atr: np.ndarray | None = None
     chandelier_k: float | None = None
+    # TL-v1 (REGISTERED_tl_v1.md sec 2.3-2.4): up/dn stay the RAW line breaks
+    # (an opposite raw break always EXITS); qual_up/qual_dn mark the breaks that also pass
+    # A1-A3 -- only those may ENTER or REVERSE. None = every break qualifies (TL-v0, C1, C2).
+    qual_up: np.ndarray | None = None
+    qual_dn: np.ndarray | None = None
 
 
 @dataclass
@@ -199,18 +205,33 @@ def simulate(x: SimInput, *, rule: str, mult: float, risk_usd: float,
                 return None
             return (d, st, seed)
 
+        qual = x.qual_up is not None
+        qu = up and (not qual or bool(x.qual_up[j]))
+        qd = dn and (not qual or bool(x.qual_dn[j]))
+
+        def aplus(d):
+            return qu if d == 1 else qd
+
         def allowed(d):
-            return x.htf is None or x.htf[j] == d
+            return (x.htf is None or x.htf[j] == d) and aplus(d)
+
+        def blocked_why(d):
+            if qual and not aplus(d):
+                k.not_aplus += 1
+            else:
+                k.htf_blocked += 1
 
         if pos == 0:
             d = 1 if up else -1                      # Pine: if upBrk ... else if dnBrk
+            if qual:
+                d = 1 if qu else (-1 if qd else d)   # TL-v1: the first QUALIFIED break, else the raw one
             if allowed(d):
                 pe = order(d)
                 if pe is not None:
                     pend_entry = pe
                     k.signals += 1
             else:
-                k.htf_blocked += 1
+                blocked_why(d)
             # the other side of a two-way bar is not acted on (Pine)
             continue
 
@@ -232,5 +253,5 @@ def simulate(x: SimInput, *, rule: str, mult: float, risk_usd: float,
         else:
             pend_exit = "flat_blocked"
             k.reversal_blocked_flat += 1
-            k.htf_blocked += 1
+            blocked_why(d)
     return res

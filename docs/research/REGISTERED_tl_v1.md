@@ -137,6 +137,67 @@ calendar days essentially cannot occur — A2 is not doing any filtering work in
 of the two (645/520/408 failures vs. 369/325/266 for A3, by pivot size). This is a finding about
 the coding, not a rule change — §2.3's A2 stands as registered.
 
+#### Amendment F — PRE-RUN (W15-0019, G3 Pine↔Python parity, closed 2026-09-29)
+
+Two comparisons were run, both CL1! daily, 2015–2019, back-adjustment off, pivLen (L=R) = 5:
+
+1. **Pine vs. the Databento archive.** `pine/TL_v1.pine`'s two plotted lines against
+   `common/tl_v1_lines.py`'s `build_series()` fed the archive's raw OHLC (`ro`/`rh`/`rl`/`rc` —
+   not the difference-back-adjusted signal series §2.1 uses for the actual backtest, which the
+   comparison script initially read by mistake and was corrected before this run): **~85%
+   mismatch on both lines**, not clustered by roll date the way `REGISTERED_tl_bounce.md`
+   Amendment 1 found.
+2. **Self-consistency: Pine vs. Python, same data.** The same Python code run on **TradingView's
+   own exported OHLC** (the identical CSV Ben's chart produced, no archive involved) against
+   Pine's own plotted line: **805/813 Resistance bars and 798/847 Support bars matched within
+   1 cent** (85–98%). The residual mismatches are small (deltas $0.50–$2.70) and localized (a
+   line armed a few weeks earlier or later on one side, in isolated stretches) — the same shape
+   Amendment 1 accepted for TL-bounce's own G3.
+
+**Finding.** Check 2 shows `common/tl_v1_lines.py` is a correct port of §2.2's line-construction
+algorithm: given the same prices Pine sees, it reproduces Pine's own line almost exactly. Check 1's
+much larger mismatch is not a code defect — TradingView's CL1! and the Databento archive's own
+continuous-contract construction are different price series, and L2's anchor picks the single most
+extreme price in a 250-bar rolling window, so a difference in the underlying feed (not just a
+roll-day offset) is enough to select an entirely different anchor and produce a line that never
+converges, however long the two are compared.
+
+**Ben's decision, 2026-09-29, in his words:** *"for §5.1 G3, let's go with python"* — G3 is closed
+on check 2 (the self-consistency result). A direct Pine-vs-archive comparison (check 1) is not
+treated as a meaningful test of the port: Pine has no way to see the archive's own feed, so it
+cannot be expected to match it bar-for-bar regardless of how correct the code is.
+
+**G3 is cleared on this basis** (§5.1's gates table and §7 updated below). W15-0020 is unblocked by
+G3; it remains blocked only on W15-0014's C2 reference run.
+
+#### Amendment G -- PRE-RUN (W15-0020 engine build, 2026-09-29, before any TL-v1 P&L exists or has been read)
+
+Coding of sec 2-4 wording that admits more than one reading. Each is fixed here; none comes from a
+result (no TL-v1 P&L has been computed by anyone). The code is `strategy/tl_v1/` and the small
+backward-compatible `qual_up/qual_dn` extension of `strategy/tl_v0/sim.py`, committed before the run.
+
+1. **Exit vs entry (sec 2.4).** An opposite *raw* line break (close beyond the support/resistance line by
+   > 0.10 x ATR) always exits at the next open. It reverses only if that break is A+ (A1-A3) and passes the
+   weekly filter; otherwise the walk goes flat. In-position same-side breaks are ignored (as v0-rev).
+2. **A2 as registered.** Calendar days from A's bar to the *last counted touch* >= 7. The G2 pre-flight
+   measured A's bar to the *break* bar (Amendment E's "A2 failed on zero breaks" is that reading). The report
+   prints both counts. Neither changes a threshold.
+3. **Criterion 2 "median trade date".** Split at the median *entry* date of the verdict book's trades;
+   each half = net at mid of the trades that entered in it; an empty half fails.
+4. **C3 matching.** Pool = every sec 2.2 break agreeing with the weekly filter; each draw picks, per market and
+   pivot size, as many of them as TL-v1 has A+ breaks agreeing with the weekly filter (matched on breaks, not on
+   filled entries, which depend on the path); same v0-rev simulator. Draw d is seeded
+   `default_rng([crc32(str(d)), crc32(market), R])`. The median filled-entry count of the draws is printed
+   beside TL-v1's.
+5. **Verdict book.** Fractional ensemble at $22,129, mid friction (TL-v0 Amendment B, inherited by sec 2.1);
+   integer book at $22,129 printed beside it. Criteria 7 (concentration) is "not read" (counts as not passed)
+   when net <= 0.
+6. **Breaks masked** where the repo's gated ATR(14) is unknown (first 13 bars); the line and touch tests use the
+   pre-flight's ATR.
+7. **Not in W15-0020:** the CL 4-hour variant (sec 2.5) and the seen window. The 4-hour variant needs the
+   ohlcv-1h 4H-bar pipeline and HTF-Ben's costs; it is board item **W15-0021**, reported only, and cannot spend
+   the holdout. The seen window lies inside the holdout region the training runner cannot read.
+
 ### 2.4 Exits and reversal — v0-rev, with one clarification
 
 - Safety line and stop: v0-rev, unchanged.
@@ -210,12 +271,12 @@ criterion: both are registered hypotheses and neither is chosen over the other o
 |---|---|---|---|
 | G1 | **Data:** the TL-v0 daily archive (as `REGISTERED_tl_v0.md`); CL 1-hour for the 4-hour variant (HTF-Ben v0 G1, passed under Amendment B). No new data | Same bars | Cleared (reused, no new data) |
 | G2 | **Pre-flight** (5.2) run and read; ER q20/q25/q33 per market written in here as PRE-RUN | Enough trades? | **Cleared 2026-09-29 — see §2.3 Amendment E** |
-| G3 | **Pine ↔ Python parity** for the §2.2 line and A1–A2 on CL1! daily, 2015–2019, back-adjustment off: same A, B, touch count and break bars, mismatches listed, zero tolerated or each explained. Pine delivered as a file for Ben to paste; **never written into Ben's Pine Editor by a chat** | New line code; lets Ben eyeball it against how she draws | **NOT YET RUN** — `pine/TL_v1.pine` delivered (306cecf), parity comparison against `common/tl_v1_lines.py` outstanding (W15-0019 subitem 3) |
+| G3 | **Pine ↔ Python parity** for the §2.2 line and A1–A2 on CL1! daily, 2015–2019, back-adjustment off: same A, B, touch count and break bars, mismatches listed, zero tolerated or each explained. Pine delivered as a file for Ben to paste; **never written into Ben's Pine Editor by a chat** | New line code; lets Ben eyeball it against how she draws | **Cleared 2026-09-29 — see §2.3 Amendment F (self-consistency check; Ben's call to close on it)** |
 | G4 | **Holdout** (§6) cut and ledger in code, mutation-tested | `PROGRAM_INDEX` §1 | Cleared (`common/tl_v1_holdout.py`, tested, 306cecf) |
 | G5 | **Look-ahead guards**, each broken by a one-bar shift in a test: the line in force at t uses only pivots confirmed by t − 1's close; touch pivots confirmed by t − 1; ER percentiles from training bars only (a test fails if a holdout bar changes them); weekly filter on completed weeks | Her replays are drawn on finished charts | Cleared (tests/test_tl_v1_hindsight_guard.py, 306cecf) |
 | G6 | **W15-0014's engine and gates G3–G5 done** (TL-v1 reuses them) | One engine, not two | Cleared |
 
-**No P&L may be run (W15-0020) until G3 is also cleared.**
+**All gates are cleared. W15-0020 is blocked only on W15-0014's C2 reference run being available.**
 
 ### 5.2 G2 pre-flight (training side only: 2010-06 → 2021-12)
 
@@ -277,6 +338,10 @@ is computed; the runner refuses both in this mode.**
 - **A2 (the span test) may not be doing anything.** The G2 pre-flight found A2 failed on zero
   breaks in any market or pivot size (§2.3 Amendment E) — worth knowing when reading §3's counts,
   though §7 bars changing the rule now.
+- **G3's comparison window can't be made to match TradingView's own feed.** Resolved 2026-09-29
+  (§2.3 Amendment F): the Pine-vs-Python port is verified correct by a self-consistency check on
+  TradingView's own data; the port is not re-checked against the archive's own feed, which is a
+  different data source Pine cannot see.
 
 ---
 
@@ -309,8 +374,9 @@ W15-0020.)*
 
 - **W15-0019** — build (on W15-0014's engine): §2.2 line code, A1–A3, Pine indicator file (G3),
   guards (G5), holdout cut (G4), count-only pre-flight (G2, writes the ER percentiles in here as
-  PRE-RUN) — **code, tests, holdout and pre-flight done (306cecf); G3 Pine↔Python parity still
-  open**. Build & test chat, Sonnet · Medium. Pre-flight runs on Ben's PC.
-- **W15-0020** — backtest, training side, Result doc. Blocked by W15-0019 (G3 specifically) and
-  W15-0014 (C2 comes from it). Build & test chat, Sonnet · Medium; runs on Ben's PC.
+  PRE-RUN) — **code, tests, holdout, pre-flight and G3 parity all done (306cecf + the parity
+  script commits, 2026-09-29); all gates cleared, item complete.** Build & test chat, Sonnet ·
+  Medium. Pre-flight ran on Ben's PC.
+- **W15-0020** — backtest, training side, Result doc. Blocked only by W15-0014 (C2 comes from
+  it); W15-0019's G3 is cleared. Build & test chat, Sonnet · Medium; runs on Ben's PC.
 - **W15-0014** — the P&L hold is lifted: TL-v1 is registered.
