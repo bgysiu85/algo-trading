@@ -27,7 +27,7 @@ def default_archive() -> Path:
     return da() / DATASET
 
 
-def load_daily(archive: Path, names: list[str], *, loader=None, log=print) -> tuple[dict, dict]:
+def load_daily(archive: Path, names: list[str], *, loader=None, log=print, ibkr: bool = False) -> tuple[dict, dict]:
     """{market: Frame}, {market: notes}. `loader(name) -> (Frame, notes)` is injectable for tests."""
     if loader is None:
         from strategy.tsmom import archive as A
@@ -38,6 +38,9 @@ def load_daily(archive: Path, names: list[str], *, loader=None, log=print) -> tu
     frames, notes = {}, {}
     for name in names:
         fr, nt = loader(name)
+        if ibkr:                                       # W15-0033: IBKR fee + 0/1/2 ticks per side
+            from strategy.futbt.costs_ibkr import with_ibkr
+            fr = with_ibkr(fr)
         frames[name], notes[name] = fr, nt
         log(f"{name}: {fr.n} sessions {fr.dates[0].date()} .. {fr.dates[-1].date()}")
     return frames, notes
@@ -58,6 +61,10 @@ def frame_cl4h_from_1h(df_1h: pd.DataFrame) -> K.Frame:
     return K.frame_from_4h(entry, MARKETS["CL"])
 
 
-def load_cl4h(archive: Path) -> K.Frame:
+def load_cl4h(archive: Path, *, ibkr: bool = False) -> K.Frame:
     from strategy.htf import bars as HB
-    return frame_cl4h_from_1h(HB.load_1h(archive))
+    fr = frame_cl4h_from_1h(HB.load_1h(archive))
+    if ibkr:                                           # one MCL at IBKR: $0.77 + 0/1/2 x $1 per side
+        from strategy.futbt.costs_ibkr import with_ibkr
+        fr = with_ibkr(fr, "MCL")
+    return fr

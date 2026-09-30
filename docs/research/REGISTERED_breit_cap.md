@@ -313,3 +313,28 @@ which is in the rules.* I'd be glad to be wrong.
 3. A profit target that lies on the wrong side of the fill is dropped (the trade runs on stop/trail only).
 4. The trail (prior-bar low/high) is applied at every close including the entry bar; a same-bar stop is taken at the stop.
 5. Volume coverage (G1) is scored on held-contract volume > 0 over training bars; a market below 99% has G-volume scored "no" throughout, via a committed amendment before the run (runner exit code 3 otherwise).
+
+### Amendment B — PRE-RUN, 2026-09-30 (W15-0033 cost basis; W15-0034 report readings; before any P&L is read)
+
+Reason: Ben's instruction to use IBKR costs, and the wording of §4 that admits more than one reading. Neither follows a result: the G2 pre-flight read no exit price and no P&L (791 daily primary entries; every market passes the 99% volume check).
+
+**Costs — IBKR (W15-0033), replacing the flat $0.50 / $1.25 / $2.50 per side.** Ben, 2026-09-30: *"please use the IBKR costs as that will be the broker i'm using"*; levels chosen by Ben (multiple choice, same day): **fee + 0 / 1 / 2 ticks per side**. Per contract per side, all-in = IBKR Pro commission (Fixed, or Tiered ≤ 1,000 contracts a month) + exchange fee (non-member) + regulatory ≈ $0.02, read 2026-09-30 from interactivebrokers.com (`/en/pricing/commissions-futures.php`, `/en/accounts/fees/{CME,CBOT,COMEX,NYMEX}.php`):
+
+| Vehicle | Commission | Exchange | All-in / side | Tick $ | low / mid / high per side |
+|---|---|---|---|---|---|
+| MES (ES) | 0.25 | 0.353 | **0.62** | 1.25 | 0.62 / 1.87 / 3.12 |
+| M2K (RTY) | 0.25 | 0.353 | **0.62** | 0.50 | 0.62 / 1.12 / 1.62 |
+| MCL (CL; also CL 4H) | 0.25 | 0.50 | **0.77** | 1.00 | 0.77 / 1.77 / 2.77 |
+| NG (full) | 0.85 | 1.60 | **2.47** | 10.00 | 2.47 / 12.47 / 22.47 |
+| M6A, M6E, M6B | 0.25 | 0.24 | **0.51** | 1.00 / 1.25 / 0.625 | 0.51 / 1.51 / 2.51; 0.51 / 1.76 / 3.01; 0.51 / 1.135 / 1.76 |
+| 6J (full) | 0.85 | 1.60 | **2.47** | 6.25 | 2.47 / 8.72 / 14.97 |
+| MGC (GC) | 0.25 | 0.70 | **0.97** | 1.00 | 0.97 / 1.97 / 2.97 |
+| SIL (SI) | 0.25 | 0.70 **(assumed)** | **0.97** | 5.00 | 0.97 / 5.97 / 10.97 |
+| MHG (HG) | 0.25 | 0.70 | **0.97** | 1.25 | 0.97 / 2.22 / 3.47 |
+| MTN | 0.25 | 0.30 | **0.57** | 1.5625 | 0.57 / 2.13 / 3.69 |
+
+SIL is not on IBKR's COMEX fee page; its exchange fee is assumed equal to the other COMEX micros (flagged in every report). Slippage is inside the mid and high levels on **every** fill, so the old separate "1 tick on stop fills" is dropped (no double count). Roll legs: two sides per contract, as before. MCL round trip $1.54 / $3.54 / $5.54, as the CHARTMARK registrations. Wherever this file says "$1.25 / side" (mid) or "$2.50 / side" (high) it now means these levels. Code: `strategy/futbt/costs_ibkr.py`. **PRE-RUN check (G5):** if Ben's first IBKR futures fills show a different all-in fee, it is amended here before any P&L is read.
+
+**Coding notes for §4 wording (fixed now, before any P&L):** criterion 2 splits at the median ENTRY date of the verdict book's trades (each half = sum of net at mid of the trades that entered in it; an empty half fails); criterion 4 uses TL-v0's `cluster_boot` (2,000 resamples, seed 20260927); criterion 5 is net AND net per unit of realised volatility (TL-v0's measure); criterion 7 is NOT READ when net ≤ 0; criterion 9 counts grid cells with net > $0 at mid (the grid is the fractional book at $22,129); criterion 10 NOT READ under 150 trades. The report layer is `strategy/futbt/report_common.py`; the backtest runners are `strategy.crudele_3s.backtest` and `strategy.breit_cap.backtest` (training side only; `--holdout`, `--limit`, `--seen`, `--spend` are refused).
+
+**BREIT-CAP-specific:** criterion 6 part one, "beats C2 on net per trade (R-normalised)", is coded as average R per trade = mean of net at mid ÷ (risk fraction × $22,129) on the fractional book; BREIT-CAP's average R must exceed C2's (the unfiltered reversal at flat 1%). Part two: net at mid above the p95 of C3's 1,000 draws. Both must hold. **CL 4H (scored secondary):** one market, so criteria 3, 4 and 7 are read by calendar year (drop the top 1 and top 2 years; bootstrap by year; no year above 50%); its own C1, C2, C3 (random draws on the 4H bars) and 27-cell grid; priced as one MCL; daily P&L for the volatility measure is summed per 18:00-New-York session. If the CL 1-hour file is not found, CL 4H is "not evaluated" and the daily primary runs alone.
