@@ -163,3 +163,13 @@ Fill at max(L*, open[t+1]) when high[t+1] ≥ L*. **There is no after-the-fill c
 **1.4 Seen window, as re-run (not evidence), `Claude outputs/w15_0036_v2_seen_proto_live.py`.** Base: 98 trades, 20 winners, (1.39) pts gross ≈ ($139) per MCL before ≈ $347 of costs; exits EMA21 41 / BACKSTOP 37 / BACKSTOP-fillbar 20; arms A 78 / B 20. V-STOP20: 75 of 110 stopped inside the fill bar. Run as a whole, the rule enters on Fri 28 Aug 14:00 at 83.52 on an A trigger (EMA9 crossing EMA21, MACD rising) and holds to 2 Sep 08:00 (89.11), so it is already long on 1 Sep and does not take Ben's 04:00 entry.
 
 **1.5 §9 prediction unchanged in range; UNCONFIRMED no longer exists in the base, so BACKSTOP will be the most common exit.**
+
+### Amendment 2 — PRE-RUN, 2026-09-30 18:40 (which red candle; before any code, count or P&L on training)
+
+Ben, on the 28 Aug 2026 A-trigger: *"I would have entered at 12:00 around $83.35"* — *"I was actually measuring against the previous red bar at 7:00. i entered above it's opening"*. The 08:00 red bar (open 82.91) was below the price and was skipped.
+
+**2.1 Replaces the red-candle level in §2.1 and Amendment 1:** the level is the open, + 1 tick, of **the most recent red bar among t−9…t whose open is above close[t]**. None → no order. (The rest of L* in Amendment 1 is unchanged.)
+
+**2.2 G6 parity adds:** started flat at the close of 28 Aug 2026 11:00, the engine fills in the 12:00 bar within 2 ticks of **83.27** (07:00 bar open 83.26 + 1 tick; Ben ≈ 83.35) and exits at the 2 Sep 08:00 open (89.11). Amendment 1.3's 1 Sep checks are unchanged (level 87.69; 00:00 no fill).
+
+**2.3 Seen window re-run (not evidence), `Claude outputs/w15_0036_v2_seen_proto_live.py`:** base 86 trades, 20 winners, +5.40 pts gross ≈ +$540 per MCL before ≈ $304 of costs; exits EMA21 36 / BACKSTOP 35 / BACKSTOP-fillbar 15; arms A 76 / B 10. V-STOP20: 78 of 109 stopped inside the fill bar. Run over the whole year the rule is long from 28 Aug 12:00 to 2 Sep 08:00, so Ben's 1 Sep trade falls inside that position.
