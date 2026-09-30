@@ -1,0 +1,86 @@
+W15-0032 CHARTMARK-S v1 (short) -- training-side backtest, CL 1H, 2010-06-06 .. 2021-12-31, run 20260930
+Registered: REGISTERED_chartmark_short_v1.md incl. Amendment A. Costs IBKR (sec 2.5). 1 MCL headline, mid friction. Negatives in brackets.
+
+VERDICT: FAIL (criterion 5 or 6 closes the study)
+
+HEADLINE (BASE, 1 MCL, mid):
+  trades 6997  wins 1678  losses 5319  gross ($3,599)  costs $24,932  net ($28,532)
+  net at low ($14,446) / mid ($28,532) / high ($42,618)   1 CL: low ($69,377) / mid ($210,237) / high ($351,097)
+  avg win $36  avg loss ($17)  largest loss ($668)  worst losing run 34  max drawdown $28,595
+  halves ($15,684) / ($12,848)
+
+SEC 4 CRITERIA (base):
+   1. Net > $0 at mid                                         FAIL  ($28,532)
+   2. Both halves net > $0                                    FAIL  (($15,684), ($12,848))
+   3. Drop-top-1 and drop-top-2 years > $0                    FAIL  (($28,941), ($28,162))
+   4. Bootstrap by year, net>0 in >=95%                       FAIL  0.000
+   5. Beats C1 on net and on net per unit of volatility       FAIL  (($28,532), $1,069, ($514), $15)
+   6. Beats C3 p99 on net                                     FAIL  (($28,532), ($3,789))
+   7. No single year > 50% of net                             FAIL  0.138
+   8. Net > $0 at high friction                               FAIL  ($42,618)
+   9. >=18 of 27 cells net > $0                               FAIL  0
+  10. >=150 trades                                            PASS  6997
+
+BASE per year (1 MCL; net low / mid / high; 1 CL mid):
+  year orders fills cancel t/out re-ent  P1%       W/L     gross     cost   net low   net mid  net high     CL mid  exits
+  2010    489   364    123     1    168  14%   78/286   ($1,658)   $1,292  ($2,220)  ($2,950)  ($3,680)  ($25,611)  {'P0': 314, 'P1': 50}  med bars order->fill 1, fill->exit 1
+  2011    816   625    190     1    285  14%  189/436   ($1,667)   $2,227  ($2,635)  ($3,893)  ($5,151)  ($32,229)  {'P0': 539, 'P1': 83, 'S': 3}  med bars order->fill 1, fill->exit 1
+  2012    785   612    169     3    283  15%  165/447     ($245)   $2,174  ($1,191)  ($2,419)  ($3,647)  ($17,645)  {'P0': 521, 'P1': 88, 'S': 3}  med bars order->fill 1, fill->exit 1
+  2013    811   644    166     2    318  11%  126/518   ($1,630)   $2,294  ($2,628)  ($3,924)  ($5,220)  ($32,330)  {'P0': 572, 'P1': 71, 'S': 1}  med bars order->fill 1, fill->exit 1
+  2014    720   564    154     1    247  17%  145/419     $2,417   $2,007    $1,544      $410    ($724)    $10,144  {'P1': 96, 'P0': 467, 'S': 1}  med bars order->fill 1, fill->exit 1
+  2015    667   525    138     2    229  15%  141/384     ($785)   $1,873  ($1,600)  ($2,658)  ($3,716)  ($20,940)  {'P0': 448, 'P1': 75, 'S': 2}  med bars order->fill 1, fill->exit 1
+  2016    736   588    146     3    277  17%  152/436     $1,317   $2,096      $405    ($779)  ($1,963)   ($1,480)  {'P0': 486, 'P1': 99, 'S': 3}  med bars order->fill 1, fill->exit 1
+  2017    779   620    156     3    284  15%  104/516     ($454)   $2,212  ($1,417)  ($2,667)  ($3,917)  ($20,003)  {'P0': 524, 'P1': 93, 'S': 3}  med bars order->fill 1, fill->exit 1
+  2018    705   555    143     7    254  17%  127/428       $802   $1,979     ($59)  ($1,177)  ($2,295)   ($5,813)  {'P1': 94, 'P0': 459, 'S': 2}  med bars order->fill 1, fill->exit 1
+  2019    785   612    168     5    268  15%  133/479     ($775)   $2,191  ($1,728)  ($2,966)  ($4,204)  ($23,060)  {'P1': 88, 'P0': 523, 'S': 1}  med bars order->fill 1, fill->exit 1
+  2020    784   604    179     0    250  16%  166/438     ($617)   $2,145  ($1,550)  ($2,762)  ($3,974)  ($21,165)  {'P0': 505, 'P1': 98, 'S': 1}  med bars order->fill 1, fill->exit 1
+  2021    870   684    185     1    291  16%  152/532     ($303)   $2,443  ($1,366)  ($2,746)  ($4,126)  ($20,104)  {'P1': 107, 'P0': 575, 'S': 2}  med bars order->fill 1, fill->exit 1
+
+EXITS BY TYPE (base): {'P0': 5933, 'P1': 1042, 'S': 22}  share reaching P1 1064/6997  orders 8947 fills 6997 cancels 1917 timeouts 29 re-entries 3154 same-bar backstop touches 0 (0 by construction)
+
+CONTROLS (1 MCL, mid):
+  C1 Donchian 20/10 short: trades 1610 net $1,069 (high ($2,275))
+  C2 long rules mirrored for shorts (reference only): trades 2662 gross $6,384 net ($3,135) (high ($8,513))
+  C3 random short entries, same count per year, same exits (1,000 draws): p5 ($24,135)  p50 ($16,266)  p95 ($7,293)  p99 ($3,789); base beats 0.5% of draws
+
+VARIANTS (reported, never ranked; 1 MCL): trades / W-L / gross / net mid / net high / net low / halves / max DD / exits
+  BASE        6997  1678/5319    ($3,599)   ($28,532)   ($42,618)   ($14,446)  ($15,684) / ($12,848)  DD $28,595  exits {'P0': 5933, 'P1': 1042, 'S': 22}
+  V-RANGE     4441  1008/3433    ($7,888)   ($23,709)   ($32,647)   ($14,771)  ($13,526) / ($10,183)  DD $23,743  exits {'P1': 582, 'P0': 3849, 'S': 10}
+  V-SESSION   3436  854/2582        $303   ($11,942)   ($18,860)    ($5,024)  ($8,226) / ($3,716)  DD $12,183  exits {'P0': 2615, 'P1': 802, 'S': 19}
+  V-WIDE      3183  1351/1832      $2,728    ($8,763)   ($15,255)    ($2,271)  ($3,308) / ($5,455)  DD $9,637  exits {'S': 1639, 'P1': 1544}
+  V-CLOSE9    6972  1629/5343    ($3,342)   ($28,196)   ($42,238)   ($14,154)  ($15,340) / ($12,856)  DD $28,218  exits {'P0': 5912, 'C9': 1026, 'S': 34}
+  V-AVOID     6105  1470/4635    ($6,591)   ($28,338)   ($40,624)   ($16,052)  ($15,473) / ($12,864)  DD $28,463  exits {'P0': 5268, 'P1': 818, 'S': 19}
+
+NEIGHBOUR GRID (27 cells, unranked): 0 of 27 net > $0 at mid.
+  cells (X1 window, P1 arm, P0 cut buffer ticks -> trades, net):
+   X1=10 P1=0.75 cut=0 ->  5882  ($25,080)
+   X1=10 P1=0.75 cut=2 ->  5774  ($24,288)
+   X1=10 P1=0.75 cut=4 ->  5652  ($23,803)
+   X1=10 P1=1.0  cut=0 ->  5919  ($25,550)
+   X1=10 P1=1.0  cut=2 ->  5800  ($24,434)
+   X1=10 P1=1.0  cut=4 ->  5672  ($23,955)
+   X1=10 P1=1.5  cut=0 ->  5950  ($25,702)
+   X1=10 P1=1.5  cut=2 ->  5827  ($24,592)
+   X1=10 P1=1.5  cut=4 ->  5696  ($24,213)
+   X1=16 P1=0.75 cut=0 ->  7142  ($29,569)
+   X1=16 P1=0.75 cut=2 ->  6961  ($28,366)
+   X1=16 P1=0.75 cut=4 ->  6772  ($26,969)
+   X1=16 P1=1.0  cut=0 ->  7194  ($30,238)
+   X1=16 P1=1.0  cut=2 ->  6997  ($28,532)
+   X1=16 P1=1.0  cut=4 ->  6801  ($27,411)
+   X1=16 P1=1.5  cut=0 ->  7236  ($30,479)
+   X1=16 P1=1.5  cut=2 ->  7033  ($28,692)
+   X1=16 P1=1.5  cut=4 ->  6835  ($27,867)
+   X1=24 P1=0.75 cut=0 ->  7790  ($32,842)
+   X1=24 P1=0.75 cut=2 ->  7593  ($31,801)
+   X1=24 P1=0.75 cut=4 ->  7379  ($30,134)
+   X1=24 P1=1.0  cut=0 ->  7847  ($33,663)
+   X1=24 P1=1.0  cut=2 ->  7633  ($32,129)
+   X1=24 P1=1.0  cut=4 ->  7411  ($30,605)
+   X1=24 P1=1.5  cut=0 ->  7895  ($33,385)
+   X1=24 P1=1.5  cut=2 ->  7674  ($31,848)
+   X1=24 P1=1.5  cut=4 ->  7449  ($30,832)
+
+SEEN WINDOW (TradingView CL1! 2025-09-08 on; seen -- not evidence): engine BASE 651 trades, gross $4,085, net $1,781 (1 MCL, mid)
+
+CAVEATS: 1H OHLC cannot show the path inside a bar; every fill is a stop order priced at the level or the open (gap), one tick of slippage per side at mid. C3 trades are independent single-trade outcomes (overlap allowed); criterion 5 volatility is I9 (spec J9). Backstop same-bar touches are 0 by construction (J3).

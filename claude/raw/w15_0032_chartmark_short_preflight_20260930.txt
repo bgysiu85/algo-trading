@@ -1,0 +1,55 @@
+CHARTMARK-S v1 G2 count-only pre-flight, training side, 20260930
+data: CL 1H training 2010-06..2021-12 (back-adjusted); 67565 bars; no price or P&L is reported here.
+
+== BASE
+orders 8947  fills 6997  cancels (E2 context) 1917  timeouts (E3) 29  roll cancels 4  re-sets 3696  re-entries after an exit 3154
+gap-through fills 125  same-bar backstop touches 0 (0 by construction, J3)
+exits by type {'P0': 5933, 'P1': 1042, 'S': 22}  reached P1 1064 (15%)  positions carried through a roll 46
+median bars order->fill 1.0  fill->exit 1.0
+
+== V-RANGE
+orders 5715  fills 4441  cancels (E2 context) 1250  timeouts (E3) 22  roll cancels 2  re-sets 2461  re-entries after an exit 2028
+gap-through fills 77  same-bar backstop touches 0 (0 by construction, J3)
+exits by type {'P1': 582, 'P0': 3849, 'S': 10}  reached P1 592 (13%)  positions carried through a roll 28
+median bars order->fill 1.0  fill->exit 1.0
+
+== V-SESSION
+orders 4670  fills 3436  cancels (E2 context) 1234  timeouts (E3) 0  roll cancels 0  re-sets 847  re-entries after an exit 832
+gap-through fills 39  same-bar backstop touches 0 (0 by construction, J3)
+exits by type {'P0': 2615, 'P1': 802, 'S': 19}  reached P1 821 (24%)  positions carried through a roll 23
+median bars order->fill 1.0  fill->exit 1.0
+
+== V-WIDE
+orders 4066  fills 3183  cancels (E2 context) 863  timeouts (E3) 18  roll cancels 2  re-sets 1569  re-entries after an exit 396
+gap-through fills 71  same-bar backstop touches 0 (0 by construction, J3)
+exits by type {'S': 1639, 'P1': 1544}  reached P1 1581 (50%)  positions carried through a roll 63
+median bars order->fill 1.0  fill->exit 8.0
+
+== V-CLOSE9
+orders 8912  fills 6972  cancels (E2 context) 1907  timeouts (E3) 29  roll cancels 4  re-sets 3691  re-entries after an exit 3148
+gap-through fills 125  same-bar backstop touches 0 (0 by construction, J3)
+exits by type {'P0': 5912, 'C9': 1026, 'S': 34}  reached P1 1060 (15%)  positions carried through a roll 49
+median bars order->fill 1.0  fill->exit 1.0
+
+== V-AVOID
+orders 7782  fills 6105  cancels (E2 context) 1644  timeouts (E3) 29  roll cancels 4  re-sets 3493  re-entries after an exit 2861
+gap-through fills 113  same-bar backstop touches 0 (0 by construction, J3)
+exits by type {'P0': 5268, 'P1': 818, 'S': 19}  reached P1 837 (14%)  positions carried through a roll 38
+median bars order->fill 1.0  fill->exit 1.0
+
+BASE per year (fills / exits / reached P1):
+  2010:  364  {'P0': 314, 'P1': 50}  P1 50
+  2011:  625  {'P0': 539, 'P1': 83, 'S': 3}  P1 86
+  2012:  612  {'P0': 521, 'P1': 88, 'S': 3}  P1 91
+  2013:  644  {'P0': 572, 'P1': 71, 'S': 1}  P1 72
+  2014:  564  {'P1': 96, 'P0': 467, 'S': 1}  P1 97
+  2015:  525  {'P0': 448, 'P1': 75, 'S': 2}  P1 77
+  2016:  588  {'P0': 486, 'P1': 99, 'S': 3}  P1 102
+  2017:  620  {'P0': 524, 'P1': 93, 'S': 3}  P1 96
+  2018:  555  {'P1': 94, 'P0': 459, 'S': 2}  P1 96
+  2019:  612  {'P1': 88, 'P0': 523, 'S': 1}  P1 89
+  2020:  604  {'P0': 505, 'P1': 98, 'S': 1}  P1 99
+  2021:  684  {'P1': 107, 'P0': 575, 'S': 2}  P1 109
+
+STOP RULE (sec 5): BASE fills = 6997; threshold 150. Clears the threshold; the backtest may run.
+Registered prediction (sec 10): 3,000-7,000 fills.

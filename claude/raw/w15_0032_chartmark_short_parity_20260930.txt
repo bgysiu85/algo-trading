@@ -1,0 +1,33 @@
+CHARTMARK-S v1 G6 seen-window parity (TradingView CL1! bars, seen -- not evidence). Counts only, no P&L.
+
+trades 651 (registered 651) OK
+exits {'P0': 542, 'P1': 108, 'S': 1} (registered {'P0': 542, 'P1': 108, 'S': 1}) OK
+orders 835 fills 651 cancels 184 timeouts 0 re-entries 284 gap fills 9 same-bar backstop touches 0
+
+first five trades:
+  engine ('2025-09-10 16:00', 63.73, '2025-09-10 18:00', 63.8, 'P0')  registered ('2025-09-10 16:00', 63.73, '2025-09-10 18:00', 63.8, 'P0')  OK
+  engine ('2025-09-10 20:00', 63.74, '2025-09-10 21:00', 63.72, 'P0')  registered ('2025-09-10 20:00', 63.74, '2025-09-10 21:00', 63.72, 'P0')  OK
+  engine ('2025-09-10 22:00', 63.6, '2025-09-11 02:00', 63.62, 'P0')  registered ('2025-09-10 22:00', 63.6, '2025-09-11 02:00', 63.62, 'P0')  OK
+  engine ('2025-09-11 06:00', 63.27, '2025-09-12 04:00', 62.09, 'P1')  registered ('2025-09-11 06:00', 63.27, '2025-09-12 04:00', 62.09, 'P1')  OK
+  engine ('2025-09-12 12:00', 63.2, '2025-09-14 20:00', 62.71, 'P1')  registered ('2025-09-12 12:00', 63.2, '2025-09-14 20:00', 62.71, 'P1')  OK
+
+G6 parity: PASS
+
+Ben's 15 short entries vs the engine (entry within 1 bar; counts only):
+  # 1 Ben 11 Nov 21:00 @ 60.92 | engine 11 Nov 22:00 @ 60.85
+  # 2 Ben 19 Nov 05:00 @ 60.18 | engine 19 Nov 06:00 @ 60.09
+  # 3 Ben 20 Nov 10:00 @ 59.50 | engine 20 Nov 09:00 @ 59.55
+  # 4 Ben 25 Nov 03:00 @ 58.44 | engine no entry within 1 bar
+  # 4 Ben 25 Nov 03:00 @ 58.40 | engine no entry within 1 bar
+  # 5 Ben 08 Dec 03:00 @ 60.03 | engine 08 Dec 02:00 @ 60.14, 08 Dec 04:00 @ 59.89
+  # 6 Ben 10 Dec 22:00 @ 58.50 | engine 10 Dec 22:00 @ 58.67
+  # 7 Ben 15 Dec 04:00 @ 57.63 | engine 15 Dec 04:00 @ 57.46
+  # 8 Ben 26 Dec 08:00 @ 58.36 | engine 26 Dec 08:00 @ 58.32
+  # 9 Ben 06 Jan 11:00 @ 58.12 | engine 06 Jan 10:00 @ 58.08
+  #10 Ben 14 Jan 16:00 @ 61.23 | engine no entry within 1 bar
+  #11 Ben 01 Feb 18:00 @ 64.63 | engine no entry within 1 bar
+  #12 Ben 09 Mar 02:00 @ 105.45 | engine 09 Mar 01:00 @ 114.58
+  #13 Ben 23 Mar 07:00 @ 97.35 | engine 23 Mar 07:00 @ 97.39
+  #14 Ben 07 Apr 16:00 @ 112.02 | engine no entry within 1 bar
+  engine has an entry within 1 bar of 10 of 15 of Ben's entries
+
