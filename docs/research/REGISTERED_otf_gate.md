@@ -277,3 +277,19 @@ a mild trend filter on a trend host and nothing on an intraday breakout.*** I'd 
 - **W15-0025 sub 4** (Ben runs, Build & test chat reads): count-only pre-flight.
 - **W15-0025 sub 5** (Build & test chat, Sonnet · Medium): training run → Result doc.
 - **W15-0033** (High timeframe chat): IBKR fee table for the 12 markets + ES/NQ/MES/MNQ (blocks G5).
+
+
+---
+
+## Amendment 1 (PRE-RUN, 2026-09-30, W15-0025 sub 3) -- implementation details fixed before any real-data run
+
+No rule, threshold, variant, criterion or ledger date above is changed. These are choices the code had to make where the text was silent. They are written down before the first real-data pre-flight so none can be chosen on a result.
+
+1. **H-B daily rebuild.** The trading-date label is the bar's ET time plus 6 hours (18:00 ET opens the next label); bars from 17:00 to 17:59 ET (the maintenance hour) are dropped. Daily open/high/low/close are the first open, max high, min low and last close of each label.
+2. **H-B roll join.** At an `instrument_id` switch the later contract is shifted by (last close of the old contract minus first open of the new one) -- additive back-adjustment on every earlier bar. If the two 1-minute bars are more than 5 minutes apart the run STOPS (`RollGapError`); nothing is patched.
+3. **G6 session check.** Each year's rebuilt sessions are compared with the XNYS days; more than 1% missing in any year = STOP. The training cut (`<= 2023-12-29`) is applied before the daily bars are built, so no holdout bar is in the rebuild.
+4. **Random-keep control (C-R) seed layout.** `np.random.default_rng([crc32(str(draw)), crc32(cell), 25])`, 1,000 draws, p97.5; the keep count per cell is the gate's kept count in that cell. Pinned by a test.
+5. **Pre-flight reads no P&L.** The book loaders read key columns only (market, spec, share, sizing, equity, direction, entry date/time); a test spies on `usecols` and fails if a P&L column is requested. H-B pre-flight uses an entry-only mirror of the B1 rule (no fill, exit or outcome bar is read; tests poison every bar after the entry and the result does not change).
+6. **`--run`.** Refuses unless a pre-flight `.json` on disk carries the same SHA-256 of every input as the current run and did not stop. Until the study module (G5 costs, C-R, sec 4 criteria) exists it stops with "study module not built (sub 5, blocked by W15-0033)".
+7. **Ledger.** `strategy/otf_gate/ledger.py` refuses every other line's ledger by name, including `holdout_va80.json`. **The reverse refusals were NOT added to the frozen ledger modules of other lines** (futbt, w16, macro_flag, ...): this file did not authorise editing them. Whether to add `holdout_otf_gate.json` and `holdout_va80.json` to their refusal lists is a decision for Ben (board item opened in sub 3).
+8. **Test status at delivery.** 93 unit tests on synthetic data pass (both packages); a mutation run of 47 deliberate code breaks was caught by the tests in 44 cases, the other 3 being provably equivalent changes.

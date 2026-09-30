@@ -225,3 +225,21 @@ at a random time.*** I'd be glad to be wrong.
   C-RT / C-ND, grid, guards G3/G4, ledger; handover `claude/handover_w15_0025_build_20260930.md`.
 - **W15-0025 sub 4 / sub 5**: count-only pre-flight, then the training run → Result doc.
 - **W15-0033**: IBKR fees (blocks G5).
+
+
+---
+
+## Amendment 1 (PRE-RUN, 2026-09-30, W15-0025 sub 3) -- implementation details fixed before any real-data run
+
+No rule, threshold, cell, criterion or ledger date above is changed. These are choices the code had to make where the text was silent. They are written down before the first real-data pre-flight so none can be chosen on a result.
+
+1. **Profile.** The prior session's volume is spread evenly over the ticks (0.25) each 1-minute bar's low-to-high range covers. POC (point of control: the price with the most volume) ties go to the price nearest the prior close, then the higher price. The value area grows from the POC one tick-row above or below at a time, taking the side with more volume; a tie goes above; it stops at the first level where accumulated volume reaches the share (70% primary). A 1e-9 tolerance stops floating-point dust from deciding a tie.
+2. **Brackets.** 30-minute brackets from 09:30 ET. A bracket is "accepted" when its close is inside the value area. The setup needs two consecutive accepted brackets, the last ending at or before 15:00. Entry is the next bar's open.
+3. **Already rotated.** If price traded at the far edge before the entry bar, the trigger is counted but the trade is skipped (reported as "rotated").
+4. **Exits.** Stop is 1 tick past the day's extreme reached before entry; target is the far edge and needs at least one tick through it; stop wins a tie inside one bar; a bar that gaps through a level fills at its open; time exit is the close of the last bar of the session.
+5. **Session and roll rules.** A session with a gap over 5 minutes is skipped, and so is the one after it (its profile would be damaged). A session whose contract changed (`instrument_id` differs between profile day and trade day) is skipped as `skip_roll`. The training cut (`<= 2023-12-29`) is applied before sessions are built.
+6. **Random controls.** C-RT and C-ND draw entry bars between 10:00 and 15:00 with `np.random.default_rng([crc32(str(draw)), crc32(date), 80])`, 1,000 draws. Pinned by a test; a control candidate uses only levels known before its entry bar.
+7. **Pre-flight is count-only.** It runs the engine with exits switched off; no bar after an entry bar is read, `walk_exit` is never called (tests poison later bars). Stop rule: fewer than 200 ES triggers on the training side = STOP.
+8. **`--run`.** Same rule as OTF-G: refuses without a matching pre-flight `.json` (SHA-256 of the session frames), and stops until the study module (G5 costs, C-RT/C-ND, criteria) exists.
+9. **Ledger.** `holdout_va80.json` refuses other lines' ledgers by name (including `holdout_otf_gate.json`). The reverse refusals in other lines' frozen ledger modules were NOT edited; Ben decides (see OTF-G Amendment 1, item 7).
+10. **Test status at delivery.** 93 unit tests (both packages) pass; 44 of 47 deliberate code breaks caught, the other 3 provably equivalent.
