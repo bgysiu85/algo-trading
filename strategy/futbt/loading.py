@@ -63,7 +63,14 @@ def frame_cl4h_from_1h(df_1h: pd.DataFrame) -> K.Frame:
 
 def load_cl4h(archive: Path, *, ibkr: bool = False) -> K.Frame:
     from strategy.htf import bars as HB
-    fr = frame_cl4h_from_1h(HB.load_1h(archive))
+    # The daily loader wants the dataset folder (E:\Databento\GLBX.MDP3, holds manifest_tsmom.json);
+    # the 1-hour file is <root>\GLBX.MDP3\ohlcv-1h and htf bar_path adds GLBX.MDP3 itself.
+    # Accept either spelling so one --archive serves both loaders (W15-0033).
+    from strategy.htf.fetch import bar_path
+    root = Path(archive)
+    if not bar_path(root).exists() and bar_path(root.parent).exists():
+        root = root.parent
+    fr = frame_cl4h_from_1h(HB.load_1h(root))
     if ibkr:                                           # one MCL at IBKR: $0.77 + 0/1/2 x $1 per side
         from strategy.futbt.costs_ibkr import with_ibkr
         fr = with_ibkr(fr, "MCL")
