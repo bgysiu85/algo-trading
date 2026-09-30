@@ -23,7 +23,7 @@ From the CL session of Thursday 1 October 2026 we run CHARTMARK-v2's K1 rule, fr
 
 ## 1. The rules, frozen
 
-**Engine:** `strategy.chartmark_v2.engine.simulate(fr, ind, p, start=…)` with the files `strategy/chartmark_v2/engine.py`, `strategy/chartmark_v2/spec.py`, `strategy/chartmark/spec.py`, `strategy/htf/bars.py` and `strategy/futbt/loading.py` exactly as at **commit f3872ff** (the last commit touching any of them; step S and step C ran on them). The scorer checks `git diff f3872ff HEAD -- <those paths>` is empty before every run and refuses otherwise.
+**Engine:** `strategy.chartmark_v2.engine.simulate(fr, ind, p, start=…)` with the files `strategy/chartmark_v2/engine.py`, `strategy/chartmark_v2/spec.py`, `strategy/chartmark/spec.py`, `strategy/htf/bars.py` and `strategy/futbt/loading.py` exactly as at **commit f3872ff** (the last commit touching any of them; step S and step C ran on them). **Freeze check, before every scorer run:** (a) `strategy/chartmark_v2/engine.py` and `strategy/chartmark_v2/spec.py` are byte-identical to f3872ff in the working tree as well as in HEAD (`git diff f3872ff -- <those two paths>` is empty), otherwise the scorer refuses; (b) the shared modules (`strategy/chartmark/spec.py`, `strategy/htf/bars.py`, `strategy/futbt/loading.py`) may be changed by other studies (W15-0034 has an uncommitted, default-off change to `loading.py` today), but only if the regression gate still reproduces step C's K1 trade list exactly (317 trades, same entry and exit bars, same prices to the tick) and Amendment 5.4's seen-window K1 (69 trades). The scorer runs that gate on every run and refuses on any difference.
 
 | Rule | Params (spec.py) | Role |
 |---|---|---|
@@ -88,7 +88,7 @@ Either stop ends that rule, reported as **FAILED FORWARD** in a Result doc. If K
 
 **Controls on the forward bars:** C1 = CHARTMARK-v1's Donchian 20/10 long code without the session filter (as step C). C3 = random entries at the open of random forward bars while flat, the same count as the rule's forward trades, exited by the rule's own backstop + EMA21 walk (no entry conditions), 1,000 draws seeded `np.random.default_rng([crc32(str(d)), crc32("CL-v2-F1"), N])`. For V-SESSION the random bars are drawn only from bars opening 02:00–12:00 NY.
 
-**What a pass earns:** nothing live. It earns a Ben decision, with its own registration, on (a) whether the locked 2022–2025 holdout should be spent on that rule (step C failed, so this would be a disclosed waiver of Amendment 4.6), and (b) a live-size discussion with risk limits and a kill switch. A variant that passes when K1 fails is a new line (W15-0038), not a rescue of K1.
+**What a pass earns:** nothing live. It earns a Ben decision, with its own registration, on (a) whether the locked 2022–2025 holdout should be spent on that rule (step C failed, so this would be a disclosed waiver of Amendment 4.6), and (b) a live-size discussion with risk limits and a kill switch. A variant that passes when K1 fails does not rescue K1: taking it further needs its own new registration (Ben closed further CHARTMARK-v2 lines at W15-0038 on 2026-09-30 and then chose, in W15-0037, to have the two variants scored forward as evidence only).
 
 ## 6. Check-ins
 
