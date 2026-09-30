@@ -63,7 +63,7 @@ SAME_BAR_TOL_HOURS = 4
 
 
 def load_ben_trades(path: Path = TRADES_FILE) -> list[dict]:
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     return data["round_trips"]
 
 
@@ -175,7 +175,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     result = run(default_archive())
     out_path = Path(args.out)
-    out_path.write_text(json.dumps(result, indent=2, default=str))
+    out_path.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
     print(f"wrote {out_path}")
     print(f"scenario B, window {result['window'][0]} .. {result['window'][1]}")
     print(f"4H entry bars covered by the archive in this window: "

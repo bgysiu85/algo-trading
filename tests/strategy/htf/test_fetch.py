@@ -72,7 +72,7 @@ def test_confirm_downloads_once_and_writes_manifest(tmp_path):
     out = F.bar_path(tmp_path)
     assert out.exists() and out.read_bytes() == b"DBN-fake"
     assert not out.with_name(out.name + ".part").exists()
-    m = json.loads(F.manifest_path(tmp_path).read_text())
+    m = json.loads(F.manifest_path(tmp_path).read_text(encoding="utf-8"))
     assert m["symbols"] == "CL.c.0,CL.c.1" and m["schema"] == "ohlcv-1h"
     assert m["start"] == "2010-06-06" and m["end"] == "2026-09-25"
     assert m["board"] == "W15-0002"
