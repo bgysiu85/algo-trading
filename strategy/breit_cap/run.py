@@ -10,6 +10,7 @@ must be committed before the pre-flight is read). No P&L, holdout, seen-window o
 from __future__ import annotations
 
 import sys
+import warnings
 from datetime import date
 
 from strategy.breit_cap import preflight as PF
@@ -18,6 +19,7 @@ from strategy.futbt import runner_common as RC
 
 
 def main(argv=None) -> int:
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
     argv = list(sys.argv[1:] if argv is None else argv)
     RC.refuse_pnl_flags(argv)
     ap = RC.base_parser("BREIT-CAP G1/G2 pre-flight (counts only)")
@@ -28,6 +30,7 @@ def main(argv=None) -> int:
     names, scoped = RC.pick_markets(a.markets)
     arch = RC.archive_path(a.archive)
     frames, notes = LD.load_daily(arch, names)
+    cl4h_note = None
     vol = PF.check_volume(frames)
     if vol["failing"] and not a.volume_amendment_committed:
         print("G1 VOLUME COVERAGE FAILS for: " + ", ".join(vol["failing"]))
@@ -36,13 +39,18 @@ def main(argv=None) -> int:
         print("STOP (exit 3): commit the PRE-RUN volume amendment, then re-run with --volume-amendment-committed.")
         return 3
     if not a.no_cl4h and "CL" in names:
-        frames["CL4H"] = LD.load_cl4h(arch)
+        try:
+            frames["CL4H"] = LD.load_cl4h(arch)
+        except FileNotFoundError as e:
+            cl4h_note = (f"CL 4H NOT EVALUATED: 1-hour file not found ({e}). Connect the E: drive "
+                         "(or fix the path) and re-run; the daily primary below is unaffected.")
+            print(cl4h_note)
     reports = PF.run_all(frames, no_volume=vol["failing"])
     summary = PF.summarize(reports)
     clean = {"volume": vol, "summary": summary,
              "markets": {m: {k: v for k, v in r.items() if k != "entries"} | {"n_entries": len(r["entries"])}
                          for m, r in reports.items()}}
-    text = PF.render(reports, summary, vol, scoped=scoped, notes=[f"{m}: {n}" for m, n in notes.items() if n])
+    text = PF.render(reports, summary, vol, scoped=scoped, notes=[f"{m}: {n}" for m, n in notes.items() if n] + ([cl4h_note] if cl4h_note else []))
     stem = f"w15_0022_breit_preflight_{date.today():%Y%m%d}" + ("_scoped" if scoped else "")
     t, j = RC.write_outputs(RC.Path(a.out), stem, text, clean)
     print(text)

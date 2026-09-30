@@ -8,6 +8,7 @@ No P&L, holdout, seen-window or --limit mode exists here; those flags are refuse
 from __future__ import annotations
 
 import sys
+import warnings
 from datetime import date
 
 from strategy.crudele_3s import preflight as PF
@@ -16,6 +17,7 @@ from strategy.futbt import runner_common as RC
 
 
 def main(argv=None) -> int:
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
     argv = list(sys.argv[1:] if argv is None else argv)
     RC.refuse_pnl_flags(argv)
     ap = RC.base_parser("CRUDELE-3S G2 pre-flight (counts only)")
