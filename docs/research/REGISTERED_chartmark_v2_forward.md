@@ -121,3 +121,18 @@ Monthly, on the first business day (Live analysis chat, Haiku / Low): per rule, 
 - **W15-0037 sub 3** (Ben): IBKR NYMEX futures data + share to paper + futures permission on paper (§7.1).
 - **W15-0037 sub 4** (Build & test, Sonnet / Medium): IBKR paper runner, dry 3 sessions, then live paper (§3.1, §7.3).
 - **W15-0037 sub 5** (Ben, then Live analysis Haiku / Low): run the weekly scorer to 30 Sep 2027; monthly check-ins; final read → Result doc.
+
+---
+
+## Amendment 1 (PRE-RUN, 2026-09-30, Build & test chat, board W15-0037 sub 2): how the scorer implements this registration
+
+Written before any forward bar was scored. **No rule, threshold, date or pass bar changes.** These are the implementation readings the scorer (`strategy/chartmark_v2/forward.py`) fixes where the registration was silent or said "archive". A reading that turns out wrong is a POST-RUN amendment.
+
+1. **Warm-up (sec 2, "archive plus the forward bars").** The scorer does not read the archive. Indicator warm-up comes from one Databento pull of CL.c.0 1H bars for sessions from 2026-06-01 up to the first forward day, stored beside the per-day files. EMA(9/21), MACD(12/26/9) and ATR(14) converge in far fewer than the roughly 2,400 warm-up bars, and the 2022-2025 holdout region never enters a frame. Cost: the same schema and symbology as W15-0002, a few cents, priced before it is bought.
+2. **Complete sessions.** UTC day D is bought only when D is before today (UTC) and the dataset's end is past D+1 00:00Z; a day not yet available is deferred, never bought partial. Session S is scored once UTC day S is on disk and every earlier forward day is on disk (or known to have no session). Sessions after that cutoff are cut from the frame by session label.
+3. **What is ledgered.** Each run re-simulates from the fixed start (first bar 2026-09-30 18:00 ET) and appends only trades that have closed. A trade still open (or whose EMA21 exit would fill at a bar not yet on disk) is reported, marked to the last close, and never ledgered. Recorded trades must be reproduced exactly by the new simulation (entry bar, exit bar, reason, arm, rolls, points to half a tick) or the run is refused and the ledger left untouched.
+4. **Early stops (sec 4)** are evaluated trade by trade in exit order on closed trades at mid, so the outcome does not depend on how often the scorer runs. Latched per rule. A K1 stop sets `paper_orders = STOPPED` in the ledger.
+5. **Read-back (sec 2).** The UTC-day close of the hourly bars against the `ohlcv-1d` close for the same day, within 1 tick, on at least 99% of forward days, cumulative; any gap run over 3 hours is listed. Below 99% the run is refused until explained.
+6. **C3 "while flat" (sec 5).** Each of the N random entries must not overlap an already accepted random trade (entry bar to exit bar); pool = every forward bar (V-SESSION: bars opening 02:00-12:00 NY); exits are the rule's own backstop + EMA21 walk; 1,000 draws, registered seed.
+7. **Window end.** A position still open at the last scored close (2027-09-30) is closed there and ledgered as WINDOW_END (J11). The F7 extension to 2027-12-31 is not built: if a rule has fewer than 50 trades then, a POST-RUN amendment adds it.
+8. **Provisional F-criteria** are printed at every run for information, labelled PROVISIONAL. They decide nothing; there is no early pass (sec 4).
