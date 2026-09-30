@@ -14,6 +14,7 @@ new), built as a small class so the three ledgers cannot drift apart:
     strategy.breit_cap.holdout    ledger holdout_breit_cap.json         candidate "BREIT-CAP"
     strategy.breit_cap.holdout_cl4h  ledger holdout_breit_cap_cl4h.json candidate "BREIT-CAP-CL4H"
     strategy.macro_flag.holdout      ledger holdout_macro_flag.json      candidate "MFLAG-v1"
+    strategy.tl_v2.holdout           ledger holdout_tl_v2.json           candidate "TL-v2"
 
 "Only by a book that passed sec 4 on training": the CLI needs --training-passed, and the runner
 that spends the holdout (a later item) must call split_dates(spend=True, candidate=..., verdict=
@@ -40,7 +41,8 @@ SEEN_FROM = "2025-09-23"
 
 OWN_LEDGERS = ("holdout_crudele_3s.json", "holdout_breit_cap.json", "holdout_breit_cap_cl4h.json",
               "holdout_macro_flag.json", "holdout_chartmark_v1.json", "holdout_chartmark_short_v1.json",
-              "holdout_chartmark_v2.json")
+              "holdout_chartmark_v2.json", "holdout_chartmark_short_v2.json",
+              "holdout_tl_v2.json")
 
 OTHER_LINES = frozenset({
     "holdout.json", "holdout_pairs_2026H2.json",

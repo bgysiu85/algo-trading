@@ -115,3 +115,18 @@ One primary hypothesis (the base), one variant family (V-A, V-B, V-RANGE, V-SESS
 - **W15-0039 sub 2** — Ben: commit this file to `docs/research/` (commands on the subitem).
 - **W15-0039 sub 3** — Build & test chat: engine change (context tiers), G2–G6, no P&L (Sonnet / Medium).
 - **W15-0039 sub 4** — Build & test chat: training backtest vs C1, C3, variants, grid → Result doc (Sonnet / Medium).
+
+---
+
+## Amendment 1 (PRE-RUN, 2026-09-30, W15-0039 sub 3) -- implementation details fixed before any pre-flight or count on bars before 2025-09-08
+
+No rule, threshold, variant, criterion or ledger date above is changed. These are choices the code had to make where the text was silent; they are also listed as K1-K7 in `strategy/chartmark_s2/spec.py`.
+
+1. **K1 Tier A is strict.** Tier A = EMA9[t] < EMA21[t]. EMA9 = EMA21 falls under Tier B (sec 2.1 says EMA9[t] >= EMA21[t]).
+2. **K2 Tier B needs bar t-1** (false at the first bar); B2's 2-tick tolerance is fixed in every grid cell.
+3. **K3 Context** = X1 and (Tier A or Tier B) and flat, with ATR, MACD histogram and EMA21 defined. v1's X2 and X3 do not exist in v2.
+4. **K4 A trade's tier** is the tier on the last context bar (bar t-1 of the fill bar t). A Tier B order lives one bar unless the next bar's context holds again (E2 re-set).
+5. **K5 Variants.** V-A: only Tier A can create a context; V-B: only Tier B. V-RANGE, V-SESSION, V-AVOID = base plus the v1 filter. v1's V-WIDE and V-CLOSE9 are not v2 variants.
+6. **K6 G6 reading.** "Within 1 bar" = an engine fill whose bar open is within one hour of the marked bar open (NY time, TradingView CL1! 1H bars, the 2026 bars from 8 Sep 2026). The accepted mark at 9 Sep 22:00 needs a fill within 2 ticks of 96.25 (as registered). The accepted mark at 11 Sep 01:00 "near 102.09" is fixed here as within 0.25.
+7. **K7 Tier shares.** "Share of context bars Tier A vs Tier B" = context bars of each tier over the training frame, before the order machine's flat and cooldown rules.
+8. **Shared module.** `holdout_chartmark_short_v2.json` is added to `OWN_LEDGERS` in `strategy/futbt/holdout.py`, so every other line's ledger (v1 short and long included) refuses it by name, and it refuses theirs.
