@@ -1,0 +1,8 @@
+{
+  "candidate": null,
+  "closed_unspent": true,
+  "closed_at": "2026-09-30",
+  "closed_by": "W15-0030",
+  "lock_from": "2022-01-03",
+  "note": "TL-v1 failed its training verdict (criterion 6, 5 of 10) and never spent its holdout. The window 2022-01-03 -> 2025-09-22 is now TL-v2's own (holdout_tl_v2.json, REGISTERED_tl_v2.md section 6), spent at most once. TL-v1 cannot spend it. Any figure quoted from 2022-01-03 onward for TL-v1 is in-sample."
+}

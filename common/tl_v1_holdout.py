@@ -128,6 +128,14 @@ def _write_ledger(candidate: str, n_locked: int) -> dict:
     return rec
 
 
+def _closed_message(rec: dict) -> str:
+    return (f"the TL-v1 holdout is CLOSED-UNSPENT ({rec.get('closed_by', '?')}, "
+            f"{rec.get('closed_at', '?')}): it can no longer be spent by anyone. The 2022-01-03 -> "
+            "2025-09-22 window belongs to TL-v2's own ledger (holdout_tl_v2.json; "
+            "REGISTERED_tl_v2.md section 6) so it is never spent twice. Delete "
+            f"{LEDGER_PATH.name} only if you intend that deletion to appear in a commit and be defended.")
+
+
 def split_dates(dates, *, spend: bool = False, candidate: str | None = None,
                 limit: int | None = None):
     """(dates to use, how many were set aside, which side was taken).
@@ -161,6 +169,8 @@ def split_dates(dates, *, spend: bool = False, candidate: str | None = None,
             "under any name.")
 
     prior = read_ledger()
+    if prior and prior.get("closed_unspent"):
+        raise HoldoutRefused(_closed_message(prior))
     if prior and prior.get("candidate") != candidate:
         raise HoldoutRefused(
             f"the TL-v1 holdout was already spent by {prior['candidate']!r} "
@@ -201,6 +211,10 @@ def main(argv=None) -> int:
     rec = read_ledger()
     print(f"TL-v1 holdout: LOCKED from {LOCK_FROM} "
           f"(REGISTERED_tl_v1.md section 6)\nledger: {LEDGER_PATH}")
+    if rec and rec.get("closed_unspent"):
+        print("  CLOSED-UNSPENT (never spent, and no longer spendable)")
+        print(f"  {_closed_message(rec)}")
+        return 2 if a.spend else 0
     if rec:
         print(f"  SPENT by {rec['candidate']!r} at {rec['spent_at']} "
               f"({rec['n_locked_days']} days)")

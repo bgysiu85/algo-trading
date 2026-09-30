@@ -98,12 +98,16 @@ def book(t: Trade, frame: pd.DataFrame, m: Market) -> Booked:
 
 
 def daily(trades: list[Trade], booked: list[Booked], frame: pd.DataFrame,
-          m: Market) -> np.ndarray:
+          m: Market, *, friction: dict | None = None, stop_slip: bool = True) -> np.ndarray:
     """(n_sessions, 3) daily net at low/mid/high for one sleeve's trades,
     marked on RAW held-contract prices: each session's change is the traded
     contract's close minus the price the position was carried at from the
     session before (that contract's own close, or on the session after a
-    roll, the new contract's close on the roll session)."""
+    roll, the new contract's close on the roll session).
+
+    `friction` / `stop_slip` default to TL-v0's flat $0.50 / $1.25 / $2.50 with one tick on stop
+    fills. TL-v2 (REGISTERED_tl_v2.md Amendment 1, W15-0033) passes its IBKR per-side levels and
+    stop_slip=False (the tick is inside the level, never counted twice)."""
     rc = frame["rc"].to_numpy()
     newc = frame["new_close_raw"].to_numpy()
     roll_after = frame["roll_after"].to_numpy()
@@ -127,8 +131,10 @@ def daily(trades: list[Trade], booked: list[Booked], frame: pd.DataFrame,
         for r in range(e, x):
             if roll_after[r]:
                 sides[r] += 2 * q
-        slip[x] += b.slip
+        if stop_slip:
+            slip[x] += b.slip
+    fr = FRICTION if friction is None else friction
     out = np.empty((n, len(LEVELS)))
     for i, lv in enumerate(LEVELS):
-        out[:, i] = gross - slip - FRICTION[lv] * sides
+        out[:, i] = gross - slip - fr[lv] * sides
     return out
