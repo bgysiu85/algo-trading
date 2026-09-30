@@ -229,8 +229,26 @@ that saves some friction.*** The W2-only variant is the one most likely to look 
 
 ---
 
+## PRE-RUN amendments, step 4 build (2026-09-30) -- written before any flagged count or P&L was produced
+
+The build fixed six implementation details the registration left open. None changes a rule, cell, threshold or
+criterion; each is stated so it cannot later be called a free choice.
+
+1. **G2 also reads `entry_j`.** The pre-flight loads `market, spec, share, sizing, equity, entry_date, entry_j`. `entry_j` is a
+   session index, not a price or P&L; it is used only for the G4 check `sessions[entry_j] == entry_date`. No net / gross
+   column is loadable in pre-flight mode (test `test_preflight_never_loads_a_pnl_column`).
+2. **Sessions** are the rows of the TL-v0 loader (`strategy.tl_v0.bars.load_market`, training rows only, Sunday rows
+   folded), per market. W2 = the first session strictly after d. If d is not a session for that market, W1 matches nothing
+   and W2 still applies.
+3. **C-P placebo is not de-duplicated against the flag.** A trade in both sets counts in both; the overlap is printed.
+4. **Criterion 7 permutation** uses seed `default_rng([crc32(str(draw)), crc32(market), 24])` (the registration gave a seed for C-R only).
+   Statistic: mean net of unflagged minus mean net of flagged, pooled over the 8 flag markets, labels shuffled within market.
+5. **Percentile of the flag in C-R** = share of draws strictly below the flag's delta, plus half the ties.
+6. **Mechanical stop rule.** `--run` refuses unless a pre-flight file exists for the same books and calendar (SHA-256) with
+   at least 60 flagged trades. The seen window (2025-09-23 ->) is not in the training books, so it is not scored.
+
 ## Next steps (board)
 
 - **W15-0023 step 3b** (Ben): approve §11 and commit this registration (commands on the board).
-- **W15-0023 step 4** (Build & test chat, Sonnet / Medium): G2–G5, then the training run → Result doc. It is no longer blocked by
+- **W15-0023 step 4** (Build & test chat, Sonnet / Medium): G2-G5 built and tested 2026-09-30; Ben runs `--preflight`, then `--run` if the floor clears -> Result doc. It is no longer blocked by
   W15-0020 (Done): the host books already exist.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One implementation of the W15-0022 holdouts (CRUDELE-3S, BREIT-CAP daily, BREIT-CAP CL 4H).
+"""One implementation of the W15-0022 holdouts (CRUDELE-3S, BREIT-CAP daily, BREIT-CAP CL 4H, MFLAG-v1).
 
 REGISTERED_crudele_3s.md sec 6 / REGISTERED_breit_cap.md sec 6:
   training   2010-06 -> 2021-12-31
@@ -13,6 +13,7 @@ new), built as a small class so the three ledgers cannot drift apart:
     strategy.crudele_3s.holdout   ledger holdout_crudele_3s.json       candidate "CRUDELE-3S"
     strategy.breit_cap.holdout    ledger holdout_breit_cap.json         candidate "BREIT-CAP"
     strategy.breit_cap.holdout_cl4h  ledger holdout_breit_cap_cl4h.json candidate "BREIT-CAP-CL4H"
+    strategy.macro_flag.holdout      ledger holdout_macro_flag.json      candidate "MFLAG-v1"
 
 "Only by a book that passed sec 4 on training": the CLI needs --training-passed, and the runner
 that spends the holdout (a later item) must call split_dates(spend=True, candidate=..., verdict=
@@ -37,7 +38,8 @@ LOCK_FROM = "2022-01-01"            # registered 2022-01-03 first weekday sessio
 SPEND_TO = "2025-09-22"
 SEEN_FROM = "2025-09-23"
 
-OWN_LEDGERS = ("holdout_crudele_3s.json", "holdout_breit_cap.json", "holdout_breit_cap_cl4h.json")
+OWN_LEDGERS = ("holdout_crudele_3s.json", "holdout_breit_cap.json", "holdout_breit_cap_cl4h.json",
+              "holdout_macro_flag.json")
 
 OTHER_LINES = frozenset({
     "holdout.json", "holdout_pairs_2026H2.json",
