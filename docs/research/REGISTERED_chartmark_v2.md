@@ -187,3 +187,40 @@ Ben, on 28 Aug 2026: *"the green candles at 9:00, 10:00 and 11:00 all had a long
 **3.4 G6 parity:** 28 Aug fill within 2 ticks of **83.30** (previous high 83.29 + 1 tick; Ben ≈ 83.35); 1 Sep unchanged (87.69; previous high 87.24 is below the live MACD level).
 
 **3.5 Seen window re-run (not evidence):** base 71 trades, 14 winners, (5.05) pts gross ≈ ($505) per MCL before ≈ $251 of costs; exits EMA21 27 / BACKSTOP 27 / BACKSTOP-fillbar 17. Amendment 2's level alone gave 86 trades and +5.40 pts on the same bars. This comparison is reported for the record; the base was chosen from Ben's description, not from these numbers, and is not changed because of them.
+
+### Amendment 4 — PRE-RUN, 2026-09-30 18:50 (choose on 2010–2015, confirm on 2016–2021; before any code, count or P&L on training)
+
+Ben asked whether results should pick the rule: *"is that entirely the point? see how the results are based on the rules and go with the rules with the best result? Doesn't the result prove which rules are better?"* Offered: choose among a small fixed set on 2010–2015 only, and require the winner to pass on 2016–2021, which the choice never saw. Ben: *"let's go with yours"*.
+
+**4.1 Candidates (fixed now, four only):**
+| | Previous-high rule (Amendment 3) | θ |
+|---|---|---|
+| K1 | on | 0.05 (the Amendment 3 base) |
+| K2 | on | 0.03 |
+| K3 | off (Amendment 2 level) | 0.05 |
+| K4 | off | 0.03 |
+Everything else is as registered: $0.60 backstop, close-breach EMA21 exit, no session filter, IBKR costs.
+
+**4.2 Step S — selection, development window 2010-06-06 → 2015-12-31 only.** Run K1–K4. The winner = highest net at mid friction, 1 MCL, among candidates with ≥ 75 trades in the window (tie → smaller max drawdown). The runner writes `selection_chartmark_v2.json` (winner, the four nets, timestamp, git commit) and **computes nothing on bars from 2016-01-01 on**. If no candidate has ≥ 75 trades → NOT READ, stop.
+
+**4.3 Step C — confirmation, 2016-01-01 → 2021-12-31, the winner only.** The runner refuses to run without the selection file and refuses any candidate other than its winner. The winner passes only if all hold on the confirmation window:
+1. Net > $0 at mid.
+2. Net > $0 at high friction.
+3. Drop-top-1 calendar year still > $0.
+4. Bootstrap by year (2,000 seeded resamples): net > 0 in ≥ 90%.
+5. Beats C1 (Donchian 20/10, same window) on net and on net ÷ std of daily net.
+6. **Beats the p99 of C3** (random entries, same count per year, same exits, 1,000 draws, window-only).
+7. No single year > 50% of net.
+8. At least 18 of 27 grid cells net > $0 (§3's grid, built around the winner's previous-high and θ settings, confirmation window).
+9. At least 75 trades. Fewer → NOT READ.
+Failing 5 or 6 closes the study. The development-window net of all four candidates is reported beside the result.
+
+**4.4 Replaces §4.** The ten criteria of §4 no longer apply; the halves test is replaced by the S/C split itself.
+
+**4.5 Variants** (V-WICK, V-STOP20, V-STOPATR, V-SESSION, V-CONFIRMED, V-AVOID, V-REDTOP, V-WICKGATE) are run only after step C, on the confirmation window, applied to the winner. They are reported, never selectable, and cannot spend the holdout.
+
+**4.6 Holdout (§6) unchanged:** spent once, by the step-C winner only, only if it passes all nine criteria of 4.3.
+
+**4.7 Pre-flight (G2):** counts only for K1–K4 on the full training window, split by window. Stop if a candidate has < 75 fills in either window (reported; that candidate is dropped from selection, not replaced).
+
+**4.8 Cost of this design, stated:** the confirmation test uses six years instead of twelve, so criteria 4 and 8 are judged on half the data. The selection itself is a multiplicity cost of four, paid inside the development window.
