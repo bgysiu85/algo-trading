@@ -18,9 +18,9 @@ class TradeT(Trade):
     tier: int = 0            # 1 = Tier A, 2 = Tier B (tier on the last context bar)
 
 
-def simulate(fr: Frame, ind: Ind, p: S.Params = S.BASE, *, start: int = 40) -> tuple[list[TradeT], dict]:
+def simulate(fr: Frame, ind: Ind, p: S.Params = S.BASE, *, start: int = 40, ctx_fn=None) -> tuple[list[TradeT], dict]:
     """Sell-stop order machine, sec 2.2 (v1 E1-E5). Returns (trades, counts); counts carry by-tier order / fill tallies."""
-    ctx, tier = context_tiers(fr, ind, p)
+    ctx, tier = (ctx_fn or context_tiers)(fr, ind, p)          # ctx_fn: v3 swaps in its own context; default is v2's
     n = fr.n
     o, l = fr.o, fr.l
     cnt = dict(orders=0, fills=0, timeouts=0, ctx_cancels=0, roll_cancels=0, resets=0, gap_fills=0,

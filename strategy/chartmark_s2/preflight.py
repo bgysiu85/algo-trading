@@ -44,8 +44,8 @@ def counts_table(fr, trades: list, cnt: dict) -> dict:
                 rolls_carried=sum(t.n_rolls > 0 for t in trades), per_year=per)
 
 
-def context_share(fr, ind, p=S.BASE) -> dict:
-    ctx, tier = context_tiers(fr, ind, p)
+def context_share(fr, ind, p=S.BASE, ctx_fn=None) -> dict:
+    ctx, tier = (ctx_fn or context_tiers)(fr, ind, p)
     a, b = int((tier == S.TIER_A).sum()), int((tier == S.TIER_B).sum())
     return dict(context_bars=int(ctx.sum()), A=a, B=b, total_bars=int(fr.n))
 
@@ -54,8 +54,8 @@ def _pct(a, b) -> str:
     return f"{100 * a / b:.0f}%" if b else "n/a"
 
 
-def report(fr, blocks: dict, share: dict, stamp: str) -> str:
-    L = [f"CHARTMARK-S v2 G2 count-only pre-flight, training side, {stamp}",
+def report(fr, blocks: dict, share: dict, stamp: str, name: str = "CHARTMARK-S v2") -> str:
+    L = [f"{name} G2 count-only pre-flight, training side, {stamp}",
          f"data: {fr.label}; {fr.n} bars; no price or P&L is reported here.", ""]
     for name, b in blocks.items():
         c = b["counts"]

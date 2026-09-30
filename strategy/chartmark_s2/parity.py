@@ -30,12 +30,12 @@ def fills_near(ny, trades, when: pd.Timestamp, bars: int = 1) -> list:
     return [t for t in trades if abs((ny[t.entry_j] - when) / pd.Timedelta(hours=1)) <= bars]
 
 
-def run(csv, log=print) -> tuple[str, bool]:
+def run(csv, log=print, *, simulate=None, params=None, name="CHARTMARK-S v2") -> tuple[str, bool]:
     fr = load_seen_frame(csv)
     ind = indicators(fr)
-    trades, cnt = E.simulate(fr, ind, S.BASE)
+    trades, cnt = (simulate or E.simulate)(fr, ind, params or S.BASE)
     ny = fr.ny.tz_localize(None)
-    L = ["CHARTMARK-S v2 G6 seen-window fidelity (TradingView CL1! bars, seen -- not evidence). Counts only, no P&L.", "",
+    L = [f"{name} G6 seen-window fidelity (TradingView CL1! bars, seen -- not evidence). Counts only, no P&L.", "",
          f"engine BASE on the seen window: {len(trades)} fills (Tier A {sum(t.tier == 1 for t in trades)}, "
          f"Tier B {sum(t.tier == 2 for t in trades)}); orders {cnt['orders']}", "",
          "Ben's 8 rejected entries (\"EMA9 above EMA21, not falling\") -- the engine must NOT fill within 1 bar:"]

@@ -109,3 +109,19 @@ One primary hypothesis (the base), one variant family (V-A, V-B, V-B1, V-RANGE, 
 - **W15-0042 sub 2** — Ben: commit this file to `docs/research/` (commands on the subitem).
 - **W15-0042 sub 3** — Build & test chat: remove B1 (thin layer over `strategy/chartmark_s2`), own ledger, G2 pre-flight, G6 re-run, tests (Sonnet / Medium).
 - **W15-0042 sub 4** — Build & test chat: training backtest vs C1, C3, variants, grid → Result doc, only if G2 and G6 clear (Sonnet / Medium).
+
+---
+
+## Amendment 1 (POST-RUN, 2026-09-30, W15-0042 sub 5) -- disclosed waiver of the G6 closing rule for one bar
+
+**This amendment was written after the G6 result was read.** It is a POST-RUN change and is marked as such.
+
+- **What happened.** G6 was run on the v3 engine (`w15_0042_chartmark_short_v3_g6_20260930.txt`). Nine of the ten marks passed: the engine takes 7 of the 8 rejected entries not at all, fills 9 Sep 22:00 at 96.25 and fills 11 Sep 01:00 at 102.06. It **failed on one rejected entry**: 8 Sep 08:00 (Ben's #1) is followed by an engine fill at 8 Sep 09:00 @ 92.64 (Tier B; the 08:00 bar broke below EMA9 with MACD histogram -0.043). Sec 5 said a second G6 failure closes the study.
+- **The waiver.** Ben, 2026-09-30: **"waive g6"**, after being told it overrides a registered closing rule, that the recommendation was to accept the closure, and that the 09:00 fill is a different trade from the one he rejected but is within the registered +/-1 bar. He gave the instruction without a further stated reason.
+- **Scope.** It waives the **closing consequence of that one failed bar only.** No rule, threshold, variant, criterion, ledger date or other gate is changed: G2 (150 fills), G3-G5, all ten sec 4 criteria, criterion 6 at p99 and the holdout rules stand; the holdout stays locked and is spent only by a ten-of-ten pass; there is still **no v4**; a further G6-style failure on any other bar is not covered.
+- **Disclosure.** Every v3 report carries the line "G6 waived for 8 Sep 08:00 (Amendment 1)". The waiver was made after seeing a result on seen bars, so v3 is **not** evidence of anything on the training side; only the holdout counts (sec 6).
+- **Predictions (sec 10)** are unchanged and stand as written.
+
+## Next steps (board, after Amendment 1)
+- **W15-0042 sub 5** -- Ben: commit the v3 build and this amendment; run the G2 count-only pre-flight (commands on the subitem).
+- **W15-0042 sub 4** -- Build & test chat: controls, run and report layer, then the training backtest, only if G2 clears (Sonnet / Medium).

@@ -41,7 +41,7 @@ SEEN_FROM = "2025-09-23"
 
 OWN_LEDGERS = ("holdout_crudele_3s.json", "holdout_breit_cap.json", "holdout_breit_cap_cl4h.json",
               "holdout_macro_flag.json", "holdout_chartmark_v1.json", "holdout_chartmark_short_v1.json",
-              "holdout_chartmark_v2.json", "holdout_chartmark_short_v2.json",
+              "holdout_chartmark_v2.json", "holdout_chartmark_short_v2.json", "holdout_chartmark_short_v3.json",
               "holdout_tl_v2.json")
 
 OTHER_LINES = frozenset({
