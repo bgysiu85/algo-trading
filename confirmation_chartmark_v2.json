@@ -1,0 +1,20 @@
+{
+  "winner": "K1",
+  "verdict": "FAIL -- criterion 5 or 6 closes the study",
+  "timestamp_utc": "2026-09-30T10:41:42+00:00",
+  "git_commit": "667ec6c8c22f41390cd753b9e0641f591e8bcad2",
+  "net_mid_1mcl": 533.26,
+  "trades": 317,
+  "criteria": {
+    "1": true,
+    "2": false,
+    "3": true,
+    "4": false,
+    "5": false,
+    "6": false,
+    "7": false,
+    "8": false,
+    "9": true
+  },
+  "holdout": "NOT spent by step C; eligible only on a nine-of-nine pass (Amendment 4.6)"
+}

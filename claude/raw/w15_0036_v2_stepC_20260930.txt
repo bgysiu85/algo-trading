@@ -1,0 +1,92 @@
+W15-0036 CHARTMARK-v2 step C -- confirmation of K1 on 2016-01-01 .. 2021-12-31, run 20260930
+Registered: REGISTERED_chartmark_v2.md Amendments 4.3, 4.5, 5. 1 MCL, IBKR costs (MCL $0.77 per side + 0/1/2 ticks). Negatives in brackets.
+Frame 67565 bars to 2021-12-31 16:00:00-05:00; engine flat until 2016-01-03 18:00:00-05:00. No bar from 2022 on was read.
+Candidate K1: Params(prev_high=True, theta=0.05, backstop=0.6, backstop_atr=None, session=False, wick=False, confirmed=False, redtop=False, wickgate=False, avoid=False, par_bars=6, ema_window=4, fillbar='amend5')
+
+VERDICT: FAIL -- criterion 5 or 6 closes the study
+
+HEADLINE (base, 1 MCL, mid):
+  trades 317  wins 103  losses 214  gross $1,705  costs $1,172  net $533
+  avg win $92  avg loss ($42)  largest loss ($91)  worst losing run 9  max drawdown $1,355
+  net at low / mid / high friction: $1,195 / $533 / ($129)   1 CL mid net $8,861
+  halves (median trade date) $614 / ($81)
+
+AMENDMENT 4.3 CRITERIA:
+  1. Net > $0 at mid                                                PASS  $533
+  2. Net > $0 at high friction                                      FAIL  ($129)
+  3. Drop-top-1 calendar year still > $0                            PASS  $88
+  4. Bootstrap by year (2,000 resamples): net > 0 in >= 90%         FAIL  0.859
+  5. Beats C1 on net AND on net / std of daily net                  FAIL  ($533, $2,357, $16, $41)
+  6. Beats the p99 of C3 (random entries) on net                    FAIL  ($533, $2,349)
+  7. No single year > 50% of net                                    FAIL  0.836
+  8. At least 18 of 27 grid cells net > $0                          FAIL  9
+  9. At least 75 trades                                             PASS  317
+
+  (criterion 5 value = base net, C1 net, base net/std, C1 net/std; criterion 6 value = base net, C3 p99)
+
+BASE per year (1 MCL, mid):
+   year  trades       W/L      gross      cost        net   C1 net
+   2016      41   13/28         $119      $156      ($37)   $384
+   2017      42   15/27         $210      $159        $51   ($533)
+   2018      57   18/39         $472      $209       $263   $143
+   2019      63   19/44         $116      $234     ($118)   ($944)
+   2020      58   17/41         $137      $209      ($72)   $1,264
+   2021      56   21/35         $651      $205       $446   $2,043
+
+EXITS BY TYPE (base): {'BACKSTOP': 81, 'EMA21': 232, 'BACKSTOP-fillbar': 4}
+arms {'A-early': 90, 'A-fresh': 206, 'B': 21}  orders 1070  fills 317  unfilled 753  positions cut at the window end (data_end) 0
+
+CONTROLS (1 MCL, mid, same window):
+  C1 Donchian 20/10 long, no session filter: trades 878  net $2,357  (high $531)  halves $83 / $2,274
+  C3 random entries, same count per year (1,000 seeded draws): p5 ($2,647)  p50 ($577)  p95 $1,410  p99 $2,349; the base beats 83.1% of draws
+
+NEIGHBOUR GRID (27 cells around K1, unranked): 9 of 27 net > $0 at mid.
+  cells (parallel bars, backstop, EMA21 window -> trades, net):
+   par=4 stop=$0.40 ema=3 ->   324  ($204)
+   par=4 stop=$0.40 ema=4 ->   324  ($207)
+   par=4 stop=$0.40 ema=5 ->   324  ($193)
+   par=4 stop=$0.60 ema=3 ->   317  $532
+   par=4 stop=$0.60 ema=4 ->   317  $533
+   par=4 stop=$0.60 ema=5 ->   317  $553
+   par=4 stop=$0.80 ema=3 ->   317  ($78)
+   par=4 stop=$0.80 ema=4 ->   317  ($79)
+   par=4 stop=$0.80 ema=5 ->   317  ($59)
+   par=6 stop=$0.40 ema=3 ->   324  ($204)
+   par=6 stop=$0.40 ema=4 ->   324  ($207)
+   par=6 stop=$0.40 ema=5 ->   324  ($193)
+   par=6 stop=$0.60 ema=3 ->   317  $532
+   par=6 stop=$0.60 ema=4 ->   317  $533
+   par=6 stop=$0.60 ema=5 ->   317  $553
+   par=6 stop=$0.80 ema=3 ->   317  ($78)
+   par=6 stop=$0.80 ema=4 ->   317  ($79)
+   par=6 stop=$0.80 ema=5 ->   317  ($59)
+   par=8 stop=$0.40 ema=3 ->   324  ($204)
+   par=8 stop=$0.40 ema=4 ->   324  ($207)
+   par=8 stop=$0.40 ema=5 ->   324  ($193)
+   par=8 stop=$0.60 ema=3 ->   317  $532
+   par=8 stop=$0.60 ema=4 ->   317  $533
+   par=8 stop=$0.60 ema=5 ->   317  $553
+   par=8 stop=$0.80 ema=3 ->   317  ($78)
+   par=8 stop=$0.80 ema=4 ->   317  ($79)
+   par=8 stop=$0.80 ema=5 ->   317  ($59)
+
+VARIANTS (Amendment 4.5; reported, never selectable, cannot spend the holdout; 1 MCL mid): trades / W-L / gross / net / net at high / max DD
+  V-THETA03      333  106/227      $1,420        $192      ($502)  DD $1,466  exits {'BACKSTOP': 83, 'EMA21': 245, 'BACKSTOP-fillbar': 5}
+  V-WICK         329  95/234        $783      ($417)    ($1,095)  DD $1,463  exits {'EMA21': 292, 'BACKSTOP': 33, 'BACKSTOP-fillbar': 4}
+  V-STOP20       336  71/265      $1,350        $132      ($556)  DD $775  exits {'BACKSTOP': 201, 'BACKSTOP-fillbar': 45, 'EMA21': 90}
+  V-STOPATR      326  86/240      $1,758        $565      ($109)  DD $1,211  exits {'BACKSTOP': 176, 'BACKSTOP-fillbar': 17, 'EMA21': 133}
+  V-SESSION      154  57/97      $1,792      $1,229        $911  DD $528  exits {'BACKSTOP': 41, 'EMA21': 112, 'BACKSTOP-fillbar': 1}
+  V-CONFIRMED    233  76/157      $1,301        $434       ($56)  DD $1,047  exits {'BACKSTOP': 63, 'EMA21': 168, 'BACKSTOP-fillbar': 2}
+  V-AVOID        201  61/140        $363      ($377)      ($795)  DD $1,234  exits {'BACKSTOP': 50, 'EMA21': 148, 'BACKSTOP-fillbar': 3}
+  V-REDTOP       385  107/278      $1,505        $100      ($694)  DD $1,454  exits {'BACKSTOP': 57, 'UNCONFIRMED': 134, 'EMA21': 191, 'BACKSTOP-fillbar': 3}
+  V-WICKGATE     411  137/274      $3,389      $1,877      $1,023  DD $1,204  exits {'BACKSTOP': 102, 'EMA21': 302, 'BACKSTOP-fillbar': 7}
+
+DEVELOPMENT WINDOW, for the record (2010-06 .. 2015-12, from step S): K1 ($1,795)  K2 ($2,112)  K3 ($2,316)  K4 ($2,703)
+  Consistency check: K1 re-run on the full frame gives 317 trades / net ($1,795) on 2010-2015 entries; step S recorded 317 / ($1,795) (the last position is cut at 2015-12-31 there, carried here).
+
+CAVEATS:
+  * Six years, not twelve (Amendment 4.8): criteria 4 (bootstrap by year, 6 resamplable years) and 8 (grid) rest on half the data.
+  * C3 draws are independent single-trade outcomes (overlap allowed), as CHARTMARK-v1's C3 was; the entry bar's low is taken as after the entry.
+  * Prices are difference-back-adjusted over the whole training archive; decisions are relative to nearby bars.
+  * The K1-K4 selection (a multiplicity of four) and the exploratory numbers of sec 0.2 are disclosed costs of this design; the confirmation window was never read by step S.
+  * Git: 667ec6c8c22f41390cd753b9e0641f591e8bcad2  UNCOMMITTED under the registered paths: ['?? strategy/chartmark_v2/confirm_c.py']

@@ -1,0 +1,50 @@
+{
+  "winner": "K1",
+  "dropped": [],
+  "window": [
+    "2010-06-06",
+    "2015-12-31"
+  ],
+  "nets_mid_1mcl": {
+    "K1": -1794.58,
+    "K2": -2111.98,
+    "K3": -2316.2,
+    "K4": -2703.14
+  },
+  "trades": {
+    "K1": 317,
+    "K2": 327,
+    "K3": 418,
+    "K4": 429
+  },
+  "max_dd_mid_1mcl": {
+    "K1": 2301.22,
+    "K2": 2555.08,
+    "K3": 2671.44,
+    "K4": 2994.84
+  },
+  "params": {
+    "K1": {
+      "prev_high": true,
+      "theta": 0.05
+    },
+    "K2": {
+      "prev_high": true,
+      "theta": 0.03
+    },
+    "K3": {
+      "prev_high": false,
+      "theta": 0.05
+    },
+    "K4": {
+      "prev_high": false,
+      "theta": 0.03
+    }
+  },
+  "rule": "Amendment 4.2: highest net at mid, 1 MCL, >= 75 trades in the window; tie -> smaller max drawdown",
+  "preflight_file": "w15_0036_v2_preflight_20260930.json",
+  "timestamp_utc": "2026-09-30T09:38:28+00:00",
+  "git_commit": "667ec6c8c22f41390cd753b9e0641f591e8bcad2",
+  "dirty_registered_paths": [],
+  "last_bar_used": "2015-12-31 16:00:00-05:00"
+}
