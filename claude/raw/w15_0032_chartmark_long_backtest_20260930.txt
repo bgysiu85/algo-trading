@@ -1,0 +1,88 @@
+W15-0032 CHARTMARK-v1 (long) -- training-side backtest, CL 1H, 2010-06-06 .. 2021-12-31, run 20260930
+Registered: REGISTERED_chartmark_v1.md incl. Amendment A. Costs IBKR (A.3). 1 MCL headline, mid friction. Negatives in brackets.
+
+VERDICT: FAIL (criterion 5 or 6 closes the study)
+
+HEADLINE (BASE, 1 MCL, mid):
+  trades 2670  wins 1095  losses 1575  gross ($3,867)  costs $9,554  net ($13,422)
+  avg win $49  avg loss ($43)  largest loss ($286)  worst losing run 15  max drawdown $15,247
+  halves ($10,655) / ($2,767)   net at high friction ($18,820)   1 CL mid net ($105,447)
+
+SEC 4 CRITERIA (base):
+   1. Net > $0 at mid                                         FAIL  ($13,422)
+   2. Both halves net > $0                                    FAIL  (($10,655), ($2,767))
+   3. Drop-top-1 and drop-top-2 years > $0                    FAIL  (($13,737), ($13,701))
+   4. Bootstrap by year, net>0 in >=95%                       FAIL  0.000
+   5. Beats C1 on net and on net per unit of volatility       FAIL  (($13,422), ($3,412), ($260), ($58))
+   6. Beats C3 p99 on net                                     FAIL  (($13,422), ($2,808))
+   7. No single year > 50% of net                             FAIL  0.226
+   8. Net > $0 at high friction                               FAIL  ($18,820)
+   9. >=18 of 27 cells net > $0                               FAIL  0
+  10. >=150 trades                                            PASS  2670
+
+BASE per year (1 MCL, mid):
+   year  orders/fills  trades       W/L      gross      cost        net
+   2010                   132   67/65         $417      $474      ($57)
+   2011                   230   90/140      ($857)      $828   ($1,686)
+   2012                   240   90/150    ($1,612)      $857   ($2,468)
+   2013                   226   90/136      ($339)      $807   ($1,146)
+   2014                   219   85/134    ($1,259)      $779   ($2,038)
+   2015                   223   79/144    ($2,239)      $796   ($3,036)
+   2016                   217   97/120        $746      $782      ($36)
+   2017                   236   96/140         $93      $839     ($746)
+   2018                   220   92/128        $200      $793     ($593)
+   2019                   246   91/155      ($890)      $881   ($1,772)
+   2020                   231  101/130        $669      $828     ($159)
+   2021                   250  117/133      $1,204      $889       $316
+
+EXITS BY TYPE (base): {'R': 1621, 'S': 714, 'P1': 246, 'P2': 89}
+Reached P1 985/2670  P2 471/2670  orders 4076 fills 2670 timeouts 3 ctx cancels 1403
+
+CONTROLS (1 MCL, mid):
+  C1 Donchian 20/10 long, session-filtered: trades 1551 net ($3,412) (high ($6,624))
+  C3 random entries, same count per year, same exits (1,000 draws): p5 ($15,143)  p50 ($10,303)  p95 ($4,833)  p99 ($2,808); base beats 14.6% of draws
+  C2 HTF-Ben v2: reference only -- see its own RESULT doc (NinjaTrader friction, not re-scored).
+
+VARIANTS (reported, never ranked; 1 MCL mid): trades / W-L / gross / net / net at high / halves / max DD
+  BASE          2670  1095/1575    ($3,867)   ($13,422)   ($18,820)  ($10,655) / ($2,767)  DD $15,247  exits {'R': 1621, 'S': 714, 'P1': 246, 'P2': 89}
+  V-STALL3      2735  1134/1601    ($3,840)   ($13,621)   ($19,147)  ($10,447) / ($3,174)  DD $15,126  exits {'V-STALL': 219, 'R': 1495, 'S': 710, 'P1': 229, 'P2': 82}
+  V-STALL4      2712  1114/1598    ($4,380)   ($14,083)   ($19,565)  ($10,726) / ($3,357)  DD $15,262  exits {'V-STALL': 127, 'R': 1548, 'S': 714, 'P1': 238, 'P2': 85}
+  X4            2576  1053/1523    ($4,908)   ($14,123)   ($19,329)  ($11,038) / ($3,084)  DD $15,467  exits {'R': 1559, 'S': 700, 'P1': 233, 'P2': 84}
+  NO-P2         2688  1128/1560    ($3,452)   ($13,063)   ($18,493)  ($9,992) / ($3,071)  DD $14,725  exits {'R': 1559, 'P1': 411, 'S': 718}
+  NO-R          1928  886/1042      $3,562    ($3,422)    ($7,368)  ($6,300) / $2,878  DD $9,042  exits {'P1': 485, 'P2': 608, 'S': 835}
+  SESSION-OFF   3419  1409/2010    ($5,937)   ($18,189)   ($25,111)  ($13,210) / ($4,979)  DD $19,003  exits {'R': 2231, 'S': 795, 'P1': 296, 'P2': 97}
+  V-AVOID       2047  851/1196    ($2,863)   ($10,198)   ($14,342)  ($7,909) / ($2,289)  DD $12,760  exits {'R': 1313, 'S': 501, 'P1': 172, 'P2': 61}
+
+NEIGHBOUR GRID (27 cells, unranked): 0 of 27 net > $0 at mid.
+  cells (E1 lookback, P1 arm, stop lookback -> trades, net):
+   E1=2 P1=0.75 S=3 ->  2823  ($14,374)
+   E1=2 P1=0.75 S=5 ->  2762  ($13,739)
+   E1=2 P1=0.75 S=8 ->  2730  ($14,275)
+   E1=2 P1=1.0  S=3 ->  2800  ($14,896)
+   E1=2 P1=1.0  S=5 ->  2735  ($14,077)
+   E1=2 P1=1.0  S=8 ->  2698  ($14,400)
+   E1=2 P1=1.5  S=3 ->  2756  ($13,959)
+   E1=2 P1=1.5  S=5 ->  2688  ($13,096)
+   E1=2 P1=1.5  S=8 ->  2649  ($12,962)
+   E1=3 P1=0.75 S=3 ->  2747  ($13,611)
+   E1=3 P1=0.75 S=5 ->  2689  ($12,965)
+   E1=3 P1=0.75 S=8 ->  2658  ($13,496)
+   E1=3 P1=1.0  S=3 ->  2731  ($14,233)
+   E1=3 P1=1.0  S=5 ->  2670  ($13,422)
+   E1=3 P1=1.0  S=8 ->  2635  ($13,761)
+   E1=3 P1=1.5  S=3 ->  2692  ($13,540)
+   E1=3 P1=1.5  S=5 ->  2629  ($12,732)
+   E1=3 P1=1.5  S=8 ->  2590  ($12,412)
+   E1=5 P1=0.75 S=3 ->  2657  ($12,521)
+   E1=5 P1=0.75 S=5 ->  2602  ($11,940)
+   E1=5 P1=0.75 S=8 ->  2573  ($12,109)
+   E1=5 P1=1.0  S=3 ->  2641  ($13,257)
+   E1=5 P1=1.0  S=5 ->  2583  ($12,464)
+   E1=5 P1=1.0  S=8 ->  2551  ($12,607)
+   E1=5 P1=1.5  S=3 ->  2606  ($12,331)
+   E1=5 P1=1.5  S=5 ->  2546  ($11,521)
+   E1=5 P1=1.5  S=8 ->  2513  ($11,230)
+
+SEEN WINDOW (TradingView CL1! 2025-09-08 on; seen -- not evidence): engine BASE 250 trades, gross $3,912, net $3,027
+
+CAVEATS: 1H OHLC cannot show the path inside a bar (level+stop same-bar touches counted in the pre-flight, 0 for the base by construction); C3 trades are independent single-trade outcomes (overlap allowed); criterion 5 volatility definition is I9 in spec.py.

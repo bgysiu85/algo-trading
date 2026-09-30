@@ -1,0 +1,67 @@
+CHARTMARK-v1 G2 count-only pre-flight, training side, 20260930
+data: CL 1H training 2010-06..2021-12 (back-adjusted); 67565 bars; no price or P&L is reported here.
+
+== BASE
+orders 4076  fills 2670  no-fills (E3 timeouts) 3  context cancels 1403  roll cancels 0  re-sets 12
+gap-through fills 23  entry bars whose own low sets the stop 175  same-bar level+stop touches 0
+exits by type {'R': 1621, 'S': 714, 'P1': 246, 'P2': 89}  reached P1 985 (37%)  P2 471 (18%)  positions carried through a roll 29
+median bars order->fill 1.0  fill->exit 4.0
+
+== V-STALL3
+orders 4170  fills 2735  no-fills (E3 timeouts) 3  context cancels 1432  roll cancels 0  re-sets 12
+gap-through fills 24  entry bars whose own low sets the stop 184  same-bar level+stop touches 0
+exits by type {'V-STALL': 219, 'R': 1495, 'S': 710, 'P1': 229, 'P2': 82}  reached P1 935 (34%)  P2 447 (16%)  positions carried through a roll 28
+median bars order->fill 1.0  fill->exit 4.0
+
+== V-STALL4
+orders 4139  fills 2712  no-fills (E3 timeouts) 3  context cancels 1424  roll cancels 0  re-sets 12
+gap-through fills 23  entry bars whose own low sets the stop 181  same-bar level+stop touches 0
+exits by type {'V-STALL': 127, 'R': 1548, 'S': 714, 'P1': 238, 'P2': 85}  reached P1 955 (35%)  P2 457 (17%)  positions carried through a roll 29
+median bars order->fill 1.0  fill->exit 4.0
+
+== X4
+orders 3955  fills 2576  no-fills (E3 timeouts) 2  context cancels 1377  roll cancels 0  re-sets 13
+gap-through fills 23  entry bars whose own low sets the stop 166  same-bar level+stop touches 0
+exits by type {'R': 1559, 'S': 700, 'P1': 233, 'P2': 84}  reached P1 947 (37%)  P2 453 (18%)  positions carried through a roll 27
+median bars order->fill 1.0  fill->exit 4.0
+
+== NO-P2
+orders 4129  fills 2688  no-fills (E3 timeouts) 3  context cancels 1438  roll cancels 0  re-sets 12
+gap-through fills 23  entry bars whose own low sets the stop 179  same-bar level+stop touches 0
+exits by type {'R': 1559, 'P1': 411, 'S': 718}  reached P1 996 (37%)  P2 0 (0%)  positions carried through a roll 27
+median bars order->fill 1.0  fill->exit 4.0
+
+== NO-R
+orders 2903  fills 1928  no-fills (E3 timeouts) 2  context cancels 973  roll cancels 0  re-sets 6
+gap-through fills 17  entry bars whose own low sets the stop 110  same-bar level+stop touches 0
+exits by type {'P1': 485, 'P2': 608, 'S': 835}  reached P1 1093 (57%)  P2 608 (32%)  positions carried through a roll 45
+median bars order->fill 1.0  fill->exit 7.0
+
+== SESSION-OFF
+orders 5526  fills 3419  no-fills (E3 timeouts) 337  context cancels 1759  roll cancels 11  re-sets 28
+gap-through fills 51  entry bars whose own low sets the stop 132  same-bar level+stop touches 0
+exits by type {'R': 2231, 'S': 795, 'P1': 296, 'P2': 97}  reached P1 1137 (33%)  P2 488 (14%)  positions carried through a roll 42
+median bars order->fill 1.0  fill->exit 4.0
+
+== V-AVOID
+orders 3297  fills 2047  no-fills (E3 timeouts) 2  context cancels 1248  roll cancels 0  re-sets 7
+gap-through fills 14  entry bars whose own low sets the stop 113  same-bar level+stop touches 0
+exits by type {'R': 1313, 'S': 501, 'P1': 172, 'P2': 61}  reached P1 747 (36%)  P2 359 (18%)  positions carried through a roll 25
+median bars order->fill 1.0  fill->exit 4.0
+
+BASE per year (fills / exits / reached P1 / P2):
+  2010:  132  {'R': 76, 'S': 40, 'P1': 12, 'P2': 4}  P1 54  P2 24
+  2011:  230  {'P1': 16, 'R': 151, 'S': 61, 'P2': 2}  P1 73  P2 33
+  2012:  240  {'R': 148, 'S': 66, 'P1': 16, 'P2': 10}  P1 75  P2 48
+  2013:  226  {'P2': 6, 'R': 150, 'S': 53, 'P1': 17}  P1 81  P2 33
+  2014:  219  {'R': 123, 'S': 63, 'P1': 24, 'P2': 9}  P1 83  P2 38
+  2015:  223  {'S': 66, 'R': 124, 'P1': 27, 'P2': 6}  P1 80  P2 26
+  2016:  217  {'S': 53, 'R': 127, 'P1': 30, 'P2': 7}  P1 101  P2 48
+  2017:  236  {'R': 131, 'S': 74, 'P2': 11, 'P1': 20}  P1 93  P2 48
+  2018:  220  {'R': 124, 'S': 64, 'P2': 11, 'P1': 21}  P1 88  P2 50
+  2019:  246  {'R': 159, 'P2': 5, 'P1': 20, 'S': 62}  P1 80  P2 42
+  2020:  231  {'P1': 21, 'R': 144, 'S': 55, 'P2': 11}  P1 86  P2 42
+  2021:  250  {'P1': 22, 'R': 164, 'P2': 7, 'S': 57}  P1 91  P2 39
+
+STOP RULE (sec 5): BASE fills = 2670; threshold 150. Clears the threshold; the backtest may run.
+Registered prediction (sec 10): 300-600 fills.
