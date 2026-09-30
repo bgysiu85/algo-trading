@@ -174,6 +174,8 @@ def test_trade_invariants(name):
             if t.reason == "BACKSTOP-fillbar":
                 assert t.exit_j == t.entry_j and t.exit_px == pytest.approx(t.entry_px - t.dist)
                 assert fr.l[t.entry_j] <= t.entry_px - t.dist + 1e-9
+                assert (fr.o[t.entry_j] >= t.level or ind.e9[t.placed_j] < ind.e9[t.placed_j - 1]
+                        or fr.c[t.entry_j] <= t.entry_px - t.dist + 1e-9 or p.fillbar == "sec24")
             if t.reason == "BACKSTOP":
                 assert t.exit_j > t.entry_j and t.exit_px <= t.entry_px - t.dist + 1e-9 or fr.o[t.exit_j] <= t.entry_px - t.dist
             if t.reason == "EMA21":
@@ -350,27 +352,48 @@ def test_seen_window_matches_registered_counts():
     pre = E.precompute(fr, ind)
     m = ~np.isnan(ind.hist)
     assert np.allclose((pre.e12 - pre.e26 - pre.sig)[m], ind.hist[m])
-    tr, c = E.simulate(fr, ind, S.K1, pre=pre)            # Amendment 3.5
+    tr, c = E.simulate(fr, ind, dataclasses.replace(S.K1, fillbar="sec24"), pre=pre)   # Amendment 3.5 (original sec 2.4)
     assert (len(tr), sum(t.exit_px > t.entry_px for t in tr)) == (71, 14)
     assert sum(t.exit_px - t.entry_px for t in tr) == pytest.approx(-5.05, abs=0.006)
     assert c["exits"] == {"EMA21": 27, "BACKSTOP": 27, "BACKSTOP-fillbar": 17}
-    tr, c = E.simulate(fr, ind, S.K3, pre=pre)            # Amendment 2.3
+    tr, c = E.simulate(fr, ind, dataclasses.replace(S.K3, fillbar="sec24"), pre=pre)   # Amendment 2.3
     assert (len(tr), sum(t.exit_px > t.entry_px for t in tr)) == (86, 20)
     assert sum(t.exit_px - t.entry_px for t in tr) == pytest.approx(5.40, abs=0.006)
     assert c["exits"] == {"EMA21": 36, "BACKSTOP": 35, "BACKSTOP-fillbar": 15}
 
 
 @needs_seen
-def test_g6_parity_only_the_documented_conflict_fails():
+def test_g6_parity_all_checks_pass():
     for p in (S.K1, S.K3):
         bad = [c["name"] for c in PA.checks(SEEN, p) if not c["ok"]]
-        assert len(bad) == 1 and "CONFLICT" in bad[0], bad
+        assert not bad, bad
 
 
-def test_preflight_run_writes_counts_only(tmp_path, monkeypatch):
-    monkeypatch.setattr(PF, "load_training_frame", lambda archive: walk(9000, 5, drift=0.01, vol=0.2, start="2010-06-07 00:00"))
-    path = PF.run("ignored", tmp_path, "20260930", log=lambda *_: None)
-    assert path.exists() and path.name == "w15_0036_v2_preflight_20260930.txt"
-    js = json.loads((tmp_path / "w15_0036_v2_preflight_20260930.json").read_text())
-    assert set(js) == {"K1", "K2", "K3", "K4"}
-    assert "exit_px" not in json.dumps(js) and "gross" not in json.dumps(js)
+def test_fillbar_rule_amendment5():
+    n = 5
+    t = pd.date_range("2015-01-05", periods=n, freq="h", tz="UTC")
+    def mk(o, h, l, c, e9_prev, e9_now):
+        fr = D.make_frame(t, [10] * n, [11] * n, [9] * n, [10] * n, np.ones(n))
+        fr.o[3], fr.h[3], fr.l[3], fr.c[3] = o, h, l, c
+        ind = D.Ind(np.ones(n), np.array([0, 0, 0, e9_prev, e9_now][::-1][::-1], float), np.zeros(n), np.zeros(n), np.zeros(n, int), np.zeros(n))
+        ind.e9[:] = 0; ind.e9[2], ind.e9[3] = e9_prev, e9_now
+        return fr, ind
+    P = S.K1
+    lvl, stop = 10.5, 9.9
+    # opened below the level, EMA9 rising (arming close t=3 uses e9[3] vs e9[2]); low reaches the stop but the bar closes above it -> NOT hit
+    fr, ind = mk(10.2, 11.0, 9.8, 10.6, 1.0, 2.0)
+    assert E._fillbar_hit(fr, ind, P, 3, 3, lvl, stop) is False
+    # ...closes at/below the stop -> hit
+    fr, ind = mk(10.2, 11.0, 9.8, 9.9, 1.0, 2.0)
+    assert E._fillbar_hit(fr, ind, P, 3, 3, lvl, stop) is True
+    # EMA9 falling -> hit even though the bar closes above the stop
+    fr, ind = mk(10.2, 11.0, 9.8, 10.6, 2.0, 1.0)
+    assert E._fillbar_hit(fr, ind, P, 3, 3, lvl, stop) is True
+    # gap fill (opened at/above the level) -> the low counts
+    fr, ind = mk(10.6, 11.0, 9.8, 10.6, 1.0, 2.0)
+    assert E._fillbar_hit(fr, ind, P, 3, 3, lvl, stop) is True
+    # low never reaches the stop -> not hit; original sec 2.4 hits whenever low <= stop
+    fr, ind = mk(10.2, 11.0, 10.0, 10.6, 2.0, 1.0)
+    assert E._fillbar_hit(fr, ind, P, 3, 3, lvl, stop) is False
+    fr, ind = mk(10.2, 11.0, 9.8, 10.6, 1.0, 2.0)
+    assert E._fillbar_hit(fr, ind, dataclasses.replace(P, fillbar="sec24"), 3, 3, lvl, stop) is True

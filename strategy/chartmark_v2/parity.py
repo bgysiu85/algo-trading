@@ -57,11 +57,10 @@ def checks(csv_path, p: S.Params = S.K1) -> list[dict]:
         None if t1 is None else str(ny[t1.entry_j]), t1 is not None and ny[t1.entry_j] == pd.Timestamp("2026-09-01 04:00"))
     if t1 is not None:
         add("1 Sep: level within 2 ticks of 87.69", 87.69, round(t1.level, 2), abs(t1.level - 87.69) <= 2 * S.TICK + 1e-9)
-        # Amendment 1.3 as written: exit 2 Sep 08:00 open 89.11. Under sec 2.4 (registered, conservative) the 04:00 bar's low 86.90 is
-        # at or below fill - 0.60 = 87.09, so the trade is stopped IN the fill bar. That is a conflict in the registration, not an
-        # engine choice: reported as FAIL, not adjusted. (The bar opened at 86.95, below the level, so the low very likely came first.)
-        add("1 Sep: exits at the 2 Sep 08:00 open 89.11 under sec 2.4 + $0.60 backstop (Amendment 1.3 as written) -- CONFLICT, Ben to decide",
-            89.11, f"{t1.reason} @ {t1.exit_px:.2f}", ny[t1.exit_j] == pd.Timestamp("2026-09-02 08:00") and abs(t1.exit_px - 89.11) < 1e-6)
+        # Amendment 1.3 + Amendment 5: the 04:00 bar opened below the level (86.95 < 87.69), EMA9 was not falling at the 03:00 close,
+        # and the bar closed at 88.04 (> the 87.09 backstop), so the fill-bar low is not counted and the trade runs to 89.11.
+        add("1 Sep: exits at the 2 Sep 08:00 open 89.11 (Amendments 1.3 + 5)", 89.11, f"{t1.reason} @ {t1.exit_px:.2f}",
+            ny[t1.exit_j] == pd.Timestamp("2026-09-02 08:00") and abs(t1.exit_px - 89.11) < 1e-6 and t1.reason == "EMA21")
         tn = E.simulate(fr, ind, replace(p, backstop=50.0), start=_idx(ny, "2026-09-01 03:00"), pre=pre)[0][0]
         add("1 Sep: EMA21 exit machinery alone (backstop neutralised) exits at the 2 Sep 08:00 open 89.11", 89.11,
             f"{tn.reason} @ {tn.exit_px:.2f} on {ny[tn.exit_j]}",
@@ -90,7 +89,7 @@ def report(csv_path=None) -> tuple[str, bool]:
             ok_all &= c["ok"]
             lines.append(f"  [{'PASS' if c['ok'] else 'FAIL'}] {c['name']}: expected {c['expected']}, got {c['got']}")
         lines.append("")
-    lines.append("G6 " + ("PASSES" if ok_all else "NOT CLEARED: see the FAIL lines (the 1 Sep exit conflict is Ben's decision, not an engine choice)"))
+    lines.append("G6 " + ("PASSES" if ok_all else "NOT CLEARED: see the FAIL lines"))
     return "\n".join(lines) + "\n", ok_all
 
 

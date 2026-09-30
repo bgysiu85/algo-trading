@@ -224,3 +224,17 @@ Failing 5 or 6 closes the study. The development-window net of all four candidat
 **4.7 Pre-flight (G2):** counts only for K1–K4 on the full training window, split by window. Stop if a candidate has < 75 fills in either window (reported; that candidate is dropped from selection, not replaced).
 
 **4.8 Cost of this design, stated:** the confirmation test uses six years instead of twelve, so criteria 4 and 8 are judged on half the data. The selection itself is a multiplicity cost of four, paid inside the development window.
+
+### Amendment 5 — PRE-RUN, 2026-09-30 19:25 (fill-bar backstop; before any P&L on training — the G2 count-only pre-flight had run under the old rule and is re-run)
+
+Found while building G6: Ben's 1 Sep 2026 trade fills in the 04:00 bar at 87.69, but §2.4 counts the $0.60 backstop as hit whenever the fill bar's low reaches it, and that bar's low (86.90) is below 87.09 — so the engine stopped it in the fill bar, against Amendment 1.3's expected exit (2 Sep 08:00 open 89.11). The bar opened at 86.95, below the level, so the low almost certainly came before the fill. Options offered: A keep §2.4; B ignore a fill-bar low when the bar opened below the level; C as B but count the stop if the bar also closes at/below it. Ben: *"i think we should also consider the EMA9 and EMA21. If EMA9 is not on a downward trend, then option C"* — then, on Claude's proposed coding (EMA9 falling = EMA9[t] < EMA9[t−1] at the arming close; EMA9 alone): *"Yes i agree"*, *"Lets only use EMA9 for this"*.
+
+**5.1 Replaces the fill-bar clause of §2.4.** In the fill bar j (order placed at the close of t, level L, backstop S = fill − distance), the backstop is taken as hit iff low[j] ≤ S **and** at least one of: (a) open[j] ≥ L (gap fill); (b) EMA9[t] < EMA9[t−1] (EMA9 falling at the arming close); (c) close[j] ≤ S. Otherwise the position is not stopped in the fill bar and the walk continues from bar j+1 (EMA21 exit from j+1 as §2.5). A hit fills at S and is counted BACKSTOP-fillbar. Bars after the fill bar are unchanged.
+
+**5.2 Applies to every candidate and variant.** The original rule is kept in the code only as `fillbar="sec24"` for regression against Amendments 2.3 and 3.5.
+
+**5.3 G6 parity now passes in full** (`claude/raw/w15_0036_v2_parity_20260930.txt`): 1 Sep fills 04:00 at 87.69 and exits 2 Sep 08:00 at 89.11 (EMA9 rose into the 04:00 bar; the bar closed at 88.04).
+
+**5.4 Disclosed, not evidence:** the rule was chosen from Ben's 1 Sep trade, not from any training result. On the seen year it moves K1 from 71 trades / (5.05) pts to 69 trades / +2.29 pts and K3 from 86 / +5.40 to 82 / +14.77 (fill-bar stops fall from 17 / 15 to 1 / 3). That is the seen window Ben traded and is not evidence; it is recorded because the change favours the strategy on those bars.
+
+**5.5 Pre-flight.** The count-only pre-flight run before this amendment (K1 639 fills; 57 fill-bar stops) is superseded; it is re-run under 5.1 before step S.

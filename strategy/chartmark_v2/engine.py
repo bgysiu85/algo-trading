@@ -190,6 +190,17 @@ def _walk(fr: Frame, ind: Ind, p: S.Params, e: int, fill: float, stop: float):
     return n - 1, c[n - 1], "data_end", ()
 
 
+def _fillbar_hit(fr: Frame, ind: Ind, p: S.Params, t: int, j: int, lvl: float, stop: float) -> bool:
+    """Is the backstop taken as hit inside the fill bar j? (Amendment 5; t = the arming close.)"""
+    if fr.l[j] > stop:
+        return False
+    if p.fillbar == "sec24" or fr.o[j] >= lvl:            # original rule, or a gap fill: the low came after the fill
+        return True
+    if ind.e9[t] < ind.e9[t - 1]:                          # EMA9 falling into the bar: treat the low as after the fill
+        return True
+    return bool(fr.c[j] <= stop)                           # else only if the bar also closed at/below the stop
+
+
 def _confirmed_at_close(fr: Frame, ind: Ind, pre: Pre, p: S.Params, j: int, arm: str) -> bool:
     """Sec 2.3 (V-REDTOP): confirmation at the fill bar's close."""
     if arm in ("A-early", "A-fresh"):
@@ -257,7 +268,7 @@ def simulate(fr: Frame, ind: Ind, p: S.Params = S.K1, *, start: int = 0,
         cnt["fills_by_arm"][k] += 1
         cnt["gap_fills"] += int(o[j] > lvl)
         cl: tuple = ()
-        if fr.l[j] <= stop:
+        if _fillbar_hit(fr, ind, p, t, j, lvl, stop):
             x, px, why = j, stop, "BACKSTOP-fillbar"
         elif p.redtop and not _confirmed_at_close(fr, ind, pre, p, j, k):
             cnt["unconfirmed"] += 1

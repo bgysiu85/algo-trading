@@ -6,8 +6,9 @@ Interpretations fixed here BEFORE any count or return was computed on the traini
   J1  Arm/level maths is the seen-window prototype's (Claude outputs/w15_0036_v2_seen_proto_live.py), made a module.
   J2  Live level: P-conditions use bar t's EMA/MACD/signal and ATR[t]; each is solved for the price P of bar t+1 and taken
       +1 tick (Amendment 1.1); the level is ceil-to-tick of the highest of all terms.
-  J3  Fill-bar backstop: taken as hit whenever low[j] <= backstop (sec 2.4 reduces to this: both of its branches hit).
-      Exit price = the backstop level. Counted as BACKSTOP-fillbar.
+  J3  Fill-bar backstop: Amendment 5 (PRE-RUN, Ben 2026-09-30): low[j] <= backstop counts as hit when the bar opened at/above the
+      level (gap fill), or EMA9[t] < EMA9[t-1] at the arming close; otherwise (opened below the level, EMA9 not falling) only if
+      close[j] <= backstop. Exit price = the backstop level, counted BACKSTOP-fillbar. fillbar='sec24' = the original always-hit rule.
   J4  EMA21 exit is evaluated from the bar AFTER the fill; breaches in the fill bar are not counted (sec 2.5).
   J5  Clause counting in the pre-flight is exclusive by priority 1, 2, 3 (any-true counts are also reported).
   J6  V-WICK: the wick breach at bar k (low[k] < EMA21[k-1]) is known intrabar; clauses 2/3 (MACD) are read on the bars
@@ -66,6 +67,7 @@ class Params:
     avoid: bool = False            # V-AVOID
     par_bars: int = PAR_BARS       # grid: {4, 6, 8}
     ema_window: int = EMA_WINDOW   # grid: {3, 4, 5} (2nd breach within this many bars)
+    fillbar: str = "amend5"        # Amendment 5; "sec24" = original sec 2.4 (kept for regression against Amendments 2.3/3.5)
 
 
 K1 = Params(prev_high=True, theta=0.05)
