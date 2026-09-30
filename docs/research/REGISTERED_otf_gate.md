@@ -200,7 +200,7 @@ host passes all six.
 | G2 | **Count-only pre-flight** (sub 4): state census (§3) and kept / removed counts per host × market × direction × year. Reads host columns `market, spec, sizing, equity, direction, entry_date, entry_j` (H-A) and B1's entry times and sides (H-B) only; a test proves no gross / net / exit column is loaded. | Open |
 | G3 | **Holdout ledger** `holdout_otf_gate.json` (§6), own lock, refused by name from every other ledger; refuses `--limit` and date-narrowing flags; mutation-tested. | Open |
 | G4 | **Look-ahead guards**, each proven by a test that a one-bar shift breaks: (a) the state used for a trade comes only from bars completed before τ; (b) a week/month in progress is never used by the primary; (c) BAL's reference bar is fixed when BAL starts; (d) H-B's daily bar for session s ends 17:00 ET before s. Plus a hand-worked synthetic series with known states for every row of the §2.1 table. | Open |
-| G5 | **Books reproduce, then IBKR.** H-A: C1 frac from the CSV = 1,175 trades, ($847) at the old mid. H-B: the re-run B1 = 3,443 ES / 3,427 NQ trades and ($14,617) / ($2,384) at NinjaTrader L2. Only then are IBKR costs (W15-0033, PRE-RUN amendment here) applied. | Open (blocked by W15-0033 for the fee table) |
+| G5 | **Books reproduce, then IBKR.** H-A: C1 frac from the CSV = 1,175 trades, ($847) at the old mid. H-B: the re-run B1 = 3,443 ES / 3,427 NQ trades and ($14,617) / ($2,384) at NinjaTrader L2. Only then are IBKR costs (W15-0033, PRE-RUN amendment here) applied. | Fee table cleared (Amendment 2, W15-0033); reproduction of the old books still to be shown by the build |
 | G6 | **H-B daily bar check:** rebuilt sessions per year vs XNYS trading days (missing > 1% → stop); roll gaps listed; ES OTF daily-state agreement with the H-A ES series reported (different day boundaries, so not a stop). | Open |
 
 **Stop rule, fixed now:** if the pre-flight shows fewer than 60 kept H-A trades **and** fewer than 150 kept H-B
@@ -293,3 +293,18 @@ No rule, threshold, variant, criterion or ledger date above is changed. These ar
 6. **`--run`.** Refuses unless a pre-flight `.json` on disk carries the same SHA-256 of every input as the current run and did not stop. Until the study module (G5 costs, C-R, sec 4 criteria) exists it stops with "study module not built (sub 5, blocked by W15-0033)".
 7. **Ledger.** `strategy/otf_gate/ledger.py` refuses every other line's ledger by name, including `holdout_va80.json`. **The reverse refusals were NOT added to the frozen ledger modules of other lines** (futbt, w16, macro_flag, ...): this file did not authorise editing them. Whether to add `holdout_otf_gate.json` and `holdout_va80.json` to their refusal lists is a decision for Ben (board item opened in sub 3).
 8. **Test status at delivery.** 93 unit tests on synthetic data pass (both packages); a mutation run of 47 deliberate code breaks was caught by the tests in 44 cases, the other 3 being provably equivalent changes.
+
+## Amendment 2 (PRE-RUN, 2026-09-30, W15-0033) -- IBKR fee table for G5, written before any P&L is read
+
+Ben, 2026-09-30: *"please use the IBKR costs as that will be the broker i'm using"*. No P&L, no kept/removed net has been computed on this line (pre-flight counts only). Levels per side: fee + 0 / 1 / 2 ticks (low / mid = headline / high).
+
+| Vehicle | Commission | Exchange (non-member) | Reg. | All-in / side | Tick $ | low / mid / high per side |
+|---|---|---|---|---|---|---|
+| MES | 0.25 | 0.353 | 0.02 | **0.62** | 1.25 | 0.62 / 1.87 / 3.12 |
+| MNQ | 0.25 | 0.353 | 0.02 | **0.62** | 0.50 | 0.62 / 1.12 / 1.62 |
+| ES | 0.85 | 1.386 | 0.02 | **2.26** | 12.50 | 2.26 / 14.76 / 27.26 |
+| NQ | 0.85 | 1.386 | 0.02 | **2.26** | 5.00 | 2.26 / 7.26 / 12.26 |
+
+Read 2026-09-30 from interactivebrokers.com (`/en/pricing/commissions-futures.php`, Fixed or Tiered <= 1,000 contracts a month; `/en/accounts/fees/CME.php`, exchange fee recovery, non-member). Regulatory ~ $0.02 as in the other W15 amendments (0.011 + ~0.01 NFA). The 12 C1 markets are the table in `REGISTERED_crudele_3s.md` Amendment C (`strategy/futbt/costs_ibkr.py`). Confirm against Ben's first IBKR futures fills (market data starts 1 Oct); if they differ, amend BEFORE any P&L is read.
+
+H-A (12 C1 markets): Amendment C table of `REGISTERED_crudele_3s.md`, priced per trade as `gross - qty x sides x (fee + k x tick)` (the old separate stop-fill tick is dropped; the tick is charged on every fill). H-B: 1 MES / 1 MNQ per trade headline, 1 ES / 1 NQ reported; ticks on every market or stop fill, 0 on B1's target limit fills. G5 still proves the old books reproduce first (H-A ($847), H-B 3,443 / 3,427 trades and ($14,617) / ($2,384) at NinjaTrader L2) and only then applies these fees. **G5 fee table: cleared by this amendment.**

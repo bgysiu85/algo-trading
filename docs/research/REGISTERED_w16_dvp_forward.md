@@ -77,3 +77,7 @@ two quarters is negative, so it **fails criterion 4**. Stop A does not fire. I'd
 - Pausing, resizing or skipping days by judgement.
 - Changing the stop or target, the 0.10% threshold, the times, or the daily limits mid-test.
 - Starting the count from a later date because the first weeks went badly.
+
+## Amendment 1 (POST-RUN, 2026-09-30, W15-0033) -- IBKR costs reported beside; scored basis unchanged until Ben decides
+
+Ben's instruction (*"please use the IBKR costs as that will be the broker i'm using"*) arrived after the first forward session (2026-09-29) had been scored at NinjaTrader L2, so a change of scoring basis is POST-RUN. Nothing about the rule, the data or the stop/pass thresholds changes. From the next weekly pull the forward report **prints a second line: the same trades at IBKR** (1 MNQ: $0.62 per side + 0 / 1 / 2 ticks of $0.50 = $1.24 / $2.24 / $3.24 round trip vs NinjaTrader L2 $2.88 round trip). Stop A/B and the section 5 pass are still read on the registered NinjaTrader L2 figures **unless Ben says otherwise** (board: W15-0033). IBKR is cheaper than NinjaTrader Free, so this can only make a pass easier, which is why it is not switched silently. Fees: OTF-G Amendment 2.

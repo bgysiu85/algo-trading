@@ -396,3 +396,7 @@ Result doc on board item W15-0020.
   (C1 was itself negative at ($847)), which v0-rev did not.
 - A2 as registered failed on 754 of 4,057 breaks (the pre-flight's A-to-break reading fails none), so it does some work.
 
+
+## POST-RUN note, 2026-09-30 (W15-0033) -- TL-v1 re-quoted at IBKR costs; no rule, bar or verdict changed
+
+Ben switched the program to IBKR costs. Costs are per trade, so the closed result is re-quoted from its own trade file, no re-run: ensemble fractional at $22,129: v1 $775 old mid -> $606 IBKR mid ($27 at IBKR high, $1,185 at IBKR low); C1 ($847) -> ($1,408). Verdict unchanged (it failed criterion 6, not on cost). Full tables (every spec, R, sizing, low / mid / high): `Claude outputs/w15_0033_requote_ibkr_20260930.txt` (script `tools/w15_0033_requote_ibkr.py`). The registered NinjaTrader-era figures above remain the record of what was tested.

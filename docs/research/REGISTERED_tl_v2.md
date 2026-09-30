@@ -209,3 +209,28 @@ it removes the worst entries*.** The S/R variant most likely falls below 150 tra
 - **W15-0031** — backtest, training side, Result doc (runs on Ben's PC).
 - **W15-0028** — Ben commits the TL-v1 POST-RUN note (still open).
 - **W15-0027** — CL 4-hour variant of closed TL-v1: keep or drop (recommend drop).
+
+## Amendment 1 (PRE-RUN, 2026-09-30, W15-0033) -- cost basis switched to IBKR; before any TL-v2 P&L exists
+
+Ben, 2026-09-30: *"please use the IBKR costs as that will be the broker i'm using"*. Only the G2 count pre-flight can exist for this study (sec 5); no exit price or P&L has been computed. This replaces "friction $0.50 / $1.25 / $2.50 per contract per side + one tick on every stop fill" everywhere in this file (sec 2.1, 4 criteria 1 and 8, controls C1-C3, the grid, the 27 neighbour cells):
+
+- **Levels:** low = IBKR all-in fee, mid (headline) = fee + 1 tick, high = fee + 2 ticks, per contract per side, on every fill; the separate stop-fill tick is dropped (no double count).
+- **Fees and ticks:** the 12-market table in `REGISTERED_crudele_3s.md` Amendment C (`strategy/futbt/costs_ibkr.py`), vehicles as TL-v0 (ES via MES, CL via MCL, etc.). ES/NQ/MES/MNQ, if ever used: OTF-G Amendment 2. Sources and dates as in those amendments.
+- "Mid friction ($1.25/side)" now reads "IBKR mid"; "high friction ($2.50/side)" reads "IBKR high". The bars (criteria 1-9), p99 and the holdout rule are unchanged.
+- **Code:** `strategy/tl_v2` must price through `strategy.futbt.costs_ibkr`, not TL-v0's flat $0.50 / $1.25 / $2.50. The Build & test chat checks this before G5 closes.
+- For comparison only, the TL-v1 result re-quoted at IBKR is in `Claude outputs/w15_0033_requote_ibkr_20260930.txt` (v1 ensemble: $775 old mid -> $606 IBKR mid).
+
+## Amendment 2 (PRE-RUN, 2026-09-30, W15-0030) -- coding choices where sec 2.2-2.3 are silent; written before the pre-flight is run and before any retest count exists
+
+No rule, number or bar above changes. These fix how the registered text is coded so the count-only pre-flight and the backtest read one reading. Code: `strategy/tl_v2/retest.py` (docstring C1-C5), `strategy/tl_v2/signals.py`, `strategy/tl_v2/costs.py`.
+
+- **C1 One live setup per market.** While a setup is pending, another qualified break in the SAME direction is ignored and counted ("ignored_pending"); the first setup keeps its frozen line. (An opposite qualified break is an opposite raw break: it kills the pending setup by T3 and starts its own.) Consequence, reported not corrected: N = 20 can start fewer setups than N = 10, because a longer-pending setup blocks a later break.
+- **C2** On a bar where the opposite raw break and a retest coincide, T3 wins: no trade.
+- **C3** A bar whose close is through the line (close < line - 0.10 x ATR for a long) fails the setup even if no retest bar came before it.
+- **C4** A retest on the last available bar cannot be filled: counted "open_at_end", not an entry.
+- **C5 S/R zone (sec 2.3).** Pivots of the SAME KIND as the pivots that drew the broken line (highs for a resistance break, lows for a support break), L = R = 5, confirmed before t, pivot bar in the 250 bars before t. A zone = at least 2 such pivots within 0.25 x ATR[t] of each other; it passes if its mean is within 0.5 x ATR[s] of the frozen line at the retest bar. Any qualifying zone passes. The S/R variant only FILTERS the T5 entry (the first retest bar); it never creates an entry and a setup whose first retest bar has no zone is used up.
+- **Frozen line.** The line at t is TL-v1's (built from pivots confirmed by the close of t, as TL-v1's code and cleared G5 do; this file's G4 wording "confirmed by t - 1" is read the same way: nothing after t enters). Slope = (line[t] - the anchor pivot's price) / (t - A's bar), projected forward. ATR for T1-T3 is the repo's ATR(14) at bar s.
+- **Weekly filter** is applied at the break bar t (part of "qualified", sec 2.1) and not re-applied at the retest bar.
+- **Entry stop** is TL-v1's v0-rev safety line as of the retest (signal) bar; sizing, 1% of $22,129 fixed equity, zero contracts = skip, counted.
+- **Pre-flight (G2) definitions.** "Retest entries" = T5 signals (setups that reach a retest bar with a following bar to fill on), all 12 markets x pivot sizes 3/5/8, N = 10; this is the number the 150-entry stop rule reads. "Sizeable" = integer contracts >= 1 at 1% of $22,129 (ensemble sleeve 1/3 risk, and alone at full risk), using the stop known at the signal bar and the next open as the fill; no later bar is read.
+- **Costs** are Amendment 1's, implemented in `strategy/tl_v2/costs.py` from `strategy.futbt.costs_ibkr`; TL-v0's flat friction and stop-fill tick are not used anywhere in `strategy/tl_v2`.

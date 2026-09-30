@@ -156,7 +156,7 @@ Passes only if all hold:
 | G2 | **Count-only pre-flight** (sub 4): §3 counts per year, and the value-area width distribution (points). Reads bars only up to each entry; a test proves no bar after the entry minute is read in pre-flight mode. **No outcome, no far-edge rate, no P&L.** | Open |
 | G3 | **Holdout ledger** `holdout_va80.json` (§6), own lock, refused by name from every other ledger (including `holdout_w16_sb.json` and `holdout_otf_gate.json`); refuses `--limit` and narrowing flags; mutation-tested. | Open |
 | G4 | **Look-ahead guards**, each proven by a test that a one-bar shift breaks: the profile uses only the prior session; a bracket counts only once its last bar has closed; the entry is the bar after the trigger; the stop level uses only bars before the entry. Plus a hand-built session with a known POC / VAH / VAL (every tie rule exercised). | Open |
-| G5 | **Costs:** IBKR MES / ES / MNQ / NQ fees from W15-0033 written in as a PRE-RUN amendment. | Open (blocked by W15-0033) |
+| G5 | **Costs:** IBKR MES / ES / MNQ / NQ fees from W15-0033 written in as a PRE-RUN amendment. | Cleared (Amendment 2, W15-0033) |
 
 **Stop rule, fixed now:** fewer than **200 ES triggers** on the training side → stop; the counts are the finding, back
 to Ben before any outcome is read.
@@ -243,3 +243,18 @@ No rule, threshold, cell, criterion or ledger date above is changed. These are c
 8. **`--run`.** Same rule as OTF-G: refuses without a matching pre-flight `.json` (SHA-256 of the session frames), and stops until the study module (G5 costs, C-RT/C-ND, criteria) exists.
 9. **Ledger.** `holdout_va80.json` refuses other lines' ledgers by name (including `holdout_otf_gate.json`). The reverse refusals in other lines' frozen ledger modules were NOT edited; Ben decides (see OTF-G Amendment 1, item 7).
 10. **Test status at delivery.** 93 unit tests (both packages) pass; 44 of 47 deliberate code breaks caught, the other 3 provably equivalent.
+
+## Amendment 2 (PRE-RUN, 2026-09-30, W15-0033) -- IBKR fee table for G5, written before any P&L is read
+
+Ben, 2026-09-30: *"please use the IBKR costs as that will be the broker i'm using"*. No P&L exists on this line (pre-flight counts only). Levels per side: fee + 0 / 1 / 2 ticks; ticks on every market or stop fill, 0 on target limit fills (W16 sec 4 convention).
+
+| Vehicle | Commission | Exchange (non-member) | Reg. | All-in / side | Tick $ | low / mid / high per side |
+|---|---|---|---|---|---|---|
+| MES | 0.25 | 0.353 | 0.02 | **0.62** | 1.25 | 0.62 / 1.87 / 3.12 |
+| MNQ | 0.25 | 0.353 | 0.02 | **0.62** | 0.50 | 0.62 / 1.12 / 1.62 |
+| ES | 0.85 | 1.386 | 0.02 | **2.26** | 12.50 | 2.26 / 14.76 / 27.26 |
+| NQ | 0.85 | 1.386 | 0.02 | **2.26** | 5.00 | 2.26 / 7.26 / 12.26 |
+
+Read 2026-09-30 from interactivebrokers.com (`/en/pricing/commissions-futures.php`, Fixed or Tiered <= 1,000 contracts a month; `/en/accounts/fees/CME.php`, exchange fee recovery, non-member). Regulatory ~ $0.02 as in the other W15 amendments (0.011 + ~0.01 NFA). The 12 C1 markets are the table in `REGISTERED_crudele_3s.md` Amendment C (`strategy/futbt/costs_ibkr.py`). Confirm against Ben's first IBKR futures fills (market data starts 1 Oct); if they differ, amend BEFORE any P&L is read.
+
+Headline vehicle 1 MES; 1 ES, and NQ via 1 MNQ / 1 NQ, reported. Round trip 1 MES at mid = $3.74 (2 x $1.87). **G5: cleared by this amendment.**

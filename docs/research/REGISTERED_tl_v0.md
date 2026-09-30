@@ -254,3 +254,7 @@ come from what cannot be coded.*
 
 - **AT-105 subitem 3** — pre-flight (§5), Python, training side only. Suggested session: **Sonnet, medium effort**.
 - Then G2 (AT-43) and G3–G5 before any backtest (step 4).
+
+## POST-RUN note, 2026-09-30 (W15-0033) -- TL-v0 / TL-v0-rev re-quoted at IBKR costs; no rule, bar or verdict changed
+
+Ben switched the program to IBKR costs. Costs are per trade, so the closed result is re-quoted from its own trade file, no re-run: ensemble fractional at $22,129: v0 ($560) old mid -> ($939) IBKR mid; v0-rev ($2,668) -> ($3,116); C1 ($847) -> ($1,408). Verdict unchanged: neither rule set is positive at IBKR mid. Full tables (every spec, R, sizing, low / mid / high): `Claude outputs/w15_0033_requote_ibkr_20260930.txt` (script `tools/w15_0033_requote_ibkr.py`). The registered NinjaTrader-era figures above remain the record of what was tested.
