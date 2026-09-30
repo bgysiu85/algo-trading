@@ -173,3 +173,17 @@ Ben, on the 28 Aug 2026 A-trigger: *"I would have entered at 12:00 around $83.35
 **2.2 G6 parity adds:** started flat at the close of 28 Aug 2026 11:00, the engine fills in the 12:00 bar within 2 ticks of **83.27** (07:00 bar open 83.26 + 1 tick; Ben ≈ 83.35) and exits at the 2 Sep 08:00 open (89.11). Amendment 1.3's 1 Sep checks are unchanged (level 87.69; 00:00 no fill).
 
 **2.3 Seen window re-run (not evidence), `Claude outputs/w15_0036_v2_seen_proto_live.py`:** base 86 trades, 20 winners, +5.40 pts gross ≈ +$540 per MCL before ≈ $304 of costs; exits EMA21 36 / BACKSTOP 35 / BACKSTOP-fillbar 15; arms A 76 / B 10. V-STOP20: 78 of 109 stopped inside the fill bar. Run over the whole year the rule is long from 28 Aug 12:00 to 2 Sep 08:00, so Ben's 1 Sep trade falls inside that position.
+
+### Amendment 3 — PRE-RUN, 2026-09-30 18:45 (clear the previous high; thresholds accepted; before any code, count or P&L on training)
+
+Ben, on 28 Aug 2026: *"the green candles at 9:00, 10:00 and 11:00 all had a long wick on top, i.e. long gap between closing and high price. So it isn't a good indication of confidence that price is moving up with certainty but the bar at 12:00 broke the highest price at 11:00 and EMA9 was moving above EMA21 so the indication of confidence is better"* (upper wicks 54% / 33% / 53% of range). Offered: A = always require the break of the previous bar's high (main), B = only after long upper wicks (variant). Ben: *"ok let's go ahead with that"*.
+
+**3.1 Base level:** L* = ceil-to-tick( max( red-candle level (Amendment 2), **high[t] + 1 tick**, live-condition prices + 1 tick (Amendment 1) ) ).
+
+**3.2 New reported variant V-WICKGATE:** high[t] + 1 tick is included only when at least 2 of the last 3 green bars (t−2…t) have upper wick ≥ 50% of their range; otherwise the level is Amendment 2's.
+
+**3.3 Claude's coding thresholds are accepted as registered** (Ben's go-ahead, W15-0036 sub 1): "within reach" = MACD within 0.05 ATR of its signal / EMA9 within 0.10 ATR of EMA21; parallel trend = EMA9 above EMA21 ≥ 6 bars; red-candle lookback 10 bars.
+
+**3.4 G6 parity:** 28 Aug fill within 2 ticks of **83.30** (previous high 83.29 + 1 tick; Ben ≈ 83.35); 1 Sep unchanged (87.69; previous high 87.24 is below the live MACD level).
+
+**3.5 Seen window re-run (not evidence):** base 71 trades, 14 winners, (5.05) pts gross ≈ ($505) per MCL before ≈ $251 of costs; exits EMA21 27 / BACKSTOP 27 / BACKSTOP-fillbar 17. Amendment 2's level alone gave 86 trades and +5.40 pts on the same bars. This comparison is reported for the record; the base was chosen from Ben's description, not from these numbers, and is not changed because of them.
