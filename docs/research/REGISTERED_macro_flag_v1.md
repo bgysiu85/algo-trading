@@ -247,8 +247,16 @@ criterion; each is stated so it cannot later be called a free choice.
 6. **Mechanical stop rule.** `--run` refuses unless a pre-flight file exists for the same books and calendar (SHA-256) with
    at least 60 flagged trades. The seen window (2025-09-23 ->) is not in the training books, so it is not scored.
 
+## POST-RUN note (2026-09-30, training run read)
+
+Result: **FAIL, study closed.** 122 flagged C1 trades; delta $2,206 at mid against a C-R p95 of $2,966 (90th percentile); criteria 2 and 7 failed
+(7: p = 0.105); criteria 1, 3, 4, 5, 6, 8 passed. Pre-run prediction: 70-110 flagged and the 40th-80th percentile; the count and percentile
+came in higher, the closure was right. Holdout not spent (`holdout_macro_flag.json` not written). Reported variants
+(W2 only 88th, FOMC only 91st, wide window 91st) are unranked and may not be used to reopen the study (sec 7). Result doc: monday item W15-0023,
+Result doc column; raw report `Claude outputs/w15_0023_mflag_v1_training_20260930.txt`.
+
 ## Next steps (board)
 
 - **W15-0023 step 3b** (Ben): approve §11 and commit this registration (commands on the board).
-- **W15-0023 step 4** (Build & test chat, Sonnet / Medium): G2-G5 built and tested 2026-09-30; Ben runs `--preflight`, then `--run` if the floor clears -> Result doc. It is no longer blocked by
+- **W15-0023 step 4** (Build & test chat, Sonnet / Medium): G2-G5 built, pre-flight and training run done 2026-09-30 -> FAIL, closed (see POST-RUN note). It is no longer blocked by
   W15-0020 (Done): the host books already exist.

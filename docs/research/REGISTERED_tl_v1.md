@@ -195,7 +195,7 @@ backward-compatible `qual_up/qual_dn` extension of `strategy/tl_v0/sim.py`, comm
 6. **Breaks masked** where the repo's gated ATR(14) is unknown (first 13 bars); the line and touch tests use the
    pre-flight's ATR.
 7. **Not in W15-0020:** the CL 4-hour variant (sec 2.5) and the seen window. The 4-hour variant needs the
-   ohlcv-1h 4H-bar pipeline and HTF-Ben's costs; it is board item **W15-0021**, reported only, and cannot spend
+   ohlcv-1h 4H-bar pipeline and HTF-Ben's costs; it is board item **W15-0027**, reported only, and cannot spend
    the holdout. The seen window lies inside the holdout region the training runner cannot read.
 
 ### 2.4 Exits and reversal — v0-rev, with one clarification
@@ -380,3 +380,19 @@ W15-0020.)*
 - **W15-0020** — backtest, training side, Result doc. Blocked only by W15-0014 (C2 comes from
   it); W15-0019's G3 is cleared. Build & test chat, Sonnet · Medium; runs on Ben's PC.
 - **W15-0014** — the P&L hold is lifted: TL-v1 is registered.
+
+---
+
+## POST-RUN note -- W15-0020 result (2026-09-29; no rule, threshold or variant above was changed by it)
+
+Training-side run, `strategy/tl_v1` at commit 70231c9, report `Claude outputs/tl_v1_backtest_20260929.txt`,
+Result doc on board item W15-0020.
+
+- **Verdict: DOES NOT PASS.** Criteria 1, 5, 8, 9, 10 pass; 2, 3, 4, 6, 7 fail. Criterion 6 failed (net $775 vs the
+  C3 p95 of $2,340; TL-v1 sits at the 68th percentile of 1,000 random selections), so under sec 4 **the study closes**.
+  The TL-v1 holdout was **not spent** (sec 6 needs all ten). This was the trend-line line's last registration (sec 9).
+- **Sec 10 prediction, scored.** Right: it does not beat the p95 of random selection. Wrong: trades (636, not 150-300 --
+  already noted above), win rate (33% vs v0-rev's 35%, not higher), and it did beat Donchian on net and net/vol
+  (C1 was itself negative at ($847)), which v0-rev did not.
+- A2 as registered failed on 754 of 4,057 breaks (the pre-flight's A-to-break reading fails none), so it does some work.
+
