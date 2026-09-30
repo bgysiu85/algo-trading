@@ -192,3 +192,21 @@ One primary hypothesis (the base), one variant family (V-STALL ×2, X4, No-P2, N
 - **W15-0032 sub 5** — Build & test chat: training-side backtest vs C1–C3 → Result doc (Sonnet / Medium; runs on Ben's PC).
 - **W15-0032 sub 3** — Ben: Short and Avoid screenshots → High timeframe chat registers the short side separately.
 - Ben commits this file: `docs/research/REGISTERED_chartmark_v1.md` (commands on the item).
+
+---
+
+### Amendment A — PRE-RUN, 2026-09-30 (Avoid variant + holdout exclusion; before any code, count or P&L for this registration)
+
+Source: Ben's 15 Avoid screenshots (`D:\Trading\Claude outputs\Strategy\Avoid\`), read in `claude/raw/w15_0032_avoid_20260930.txt`. Ben's words: *"even quieter times for CL seems to still have movements of around a $1 range which is substantial enough when buying 5 contracts or so. The screenshots tend to have lower volume (below Volume MA) and crosses the EMA lines multiple times rather than having an obvious trend."* Decisions: *"let's test them on both sides"* · *"yes leave them out of the final test"*.
+
+**A.1 New reported variant V-AVOID (never ranked, cannot spend the holdout).** Adds one context condition, evaluated at the close of bar t with bar t's values only:
+
+AVOID(t) = |EMA21[t] − EMA21[t−10]| < **0.5** × ATR(14)[t] **and** at least **7** of bars t−9…t have volume < SMA(volume, 20) of that same bar.
+
+While AVOID(t) is true no order is placed for bar t+1 and any working entry order is cancelled (as a context failure). Open positions are not affected. Look-ahead guard (G4): AVOID uses bars ≤ t only; a one-bar shift must break its test.
+
+What the seen window said (reported, not evidence): the Avoid boxes have flat, tangled averages (EMA9−EMA21 gap 0.26 vs 0.53 ATR outside) and slightly more below-average volume (70% vs 60% of bars). The condition flags 32% of bars inside the boxes and 14% outside. It would have blocked 2 of Ben's 15 shorts and **7 of his 14 longs**, whose entries launch out of exactly such quiet stretches. On the short draft it blocked 96 of 651 seen-year trades (29 W / 67 L, (1.78) pts gross).
+
+**A.2 Holdout exclusion.** Two Avoid screenshots show bars inside this registration's holdout (2022-01-03 → 2025-09-07): `Avoid/5.png` ≈ 20 Feb → 3 Mar 2025 and `Avoid/4.png` ≈ 23 Jun → 2 Jul 2025. Ben has seen them; they were not measured. **Holdout scoring excludes every trade whose entry falls in 2025-02-19 00:00 → 2025-03-04 23:59 or 2025-06-22 00:00 → 2025-07-03 23:59 (New York).** Those trades are listed separately in the holdout report, never counted in the pass/fail figures. The holdout ledger records both windows. Future marking by Ben is limited to bars from 2025-09-08 onward.
+
+**A.3 Costs → IBKR (long side only; the short side registered IBKR from the start).** Ben, 2026-09-30: *"please use the IBKR costs as that will be the broker i'm using"* (W15-0033). The friction inherited from HTF-Ben v2 (NinjaTrader Free) is replaced by IBKR Pro published rates read 2026-09-30, per contract per side: **MCL $0.77** ($0.25 E-micro commission + $0.50 NYMEX + ≈$0.02 regulatory), **CL $2.37** ($0.85 + $1.50 + ≈$0.02). Levels unchanged in form: low = fee, mid (headline) = fee + 1 tick per side, high = fee + 2 ticks; round trip MCL $1.54 / $3.54 / $5.54, CL $4.74 / $24.74 / $44.74. G5 checks the fee against Ben's first IBKR futures fills (PRE-RUN amendment if different). V-STALL's breakeven (entry + round-trip friction, §2.6) uses these figures.
