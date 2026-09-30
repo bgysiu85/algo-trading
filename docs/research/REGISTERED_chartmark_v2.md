@@ -139,3 +139,27 @@ Tuning any threshold to the training result; promoting a variant or grid cell af
 - **W15-0036 sub 1** — Ben: read §2 and §8 (the "within reach" thresholds are Claude's coding); OK or PRE-RUN changes.
 - **W15-0036 sub 2** — Build & test chat (Sonnet / Medium): engine, G2–G6, count-only pre-flight.
 - **W15-0036 sub 3** — Build & test chat (Sonnet / Medium): training backtest → Result doc.
+
+---
+
+### Amendment 1 — PRE-RUN, 2026-09-30 18:25 (live trigger level; before any code, count or P&L on training)
+
+Ben, 2026-09-30: *"for the confirmation part, what do you mean by the trade is kept? Because my idea is that the trade shouldn't be entered in the first place until it reach above 0.05"* — then, after seeing that on 1 Sep the cross only reached 0.05 ATR at about 87.67, *"ok then keep the 0.05 rule"*.
+
+**1.1 Replaces §2.2–§2.3 for the base.** EMA9, EMA21, the MACD line, its signal and H are linear in the current price P of the bar being traded, so the lowest price at which each trigger condition holds *live* is known at the close of the arming bar t. The buy-stop level for bar t+1 is
+
+L* = ceil-to-tick( max( red-body top + 1 tick, P-conditions + 1 tick ) )
+
+where the P-conditions use bar t's EMA, MACD and signal values and **ATR[t]**:
+- **B:** H(P) ≥ θ·ATR[t] (θ = 0.05 base, 0.03 in V-θ03); G(P) > G[t]; EMA9(P) > EMA21(P).
+- **A-early / A-fresh:** EMA9(P) > EMA21(P); H(P) > H[t].
+
+Fill at max(L*, open[t+1]) when high[t+1] ≥ L*. **There is no after-the-fill confirmation and no UNCONFIRMED exit in the base.** L* ≤ close[t] → no order. The arming conditions of §2.1 are unchanged. The order lives one bar and is recomputed at each close.
+
+**1.2 New reported variant V-REDTOP** = the original §2.2–§2.3 (buy-stop at the red-body top + 1 tick, confirmation at the fill bar's close, UNCONFIRMED exit at the next open, re-arm only after a false close). V-CONFIRMED stays.
+
+**1.3 G6 parity replaced.** The engine, started flat at the close of 1 Sep 2026 03:00, must fill in the 04:00 bar within 2 ticks of **87.69** and exit at the 2 Sep 08:00 open (89.11); it must not fill in the 1 Sep 00:00 bar (level 87.25 > high 87.09); and it takes no trade whose fill falls 30 Aug 18:00 → 31 Aug 23:59.
+
+**1.4 Seen window, as re-run (not evidence), `Claude outputs/w15_0036_v2_seen_proto_live.py`.** Base: 98 trades, 20 winners, (1.39) pts gross ≈ ($139) per MCL before ≈ $347 of costs; exits EMA21 41 / BACKSTOP 37 / BACKSTOP-fillbar 20; arms A 78 / B 20. V-STOP20: 75 of 110 stopped inside the fill bar. Run as a whole, the rule enters on Fri 28 Aug 14:00 at 83.52 on an A trigger (EMA9 crossing EMA21, MACD rising) and holds to 2 Sep 08:00 (89.11), so it is already long on 1 Sep and does not take Ben's 04:00 entry.
+
+**1.5 §9 prediction unchanged in range; UNCONFIRMED no longer exists in the base, so BACKSTOP will be the most common exit.**
