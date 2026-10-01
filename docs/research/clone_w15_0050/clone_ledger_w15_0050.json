@@ -1,0 +1,44 @@
+{
+  "study": "W15-0050 CHARTMARK-CLONE",
+  "created_utc": "2026-09-30T23:15:02Z",
+  "git_commit": "ea5d21ab65a4ea1105c1f26fcababcce0a51c05a",
+  "n_candidates": 2670,
+  "n_presentations": 2927,
+  "per_year": {
+    "2010": 132,
+    "2011": 230,
+    "2012": 240,
+    "2013": 226,
+    "2014": 219,
+    "2015": 223,
+    "2016": 217,
+    "2017": 236,
+    "2018": 220,
+    "2019": 246,
+    "2020": 231,
+    "2021": 250
+  },
+  "f1_up": 1465,
+  "f1_down": 1205,
+  "f1_warmup": 18,
+  "queue_sha256": "d5e0b0277dfa211925e5ddc73ae1e0dfef2d68fb9b9b11ccdfeb84c2b5584af0",
+  "manifest_sha256": "069f741d7498471c2edfb63120baaaa6aa0260ebb74abfcccc03c692bfdf8492",
+  "frame_content_sha256": "f5a535e4c98910133bde21b47c0cde4885873509bbd0055c7ef1108067178254",
+  "n_frame_bars": 67565,
+  "queue_seed_words": [
+    161159632,
+    2466404814
+  ],
+  "repeat_seed_word": 2119671004,
+  "files": {
+    "manifest": "clone_manifest_w15_0050.csv",
+    "queue": "clone_queue_w15_0050.csv",
+    "labels": "labels_chartmark_clone.csv"
+  },
+  "first_label_written": true,
+  "labels_sha256": "50f073c3e2f0024e7c650709873a29042d3d82207ac6b36e21bf0869e4d433a6",
+  "clone_frozen_sha256": "5eee53738325ad5320a89b33b47ce3fa607a3f94d3f01ad50b41544869e03a77",
+  "outcome_run_done": false,
+  "first_label_utc": "2026-10-01T04:24:23Z",
+  "frozen_utc": "2026-10-01T06:26:31Z"
+}

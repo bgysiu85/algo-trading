@@ -26,3 +26,5 @@ pyodbc>=5.0
 # have the API this is written against; pin the one that was tested.
 mcp>=2,<3
 matplotlib>=3.8
+# --- CHARTMARK-CLONE fit (W15-0050 sub 4): rules/logistic/gradient-boosting clone and its cross-validation
+scikit-learn>=1.4

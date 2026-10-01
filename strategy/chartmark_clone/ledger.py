@@ -107,3 +107,23 @@ def mark_first_label(out_dir: Path) -> None:
         led["first_label_written"] = True
         led["first_label_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         path.write_text(json.dumps(led, indent=2) + "\n", encoding="utf-8")
+
+
+def mark_frozen(out_dir: Path, labels_sha256: str, clone_frozen_sha256: str) -> None:
+    """Sub 4: record the label-file hash and the frozen-clone hash. Once; the labels are closed from then on."""
+    path = Path(out_dir) / S.LEDGER_FILE
+    led = read_ledger(out_dir)
+    if led.get("clone_frozen_sha256") or led.get("labels_sha256"):
+        raise LedgerError("the ledger already records a frozen clone: it is never overwritten.")
+    led["labels_sha256"] = labels_sha256
+    led["clone_frozen_sha256"] = clone_frozen_sha256
+    led["frozen_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    path.write_text(json.dumps(led, indent=2) + "\n", encoding="utf-8")
+
+
+def check_labels_open(out_dir: Path) -> None:
+    """The labelling tool's second start-up check: once the clone is frozen no further label may be written."""
+    led = read_ledger(out_dir)
+    if led.get("labels_sha256") or led.get("clone_frozen_sha256"):
+        raise LedgerError("the labels are closed: the clone was fitted and frozen on them (ledger records "
+                          "labels_sha256). A new label would make the frozen clone's inputs unreproducible.")

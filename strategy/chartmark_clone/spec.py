@@ -76,3 +76,15 @@ LABELS_FILE = "labels_chartmark_clone.csv"
 FRAME_CACHE_FILE = f"clone_frame_{ID}.npz"        # goes to var/ (gitignored)
 MANIFEST_COLUMNS = ["candidate_id", "decision_t", "decision_idx", "level", "year", "daily_trend"]
 QUEUE_COLUMNS = ["queue_pos", "candidate_id", "key"]
+
+# ---- the fit (sub 4; REGISTERED sec 8 + Amendment 2, PRE-RUN) ----
+CV_SEED_WORD = zlib.crc32(b"W15-0050-cv")
+CV_REPEATS, CV_FOLDS, INNER_FOLDS = 5, 5, 5
+RULE_MIN_USES = 15
+EVENT_CELL_MIN = 3
+FIDELITY_RECALL, FIDELITY_PRECISION = 0.75, 0.50
+LOGIT_C_GRID = (0.01, 0.1, 1.0)
+FROZEN_FILE = f"clone_frozen_{ID}.json"
+FEATURE_TABLE_FILE = f"clone_features_{ID}.csv"
+FIT_REPORT_FILE = f"clone_fit_report_{ID}.txt"
+FAMOUS_WINDOWS = (("2014-07-01", "2015-01-31"), ("2020-02-01", "2020-06-30"))

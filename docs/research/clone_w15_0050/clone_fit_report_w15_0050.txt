@@ -1,0 +1,73 @@
+W15-0050 CHARTMARK-CLONE -- sub 4 fit and fidelity report (labels and chart features only; no price outcome, exit or P&L)
+
+1. THE LABELS
+   unique candidates labelled 500 (registered minimum 500); takes 155 (minimum 60); take rate 31.0%; sittings S20261001T042010Z
+   skip reasons used: {'1': 2, '3': 212, '4': 84, '5': 1, '7': 46}   (reason 7 = 13.3% of skips; limit 25% -> OK)
+   of the reason-7 notes, 32 say he would wait for more bars before entering
+   take reasons used: {'A': 148, 'C': 5, 'B': 2}
+   median decision time 3.2 s
+
+2. BEN'S OWN CONSISTENCY (the ceiling for any clone)
+   40 repeat presentations (unmarked on screen); takes he took again: 7 of 13 = 53.8% (95% interval 29.1% to 76.8%); skips he skipped again: 26 of 27 = 96.3%; overall agreement 82.5%
+   registered: recall bar = min(75%, consistency) = 53.8%; precision bar = 50%
+
+3. FIDELITY (5 x repeated stratified 5-fold CV, out-of-fold; mean over repeats [range])
+   always-take reference: recall 100.0%, precision 31.0% (the base rate)
+   R     take-recall 60.6% [57.4%..61.9%]   take-precision 58.0% [57.8%..58.2%]   agreement 74.2%   kappa 0.404   clone take rate 32.4%   bar MET
+         confusion (mean): both take 94.0 | clone takes, Ben skipped 68.2 | clone skips, Ben took 61.0 | both skip 276.8
+         share of Ben's skips of each reason that the clone also skips: reason 1: 50.0%, reason 3: 80.8%, reason 4: 96.7%, reason 5: 100.0%, reason 7: 48.3%
+   M     take-recall 95.6% [94.2%..97.4%]   take-precision 54.9% [53.5%..55.7%]   agreement 74.3%   kappa 0.501   clone take rate 54.0%   bar MET
+         confusion (mean): both take 148.2 | clone takes, Ben skipped 121.8 | clone skips, Ben took 6.8 | both skip 223.2
+         share of Ben's skips of each reason that the clone also skips: reason 1: 0.0%, reason 3: 64.5%, reason 4: 81.2%, reason 5: 20.0%, reason 7: 39.1%
+   M-GB  take-recall 92.9% [87.7%..96.8%]   take-precision 51.3% [50.3%..52.3%]   agreement 70.4%   kappa 0.435   clone take rate 56.2%   bar MET
+         confusion (mean): both take 144.0 | clone takes, Ben skipped 136.8 | clone skips, Ben took 11.0 | both skip 208.2
+         share of Ben's skips of each reason that the clone also skips: reason 1: 0.0%, reason 3: 57.9%, reason 4: 82.1%, reason 5: 0.0%, reason 7: 35.7%
+
+   sensitivity (reported, not a criterion): against the UNCAPPED 75% recall bar -> R NOT met; M met; M-GB met.  Against the 95% interval's upper end of Ben's consistency (76.8%) the bar would be 75.0%.
+
+4. THE CLONE (registered order R -> M): R
+   rules fitted on all labels (R):
+     reason 1: no rule: 2 uses < 15
+     reason 2: no rule: 0 uses < 15
+     reason 3: rule built (212 uses): F10 gt 0.95, J 0.372
+     reason 4: rule built (84 uses): F5 lt 0.0533, J 0.746
+     reason 5: no rule: 1 uses < 15
+     reason 6: no rule: 0 uses < 15
+     reason 7: not coded (46 uses)
+     RULE 3: skip when F10 > 0.9500   catches 65.6% of reason-3 skips and 28.4% of Ben's takes (J 0.372)
+     RULE 4: skip when F5 < 0.0533   catches 86.9% of reason-4 skips and 12.3% of Ben's takes (J 0.746)
+
+5. WHAT THE LABELS SAY (labels only)
+   take rate by year: 2010: 27% (n 26), 2011: 33% (n 42), 2012: 35% (n 46), 2013: 29% (n 42), 2014: 22% (n 41), 2015: 24% (n 41), 2016: 24% (n 41), 2017: 41% (n 44), 2018: 33% (n 42), 2019: 27% (n 45), 2020: 33% (n 43), 2021: 40% (n 47)
+   by daily trend: down: 30.2% (n 225), up: 31.6% (n 275)
+   by session of the order bar: London: 21.0% (n 248), US-AM: 41.9% (n 191), US-PM: 37.7% (n 61)
+   by position in the queue (blocks of 100 = fatigue drift): 0+: 35%, 100+: 31%, 200+: 30%, 300+: 35%, 400+: 27%, 500+: 22%
+   famous windows (2014 collapse, 2020 crash): take rate 25.6% on 39 vs 31.5% on the other 461
+   median chart feature, takes vs skips:
+     F1   take     1.000   skip     1.000
+     F2   take     0.161   skip     0.080
+     F3   take     0.115   skip     0.209
+     F4   take     0.154   skip     0.061
+     F5   take     0.127   skip     0.038
+     F6   take     0.279   skip     0.433
+     F7   take     3.230   skip     2.987
+     F8   take     1.610   skip     1.232
+     F9   take     1.000   skip     2.000
+     F10  take     0.800   skip     1.000
+     F11  take     4.537   skip     4.377
+     F13  take     0.131   skip     0.231
+     F14  take    19.000   skip    16.000
+     F15  take     0.530   skip     0.278
+
+5b. REGISTERED PREDICTIONS (sec 16) vs WHAT HAPPENED
+   Ben takes 8-20% of candidates: actual 31.0% -> OUTSIDE
+   consistency on repeated takes 60-80%: actual 53.8% -> OUTSIDE (13 observations)
+   rules clone meets the fidelity bar (about 40%): R met the registered bar
+   most-used skip reasons 3 (chop) and 1 (against the daily trend): actual order 3, 4, 7 (reason 1 used 2 times)
+
+6. CAVEATS
+   - 13 repeated takes make the consistency ceiling rough (see its interval); with the cap at the point estimate the bar is soft.
+   - F10 (share of recent bars below the 20-bar volume average) is mostly a time-of-day proxy, because the average mixes day and night hours.
+   - Reasons used fewer than 15 times get no rule (registered); reason 7 is not coded.
+   - Labels are Ben on historical charts with the date, year and instrument hidden; the famous-window split above is the leakage check.
+   - Nothing here says whether the clone's picks make money. That is sub 5, one run, after this freeze.

@@ -25,6 +25,7 @@ def load_app(out_dir: Path, cache: Path, sitting_id: str | None = None) -> App:
     out_dir = Path(out_dir)
     fr = LG.load_frame_cache(cache)
     LG.check_inputs(out_dir, fr)                                   # G7: queue / manifest / frame == ledger
+    LG.check_labels_open(out_dir)                                  # G7: refuse once the clone is frozen (sub 4)
     man = pd.read_csv(out_dir / S.MANIFEST_FILE, dtype={"candidate_id": str, "decision_t": str})
     q = pd.read_csv(out_dir / S.QUEUE_FILE, dtype={"candidate_id": str, "key": str})
     if set(q["candidate_id"]) != set(man["candidate_id"]) or len(q) != len(man):

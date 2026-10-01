@@ -1,0 +1,225 @@
+{
+  "study": "W15-0050 CHARTMARK-CLONE",
+  "frozen_utc": "2026-10-01T06:26:31Z",
+  "clone_type": "R",
+  "fidelity_met": true,
+  "recall_bar": 0.5384615384615384,
+  "precision_bar": 0.5,
+  "ben_take_consistency": 0.5384615384615384,
+  "n_unique": 500,
+  "n_takes": 155,
+  "cv_headline": {
+    "R": {
+      "recall": 0.6064516129032258,
+      "precision": 0.579509027557808,
+      "agreement": 0.7415999999999999,
+      "kappa": 0.40354502964004596,
+      "clone_take_rate": 0.3244
+    },
+    "M": {
+      "recall": 0.9561290322580647,
+      "precision": 0.5489321665682109,
+      "agreement": 0.7427999999999999,
+      "kappa": 0.5007939597520827,
+      "clone_take_rate": 0.54
+    },
+    "M-GB": {
+      "recall": 0.9290322580645161,
+      "precision": 0.5129895192121198,
+      "agreement": 0.7044,
+      "kappa": 0.43520013181490735,
+      "clone_take_rate": 0.5616000000000001
+    }
+  },
+  "cv_meets_bar": {
+    "R": true,
+    "M": true,
+    "M-GB": true
+  },
+  "R": {
+    "rules": [
+      {
+        "reason": "3",
+        "kind": "threshold",
+        "feature": "F10",
+        "op": "gt",
+        "threshold": 0.95,
+        "J": 0.3717894096165551,
+        "n_uses": 212,
+        "skips_caught": 0.6556603773584906,
+        "takes_caught": 0.2838709677419355
+      },
+      {
+        "reason": "4",
+        "kind": "threshold",
+        "feature": "F5",
+        "op": "lt",
+        "threshold": 0.05330184630030378,
+        "J": 0.7464669738863288,
+        "n_uses": 84,
+        "skips_caught": 0.8690476190476191,
+        "takes_caught": 0.12258064516129032
+      }
+    ],
+    "notes": {
+      "1": "no rule: 2 uses < 15",
+      "2": "no rule: 0 uses < 15",
+      "3": "rule built (212 uses): F10 gt 0.95, J 0.372",
+      "4": "rule built (84 uses): F5 lt 0.0533, J 0.746",
+      "5": "no rule: 1 uses < 15",
+      "6": "no rule: 0 uses < 15",
+      "7": "not coded (46 uses)"
+    },
+    "rule_semantics": "take iff no rule fires; NaN never fires; hour/weekday = bar j open, New York"
+  },
+  "M": {
+    "kind": "logit",
+    "C": 0.01,
+    "threshold": 0.25,
+    "intercept": -0.9234551461964993,
+    "coef": [
+      0.0560960649291842,
+      0.06613080112805482,
+      -0.13299921938046652,
+      0.2048835726744083,
+      0.4891852395515501,
+      -0.2215812551316676,
+      0.08328409023420179,
+      0.2395680731733028,
+      -0.11037427961810008,
+      -0.14187268579052068,
+      0.047944326927851874,
+      -0.19782158225894866,
+      0.04426754933849685,
+      0.22919720206365135,
+      0.0,
+      -0.08107093130024952,
+      0.09700718594579673,
+      -0.0159317289780327,
+      -0.022569815456532503,
+      -0.008416953126785661,
+      -0.007839790562047234,
+      0.04087437261535402,
+      -0.002043287802474035,
+      0.0,
+      0.0
+    ],
+    "median": [
+      1.0,
+      0.11267492095071029,
+      0.18477494321097104,
+      0.08288111477444815,
+      0.06366382122037534,
+      0.37007900800845384,
+      3.0892468055392097,
+      1.309092070781361,
+      2.0,
+      0.9,
+      4.415440982321504,
+      0.20000000000000948,
+      17.0,
+      0.351
+    ],
+    "mean": [
+      0.1,
+      0.023811272783111,
+      0.23400242643718916,
+      0.09428789229895132,
+      0.0600456181890092,
+      0.44897915000019606,
+      3.4393593555557955,
+      1.4379434970798688,
+      2.578,
+      0.8272,
+      4.66567556930588,
+      0.2304928443868984,
+      20.63,
+      0.39772
+    ],
+    "sd": [
+      0.9949874371066201,
+      0.7155233126262136,
+      0.5019649288535301,
+      0.15648626819450803,
+      0.08428327623441839,
+      0.3247680841899659,
+      1.4252145869433561,
+      0.8236607547241958,
+      2.009954228334566,
+      0.22877971938089267,
+      1.3897208427530805,
+      0.17949355453324917,
+      16.58629253329387,
+      0.29259549142117686
+    ],
+    "feature_order": [
+      "F1",
+      "F2",
+      "F3",
+      "F4",
+      "F5",
+      "F6",
+      "F7",
+      "F8",
+      "F9",
+      "F10",
+      "F11",
+      "F13",
+      "F14",
+      "F15"
+    ],
+    "onehot": [
+      "F12_session 0..3",
+      "F12_weekday 0..6"
+    ],
+    "inner_f2": 0.8388888888888889
+  },
+  "M_GB": {
+    "recipe": "HistGradientBoostingClassifier(max_depth=3, max_iter=100, early_stopping=False, random_state=0) refit on clone_features_w15_0050.csv (read with float_precision='round_trip') with columns F1,F2,F3,F4,F5,F6,F7,F8,F9,F10,F11,F13,F14,F15,F12_session,F12_weekday",
+    "threshold": 0.06,
+    "inner_f2": 0.805921052631579,
+    "train_proba_sha256": "b13fe6d703afc0bcaba7c550faf5f1e3b8a989ef58791ffe02275be52317e462",
+    "cols": [
+      "F1",
+      "F2",
+      "F3",
+      "F4",
+      "F5",
+      "F6",
+      "F7",
+      "F8",
+      "F9",
+      "F10",
+      "F11",
+      "F13",
+      "F14",
+      "F15",
+      "F12_session",
+      "F12_weekday"
+    ]
+  },
+  "feature_table": {
+    "file": "clone_features_w15_0050.csv",
+    "sha256": "ba3ca89ee61649eff91bb6578dd476f6ff610a89f9023eaa5ec7a407a4535b45"
+  },
+  "code_sha256": {
+    "features.py": "0f662ccda34d5274bbc929e4ff03b72d9bfcdcc2e641f3ee6844e30651346301",
+    "daily.py": "7fbb39b79fc7e9bd31aa84fea06683b31f872f822477651dbeb9527b395484f2",
+    "chartdata.py": "f97c57aa1ddcf2ab7a724cb68eafcb90b86414ec4b582b371b2f2fe999668276",
+    "clone.py": "cafb5d310d4da260feb917f858eb81cfd028cf83b084d124ba433fa7ca2ed72d",
+    "fit.py": "56305b39210e78a493d306d6233b536e5abeff977376cbc89bdea7c79bc3a805",
+    "spec.py": "3025afd5a2922d05f2dbad5add6cff7606e72a4a7bee391bf041e2d88514a00d"
+  },
+  "labels_sha256": "50f073c3e2f0024e7c650709873a29042d3d82207ac6b36e21bf0869e4d433a6",
+  "queue_sha256": "d5e0b0277dfa211925e5ddc73ae1e0dfef2d68fb9b9b11ccdfeb84c2b5584af0",
+  "manifest_sha256": "069f741d7498471c2edfb63120baaaa6aa0260ebb74abfcccc03c692bfdf8492",
+  "frame_content_sha256": "f5a535e4c98910133bde21b47c0cde4885873509bbd0055c7ef1108067178254",
+  "git_base_commit": "a401ad4772548122fc2bee971dfeee23b672ab2a",
+  "library_versions": {
+    "numpy": "2.4.4",
+    "pandas": "3.0.2",
+    "sklearn": "1.8.0",
+    "python": "3.11.15"
+  },
+  "report_sha256": "b41983213f2fb020c524d5564809401548ed72428ddb52a83a63a30ffba662eb"
+}
