@@ -246,3 +246,17 @@ No rule, number or bar above changes. Code: `strategy/tl_v2/controls.py`, `repor
 - **C2 reference** is TL-v1's immediate entry re-quoted at IBKR (v1 ensemble, fractional $22,129: $606 mid, 636 trades; `w15_0033_requote_ibkr_20260930.txt`). Reported, not a criterion. If TL-v2 passes yet is below it, the first line of the verdict says so.
 - **Seen window.** Sec 3 says "reported only", sec 6 says "never scored". The runner reads only training bars, so it reports the label and confirms 0 seen sessions in the sample; it does not score 2025-09-23 onward.
 - **Runner gate.** `strategy.tl_v2.run` refuses to start until a full 12-market count-only pre-flight csv (`w15_0030_tl_v2_preflight_*.csv`) shows >= 150 primary (N = 10) retest entries (sec 5 stop rule). No override flag. `--holdout` and `--limit` are refused.
+
+
+## POST-RUN note (W15-0031, 2026-10-01) -- training-side result; no rule, number or bar above changed
+
+Run: `python -m strategy.tl_v2.run` on the training side (2010-06 to 2021-12), IBKR costs (Amendment 1). Report: `Claude outputs/w15_0031_tl_v2_backtest_20260930.txt`. Result doc: `claude/w15_0031_tl_v2_RESULT_20261001.md`.
+
+**TL-v2 DOES NOT PASS. The study closes** (sec 4: failing criterion 5 or 6 closes it whatever else passes). The holdout (`holdout_tl_v2.json`) was NOT read and NOT spent.
+
+- Verdict book (fractional ensemble @ $22,129, IBKR mid): net ($2,262), 446 trades, 32% wins. Criteria 1-6, 8 and 9 FAIL, 7 NOT READ (net not above $0), 10 PASS.
+- C1 Donchian 20/10: ($1,408). C3 random p99: $924 (p5 ($3,472), p50 ($1,578), p95 $207); TL-v2 at draw-percentile 27. C2 TL-v1 immediate entry at IBKR: $606 on 636 trades, so waiting for the retest made it worse.
+- Neighbour grid: 2 of 27 cells above $0 (needs 18). Centre cell equals the verdict book exactly.
+- Reported variants (not criteria): S/R 178 trades, ($379); N = 20 456 trades, ($3,566).
+- Sec 10 prediction scored: right that it does not beat p99 and is not better than immediate entry; wrong on trade count (446, predicted 200-350), win rate (32%, not up), net per trade (down, not up) and the S/R count (178, not under 150).
+- This was the last trend-line registration (sec 9). TL-v0, v0-rev, TL-bounce, TL-v1 and TL-v2 are all closed.

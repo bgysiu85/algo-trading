@@ -1,0 +1,257 @@
+TL-v2 BACKTEST -- REGISTERED_tl_v2.md sections 3-4, Amendments 1-3 (W15-0049 layer; W15-0031 run)
+TRAINING SIDE ONLY: sessions 2010-06-01 .. 2021-12-31, cut by the holdout ledger before any bar
+was built. The TL-v2 holdout (2022-01-03 .. 2025-09-22) is NOT read and NOT spent by this run.
+Nothing is ranked; no best-cell table.
+Markets (12): ES, RTY, CL, NG, 6A, 6B, 6E, 6J, GC, SI, HG, MTN.
+TL-v1's line, A1-A3, weekly filter, safety line, exits, sizing and series; only the entry timing is new (T1-T5, N = 10). Costs: IBKR (Amendment 1).
+A3 thresholds: per-market q25 of ER(20) on the training bars (TL-v1 Amendment E).
+Pre-flight stop rule (W15-0048) read before this run: 619 retest entries (N = 10, 12 markets) >= 150.
+Years in sample: 11.57  (2010-06-07 .. 2021-12-31)
+Money: whole dollars, negatives in (brackets). COSTS = IBKR (Amendment 1): per contract per side,
+low = all-in fee, mid = fee + 1 tick, high = fee + 2 ticks; no separate stop-fill tick.
+
+====================================================================================================
+1. SECTION 4 VERDICT -- TL-v2 ensemble, fractional @ $22,129, IBKR mid friction
+====================================================================================================
+  => DOES NOT PASS (failed or not read: criteria [1, 2, 3, 4, 5, 6, 7, 8, 9])  -- criterion 5 and/or 6 failed: the study closes whatever else passes (sec 4)
+   1. [FAIL    ] net > $0 at IBKR mid friction: ($2,262)
+   2. [FAIL    ] both halves > $0 (split at median entry date; empty half fails): $29 (220 trades) / ($2,291) (226 trades), split 2017-07-05
+   3. [FAIL    ] drop-top-1 and drop-top-2 by market still > $0: ($3,673) / ($4,117)
+   4. [FAIL    ] bootstrap (2,000) by market AND by year: net > 0 in >= 95% each: 16% / 15%
+   5. [FAIL    ] beats C1 Donchian 20/10 on net AND net per unit realised volatility: ($2,262) vs ($1,408); -0.19 vs -0.04
+   6. [FAIL    ] beats the p99 of C3 (random selection of retest entries of every line break): ($2,262) vs p99 $924 (p5 ($3,472), p50 ($1,578), p95 $207)
+   7. [NOT READ] no single year and no single market > 50% of net: not read (net <= 0)
+   8. [FAIL    ] still net > $0 at IBKR high friction: ($2,989)
+   9. [FAIL    ] >= 18 of 27 neighbour cells net > $0 (IBKR mid): 2 of 27
+  10. [PASS    ] at least 150 trades (fewer = NOT READ, not failed): 446 trades
+  Integer book @ $22,129 beside it: net at mid ($2,262) fractional vs ($1,090) integer (29 trades)
+  C2 (TL-v1 immediate entry, W15-0020, IBKR re-quote; reported beside, NOT a criterion): net at mid $606, 636 trades. TL-v2 is below it (TL-v2 ($2,262), 446 trades).
+
+====================================================================================================
+2. EVERY BOOK, fractional @ $22,129 -- registry order, unranked (IBKR low / mid / high)
+====================================================================================================
+book                     gross     net low     net mid    net high     mid/yr  trades     W     L  win%  hold    worst DD net/vol
+v2 ens                ($1,212)    ($1,534)    ($2,262)    ($2,989)     ($196)     446   144   302   32%    14    ($4,234)   -0.19
+v2 R3                   ($480)      ($870)    ($1,621)    ($2,373)     ($140)     202    65   137   32%    12    ($5,143)   -0.07
+v2 R5                 ($4,078)    ($4,316)    ($4,775)    ($5,234)     ($413)     139    42    97   30%    16    ($6,295)   -0.47
+v2 R8                    $921        $583       ($389)    ($1,360)      ($34)     105    37    68   35%    22    ($4,324)   -0.03
+v2-SR ens                ($94)      ($188)      ($379)      ($569)      ($33)     178    62   116   35%    19    ($2,151)   -0.06
+v2-SR R3                ($939)    ($1,060)    ($1,317)    ($1,575)     ($114)      81    24    57   30%    14    ($3,905)   -0.11
+v2-SR R5                ($483)      ($561)      ($724)      ($887)      ($63)      56    22    34   39%    24    ($1,667)   -0.11
+v2-SR R8               $1,141      $1,058        $906        $754        $78       41    16    25   39%    35    ($2,185)    0.14
+v2-N20 ens            ($2,484)    ($2,819)    ($3,566)    ($4,312)     ($308)     456   140   316   31%    14    ($4,656)   -0.30
+v2-N20 R3             ($2,389)    ($2,810)    ($3,607)    ($4,403)     ($312)     204    62   142   30%    10    ($5,675)   -0.16
+v2-N20 R5             ($5,150)    ($5,393)    ($5,858)    ($6,324)     ($506)     143    42   101   29%    15    ($7,093)   -0.57
+v2-N20 R8                 $86       ($256)    ($1,233)    ($2,210)     ($107)     109    36    73   33%    20    ($4,565)   -0.10
+C1 single              $2,154        $949     ($1,408)    ($3,764)     ($122)    1175   419   756   36%    13    ($8,044)   -0.04
+
+====================================================================================================
+2. EVERY BOOK, integer @ $22,129 -- registry order, unranked (IBKR low / mid / high)
+====================================================================================================
+book                     gross     net low     net mid    net high     mid/yr  trades     W     L  win%  hold    worst DD net/vol
+v2 ens                  ($656)      ($773)    ($1,090)    ($1,407)      ($94)      29     4    25   14%     0    ($1,349)   -0.36
+v2 R3                    $414        $185       ($215)      ($615)      ($19)      68    23    45   34%     6    ($4,643)   -0.02
+v2 R5                   ($944)    ($1,072)    ($1,304)    ($1,536)     ($113)      36    12    24   33%     4    ($2,603)   -0.26
+v2 R8                  $1,913      $1,684        $918        $152        $79       23    10    13   43%    12    ($1,932)    0.15
+v2-SR ens               ($157)      ($173)      ($203)      ($233)      ($18)       9     1     8   11%     0      ($263)   -0.23
+v2-SR R3                 $795        $739        $621        $503        $54       19     8    11   42%     6    ($1,058)    0.13
+v2-SR R5                ($130)      ($149)      ($183)      ($217)      ($16)       7     2     5   29%     2      ($603)   -0.11
+v2-SR R8                 $452        $417        $358        $299        $31        5     1     4   20%     2      ($752)    0.11
+v2-N20 ens              ($838)      ($963)    ($1,293)    ($1,622)     ($112)      32     4    28   12%     0    ($1,293)   -0.43
+v2-N20 R3               ($334)      ($589)    ($1,028)    ($1,467)      ($89)      71    22    49   31%     6    ($4,776)   -0.09
+v2-N20 R5             ($1,994)    ($2,121)    ($2,349)    ($2,578)     ($203)      36    10    26   28%     3    ($3,104)   -0.54
+v2-N20 R8              $1,751      $1,518        $747        ($24)       $65       25    10    15   40%    10    ($1,982)    0.12
+C1 single              $1,513      $1,174        $556        ($62)       $48      212    73   139   34%    10    ($2,631)    0.05
+
+====================================================================================================
+3. CONTROLS
+====================================================================================================
+  C1 Donchian 20/10 (same markets/sizing/IBKR costs): net mid ($1,408), 1175 trades, net/vol -0.04
+  C2 TL-v1 immediate entry (W15-0020, IBKR re-quote): net mid $606, 636 trades  (old flat-friction mid $775)
+  C3 random selection, 1,000 seeded draws (crc32 of draw number): net at IBKR mid p5 ($3,472)  p50 ($1,578)  p95 $207  p99 $924  mean ($1,608)
+     pool 1,136 retest entries of every weekly-agreeing line break (A+ not required); TL-v2 selects 619; draws fill a median 466 trades vs TL-v2's 446 (fractional ensemble trades)
+     TL-v2's own 619 retest entries: 615 are also in the pool; the other 4 were displaced there by a non-A+ setup occupying the one live slot (Amendment 2 C1 applies to the pool's scan too)
+     TL-v2 at mid ($2,262) sits at draw-percentile 27; p99 is about the 10th-largest of 1,000 draws
+
+====================================================================================================
+4. COUNTS -- what happened to each qualified break (primary N = 10; three pivot sizes summed)
+====================================================================================================
+-- by market (skipped_size = entries the simulator skipped for zero contracts) --
+        qualified  entries  failed  no_retest  open_end  ignored  med_bars_to_retest  med_bars_held  skipped_size
+market                                                                                                           
+6A             97       57      26         14         0        3                 1.0           13.0             0
+6B            145       93      27         25         0        4                 1.0           14.0             0
+6E            102       62      21         19         0        0                 1.0           19.0             0
+6J             91       49      24         18         0        3                 1.0           15.0             0
+CL            120       66      32         22         0        4                 1.0           15.5             0
+ES             76       47      22          7         0        0                 1.0           12.0             0
+GC             71       44      17         10         0        1                 1.0           24.5             0
+HG             87       50      21         16         0        3                 1.0           20.0             0
+MTN            33       25       0          8         0        4                 1.0           13.0             0
+NG             79       51      15         13         0        0                 1.0           14.0             0
+RTY            40       22      13          5         0        0                 1.0           13.0             0
+SI             97       53      27         17         0        1                 1.0           12.0             0
+-- by year of the BREAK (skipped-for-size is counted per market by the simulator, not per year) --
+      qualified  entries  failed  no_retest  open_end  ignored  med_bars_to_retest  med_bars_held
+year                                                                                             
+2010          1        1       0          0         0        0                 1.0           14.0
+2011         38       26       7          5         0        0                 1.0            9.0
+2012         68       42      13         13         0        1                 1.0           32.0
+2013        114       66      22         26         0        3                 1.0           24.0
+2014        110       61      27         22         0        4                 1.0           19.0
+2015         63       43       8         12         0        0                 1.0           17.0
+2016         74       45      21          8         0        0                 1.0           20.0
+2017         95       71      14         10         0        3                 1.0           13.0
+2018         88       53      16         19         0        4                 1.0            9.0
+2019        120       74      27         19         0        2                 1.0           15.0
+2020        136       74      43         19         0        5                 1.0           11.5
+2021        131       63      47         21         0        1                 1.0           19.0
+-- by pivot size R --
+   qualified  entries  failed  no_retest  open_end  ignored  med_bars_to_retest  med_bars_held
+R                                                                                             
+3        450      278     100         72         0       16                 1.0           12.0
+5        342      199      85         58         0        5                 1.0           16.0
+8        246      142      60         44         0        2                 1.0           22.0
+-- reported variant N = 20: outcomes (all markets, three pivot sizes summed) --
+outcome
+entry              617
+failed             247
+no_retest          134
+ignored_pending     63
+(Amendment 2 C1: N = 20 can start FEWER setups than N = 10, because a longer-pending setup blocks a later same-side break.)
+-- simulator counts, frac @ $22,129 (per sleeve walk, summed) --
+             breaks  signals  not_aplus  htf_blocked  ignored_in_position  reversals  reversal_blocked_flat  voided  skipped_size  no_stop  unfilled_at_end  entries
+spec share                                                                                                                                                          
+C1   single    4298     1175          0            0                 3121          0                      0       0             0        0                2     1175
+v2   alone     4676      446       3610            0                  616          0                     74       0             0        0                0      446
+     sleeve    4676      446       3610            0                  616          0                     74       0             0        0                0      446
+-- simulator counts, int @ $22,129 (per sleeve walk, summed) --
+             breaks  signals  not_aplus  htf_blocked  ignored_in_position  reversals  reversal_blocked_flat  voided  skipped_size  no_stop  unfilled_at_end  entries
+spec share                                                                                                                                                          
+C1   single    4298     3716          0            0                  580          0                      0       0          3504        0                2      212
+v2   alone     4676      587       3986            0                   99          0                     13       0           460        0                0      127
+     sleeve    4676      618       4051            0                    3          0                      1       0           589        0                0       29
+
+====================================================================================================
+5. THE 27-CELL NEIGHBOUR GRID (fractional ensemble, net at IBKR mid; robustness only, unranked)
+====================================================================================================
+   N  window  touch buf     net mid  trades
+   5     125       0.15         $1      306
+   5     125       0.25       $827      372
+   5     125       0.35      ($526)     414
+   5     250       0.15    ($2,797)     357
+   5     250       0.25    ($1,981)     429
+   5     250       0.35      ($348)     472
+   5     400       0.15    ($2,621)     340
+   5     400       0.25    ($2,031)     389
+   5     400       0.35    ($2,875)     427
+  10     125       0.15      ($493)     331
+  10     125       0.25       ($93)     401
+  10     125       0.35      ($838)     436
+  10     250       0.15    ($3,514)     380
+  10     250       0.25    ($2,262)     446
+  10     250       0.35    ($1,098)     487
+  10     400       0.15    ($3,539)     359
+  10     400       0.25    ($2,682)     406
+  10     400       0.35    ($3,476)     446
+  20     125       0.15    ($1,192)     343
+  20     125       0.25      ($326)     406
+  20     125       0.35    ($1,006)     434
+  20     250       0.15    ($4,725)     392
+  20     250       0.25    ($3,566)     456
+  20     250       0.35    ($2,011)     490
+  20     400       0.15    ($3,104)     376
+  20     400       0.25    ($2,162)     421
+  20     400       0.35    ($2,657)     453
+share of cells positive: 7% (2 of 27); criterion 9 needs 18.
+Centre cell (0.25, 250, 10) vs the verdict book: net difference +0.0000, trade difference +0 (both must be 0).
+
+====================================================================================================
+6. EVERY CALENDAR YEAR and EVERY MARKET, net at IBKR mid (fractional @ $22,129)
+====================================================================================================
+year            v2 ens       v2-SR ens      v2-N20 ens       C1 single
+2010             ($15)             $0            ($15)         $2,330 
+2011            ($384)          ($328)          ($384)        ($3,977)
+2012            ($508)          ($406)          ($454)         $1,314 
+2013             $890            $536            $816          $1,339 
+2014             $239           ($181)           ($38)          ($151)
+2015             $726            $688            $494           ($577)
+2016            ($539)           ($38)          ($539)        ($1,806)
+2017          ($1,174)          ($592)        ($1,230)        ($2,431)
+2018             $347            $161            $216          $3,566 
+2019            ($992)          ($457)        ($1,009)        ($2,835)
+2020            ($775)            $44           ($878)         $2,227 
+2021             ($77)           $195           ($546)          ($406)
+market           v2 ens       v2-SR ens      v2-N20 ens       C1 single
+ES               ($899)           ($64)          ($899)        ($2,441)
+RTY              ($225)           $149           ($360)         $1,229 
+CL                 $10            ($96)          ($281)         $2,283 
+NG               ($513)          ($270)          ($523)        ($1,922)
+6A               ($998)          ($448)        ($1,032)          ($697)
+6B               ($105)          ($415)          ($281)        ($2,564)
+6E               ($410)           $108           ($545)          ($881)
+6J               ($860)          ($273)          ($836)        ($1,696)
+GC                $443            $341            $270          $1,558 
+SI                  $5            $462           ($150)         $2,818 
+HG              $1,412            $198          $1,193            $179 
+MTN              ($122)           ($71)          ($122)           $726 
+  v2 ens: drop-top-1/2/3 ($3,673) / ($4,117) / ($4,126); boot by market >0 16% (p05 ($5,694)), by year >0 15% (p05 ($5,813))
+
+====================================================================================================
+7. A3 THRESHOLDS: computed from the training bars vs the registered TL-v1 q25 (should agree)
+====================================================================================================
+market   q25 calc     reg
+ES          0.104   0.104
+RTY         0.100   0.100
+CL          0.109   0.109
+NG          0.095   0.095
+6A          0.094   0.094
+6B          0.093   0.093
+6E          0.091   0.091
+6J          0.086   0.086
+GC          0.103   0.103
+SI          0.110   0.110
+HG          0.090   0.090
+MTN         0.086   0.086
+largest |calculated - registered| = 0.0005  (rounding only)
+
+====================================================================================================
+8. SAMPLE TRADES -- TL-v2 ensemble, integer @ $22,129, IBKR mid friction (raw held-contract prices)
+====================================================================================================
+29 trades, every 2th shown
+market   R  side       entry        exit      contract  qty     entry px      exit px          why      net $
+6B       8 short  2013-06-12  2013-06-13     6BU3_2013    1       1.5636      1.57058         stop      ($46)
+6A       3  long  2014-07-03  2014-07-03     6AU4_2014    1       0.9386     0.932454         stop      ($64)
+SI       8 short  2017-09-01  2017-09-01     SIZ7_2017   19       17.635      17.6387         stop     ($298)
+6B       8 short  2018-06-22  2018-06-22     6BN8_2018   14        1.327      1.32781         stop     ($103)
+6B       3 short  2018-08-08  2018-08-21     6BU8_2018    2       1.2965      1.28403         stop      $151 
+MTN      3 short  2018-10-12  2018-10-22     TNZ8_2018    1      125.016      124.806         stop       $17 
+6B       8 short  2018-12-05  2018-12-05     6BZ8_2018    1       1.2725         1.28         stop      ($49)
+6A       3  long  2019-04-16  2019-04-23     6AK9_2019    1       0.7178     0.712199         stop      ($59)
+RTY      3  long  2019-05-01  2019-05-01    RTYM9_2019    1       1596.7      1584.61         stop      ($63)
+HG       3 short  2019-06-07  2019-06-11     HGN9_2019    1        2.649      2.66917         stop      ($55)
+6A       5  long  2020-01-06  2020-01-07     6AF0_2020    6       0.6933     0.693032         stop     ($100)
+6A       3 short  2020-07-29  2020-07-30     6AQ0_2020    2       0.7171     0.719637         stop      ($57)
+
+====================================================================================================
+9. SEEN WINDOW (2025-09-23 onward)
+====================================================================================================
+  Label: "seen -- not evidence". The training bars contain 0 session(s) in the seen window, as they must (0): it lies inside the region strategy.tl_v0.bars cuts before any bar is built.
+  It is NOT scored here (sec 6: "never scored"; same as TL-v1). Sec 3 lists it as "reported only"; a report needs bars this runner cannot read, so nothing is reported. Not evidence either way.
+
+====================================================================================================
+10. CAVEATS AND DEPARTURES
+====================================================================================================
+  * Known departures (sec 2.3, not coded): wick-based line validity; her multi-timeframe ladder; news;
+    volatility overlay; one instrument at a time; her 4-15% risk; her judgement of which retests to take.
+  * Selection by survival (sec 8): T4 drops the fast runners that never come back; the no-retest count
+    in section 4 is that cost.
+  * C3 at p99 with 1,000 draws is about the 10th-largest draw: a weak bar in resolution, strong in level.
+  * Bars are UTC days (Databento ohlcv-1d, Sunday stubs folded) -- see TL-v0's caveats.
+  * MTN: P&L on TN's held contract at $100/point; MTN listed 2024-03-25, so 2010-2021 describes the
+    signal, not a tradable history. NG and 6J are sized in full contracts (most signals skip).
+  * The 1% risk is of a FIXED $22,129 (no compounding). Roll legs are booked at the two contracts'
+    closes on the roll session, two sides of friction per contract.
+  * A3's thresholds come from the training bars only; section 7 compares them with the registered q25.
+  * The training bars have now been read by TL-v0, v0-rev, TL-bounce, TL-v1 and this run: a training-side
+    pass alone is not a finding; only the holdout counts (sec 0, sec 6).
