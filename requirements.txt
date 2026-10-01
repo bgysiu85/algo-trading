@@ -25,3 +25,4 @@ pyodbc>=5.0
 # 2.x renamed FastMCP to MCPServer. >=1.2 allowed a major that does not
 # have the API this is written against; pin the one that was tested.
 mcp>=2,<3
+matplotlib>=3.8
