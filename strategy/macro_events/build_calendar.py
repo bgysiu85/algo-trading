@@ -1,4 +1,4 @@
-"""W15-0023 step 1: scheduled macro-event calendar, 2010-2026.
+r"""W15-0023 step 1: scheduled macro-event calendar, 2010-2026.
 
 Writes macro_event_calendar.csv (one row per event) and a validation report.
 Sources: BLS schedule pages (CPI, Employment Situation), federalreserve.gov (FOMC),

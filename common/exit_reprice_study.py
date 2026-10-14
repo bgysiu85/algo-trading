@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""W02-0018 -- would a wider retry ladder have caught a collapsing exit higher.
+r"""W02-0018 -- would a wider retry ladder have caught a collapsing exit higher.
 
     python -m common.exit_reprice_study
     python -m common.exit_reprice_study --archive E:\Databento --fills-dir var/fills
