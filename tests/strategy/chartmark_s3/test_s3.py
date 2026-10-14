@@ -206,7 +206,7 @@ def test_ledger_spends_once_and_records_windows(ledger):
     keep, _, _ = HO.split_dates(["2021-12-30", "2022-01-03", "2025-09-05", "2025-09-08"],
                                 spend=True, candidate="CHARTMARK-S-v3", verdict="PASS")
     assert keep == ["2022-01-03", "2025-09-05"]
-    assert json.loads(ledger.read_text())["excluded_entry_windows"] == [["2025-02-19", "2025-03-04"], ["2025-06-22", "2025-07-03"]]
+    assert json.loads(ledger.read_text(encoding="utf-8"))["excluded_entry_windows"] == [["2025-02-19", "2025-03-04"], ["2025-06-22", "2025-07-03"]]
     with pytest.raises(HO.HoldoutRefused):
         HO.split_dates(["2023-01-01"], spend=True, candidate="CHARTMARK-S-v3", verdict="PASS")
 

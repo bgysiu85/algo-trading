@@ -51,7 +51,7 @@ def test_spend_once_and_needs_pass(tmp_path):
         h.split_dates(DATES, spend=True, candidate="OTHER", verdict="PASS")
     keep, _, _ = h.split_dates(DATES, spend=True, candidate="CRUDELE-3S", verdict="PASS")
     assert keep == ["2022-01-03", "2025-09-22"]
-    assert json.loads(h.ledger_path.read_text())["candidate"] == "CRUDELE-3S"
+    assert json.loads(h.ledger_path.read_text(encoding="utf-8"))["candidate"] == "CRUDELE-3S"
     with pytest.raises(HoldoutRefused):
         h.split_dates(DATES, spend=True, candidate="CRUDELE-3S", verdict="PASS")
 

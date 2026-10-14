@@ -58,7 +58,7 @@ def test_spend_only_one_of_six_scored_candidates():
     keep, n_train, label = H.split_dates(dates, spend=True, candidate="NRS-NQ")
     assert keep == dates
     assert "LOCKED" in label
-    rec = json.loads(H.LEDGER_PATH.read_text())
+    rec = json.loads(H.LEDGER_PATH.read_text(encoding="utf-8"))
     assert rec["candidate"] == "NRS-NQ"
 
 

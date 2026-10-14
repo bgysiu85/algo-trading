@@ -34,7 +34,7 @@ def test_refuses_missing_selection_unknown_winner_changed_params_and_non_dev_sel
         CC.load_selection(p)
     sel = write_sel(p)
     sel["params"]["K1"]["theta"] = 0.04
-    p.write_text(json.dumps(sel))
+    p.write_text(json.dumps(sel), encoding="utf-8")
     with pytest.raises(SystemExit, match="differ"):
         CC.load_selection(p)
     write_sel(p, last_bar_used="2016-01-04 10:00:00-05:00")
@@ -135,7 +135,7 @@ def test_run_end_to_end_writes_outputs_ledger_once_and_reads_nothing_after_2021(
     assert all(str(fr.ny[t.entry_j].date()) >= S.CONF_FIRST for t in res["trades"])
     txt = (tmp_path / "w15_0036_v2_stepC_t.txt").read_text(encoding="utf-8")
     assert "VERDICT" in txt and "AMENDMENT 4.3 CRITERIA" in txt and "No bar from 2022 on was read" in txt
-    assert json.loads(led.read_text())["winner"] == "K1" and "NOT spent" in led.read_text()
+    assert json.loads(led.read_text(encoding="utf-8"))["winner"] == "K1" and "NOT spent" in led.read_text(encoding="utf-8")
     assert (tmp_path / "w15_0036_v2_stepC_t.json").exists() and (tmp_path / "w15_0036_v2_stepC_trades_t.csv").exists()
     with pytest.raises(SystemExit, match="REFUSED"):
         CC.run("x", tmp_path, "t", selection_path=sel_path, ledger_path=led, draws=40, frame=fr, log=lambda *_: None)

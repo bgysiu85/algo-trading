@@ -68,7 +68,7 @@ def test_run_writes_selection_once_and_uses_dev_window_only(tmp_path, monkeypatc
     sel_path = tmp_path / "selection_chartmark_v2.json"
     sel = SS.run("unused", tmp_path, "20260930", selection_path=sel_path, log=lambda *_: None)
     assert sel["winner"] in S.CANDIDATES and sel_path.exists()
-    saved = json.loads(sel_path.read_text())
+    saved = json.loads(sel_path.read_text(encoding="utf-8"))
     assert saved["window"] == [S.DEV_FIRST, S.DEV_LAST] and set(saved["nets_mid_1mcl"]) == set(S.CANDIDATES)
     assert saved["last_bar_used"][:10] <= S.DEV_LAST and saved["git_commit"] and saved["timestamp_utc"]
     txt = (tmp_path / "w15_0036_v2_stepS_20260930.txt").read_text(encoding="utf-8")

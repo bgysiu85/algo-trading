@@ -142,7 +142,8 @@ def test_load_tv_export_handles_unix_seconds_csv(tmp_path):
     csv_path.write_text(
         "time,open,high,low,close,Resistance (her line),Support (her line)\n"
         "1420070400,50,51,49,50.5,,48.0\n"
-        "1420156800,50.5,52,50,51.5,55.0,\n"
+        "1420156800,50.5,52,50,51.5,55.0,\n",
+        encoding="utf-8",
     )
     df = load_tv_export(str(csv_path))
     assert df["date"].dt.year.tolist() == [2015, 2015]
@@ -154,7 +155,8 @@ def test_load_tv_export_accepts_iso_time_and_loose_headers(tmp_path):
     csv_path.write_text(
         "time,open,high,low,close,Resistance (her line),Support (her line)\n"
         "2016-01-04,50,51,49,50.5,,48.0\n"
-        "2016-01-05,50.5,52,50,51.5,55.0,\n"
+        "2016-01-05,50.5,52,50,51.5,55.0,\n",
+        encoding="utf-8",
     )
     df = load_tv_export(str(csv_path))
     assert list(df.columns) == ["date", "tv_resV", "tv_supV"]

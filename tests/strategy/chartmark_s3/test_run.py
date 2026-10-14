@@ -33,7 +33,7 @@ def test_report_carries_the_waiver_headline_and_all_sections(res):
 def test_outputs_written_and_json_has_waiver(res):
     import json
     out = res["_out"]
-    js = json.loads((out / "w15_0042_chartmark_short_v3_backtest_t.json").read_text())
+    js = json.loads((out / "w15_0042_chartmark_short_v3_backtest_t.json").read_text(encoding="utf-8"))
     assert js["waiver"] == R.WAIVER and set(js["tiers"]) == {"A", "B"}
     assert (out / "w15_0042_chartmark_short_v3_trades_base_t.csv").exists()
 
