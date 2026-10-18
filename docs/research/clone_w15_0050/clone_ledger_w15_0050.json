@@ -38,7 +38,14 @@
   "first_label_written": true,
   "labels_sha256": "50f073c3e2f0024e7c650709873a29042d3d82207ac6b36e21bf0869e4d433a6",
   "clone_frozen_sha256": "5eee53738325ad5320a89b33b47ce3fa607a3f94d3f01ad50b41544869e03a77",
-  "outcome_run_done": false,
+  "outcome_run_done": true,
   "first_label_utc": "2026-10-01T04:24:23Z",
-  "frozen_utc": "2026-10-01T06:26:31Z"
+  "frozen_utc": "2026-10-01T06:26:31Z",
+  "outcome_run_started_utc": "2026-10-01T06:50:12Z",
+  "outcome_run_retries": [
+    "2026-10-01T06:53:50Z"
+  ],
+  "outcome_run_utc": "2026-10-01T06:54:40Z",
+  "outcome_verdict": "FAIL (criterion 6 or 7 closes the study)",
+  "outcome_report_sha256": "90544be85509282266a54a6d46334c967b9a9f75228d6714b75d8172328eb082"
 }

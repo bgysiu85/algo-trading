@@ -104,6 +104,8 @@ def test_a_full_build_never_reads_an_outcome_column(tmp_path, monkeypatch):
 def test_no_module_in_the_package_reads_an_outcome_column():
     """Static: no string literal names an outcome column, and no attribute access reads an exit-side field."""
     for f in sorted(PKG.glob("*.py")):
+        if f.name in OUTCOME_STAGE_MODULES:             # sub 5 only: walks outcomes out of the frozen clone's gate (see below)
+            continue
         tree = ast.parse(f.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -112,3 +114,17 @@ def test_no_module_in_the_package_reads_an_outcome_column():
                 assert node.attr not in OUTCOME_ATTRS, f"{f.name} reads .{node.attr}"
     users = [f.name for f in PKG.glob("*.py") if "TRADES_CSV_NAME" in f.read_text(encoding="utf-8")]
     assert sorted(users) == ["build.py", "spec.py"]
+
+
+OUTCOME_STAGE_MODULES = ("gated.py", "outcome.py")
+
+
+def test_only_the_outcome_stage_may_walk_outcomes_and_nothing_before_it_imports_it():
+    """Sub 5's two modules legitimately compute exits and P&L; every other module in the package must stay outcome-free
+    and must not import them (a fit-stage module that pulled in gated/outcome would reach an outcome)."""
+    for f in sorted(PKG.glob("*.py")):
+        if f.name in OUTCOME_STAGE_MODULES:
+            continue
+        src = f.read_text(encoding="utf-8")
+        assert "chartmark_clone.gated" not in src and "chartmark_clone import gated" not in src, f.name
+        assert "chartmark_clone.outcome" not in src and "chartmark_clone import outcome" not in src, f.name
