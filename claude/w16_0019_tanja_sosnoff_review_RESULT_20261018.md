@@ -66,6 +66,14 @@ Chart Fanatics, 13 Jul 2025, 70 min, 249k views. https://www.youtube.com/watch?v
 
 73k subscribers, 26 videos, started Nov 2025. The channel promotes his free platform Lossdog. Most titles are motivational ("Making You Infinitely Rich in 200 Seconds"). The strategy content is in this video and "11 'Boring' Trading Strategies" (also read in full: short puts at 16–22 delta and 35–50 days, jade lizard, put ratio spread, broken-wing butterfly, skewed iron condor, short strangles). He says short strangles plus discretionary volatility selling make up about 70% of his profits. **Verdict: credible on mechanics, off-strategy for this project. No sweep.**
 
+## Addendum 2026-10-18 — wider channel check
+
+Ben asked whether anything else on the two channels is worth considering. The YouTube transcript connector disconnected mid-check, so this pass used titles, page descriptions and chapter lists only.
+
+- **Tanja Trades:** "How to Trade All-Time Highs" (Apr 2026), "Risk Management Protocol for Futures Prop Firms" (May 2024) and "How to Add to Winning Positions" (+88 pts NQ, Aug 2024). The descriptions carry no rules, only prop-firm affiliate offers. The one useful idea is adding to a winner. That is noted on W16-0022 as an optional variant, with the transcript to read once the connector is back. The prop-firm risk video doesn't apply, because Ben trades his own IBKR account.
+- **Tom Sosnoff:** "If You Master Volatility" (IV rank basics), "I Quit Passive Investing" (his split: 30–40% cash, 30–40% options, 10% stocks, 20% futures), "If You Only Watch One Investment Video" (why to trade actively), "I Watched Markets for 40 Years" (a broker checklist: spreads, data and exchange fees, interest on idle cash, negotiable margin rates). Nothing to test. The broker checklist is general and IBKR already does well on it.
+- **Verdict:** nothing further. No new items.
+
 ## Caveats
 
 - Transcripts are YouTube auto-captions. Numbers are as spoken.
