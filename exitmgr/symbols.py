@@ -68,9 +68,32 @@ def arm_distance(root: str, atr_at_fill: float | None = None, median_cl_atr: flo
     return _scaled(CL_ARM, root, atr_at_fill, median_cl_atr)
 
 
-def emergency_distance(root: str, atr_at_fill: float | None = None, median_cl_atr: float | None = None) -> float:
-    """Emergency stop distance, in price. CL / MCL: $0.60 (sec 13 / rail 3)."""
-    return _scaled(CL_EMERGENCY, root, atr_at_fill, median_cl_atr)
+EMERGENCY_MODES = ("A", "B", "C")
+DEFAULT_EMERGENCY_MODE = "A"
+# Fixed emergency distances for the index futures, in index POINTS, measured by tools/mnq_swing.py on MNQ 30-min / 1-hour
+# bars, 3 Sep - 16 Oct 2026 (Ben, 2026-10-18): top-15 biggest 30-min bars average 247 pts; the median 1H bar is 70 pts.
+# NQ moves the same points as MNQ. Unvalidated, like every non-CL row.
+BAR_STOP_PTS = {"MNQ": 250.0, "NQ": 250.0}      # mode B: about one big 30-min bar ($500 per MNQ contract)
+HOURLY_STOP_PTS = {"MNQ": 105.0, "NQ": 105.0}   # mode C: 1.5 x the median 1H range ($210 per MNQ contract)
+
+
+def emergency_distance(root: str, atr_at_fill: float | None = None, median_cl_atr: float | None = None,
+                       mode: str = DEFAULT_EMERGENCY_MODE) -> float:
+    """Emergency stop distance, in price. CL / MCL: $0.60 in every mode (sec 13 / rail 3).
+    Other symbols, selectable (Ben, 2026-10-18; default A):
+      A  the CL value scaled by volatility: 0.60 / median CL 1H ATR(14) x the symbol's 1H ATR(14) at the fill (registered sec 13)
+      B  a fixed distance of about one big 30-min bar (BAR_STOP_PTS)
+      C  a fixed distance of 1.5 x the median 1H range (HOURLY_STOP_PTS)
+    A symbol with no B / C row raises: the manager never guesses."""
+    if mode not in EMERGENCY_MODES:
+        raise ValueError(f"emergency mode {mode!r} is not one of {EMERGENCY_MODES}")
+    get(root)
+    if root in VALIDATED or mode == "A":
+        return _scaled(CL_EMERGENCY, root, atr_at_fill, median_cl_atr)
+    table = BAR_STOP_PTS if mode == "B" else HOURLY_STOP_PTS
+    if root not in table:
+        raise ValueError(f"{root}: no fixed emergency distance for mode {mode}; use mode A or add a measured row")
+    return table[root]
 
 
 def _scaled(cl_value: float, root: str, atr: float | None, med: float | None) -> float:

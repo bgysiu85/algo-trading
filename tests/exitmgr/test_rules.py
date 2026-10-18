@@ -153,3 +153,11 @@ def test_variants_build_and_compose():
     assert x.reason == "data_end"
     x = run(rows + [(101.0, 101.1, 100.5, 100.6)], "X-JUMP-1R-half")
     assert (x.exit_j, x.reason, x.exit_px) == (4, "RATCHET", pytest.approx(100.65))
+
+
+def test_b_stop_emerg_caps_the_initial_stop_only():
+    from exitmgr import rules as R
+    assert "B-STOP-EMERG" in R.VARIANTS and "B-STOP-EMERG" not in R.SCORED
+    assert R.initial_stop("B-STOP-EMERG", 100.0, 99.0, 0.60) == 99.40      # S wider than 0.60 -> tightened to the emergency stop
+    assert R.initial_stop("B-STOP-EMERG", 100.0, 99.70, 0.60) == 99.70     # S already closer -> never widened
+    assert R.initial_stop("B-STOP", 100.0, 99.0, 0.60) == 99.0             # every other rule set keeps S

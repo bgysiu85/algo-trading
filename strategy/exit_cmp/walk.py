@@ -118,8 +118,9 @@ class Study:
         proj = self.proj(p.al_L, p.al_buf) if rule_id.startswith("X-ALERT") else None
         out = []
         for x in self.entries:
-            comps = R.build(rule_id, self.b, x.e, x.entry_px, x.a0, x.s0, self.tick, p, proj)
-            out.append(walk(self.b, x.e, x.entry_px, x.a0, x.s0, comps, scenario=scenario, sess_end=self.sess_end,
+            s0 = R.initial_stop(rule_id, x.entry_px, x.s0, S.EMERGENCY)
+            comps = R.build(rule_id, self.b, x.e, x.entry_px, x.a0, s0, self.tick, p, proj)
+            out.append(walk(self.b, x.e, x.entry_px, x.a0, s0, comps, scenario=scenario, sess_end=self.sess_end,
                             cap=cap, n=self.n))
         self._cache[key] = out
         return out

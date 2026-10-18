@@ -245,6 +245,28 @@ One entry set; five candidate rule sets (R-BEN, R-MOM, X-ALERT-touch, X-ALERT-cl
 
 I'd be glad to be wrong.
 
+## Amendment 1 — PRE-RUN, 2026-10-18 (before the pre-flight; no outcome read)
+
+Written by the Build & test chat with Ben's approval ("1 YES … 3 Yes", 2026-10-18). Nothing below changes a rule number in §6; it fixes how the code reads them, adds one reported variant, and fixes the non-CL emergency distances.
+
+**Interpretations fixed before any outcome (I1–I10).**
+- **I1** "Highest high since entry" includes the entry bar's own high (a buy-stop fills at the first touch of its level, so that high came at or after the fill); anything computed from it works from the next bar.
+- **I2** M1 (three red closes) uses only bars after the entry bar.
+- **I3** X-ALERT: the level working in bar j is the line projected from the state after bar j−1, eligible only while below close[j−1]; X-ALERT-close fires at the close of j when close[j] < that level − buf × ATR[j].
+- **I4** X-JUMP: a swing low is a bar with a strictly lower low than the L bars either side, confirmed at the close of bar i+L; only swings after the arming bar count; the stop moves to low − 1 tick only if that is above the entry price.
+- **I5** X-JUMP-1R-half: once X-JUMP has armed, the R-BEN half-profit ratchet applies too (stop = the higher of the two).
+- **I6** FLAT's session end is the bar that opens 16:00 NY, or the last bar before a gap when the session closes early (175 early-close sessions in the frame).
+- **I7** Entry sessions are by NY entry hour: 02 / 03–07 / 08–12.
+- **I8** A "give-back" trade is one whose best high before the exit bar reached +0.20 and whose net at mid is ≤ 0.
+- **I9** Price thresholds are compared with a 1e-9 slack (float noise from back-adjustment).
+- **I10** The B-V1 parity check runs without the 120-bar cap (0 of 2,670 v1 trades exceed it).
+
+**Look-alike line tracker (Ben: "1 YES").** X-ALERT uses `exitmgr/lines.py`, an online tracker proven identical to the frozen `common/tl_v0_lines.walk_line_and_breaks` on random series plus a next-bar projection; the frozen module is untouched.
+
+**Added reported variant: B-STOP-EMERG.** B-STOP with the initial stop capped at `max(S, entry − $0.60)`. It is reported and never ranked, in the §10 paired form against B-STOP. Reason: 1,458 of the 2,670 entries have S wider than $0.60, and the live manager's first order is the emergency stop (§14 rail 3), so the live stop is tighter than the tested one. The §18 multiplicity budget is unchanged (no new scored rule set).
+
+**Non-CL emergency distance (Ben, 2026-10-18).** CL / MCL stay at $0.60 in every mode. For other symbols the manager has three selectable modes, default **A**: **A** the §13 volatility scaling; **B** about one big 30-min bar; **C** 1.5 × the median 1H range. Measured on MNQ 30-min / 1-hour bars, 3 Sep – 16 Oct 2026 (`tools/mnq_swing.py`): the 15 biggest 30-min bars average 247 points (≈$495 per MNQ contract), the 15 biggest 1-hour bars 281 points (≈$561); the median 1H bar is 70 points. Mode B is therefore 250 points (MNQ and NQ), mode C 105 points. These are unvalidated (§13) and are not backtested here (§17).
+
 ---
 
 ## Next steps (board)

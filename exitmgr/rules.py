@@ -38,7 +38,7 @@ V1_P1_ARM, V1_P2_ARM = 1.0, 2.0
 V1_R_WICK, V1_R_MIN_RANGE, V1_R_LIFE = 0.5, 0.3, 3
 
 RULES = ("B-STOP", "B-V1", "R-BEN", "R-MOM", "X-ALERT-touch", "X-ALERT-close", "X-JUMP")
-VARIANTS = ("R-BEN-EMA", "R-MOM+BEN", "X-JUMP-1R-half")
+VARIANTS = ("R-BEN-EMA", "R-MOM+BEN", "X-JUMP-1R-half", "B-STOP-EMERG")
 SCORED = ("R-BEN", "R-MOM", "X-ALERT-touch", "X-ALERT-close", "X-JUMP")
 
 
@@ -253,11 +253,17 @@ class Jump(Comp):
         return None
 
 
+def initial_stop(rule_id: str, entry: float, s0: float, emergency: float) -> float:
+    """The stop a rule set starts from. Only B-STOP-EMERG caps it: max(S, entry - emergency distance), as the live manager's
+    first order does (REGISTERED sec 14 rail 3). Every other rule set starts at S."""
+    return max(s0, entry - emergency) if rule_id == "B-STOP-EMERG" else s0
+
+
 def build(rule_id: str, b, e: int, entry: float, a0: float, s0: float, tick: float, p: Params = BASE, proj=None) -> list[Comp]:
     """The components of one rule set for one trade. `proj` is the X-ALERT projected-level array for (p.al_L, p.al_buf)."""
     a = (b, e, entry, a0, s0, tick)
     fl = Floor(*a)
-    if rule_id == "B-STOP":
+    if rule_id in ("B-STOP", "B-STOP-EMERG"):      # B-STOP-EMERG differs only in the s0 it is handed (initial_stop)
         return [fl]
     if rule_id == "B-V1":
         return [fl, EmaTrail(*a), Reversal(*a)]

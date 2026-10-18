@@ -50,3 +50,17 @@ def test_distances():
 def test_unknown_symbol_is_an_error_not_a_guess():
     with pytest.raises(KeyError):
         SY.get("ZB")
+
+
+def test_emergency_modes_selectable():
+    import pytest
+    assert SY.emergency_distance("MCL", mode="B") == SY.emergency_distance("CL", mode="C") == 0.60
+    assert SY.emergency_distance("MNQ", 40.0, 0.5) == pytest.approx(0.60 / 0.5 * 40.0)      # A is the default
+    assert SY.emergency_distance("MNQ", mode="B") == 250.0
+    assert SY.emergency_distance("MNQ", mode="C") == 105.0
+    with pytest.raises(ValueError):
+        SY.emergency_distance("MES", mode="B")
+    with pytest.raises(ValueError):
+        SY.emergency_distance("MNQ", mode="Z")
+    with pytest.raises(ValueError):
+        SY.emergency_distance("MNQ")          # A needs the ATR inputs

@@ -36,7 +36,7 @@ GRID_MIN_POSITIVE = 6                         # of 9 cells
 SCORED = ("R-BEN", "R-MOM", "X-ALERT-touch", "X-ALERT-close", "X-JUMP")
 BASELINE = "B-STOP"
 REFERENCE = "B-V1"
-VARIANTS = ("R-BEN-EMA", "R-MOM+BEN", "X-JUMP-1R-half")
+VARIANTS = ("R-BEN-EMA", "R-MOM+BEN", "X-JUMP-1R-half", "B-STOP-EMERG")
 
 BASE = Params()
 # sec 6 neighbour grids (9 cells each; the middle one is the registered base). Dimension values as registered.
