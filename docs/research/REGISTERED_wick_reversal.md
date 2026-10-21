@@ -20,6 +20,12 @@ Board: **W15-0063** (Research & spec chat raised it; Ben's question). Source: ch
 Amendments are marked **PRE-RUN** or **POST-RUN**. A rule or threshold changed after seeing a result is
 a new hypothesis.
 
+**Amendment A — PRE-RUN, 2026-10-21, before any code or data read.** Databento has ceased, so no CL
+1-minute purchase. MCL 30m now comes from IBKR history (about 2 years), which is too short for the
+training window, so it is **reported only**. Primary tests go from 12 to **10**, with the Bonferroni CI at
+99.5%. Changed: §2 table, §3.1, §5, §6, G1b, §9, §11, next steps. The first commit (13d9516) holds the
+text before this amendment.
+
 ---
 
 ## 0. What this is
@@ -49,8 +55,10 @@ ratio ≥ 0.6 — on MCL and MNQ at 30m, 1H and 4H.**
 |---|---|---|---|---|
 | **MNQ** | NQ.v.0 `ohlcv-1m` → 30m / 1H / 4H | $2 per index point | 0.25 pt = $0.50 | W16 archive, GLBX.MDP3, 2010-06-06 → |
 | **MCL** | CL.c.0 `ohlcv-1h` → 1H / 4H | $100 per $1.00 | $0.01 = $1.00 | HTF archive, GLBX.MDP3, 2010-06-06 → |
-| **MCL 30m** | CL `ohlcv-1m` → 30m | as above | as above | **not owned. Gate G1b** |
+| **MCL 30m** | IBKR 30-min bars (MCL/CL continuous) | as above | as above | **IBKR history only (≈ 2 years). Reported only, see G1b** |
 
+- **Databento has ceased (Ben, 2026-10-21); IBKR is the only data source from now on.** The owned
+  Databento files already on disk are still used. No new Databento purchase.
 - NQ prices are used for MNQ (the same index; MNQ = 1/10 of NQ in dollars). CL prices are used for MCL
   the same way.
 - **Session:** 18:00 New York open (`strategy.htf.bars` conventions). 4H bars start 18:00, 22:00,
@@ -92,8 +100,8 @@ t+1 … t+20. On the first bar where L ≤ D or H ≥ U:
 
 - **D first → reversal** (for an up-context signal; mirror for down context).
 - **U first → continuation.**
-- **Both lines inside one bar → resolved on 1-minute bars** where owned (all MNQ; MCL once G1b passes).
-  If no 1-minute bars are owned, or the first touch of both falls in the same minute, the bar is
+- **Both lines inside one bar → resolved on 1-minute bars** where owned (all MNQ; MCL 4H uses the 1-hour
+  bars). If no finer bars are owned (MCL 1H; MCL 30m unless IBKR 1-minute bars are pulled for it), or the first touch of both falls in the same minute, the bar is
   **ambiguous**. Ambiguous counts **against** the hypothesis (as continuation) in every headline
   number, and the ambiguous count is reported.
 - A gap open beyond a line counts as touching it at that bar's open.
@@ -130,7 +138,7 @@ Both are reported, so that gap is visible.
 
 ## 5. What every run must emit
 
-For each of the 6 market/timeframe combinations (5 if G1b fails), each direction (up→down using UWR,
+For each of the 6 market/timeframe combinations (MCL 30m on its shorter IBKR window, labelled "reported only"), each direction (up→down using UWR,
 down→up using LWR), at k = 0.5 / **1** / 1.5:
 
 1. **Counts:** bars, dropped (H = L, roll, warm-up), up/down-context bars, signals per bucket, ambiguous,
@@ -155,11 +163,11 @@ MCL 30m, 1H, 4H, then MNQ 30m, 1H, 4H.
 
 ## 6. How the answer is read (training side, 2010-06-06 → 2021-12-31)
 
-**Primary tests: 12** = 6 combinations × 2 directions, each at k = 1, 3 bars, primary group (ratio ≥ 0.6).
+**Primary tests: 10** = 5 combinations (MCL 1H/4H, MNQ 30m/1H/4H) × 2 directions, each at k = 1, 3 bars, primary group (ratio ≥ 0.6).
 
 A combination-direction **shows an edge** only if all of these hold:
 
-1. Edge > 0, and its block-bootstrap CI at **99.58%** (95% after Bonferroni correction for 12 tests)
+1. Edge > 0, and its block-bootstrap CI at **99.5%** (95% after Bonferroni correction for 10 tests)
    excludes 0.
 2. Edge > 0 in both halves (split at the median signal date).
 3. No calendar year supplies more than 25% of the excess reversals.
@@ -180,7 +188,7 @@ The bars-to-reversal ρ is **descriptive only**: it is reported with its CI and 
 |---|---|---|
 | G0 | **This file committed** to the repo (W15-0063 subitem 2a) before any WICK-REV code | register before code |
 | G1a | **Read-back** of the owned NQ 1m and CL 1h files: first/last bar, bar count per year, gaps. No spend | same bars as W16 / W15 |
-| G1b | **CL 1-minute bars (MCL 30m and tie-breaks):** price an estimate only (`strategy.htf.fetch` guards: estimate first, `--max-cost`, nothing without `--confirm`). **Ben decides the spend** (W15-0063 subitem 3a). If he declines, MCL 30m is dropped and recorded here as PRE-RUN; MCL 1H double touches stay ambiguous | data not owned |
+| G1b | **MCL 30m from IBKR:** pull MCL (or CL) 30-min bars via `ib_async`, as far back as IBKR serves (expired contracts ≈ 2 years), back-adjusted the same way. It is too short for the training window, so **MCL 30m is reported only**: same tables, no pass/fail, never spends the holdout. Written to `var/` with a read-back (first/last bar, gaps) before use | Databento ceased |
 | G2 | **Count-only pre-flight:** §5 item 1 per combination, training side. **No race outcome and no P&L read**; the runner refuses both in this mode | enough signals? |
 | G3 | **Look-ahead guards**, each broken by a one-bar shift in a unit test: context uses t−1; ATR for the size bucket uses t−1; race lines use ATR at t and are scanned from t+1; the trade enters at t+1's open | no hindsight |
 | G4 | **Holdout** (§8) cut first, own ledger, mutation-tested | `PROGRAM_INDEX` §1 |
@@ -207,7 +215,7 @@ The bars-to-reversal ρ is **descriptive only**: it is reported with its CI and 
   new registration.
 - Quoting gross, or P(rev | decided) without P(rev), as the headline.
 - Writing to Ben's TradingView Pine Editor from any chat.
-- Spending on data without Ben's yes (G1b).
+- Buying data (Databento has ceased; IBKR only).
 
 ---
 
@@ -231,7 +239,7 @@ The bars-to-reversal ρ is **descriptive only**: it is reported with its CI and 
 ## 11. A prediction, written down now
 
 **Long-wick bars reverse slightly more often than the base rate: an edge of about +1 to +4 percentage
-points on most of the 12 tests, with perhaps 2–5 of them surviving the Bonferroni cut — mostly 30m and 1H,
+points on most of the 10 tests, with perhaps 2–4 of them surviving the Bonferroni cut — mostly MNQ 30m and 1H,
 where the sample is largest.** Classic shooting stars look no better than the plain UWR ≥ 0.6 group. The
 bars-to-reversal ρ is weak (|ρ| < 0.10): bigger wicks reverse a little more often, not much faster. The
 trade-shaped version nets near zero or a loss at IBKR mid on 30m, and is closest to break-even on 4H. I'd
@@ -244,8 +252,8 @@ be glad to be wrong.
 - **W15-0063** sub 1 — Ben: definitions confirmed → Done.
 - **W15-0063** sub 2 — Research & spec chat: this file → Done.
 - **W15-0063** sub 2a — **Ben: commit this file to the repo (G0).** Haiku · Low. Commands on the board.
-- **W15-0063** sub 3 — **Build & test chat, Sonnet · Medium:** `strategy/wick_rev/` — loaders (G1a), CL
-  1m estimate only (G1b), count-only pre-flight (G2), guards (G3), holdout ledger (G4), full run, raw
+- **W15-0063** sub 3 — **Build & test chat, Sonnet · Medium:** `strategy/wick_rev/` — loaders (G1a), IBKR
+  MCL 30m pull (G1b, Ben runs it with IB Gateway up), count-only pre-flight (G2), guards (G3), holdout ledger (G4), full run, raw
   .txt. Blocked by sub 2a.
-- **W15-0063** sub 3a — **Ben: decide the CL 1-minute purchase** once the estimate is posted. Haiku · Low.
+- **W15-0063** sub 3a — Build & test chat: IBKR MCL 30m pull + read-back (G1b). Sonnet · Low.
 - **W15-0063** sub 4 — Build & test chat, Sonnet · Low: Result doc (monday Doc + raw .txt + artifact page).
