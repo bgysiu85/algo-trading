@@ -28,7 +28,7 @@ password, but the same tailnet point applies to it; W10-0013 sub 7 reviews both.
 
 Why 4002 and not 4004: the Gateway listens on **4002** inside its own container; the gnzsnz image adds a socat relay
 on **4004** for *other* containers. The trader refuses every port except 4002/7497, so it joins the Gateway's network
-(`network_mode: "service:ib-gateway"`, sub 5) and talks to `127.0.0.1:4002`. Step 7 records what was measured on your NAS.
+(`network_mode: "container:trader-ib-gateway"`, sub 5) and talks to `127.0.0.1:4002`. Step 7 records what was measured on your NAS.
 
 ## Before you start
 
@@ -118,7 +118,7 @@ on **4004** for *other* containers. The trader refuses every port except 4002/74
 - The API (4002/4004) is never published, not even on `127.0.0.1` (Tailscale userspace mode would expose it to the tailnet). No `0.0.0.0` binding, no `network_mode: host`, no live trading mode in this project's Gateway.
 - `READ_ONLY_API` stays `"no"` (the trader places orders). The recorder's Gateway keeps `"yes"`; they are different containers.
 - Host VNC port 5901 (the recorder's Gateway holds 5900).
-- Sub 5 adds the trader with `network_mode: "service:ib-gateway"`; any port the trader needs published would have to sit on the Gateway service, and the API is not one of them.
+- Sub 5 adds the trader with `network_mode: "container:trader-ib-gateway"` (`service:ib-gateway` failed on the NAS with `--no-deps`); any port the trader needs published would have to sit on the Gateway service, and the API is not one of them.
 - The DSM Container Manager project `trader` was created in step 4. Compose changes reach it by unpacking the new tar and pressing **Build** in DSM (as for `trade-journal`), not by `docker compose up`.
 - The trader service is in profile `trade`, so the project never starts it; it is started on purpose (T7, and the scheduled task in sub 9). It has no restart policy. `TRADER_MODE` is `dry` unless `.env` says `paper`; flipping it is the cutover (sub 9), never a side effect.
 - The trader container runs the code from `/volume1/docker/trader/app` (read-only) and writes only to `/volume1/trader/var`. The code folder is replaced by unpacking a new `build_release.py` tar; there is no `.git` on the NAS, `RELEASE.json` says which commit it is.

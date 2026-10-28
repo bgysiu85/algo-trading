@@ -117,7 +117,9 @@ def test_the_trader_service_exists_and_the_gateway_service_is_still_found():
 
 
 def test_the_trader_shares_the_gateways_network_and_publishes_nothing_itself():
-    assert re.search(r'^\s+network_mode: "service:ib-gateway"\s*$', TRADER, re.M)
+    assert re.search(r'^\s+network_mode: "container:trader-ib-gateway"\s*$', TRADER, re.M)
+    assert "service:ib-gateway" not in TRADER.replace("depends_on", "")          # failed on the NAS with --no-deps
+    assert re.search(r"^\s+container_name: trader-ib-gateway\s*$", service_block("ib-gateway"), re.M)   # the name it joins
     assert not re.search(r"^\s+ports:\s*$", TRADER, re.M)
     assert not re.search(r"^\s+expose:", TRADER, re.M)
     assert not re.search(r"^\s+networks:", TRADER, re.M)          # one network, the Gateway's

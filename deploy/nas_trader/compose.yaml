@@ -4,7 +4,7 @@
 #
 # The API is NOT published anywhere - not on the home network, not on the NAS's loopback. Rules a later chat must not undo:
 #   * The paper API (unauthenticated, orders allowed) is reachable only from containers that share this container's
-#     network: the trader (sub 5, network_mode: "service:ib-gateway"), and one-off jobs (the probe, the W18 desk's
+#     network: the trader (sub 5, network_mode: "container:trader-ib-gateway"), and one-off jobs (the probe, the W18 desk's
 #     data script) join it with  --network container:trader-ib-gateway.
 #   * Why not 127.0.0.1:4002 on the NAS either: the NAS runs Tailscale in userspace mode, which hands every tailnet
 #     connection to the NAS's 127.0.0.1 (W17-0024 step 4 found 127.0.0.1:5900 and :5432 open that way). A loopback
@@ -66,7 +66,10 @@ services:
     platform: linux/amd64
     # SHARES the Gateway's network, so it sees the Gateway on 127.0.0.1:4002 (the only port it accepts) and the API is
     # still published nowhere. Anything the trader needs published would have to be listed on ib-gateway, not here.
-    network_mode: "service:ib-gateway"
+    # "container:<fixed name>" and not "service:ib-gateway": with  up --no-deps  the NAS's docker compose passed
+    # "service:ib-gateway" straight to the daemon ("network service:ib-gateway not found", measured 2026-10-28).
+    # The Gateway's container_name is fixed, so the name always resolves; the daemon does the lookup at start.
+    network_mode: "container:trader-ib-gateway"
     depends_on:
       ib-gateway:
         condition: service_healthy
