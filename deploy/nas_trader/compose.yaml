@@ -1,10 +1,10 @@
 # Paper IB Gateway for the NAS trader (W10-0013 sub 4). Project "trader" = the second of the three NAS projects
-# (trade-journal | trader | edge, decided 2026-10-28, sub 14). This step adds ONLY the Gateway; sub 5 adds the trader
-# service, sub 11 the portal relay. Setup guide: deploy/nas_trader/NAS-TRADER-SETUP.md
+# (trade-journal | trader | edge, decided 2026-10-28, sub 14). Sub 4 added the Gateway, sub 5 the trader service (profile
+# "trade", dry by default); sub 11 adds the portal relay. Setup guide: deploy/nas_trader/NAS-TRADER-SETUP.md
 #
 # The API is NOT published anywhere - not on the home network, not on the NAS's loopback. Rules a later chat must not undo:
 #   * The paper API (unauthenticated, orders allowed) is reachable only from containers that share this container's
-#     network: the trader will (sub 5,  network_mode: "service:ib-gateway"), and one-off jobs (the probe, the W18 desk's
+#     network: the trader (sub 5, network_mode: "service:ib-gateway"), and one-off jobs (the probe, the W18 desk's
 #     data script) join it with  --network container:trader-ib-gateway.
 #   * Why not 127.0.0.1:4002 on the NAS either: the NAS runs Tailscale in userspace mode, which hands every tailnet
 #     connection to the NAS's 127.0.0.1 (W17-0024 step 4 found 127.0.0.1:5900 and :5432 open that way). A loopback
@@ -57,5 +57,57 @@ services:
       driver: json-file
       options: {max-size: "10m", max-file: "3"}
 
-  # trader:   (sub 5)   image + env, and  network_mode: "service:ib-gateway"  so it sees 127.0.0.1:4002 and nothing else.
+  trader:
+    # The trader (W10-0013 sub 5). Plain python image + three folders mounted in, because Synology cannot run a RUN step
+    # in a build: /app = the code (from build_release.py), /deps = the pinned packages (installed once with a plain
+    # docker run), /app/var = the trader's state and fills. Steps: NAS-TRADER-SETUP.md part 2.
+    image: ${TRADER_IMAGE:-python:3.12-slim}
+    container_name: trader-trader
+    platform: linux/amd64
+    # SHARES the Gateway's network, so it sees the Gateway on 127.0.0.1:4002 (the only port it accepts) and the API is
+    # still published nowhere. Anything the trader needs published would have to be listed on ib-gateway, not here.
+    network_mode: "service:ib-gateway"
+    depends_on:
+      ib-gateway:
+        condition: service_healthy
+    # NEVER starts with the project: it is in profile "trade", which COMPOSE_PROFILES does not list. Started on purpose
+    # (sub 9 puts that in a DSM scheduled task):  docker compose --profile trade up -d --no-deps trader
+    profiles: ["trade"]
+    # A session ends by itself at the close; restarting it would start a second session. No restart policy.
+    restart: "no"
+    user: "1000:1000"                           # the owner of the NAS folders (same as the Gateway's settings folder)
+    init: true
+    stop_grace_period: 90s                      # SIGTERM = the trader's own graceful stop (it flattens its book view and writes the fill log)
+    security_opt:
+      - seccomp:unconfined                      # Synology's kernel has no seccomp
+    working_dir: /app                           # var/ is resolved against the working directory (audit item 5)
+    command: ["python", "/app/run_trader.py"]
+    environment:
+      PYTHONPATH: /deps
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      TZ: America/New_York
+      # What to run. dry = no orders. paper = real orders on the PAPER account; changing it is the cutover decision (sub 9).
+      TRADER_MODE: ${TRADER_MODE:-dry}
+      TRADER_STRATEGY: ${TRADER_STRATEGY:-mcl}
+      TRADER_MAX_POSITIONS: ${TRADER_MAX_POSITIONS:-}
+      TRADER_CAP_SCOPE: ${TRADER_CAP_SCOPE:-}
+      TRADER_TELEGRAM_BATCH_MIN: ${TRADER_TELEGRAM_BATCH_MIN:-0}
+      TRADER_FEED: ${TRADER_FEED:-on}
+      # Optional secrets; empty = that feature is off. Never baked into an image or a file in the repo.
+      TV_SESSIONID: ${TV_SESSIONID:-}
+      TV_SESSIONID_SIGN: ${TV_SESSIONID_SIGN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      UI_RELAY_URL: ${UI_RELAY_URL:-}
+      UI_AGENT_TOKEN: ${UI_AGENT_TOKEN:-}
+      UI_AGENT_ID: ${UI_AGENT_ID:-nas-trader}   # explicit: the default is the container's hostname
+    volumes:
+      - ${TRADER_APP_DIR:-/volume1/docker/trader/app}:/app:ro
+      - ${TRADER_DEPS_DIR:-/volume1/docker/trader/deps}:/deps:ro
+      - ${TRADER_VAR_DIR:-/volume1/trader/var}:/app/var
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
+
   # relay:    (sub 11)  portal relay, joins the external network thesiuz-edge (project "edge", sub 15).

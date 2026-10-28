@@ -46,6 +46,7 @@ point.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -75,10 +76,13 @@ class Provenance:
     dirty: bool          # uncommitted changes in the tree
     var_path: str        # var/, fully resolved -- follows junctions
     var_exists: bool
+    source: str = "git"  # "git", "release" (RELEASE.json, a container copy with no .git) or "none"
 
     def as_line(self) -> str:
         """One line, for a log or a notification header."""
         bits = [self.described or self.commit or "no-git"]
+        if self.source == "release":
+            bits.append("release")
         if self.dirty:
             bits.append("DIRTY")
         bits.append(f"tree={Path(self.tree).name}")
@@ -104,6 +108,23 @@ def _git(*args: str, cwd: Path) -> str:
         return ""
 
 
+RELEASE_FILE = "RELEASE.json"
+
+
+def _release(t: Path) -> dict:
+    """The RELEASE.json that deploy/nas_trader/build_release.py writes into a container copy, or {}.
+
+    A container has no .git, so without this a fill log from the NAS could not be traced to a commit - the exact
+    question this module exists to answer. `dirty` here is what the BUILDER saw (a shipped file differing from HEAD
+    on the PC), not something the container can re-check.
+    """
+    try:
+        data = json.loads((t / RELEASE_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def read(tree: Path | None = None) -> Provenance:
     t = Path(tree).resolve() if tree else TREE
     v = var_dir()
@@ -112,6 +133,16 @@ def read(tree: Path | None = None) -> Provenance:
     # only asserted when git actually answered.
     have_git = bool(_git("rev-parse", "--git-dir", cwd=t))
     status = _git("status", "--porcelain", cwd=t) if have_git else ""
+    if not have_git:
+        rel = _release(t)
+        if rel.get("commit") or rel.get("described"):
+            return Provenance(
+                tree=str(t), cwd=str(Path.cwd()),
+                commit=str(rel.get("commit") or ""),
+                described=str(rel.get("described") or ""),
+                branch=str(rel.get("branch") or ""),
+                dirty=bool(rel.get("dirty")),
+                var_path=str(v), var_exists=v.exists(), source="release")
     return Provenance(
         tree=str(t),
         cwd=str(Path.cwd()),
@@ -121,6 +152,7 @@ def read(tree: Path | None = None) -> Provenance:
         dirty=bool(have_git and status),
         var_path=str(v),
         var_exists=v.exists(),
+        source="git" if have_git else "none",
     )
 
 
@@ -152,7 +184,8 @@ def render(p: Provenance) -> list[str]:
     L = ["WHAT IS RUNNING", "",
          f"  tree          {p.tree}",
          f"  invoked from  {p.cwd}",
-         f"  commit        {p.commit or '(no git in this tree)'}",
+         f"  commit        {p.commit or '(no git in this tree)'}"
+         + ("   (from RELEASE.json)" if p.source == "release" else ""),
          f"  describes as  {p.described or '-'}",
          f"  branch        {p.branch or '-'}",
          f"  uncommitted   {'YES -- this tree is NOT frozen' if p.dirty else 'no'}",

@@ -1,9 +1,11 @@
-# Paper IB Gateway on the NAS (W10-0013 sub 4)
+# Paper IB Gateway and the trader on the NAS (W10-0013 subs 4 and 5)
+
+Part 1 (steps 1-8) is the Gateway, done 2026-10-28. Part 2 (steps T1-T7, further down) adds the trader container.
 
 What this adds: one container, `trader-ib-gateway`, in a new NAS project called `trader` (the second of the three
 projects decided on 2026-10-28: `trade-journal`, `trader`, `edge`). It is IB Gateway plus IBC (the tool that types
-the IBKR login for you), logged in to the **paper** username. Later steps add the trader (sub 5) and the portal
-relay (sub 11) to the same project. Nothing here touches the recorder.
+the IBKR login for you), logged in to the **paper** username. Sub 5 adds the trader (part 2) and sub 11 the portal
+relay to the same project. Nothing here touches the recorder.
 
 Terms. *Paper* = IBKR's practice account. *API* = the socket the trader talks to the Gateway on. *Loopback* =
 `127.0.0.1`, an address that only the machine itself can reach. *Network namespace* = the private network a container
@@ -117,11 +119,89 @@ on **4004** for *other* containers. The trader refuses every port except 4002/74
 - `READ_ONLY_API` stays `"no"` (the trader places orders). The recorder's Gateway keeps `"yes"`; they are different containers.
 - Host VNC port 5901 (the recorder's Gateway holds 5900).
 - Sub 5 adds the trader with `network_mode: "service:ib-gateway"`; any port the trader needs published would have to sit on the Gateway service, and the API is not one of them.
-- The DSM Container Manager project `trader` is created in step 4. Sub 5 adds the trader service by editing `compose.yaml` and pressing **Build** in DSM (as for `trade-journal`), not by `docker compose up`.
+- The DSM Container Manager project `trader` was created in step 4. Compose changes reach it by unpacking the new tar and pressing **Build** in DSM (as for `trade-journal`), not by `docker compose up`.
+- The trader service is in profile `trade`, so the project never starts it; it is started on purpose (T7, and the scheduled task in sub 9). It has no restart policy. `TRADER_MODE` is `dry` unless `.env` says `paper`; flipping it is the cutover (sub 9), never a side effect.
+- The trader container runs the code from `/volume1/docker/trader/app` (read-only) and writes only to `/volume1/trader/var`. The code folder is replaced by unpacking a new `build_release.py` tar; there is no `.git` on the NAS, `RELEASE.json` says which commit it is.
 
-## Not verified (no Gateway was reachable from the cloud workspace)
+## Not verified in part 1 (since measured on the NAS, 2026-10-28)
 
-Everything above that needs a running Gateway: the login itself, 4002 vs 4004 inside the container, the healthcheck
-(a plain TCP connect to 4002), the what-if behaviour under Read-Only API, the `config.ini` path and folder permissions on
-`/volume1/trader/gateway`. The probe's logic and the compose file's safety rules are
-unit-tested (`tests/deploy/`), and the compose file passes `docker compose config`.
+The login, the healthcheck, Read-Only API off, and the 4002/4004 behaviour were all checked on the NAS: see the sub 4 result
+on the board and `claude/handover_w10_0013_sub4_gateway_20261028.md`. Folder permissions needed
+`sudo chown -R 1000:1000 /volume1/trader/gateway`.
+
+---
+
+# Part 2 - the trader container (W10-0013 sub 5)
+
+What this adds: a second service, `trader`, in the same project. It is a plain `python:3.12-slim` container with three
+folders mounted in (Synology cannot run a RUN step in a build, so there is no custom image):
+
+| Mounted at | Is | Comes from |
+|---|---|---|
+| `/app` (read-only) | the trader's code: `main.py` and the 29 modules it reaches, plus `run_trader.py` | `build_release.py` on the PC, unpacked to `/volume1/docker/trader/app` |
+| `/deps` (read-only) | `ib_async 2.1.0`, `pandas 3.0.5`, `numpy 2.5.2`, `tzdata 2025.3` (the versions the ProArt runs) | `pip install --target`, step T4 |
+| `/app/var` | the trader's state: watchlist, fills, session lock, archive | `/volume1/trader/var` (owned by user 1000) |
+
+`run_trader.py` replaces `run_paper.ps1`. Settings come from `.env` (`TRADER_MODE`, `TRADER_STRATEGY`, ...), the defaults
+are a dry run (no orders), and it refuses live ports and anything that is not `dry`/`paper`. `--selfcheck` proves the
+image works without a Gateway. The container shares the Gateway's network, so it connects to `127.0.0.1:4002`.
+
+Terms. *Dry run* = the trader logs what it would do and places no orders. *Selfcheck* = imports, time zone, folder
+permissions and argument check, with no broker. *AVX* = a CPU feature some Python packages assume; the DS1819+ CPU may
+not have it, and step T5 is the test.
+
+## Before part 2
+
+- Part 1 is finished and the Gateway shows `healthy`.
+- Still one IBKR session per username: the PC's paper Gateway and the ProArt trader stay off.
+- Disk: the packages are about 400 MB in `/volume1/docker/trader/deps`.
+
+## Steps
+
+T1. **PC: run the tests, then commit.** Exact commands are on the board (W10-0013 sub 5). Commit only the files listed
+    there; the tree holds other unfinished work that must not go in.
+T2. **PC: build the tar.** `python deploy\nas_trader\build_release.py` writes `D:\Trading\Claude outputs\w10_0013_sub5_nas.tar`
+    and prints `dirty=False` when the shipped files match the commit. If it says `dirty=True`, commit first.
+T3. **NAS: unpack.** Upload the tar into `/volume1/docker` (File Station), then:
+    ```
+    cd /volume1/docker && sudo tar --overwrite -xf w10_0013_sub5_nas.tar && sudo chmod -R a+rX /volume1/docker/trader
+    sudo chown -R "$(id -un)":users /volume1/docker/trader
+    ```
+    This refreshes `compose.yaml`, `.env.example`, this guide and `probe_gateway.py`, and creates `app/`. `.env` is never in the tar.
+T4. **NAS: the trader's var folder, then the packages.**
+    ```
+    sudo mkdir -p /volume1/trader/var && sudo chown -R 1000:1000 /volume1/trader/var && sudo chmod -R 775 /volume1/trader/var
+    sudo docker run --rm --security-opt seccomp=unconfined -v /volume1/docker/trader:/work -w /work python:3.12-slim pip install --no-cache-dir --target /work/deps -r /work/app/requirements.txt
+    ```
+    The last line should end with `Successfully installed ... ib_async-2.1.0 ... numpy-2.5.2 pandas-3.0.5 ... tzdata-2025.3`.
+T5. **NAS: selfcheck** (this is audit risk C, the no-AVX test):
+    ```
+    sudo docker run --rm --security-opt seccomp=unconfined --user 1000:1000 -e PYTHONPATH=/deps -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -v /volume1/docker/trader/app:/app:ro -v /volume1/docker/trader/deps:/deps:ro -v /volume1/trader/var:/app/var -w /app python:3.12-slim python /app/run_trader.py --selfcheck
+    ```
+    Expected last line `SELFCHECK PASS`. An "Illegal instruction" crash while importing numpy or pandas means this CPU
+    lacks a feature those wheels need; report it, do not retry.
+T6. **NAS: put the trader service in the project.** Check, then **Build** the project in DSM (Container Manager > Project >
+    trader > Build). The Gateway's own settings did not change, so it should keep running; if DSM recreates it, wait for
+    `healthy` again (a paper login, no approval).
+    ```
+    cd /volume1/docker/trader
+    sudo docker compose --profile trade config > /dev/null && echo CONFIG OK
+    sudo docker ps --format '{{.Names}}  {{.Status}}'
+    ```
+T7. **NAS: first dry run.** `TRADER_MODE` is `dry` by default, so no orders. Outside 04:00-09:30 New York time the trader
+    connects, checks the account, sees the session is over and stops by itself with exit code 0 - which is a good
+    connection test. Inside that window (19:00-00:30 Sydney while New York is on daylight time) it keeps running; stop it
+    with the last command.
+    ```
+    cd /volume1/docker/trader
+    sudo docker compose --profile trade up -d --no-deps trader
+    sleep 25
+    sudo docker logs --tail 80 trader-trader
+    sudo docker ps -a --filter name=trader-trader --format '{{.Names}}  {{.Status}}'
+    ```
+    Expected in the log: the "DRY RUN" banner, a `running <commit> release` line, the account (`DUM...`), and either
+    "reached and flat - stopping" or "entering main loop". To stop a running one and tidy up:
+    `sudo docker stop trader-trader && sudo docker rm trader-trader`.
+
+Switching to real paper orders is not part of this step: it is `TRADER_MODE=paper` in `.env`, decided in sub 9 after
+the shadow run (sub 8). Secrets (TradingView cookie, Telegram, portal token) are left empty for now; sub 8/9 add them.

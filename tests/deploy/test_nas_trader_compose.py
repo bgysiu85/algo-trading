@@ -93,3 +93,73 @@ def test_env_example_has_every_variable_the_compose_file_needs_and_no_real_secre
     assert needed <= declared, sorted(needed - declared)
     assert "your_paper_password" in ENV_EXAMPLE and "choose_a_vnc_password" in ENV_EXAMPLE
     assert not re.search(r"sha256:[0-9a-f]{64}", ENV_EXAMPLE.split("IB_GATEWAY_IMAGE=")[-1].splitlines()[0])
+
+
+# ---------------------------------------------------------------- the trader service (W10-0013 sub 5)
+def service_block(name: str) -> str:
+    """The code lines of one service: from '  name:' to the next service (2-space indent) or the end."""
+    lines, out, inside = code_lines(COMPOSE), [], False
+    for ln in lines:
+        if re.match(r"^  [a-z][a-z0-9-]*:\s*$", ln):
+            inside = ln.strip() == f"{name}:"
+            continue
+        if inside:
+            out.append(ln)
+    return "\n".join(out)
+
+
+TRADER = service_block("trader")
+
+
+def test_the_trader_service_exists_and_the_gateway_service_is_still_found():
+    assert TRADER and service_block("ib-gateway")
+    assert "network_mode" not in service_block("ib-gateway")          # the Gateway owns the network; the trader joins it
+
+
+def test_the_trader_shares_the_gateways_network_and_publishes_nothing_itself():
+    assert re.search(r'^\s+network_mode: "service:ib-gateway"\s*$', TRADER, re.M)
+    assert not re.search(r"^\s+ports:\s*$", TRADER, re.M)
+    assert not re.search(r"^\s+expose:", TRADER, re.M)
+    assert not re.search(r"^\s+networks:", TRADER, re.M)          # one network, the Gateway's
+
+
+def test_the_trader_never_starts_with_the_project_and_never_restarts_itself():
+    assert re.search(r'^\s+profiles: \["trade"\]\s*$', TRADER, re.M)
+    assert re.search(r'^\s+restart: "no"\s*$', TRADER, re.M)
+    assert "ib-gateway:" in TRADER and "condition: service_healthy" in TRADER
+
+
+def test_the_trader_defaults_to_a_dry_run_in_compose_and_in_env_example():
+    assert "TRADER_MODE: ${TRADER_MODE:-dry}" in TRADER
+    assert re.search(r"^TRADER_MODE=dry\s*$", ENV_EXAMPLE, re.M)
+
+
+def test_the_trader_mounts_code_and_packages_read_only_and_var_writable():
+    assert re.search(r"-\s+\$\{TRADER_APP_DIR:-[^}]+\}:/app:ro\s*$", TRADER, re.M)
+    assert re.search(r"-\s+\$\{TRADER_DEPS_DIR:-[^}]+\}:/deps:ro\s*$", TRADER, re.M)
+    assert re.search(r"-\s+\$\{TRADER_VAR_DIR:-[^}]+\}:/app/var\s*$", TRADER, re.M)
+    assert "trade-journal" not in "\n".join(code_lines(COMPOSE))     # the recorder's folders are never mounted here
+
+
+def test_the_trader_runs_unprivileged_with_the_synology_seccomp_workaround():
+    assert re.search(r'^\s+user: "1000:1000"\s*$', TRADER, re.M)
+    assert "seccomp:unconfined" in TRADER
+    assert "privileged" not in TRADER and "cap_add" not in TRADER
+
+
+def test_the_trader_runs_the_launcher_and_cannot_be_pointed_at_a_live_port_from_compose():
+    assert re.search(r'^\s+command: \["python", "/app/run_trader.py"\]\s*$', TRADER, re.M)
+    assert "TRADER_PORT" not in COMPOSE                           # not configurable here; the launcher also refuses live ports
+    assert not re.search(r"\b(4001|4003|7496|7498)\b", TRADER)
+
+
+def test_trader_secrets_are_optional_env_references_never_literals():
+    secrets = ("TV_SESSIONID", "TV_SESSIONID_SIGN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "UI_RELAY_URL",
+               "UI_AGENT_TOKEN")
+    for name in secrets:
+        assert re.search(rf"^\s+{name}: \$\{{{name}:-\}}\s*$", TRADER, re.M), name
+        assert re.search(rf"^{name}=\s*$", ENV_EXAMPLE, re.M), f"{name} must be empty in .env.example"
+
+
+def test_the_agent_id_is_set_explicitly_so_the_portal_can_tell_the_nas_from_the_proart():
+    assert "UI_AGENT_ID: ${UI_AGENT_ID:-nas-trader}" in TRADER

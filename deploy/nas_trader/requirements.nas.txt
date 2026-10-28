@@ -1,0 +1,9 @@
+# Packages for the NAS trader container (W10-0013 sub 5). Pinned to what the ProArt trader runs today
+# (D:\Trading\.venv, Python 3.14): the closest thing to "the version this suite has been run against".
+# Installed once into /volume1/docker/trader/deps with a plain docker run (see NAS-TRADER-SETUP.md) because
+# Synology cannot run a RUN step in a Dockerfile build. Not needed on the NAS: pyodbc, sqlalchemy, databento,
+# matplotlib, scikit-learn, mcp (none is reachable from main.py - W10-0013 sub 2 audit).
+ib_async==2.1.0
+pandas==3.0.5
+numpy==2.5.2
+tzdata==2025.3

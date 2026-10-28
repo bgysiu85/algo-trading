@@ -283,3 +283,44 @@ def test_var_is_gitignored_WITHOUT_a_trailing_slash():
     assert "var/" not in lines, (
         "a trailing slash makes this directory-only, and the production copy "
         "reaches var/ through a junction that git reads as a file")
+
+
+# --- a container copy has no .git: RELEASE.json says which code it is (W10-0013 sub 5) -----------------------------
+
+def _release_tree(tmp_path, monkeypatch, **fields):
+    import json
+    tree = tmp_path / "app"
+    (tree / "var").mkdir(parents=True)
+    (tree / P.RELEASE_FILE).write_text(json.dumps(fields), encoding="utf-8")
+    monkeypatch.chdir(tree)
+    return tree
+
+
+def test_a_tree_with_no_git_but_a_release_manifest_reports_the_release(tmp_path, monkeypatch):
+    tree = _release_tree(tmp_path, monkeypatch, commit="e68f146", described="e68f146", branch="main", dirty=False)
+    p = P.read(tree)
+    assert (p.commit, p.described, p.branch, p.dirty, p.source) == ("e68f146", "e68f146", "main", False, "release")
+    assert "release" in p.as_line() and "e68f146" in p.as_line()
+    assert any("RELEASE.json" in ln for ln in P.render(p))
+
+
+def test_the_release_manifest_carries_the_builders_dirty_flag(tmp_path, monkeypatch):
+    tree = _release_tree(tmp_path, monkeypatch, commit="abc1234", described="abc1234-dirty", dirty=True)
+    p = P.read(tree)
+    assert p.dirty is True and "DIRTY" in p.as_line()
+
+
+def test_a_broken_or_empty_release_manifest_falls_back_to_no_git(tmp_path, monkeypatch):
+    tree = tmp_path / "app"
+    (tree / "var").mkdir(parents=True)
+    monkeypatch.chdir(tree)
+    (tree / P.RELEASE_FILE).write_text("{not json", encoding="utf-8")
+    p = P.read(tree)
+    assert p.source == "none" and p.commit == "" and not p.dirty
+    (tree / P.RELEASE_FILE).write_text("{}", encoding="utf-8")          # valid JSON, says nothing
+    assert P.read(tree).source == "none"
+
+
+def test_git_wins_over_a_release_manifest_when_both_exist():
+    """The real repo has .git; a stray RELEASE.json must not override what git says."""
+    assert P.read().source == "git"
