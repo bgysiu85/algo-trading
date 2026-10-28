@@ -242,7 +242,7 @@ def run(argv: list[str] | None = None) -> int:
             return _fail(f"--strategy {','.join(bad)} cannot be traded live; "
                          f"the live trader supports {sorted(LIVE_STRATEGIES)}. "
                          f"Use --mode backtest for it instead.")
-        held = session_lock.active()
+        held = session_lock.active_anywhere()
         if held:
             return _fail("a live session is already running -- "
                          + session_lock.describe(held)

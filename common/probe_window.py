@@ -98,7 +98,7 @@ async def main_async(args) -> int:
     if args.port in LIVE_PORTS:
         print(f"REFUSING: port {args.port} is {LIVE_PORTS[args.port]}.")
         return 1
-    live = session_lock.active()
+    live = session_lock.active_anywhere()
     if live:
         print("REFUSING: " + session_lock.describe(live))
         return 1

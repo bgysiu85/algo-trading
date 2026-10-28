@@ -108,7 +108,7 @@ services:
     volumes:
       - ${TRADER_APP_DIR:-/volume1/docker/trader/app}:/app:ro
       - ${TRADER_DEPS_DIR:-/volume1/docker/trader/deps}:/deps:ro
-      - ${TRADER_VAR_DIR:-/volume1/trader/var}:/app/var
+      - ${TRADER_VAR_DIR:-/volume1/trader-data/var}:/app/var
     logging:
       driver: json-file
       options: {max-size: "10m", max-file: "5"}

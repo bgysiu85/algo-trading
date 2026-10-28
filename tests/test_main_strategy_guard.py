@@ -12,7 +12,7 @@ def _paper(monkeypatch, argv, answer=None, tty=True):
     # lock and with a path for the WRITER lock. A zero-arg stub let the real
     # tv_feed thread start and die on a TypeError -- contained, correctly, but
     # a test must not depend on the containment it is not testing.
-    monkeypatch.setattr(M.session_lock, "active", lambda *a, **k: None)
+    monkeypatch.setattr(M.session_lock, "active_anywhere", lambda *a, **k: None)
     monkeypatch.setattr(M.session_lock, "held",
                         lambda *a, **k: contextlib.nullcontext())
     import brokers.ibkr.trader as T
@@ -157,7 +157,7 @@ def _paper_feed(monkeypatch, argv, feed=None, answer="PAPER"):
     """As _paper, but with common.tv_feed.main replaced."""
     import contextlib, io
     seen = {}
-    monkeypatch.setattr(M.session_lock, "active", lambda *a, **k: None)
+    monkeypatch.setattr(M.session_lock, "active_anywhere", lambda *a, **k: None)
     monkeypatch.setattr(M.session_lock, "held",
                         lambda *a, **k: contextlib.nullcontext())
     import brokers.ibkr.trader as T

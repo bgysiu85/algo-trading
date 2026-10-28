@@ -612,7 +612,7 @@ class Runner:
 
 
 async def main_async(args) -> int:
-    live = None if args.force else session_lock.active()
+    live = None if args.force else session_lock.active_anywhere()
     if live:
         print("REFUSING: " + session_lock.describe(live))
         print("  IB's ~60-requests-per-10-minutes cap is account-wide, so this")

@@ -140,7 +140,7 @@ folders mounted in (Synology cannot run a RUN step in a build, so there is no cu
 |---|---|---|
 | `/app` (read-only) | the trader's code: `main.py` and the 29 modules it reaches, plus `run_trader.py` | `build_release.py` on the PC, unpacked to `/volume1/docker/trader/app` |
 | `/deps` (read-only) | `ib_async 2.1.0`, `pandas 3.0.5`, `numpy 2.5.2`, `tzdata 2025.3` (the versions the ProArt runs) | `pip install --target`, step T4 |
-| `/app/var` | the trader's state: watchlist, fills, session lock, archive | `/volume1/trader/var` (owned by user 1000) |
+| `/app/var` | the trader's state: watchlist, fills, session lock, archive | `/volume1/trader/var` (owned by user 1000); from sub 6 `/volume1/trader-data/var` (part 3) |
 
 `run_trader.py` replaces `run_paper.ps1`. Settings come from `.env` (`TRADER_MODE`, `TRADER_STRATEGY`, ...), the defaults
 are a dry run (no orders), and it refuses live ports and anything that is not `dry`/`paper`. `--selfcheck` proves the
@@ -205,3 +205,56 @@ T7. **NAS: first dry run.** `TRADER_MODE` is `dry` by default, so no orders. Out
 
 Switching to real paper orders is not part of this step: it is `TRADER_MODE=paper` in `.env`, decided in sub 9 after
 the shadow run (sub 8). Secrets (TradingView cookie, Telegram, portal token) are left empty for now; sub 8/9 add them.
+
+---
+
+# Part 3 - the trader's files readable from the ProArt, and a lock both machines can see (W10-0013 sub 6)
+
+What this adds, and why. The trader's data folder (`var`: fills, archive, logs, state, the session lock) moves into a new
+DSM **shared folder**, `trader-data`, which the ProArt can open **read-only**. Two things then use it:
+
+1. **The session lock is read live.** The trader's lock now carries a *heartbeat* (a timestamp it refreshes every 20
+   seconds). A backtest or `main.py` started on the ProArt reads the NAS lock straight from the share and refuses while the
+   NAS trader is in session, because IB's request budget (about 60 historical-data requests per 10 minutes) is shared by
+   the whole account. A lock whose heartbeat is more than 2 minutes old counts as dead, so a crash clears itself.
+2. **Fills are copied, not read live.** A scheduled task on the ProArt runs `pull_nas_var.py` every 2 hours. It copies new
+   or changed files from the share into `D:\Trading\var\nas_mirror\` and never deletes or overwrites anything.
+   Moving fills into `var\fills` (where the journal and `db_load` look) is `--promote`, a cut-over step for sub 8/9, so two
+   traders writing the same day's file cannot overwrite each other.
+
+Terms. *SMB* = the Windows file-sharing protocol DSM speaks. *Heartbeat* = a timestamp a running process keeps refreshing,
+so a reader can tell "alive" from "left behind". *Read-only share* = the ProArt's NAS user can look and copy but not change.
+
+## Order
+
+- **S1 and S4 can be done any time.** Nothing on the NAS trader changes.
+- **S2/S3 replace the code the trader runs.** Do them after the sub 5 dry-run log has been checked (after 00:30 Sydney on
+  Thu 29 Oct), so that log is from the build that was tested.
+
+## Steps
+
+S1. **DSM (browser): the shared folder and a read-only user.**
+    - Control Panel > Shared Folder > Create > **Create new shared folder**: name `trader-data`, location Volume 1. Leave
+      "Enable Recycle Bin" off and encryption off. On the permissions page grant nobody yet.
+    - Control Panel > User & Group > Create: user `pc-reader` with a new password. On the permissions page tick **Read only**
+      for `trader-data` and **No access** for everything else. Do not give it any application access.
+    - Control Panel > File Services > SMB: SMB must be enabled (it is, if you already use `\\SiuDiskstation`).
+S2. **PC: tests, commit, build the tar.** Exact commands are on the board (W10-0013 sub 6). The tar is
+    `D:\Trading\Claude outputs\w10_0013_sub6_nas.tar`; the build must print `dirty=False`.
+S3. **NAS: unpack, move the data, restart.** Exact commands are on the board. In short: stop `trader-trader`, unpack the
+    tar, copy `/volume1/trader/var` into `/volume1/trader-data/var`, give it to user 1000 with world-read, set
+    `TRADER_VAR_DIR=/volume1/trader-data/var` in `.env`, start the trader, and check the lock file's `heartbeat_epoch`
+    moves between two reads 25 seconds apart.
+S4. **PC: credentials, the two settings, the scheduled copy.** Exact commands are on the board. In short: `cmdkey` stores
+    the `pc-reader` password in Windows, `setx SESSION_LOCK_REMOTE` and `setx NAS_TRADER_VAR` tell the tools where the
+    share is, `python -m common.session_lock` shows what the ProArt sees, and `Register-ScheduledTask` creates the copy.
+
+## Rules this part follows
+
+- The ProArt only ever **reads** the share. `pc-reader` has read-only permission, and `pull_nas_var.py` never writes to it.
+- If the NAS is off or the share is not reachable, the tools **warn and carry on** (they treat the NAS as not in session).
+  A warning that says "the NAS lock was NOT checked" means a backtest could run into a NAS session; start none until the
+  NAS is back or you have checked by hand.
+- Both machines need correct clocks (the heartbeat is compared across them). Step S4 prints both times.
+- Undo: delete the scheduled task `Algo - pull NAS var`, `setx SESSION_LOCK_REMOTE ""`, and point `TRADER_VAR_DIR` back
+  to `/volume1/trader/var` (the old folder is left in place by S3, not deleted).

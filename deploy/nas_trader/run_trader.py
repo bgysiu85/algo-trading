@@ -150,7 +150,7 @@ def prepare_var(root: Path = ROOT) -> list[str]:
         raise Refused(
             f"cannot write to {var} ({e}).\n"
             "  On the NAS the folder must belong to the user the container runs as (1000):\n"
-            "    sudo chown -R 1000:1000 /volume1/trader/var && sudo chmod -R u+rwX /volume1/trader/var") from None
+            "    sudo chown -R 1000:1000 /volume1/trader-data/var && sudo chmod -R u+rwX /volume1/trader-data/var") from None
     wl = root / WATCHLIST
     if not wl.exists():
         wl.write_text("# one ticker per line; picked up within 5 seconds. Cleared at the end of every session.\n",
@@ -175,8 +175,9 @@ def clear_container_locks(root: Path = ROOT, env=None) -> list[str]:
 
     Safe because the container name is fixed (Docker will not run two) and var/ is private to it. It leaves alone a lock
     whose recorded tree is some OTHER tree (a lock written by the ProArt would say D:\\Trading...). The watchlist-writer lock
-    carries no tree; it is removed on the same reasoning, which stops being safe the day var/ is shared with another
-    machine - W10-0013 sub 6 replaces the lock before that happens. TRADER_CLEAR_STALE_LOCKS=0 turns this off.
+    carries no tree; it is removed on the same reasoning. Since W10-0013 sub 6 var/ is shared with the ProArt, but READ-ONLY, so
+    nothing else ever writes these locks and this stays safe. The lock now also carries a heartbeat and would clear itself
+    two minutes after a crash anyway (common/session_lock.py); this just does it at once. TRADER_CLEAR_STALE_LOCKS=0 turns this off.
     """
     import json
     env = os.environ if env is None else env
