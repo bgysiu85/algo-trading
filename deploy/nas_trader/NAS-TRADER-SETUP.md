@@ -26,7 +26,7 @@ password, but the same tailnet point applies to it; W10-0013 sub 7 reviews both.
 
 Why 4002 and not 4004: the Gateway listens on **4002** inside its own container; the gnzsnz image adds a socat relay
 on **4004** for *other* containers. The trader refuses every port except 4002/7497, so it joins the Gateway's network
-(`network_mode: "service:ib-gateway"`, sub 5) and talks to `127.0.0.1:4002`. Step 7 proves this on your NAS.
+(`network_mode: "service:ib-gateway"`, sub 5) and talks to `127.0.0.1:4002`. Step 7 records what was measured on your NAS.
 
 ## Before you start
 
@@ -45,24 +45,31 @@ on **4004** for *other* containers. The trader refuses every port except 4002/74
    cd /volume1/docker && sudo tar -xf w10_0013_sub4_nas.tar && sudo chmod -R a+rX /volume1/docker/trader
    sudo chown -R "$(id -un)":users /volume1/docker/trader
    ```
-   (The last line makes you the owner of the folder so DSM's Text Editor can save `.env` in step 3.)
+   (The last line makes you the owner of the folder so step 3 can write `.env`.)
    (Upload the tar into `/volume1/docker` with File Station first.)
-3. **NAS: fill in `.env`.** Copy it with `cp /volume1/docker/trader/.env.example /volume1/docker/trader/.env`, edit it in DSM's Text Editor (paper username, paper password,
-   a VNC password), then lock it: `sudo chmod 600 /volume1/docker/trader/.env`.
-   For `IB_GATEWAY_IMAGE`, copy the line the recorder uses so both Gateways are the same version:
-   `sudo grep '^IB_GATEWAY_IMAGE=' /volume1/docker/trade-journal/.env`
-4. **NAS: check, then start.**
+3. **NAS: fill in `.env`.** Run `bash /volume1/docker/make_trader_env.sh` (also in this folder as `make_trader_env.sh`). It asks
+   for the paper username, the paper password and a VNC password, copies the Gateway image pin from the recorder's `.env`
+   (so both Gateways are the same version) and writes `/volume1/docker/trader/.env` with mode 600. DSM has no text editor
+   for dot-files, which is why this is a script. A password containing `'` or `\` is refused.
+4. **NAS: check, create the DSM project, start.** Create the project first, so Container Manager shows and manages it
+   from day one (adopting a stack that was started over SSH later needed hash checks and a rebuild, W17-0037).
    ```
    free -m
    cd /volume1/docker/trader
    sudo docker compose config > /dev/null && echo CONFIG OK
-   sudo docker compose up -d
+   ```
+   Then in DSM: **Container Manager > Project > Create**. Project name exactly `trader`, path `/volume1/docker/trader`,
+   source "Use existing docker-compose.yml" (it finds `compose.yaml`; the `.env` in the same folder is used), leave the
+   Web Station portal option off, tick start on creation (nothing else runs in this project yet). If the dot stays
+   grey, press **Build** once, then **Start**. After this, start, stop and rebuild the Gateway from DSM, not with
+   `docker compose up` (mixing the two leaves stale settings hashes, the W17-0037 lesson). Then:
+   ```
    sudo docker compose ps
    sudo docker logs --tail 60 trader-ib-gateway
    ```
    Wait two minutes. `ps` should end up `healthy`. The log should show the IBC login finishing and the API listening.
    A paper login normally needs no phone approval. If the log says "Permission denied" about `tws_settings`, run
-   `sudo chmod -R 777 /volume1/trader/gateway` and `sudo docker compose restart` (this folder holds only Gateway settings).
+   `sudo chmod -R 777 /volume1/trader/gateway` and restart the project in DSM (this folder holds only Gateway settings).
 5. **NAS: probe.** Runs inside the Gateway's network, exactly as the trader will see it (the recorder image already
    holds `ib_async` 2.1.0, the same pin as the trader):
    ```
@@ -76,15 +83,17 @@ on **4004** for *other* containers. The trader refuses every port except 4002/74
    settles it.
 6. **NAS: read the Read-Only setting directly** (audit risk B):
    `sudo docker exec trader-ib-gateway grep -i '^ReadOnlyApi' /home/ibgateway/ibc/config.ini` should print `ReadOnlyApi=no`.
-7. **NAS: prove the port question** (audit risk A). From a *different* container on the project network the API port
-   4002 should be closed and only the relay 4004 open, which is why the trader must share the Gateway's network:
+7. **NAS: the port question** (audit risk A) - measured 2026-10-28. From a *different* container on the project network
+   (command below) the relay 4004 accepts an API session, and 4002 also accepts a plain TCP connection (the Gateway's Java
+   process listens on all interfaces inside the container). So "4002 closed from outside" was wrong. What is still
+   untested is whether the Gateway accepts an API *session* on 4002 from another container (it may refuse or ask for a
+   click on its screen, because "localhost only" is a Gateway setting). Sub 5 stays with the safe design, sharing the
+   Gateway's network so the trader is "localhost"; it can try 4002 over the network later if that is ever wanted.
    ```
    sudo docker run --rm --security-opt seccomp=unconfined --network trader_default \
      -v /volume1/docker/trader/probe_gateway.py:/probe.py:ro --entrypoint python \
      trade-journal-recorder:latest /probe.py --host trader-ib-gateway --port 4004 --ports 4002,4004
    ```
-   Expected: `4002 is closed`, `4004 is open`, `api` PASS on 4004. (If 4002 were open here, sub 5 could use a plain
-   network and the `network_mode` line would not be needed. Report what you see.)
 8. **Run something against this Gateway from a one-off container** (this is how the W18 desk's data script gets its
    price bars; the PC cannot reach the API by design). Pattern: join the Gateway's network and connect to
    `127.0.0.1:4002` as if the Gateway were on the same machine:
@@ -99,9 +108,8 @@ on **4004** for *other* containers. The trader refuses every port except 4002/74
 
 - Status: `cd /volume1/docker/trader && sudo docker compose ps` · log: `sudo docker logs --tail 60 trader-ib-gateway`
 - Memory and CPU: `sudo docker stats --no-stream`
-- Restart the Gateway (a fresh IBKR login): `sudo docker compose restart ib-gateway`
-- Stop and remove: `sudo docker compose down` (settings stay in `/volume1/trader/gateway`)
-- Undo this step entirely: `sudo docker compose down` and delete `/volume1/docker/trader` and `/volume1/trader`.
+- Restart / stop the Gateway (a fresh IBKR login on start): DSM Container Manager > Project > trader > Stop / Start.
+- Undo this step entirely: stop the project and choose Delete in DSM, then delete `/volume1/docker/trader` and `/volume1/trader`.
 
 ## Rules a later chat must not undo
 
@@ -109,8 +117,7 @@ on **4004** for *other* containers. The trader refuses every port except 4002/74
 - `READ_ONLY_API` stays `"no"` (the trader places orders). The recorder's Gateway keeps `"yes"`; they are different containers.
 - Host VNC port 5901 (the recorder's Gateway holds 5900).
 - Sub 5 adds the trader with `network_mode: "service:ib-gateway"`; any port the trader needs published would have to sit on the Gateway service, and the API is not one of them.
-- Create the DSM Container Manager project `trader` from this compose file only once sub 5 has added the trader
-  service (build once in DSM, as for `trade-journal`, W17-0037). Until then use the commands above.
+- The DSM Container Manager project `trader` is created in step 4. Sub 5 adds the trader service by editing `compose.yaml` and pressing **Build** in DSM (as for `trade-journal`), not by `docker compose up`.
 
 ## Not verified (no Gateway was reachable from the cloud workspace)
 

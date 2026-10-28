@@ -11,7 +11,8 @@ Run it INSIDE the Gateway container's network, so it sees the Gateway exactly as
 
 What it answers, one line each (PASS / FAIL / WARN / INFO):
   1. ports   Which of 4002 (the Gateway's own API) and 4004 (gnzsnz's socat relay) accept a connection.
-             Inside the Gateway's namespace both should be open; from any other container only 4004 is.
+             Inside the Gateway's namespace both are open. From another container both also accept a TCP
+             connection (measured 2026-10-28); whether a SESSION on 4002 is accepted from outside is untested.
              The trader accepts only 4002 / 7497, so 4004 is the "risk A" the step-2 audit raised.
   2. api     A read-only API session on 4002 completes the handshake (the Gateway is logged in and the API is on).
   3. paper   Every account the login sees is a paper account (ids start with "D"). A live id is a FAIL.
