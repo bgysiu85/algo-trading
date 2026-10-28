@@ -1,0 +1,61 @@
+# Paper IB Gateway for the NAS trader (W10-0013 sub 4). Project "trader" = the second of the three NAS projects
+# (trade-journal | trader | edge, decided 2026-10-28, sub 14). This step adds ONLY the Gateway; sub 5 adds the trader
+# service, sub 11 the portal relay. Setup guide: deploy/nas_trader/NAS-TRADER-SETUP.md
+#
+# The API is NOT published anywhere - not on the home network, not on the NAS's loopback. Rules a later chat must not undo:
+#   * The paper API (unauthenticated, orders allowed) is reachable only from containers that share this container's
+#     network: the trader will (sub 5,  network_mode: "service:ib-gateway"), and one-off jobs (the probe, the W18 desk's
+#     data script) join it with  --network container:trader-ib-gateway.
+#   * Why not 127.0.0.1:4002 on the NAS either: the NAS runs Tailscale in userspace mode, which hands every tailnet
+#     connection to the NAS's 127.0.0.1 (W17-0024 step 4 found 127.0.0.1:5900 and :5432 open that way). A loopback
+#     publish of the API would therefore be reachable by every device on the tailnet. Never publish it at all.
+#   * The trader refuses every port except 4002/7497. Inside the Gateway's network the Gateway itself listens on
+#     4002; gnzsnz's socat relay on 4004 exists for OTHER containers and is the wrong port for the trader.
+#   * One IBKR username = one session. The PC's paper Gateway and the ProArt trader must be OFF while this runs.
+name: trader
+
+services:
+  ib-gateway:
+    # Same gnzsnz image and pin as the recorder's Gateway (set IB_GATEWAY_IMAGE in .env to the digest in
+    # /volume1/docker/trade-journal/.env). A different username, so a second Gateway is needed.
+    image: ${IB_GATEWAY_IMAGE:-ghcr.io/gnzsnz/ib-gateway:stable}
+    container_name: trader-ib-gateway           # fixed name: probe and one-off jobs join it with  --network container:trader-ib-gateway
+    platform: linux/amd64
+    restart: always
+    security_opt:
+      - seccomp:unconfined                      # Synology's kernel has no seccomp; without this containers fail to start
+    environment:
+      TWS_USERID: ${TWS_USERID:?set TWS_USERID in .env}          # the PAPER username
+      TWS_PASSWORD: ${TWS_PASSWORD:?set TWS_PASSWORD in .env}
+      TRADING_MODE: paper
+      READ_ONLY_API: "no"                       # the trader places orders; "yes" makes IBKR reject every one (audit risk B)
+      # Daily restart in the middle of the CME break (16:00-17:00 Chicago), as on the recorder's Gateway. A daily restart
+      # needs no new approval. Sub 6/9 confirm the trader's session hours fit around it.
+      TIME_ZONE: America/Chicago
+      TZ: America/Chicago
+      AUTO_RESTART_TIME: "04:30 PM"
+      TWOFA_TIMEOUT_ACTION: restart             # an unapproved login prompt is retried, not left dead (paper logins normally have none)
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      VNC_SERVER_PASSWORD: ${VNC_SERVER_PASSWORD:?set VNC_SERVER_PASSWORD in .env}
+      TWS_SETTINGS_PATH: /home/ibgateway/tws_settings
+    volumes:
+      - ${GATEWAY_SETTINGS_DIR:-/volume1/trader/gateway}:/home/ibgateway/tws_settings
+    ports:
+      # Only the login screen (VNC), NAS loopback only, like the recorder's. 5901 because the recorder's Gateway already
+      # holds 5900. It is password-protected, but note the Tailscale point above: the tailnet reaches it (W10-0013 sub 7
+      # reviews the recorder's 5900 and this one together). The API is deliberately not listed here.
+      - "127.0.0.1:${VNC_HOST_PORT:-5901}:5900"
+    healthcheck:
+      # Healthy while the Gateway's own API socket (4002) accepts a connection, i.e. logged in and API on. Docker only
+      # flags it; nothing restarts on "unhealthy" here (alerts for this come with W10-0013 sub 12).
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/4002"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  # trader:   (sub 5)   image + env, and  network_mode: "service:ib-gateway"  so it sees 127.0.0.1:4002 and nothing else.
+  # relay:    (sub 11)  portal relay, joins the external network thesiuz-edge (project "edge", sub 15).
