@@ -1,0 +1,20 @@
+{
+  "tickers": ["MPC", "AMZN", "INTC", "PBF", "BAC", "CNC", "BTSG", "ICHR", "SNEX", "SNDK",
+              "MXL", "CRDO", "NEXA", "CSTM", "LITE", "FN", "GM", "DY", "NEM", "B"],
+  "paper_rules": {
+    "long_only": true,
+    "shares_per_symbol": 1,
+    "max_open_positions": 15,
+    "max_hold_days": 180,
+    "account_usd": 19000
+  },
+  "ibkr": {
+    "host": "127.0.0.1",
+    "port": 4002,
+    "client_id": 91,
+    "duration": "2 Y",
+    "timeout_s": 15
+  },
+  "runs_dir": "var/desk_runs",
+  "sec_user_agent_env": "SEC_CONTACT"
+}
