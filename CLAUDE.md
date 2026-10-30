@@ -28,6 +28,15 @@ Handover and RESULT docs live in `claude/` (named `handover_wXX_nnnn_*` / `wXX_n
 - Trader session window is 04:00–09:30 New York.
 - Current settings: TRADER_STRATEGY=mcl,mc5, TRADER_MAX_POSITIONS=3, TRADER_CAP_SCOPE=strategy (Ben: "3 positions should be to each strategy").
 
+## NAS SSH access (W10-0017) — how Claude logs in to the DS1819+
+- Host 192.168.1.109 (DS1819+, DSM 7.4.1), port 22, user `claude`, key login only. Private key: `D:\Trading\Claude outputs\.ssh\nas_claude_ed25519` (git-ignored via `Claude outputs/`). Never copy it into the repo, print it or send it anywhere.
+- Test from PowerShell: `ssh -i "D:\Trading\Claude outputs\.ssh\nas_claude_ed25519" -o BatchMode=yes claude@192.168.1.109 "echo LOGIN-OK"`
+- If Windows ssh refuses the key as "too open", Ben runs once: `icacls "D:\Trading\Claude outputs\.ssh\nas_claude_ed25519" /inheritance:r /grant:r "$($env:USERNAME):(R)"`
+- Cloud chat sessions using the linked PC's Linux shell: copy the key to `~/.ssh/nas` with `chmod 600` first (the mounted copy's permissions are not accepted), then `ssh -i ~/.ssh/nas claude@192.168.1.109`.
+- Folders: read/write `/volume1/trade-journal`, `/volume1/docker`, `/volume1/web`, `/volume1/Logs`, `/volume1/Cloud Services`, `/volume1/homes`; read-only `/volume1/ActiveBackupforBusiness`; no access to other shares. `python3` and `psql` are in /usr/bin.
+- No root: `sudo` asks for a password and the Docker socket is root-only, so no `docker` / `docker compose` commands. Ben decided (2026-10-28) not to add passwordless sudo, not even docker-only: "let's leave it as it is for now". Give Ben docker commands as copy-paste for his own NAS session.
+- Use it to copy and unpack release tars, read log and data files, check deployed files (checksums, RELEASE.json) and run read-only psql queries. Files written are owned by `claude` (uid 1043, group users): set permissions the container can read (an earlier owner-only tar broke journal-app). Ask Ben before editing a `.env` or deleting anything on the NAS.
+
 ## Task board (monday.com, board "Algo Trading", id 5031413876)
 - Every task becomes an item "Wxx-nnnn · name"; subitems for steps. Post an Update first (dated note), then change Status/Assignee.
 - Commands Ben must run go on the board as an Update inside <pre>…</pre>, one command per line.
