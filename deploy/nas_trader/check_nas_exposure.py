@@ -1,4 +1,4 @@
-"""W10-0013 sub 7: which NAS ports answer from the PC, on the home network and over Tailscale.
+"""W10-0013 subs 7 and 15: which NAS ports answer from the PC, on the home network and over Tailscale.
 
 The W17-0024 checker (Trade Journal repo, tools/check_journal_internet.py) extended with the trader's ports and the
 NAS's loopback-only services. Run on the ProArt (it is on both networks). It only opens and closes TCP connections; it
@@ -35,6 +35,8 @@ MUST_BE_CLOSED = [
     (33300, "DSM internal (127.0.0.1 only)"), (33303, "DSM internal (127.0.0.1 only)"),
     (33304, "DSM internal (127.0.0.1 only)"),
     (8088, "old journal port"), (4180, "journal login container"),
+    (8080, "portal relay container (sub 11; reached only through the tunnel)"),
+    (1411, "Pocket ID container (sub 15; reached only through the tunnel)"),
     (6881, "qbittorrent BitTorrent"), (9865, "qbittorrent web UI"),
 ]
 # Expected to answer; reported for the record, never a failure.

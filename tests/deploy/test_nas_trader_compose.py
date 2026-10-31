@@ -55,7 +55,9 @@ def test_the_api_is_never_published_on_any_address():
 
 def test_nothing_is_bound_to_all_interfaces_or_the_host_network():
     code = "\n".join(code_lines(COMPOSE))
-    assert "0.0.0.0" not in code
+    # The relay listens on 0.0.0.0 INSIDE its container (it must, to be reached on the Docker network); it publishes no
+    # port and sits on thesiuz-edge only - see the relay tests below.
+    assert "0.0.0.0" not in code.replace(service_block("relay"), "")
     assert "network_mode: host" not in code and 'network_mode: "host"' not in code
     assert "privileged" not in code
 
@@ -180,3 +182,44 @@ def test_every_upgrade_unpack_closes_env_again():
     for b in upgrades:
         assert "chmod 600 /volume1/docker/trader/.env" in b, b
         assert b.index("chmod 600 /volume1/docker/trader/.env") > b.index("a+rX /volume1/docker/trader"), b
+
+
+# ---------------------------------------------------------------- the portal relay (W10-0013 sub 11)
+RELAY = service_block("relay")
+
+
+def test_the_relay_exists_and_is_only_on_the_external_edge_network():
+    assert RELAY
+    assert re.search(r"^\s+networks:\n\s+- edge\s*$", RELAY, re.M)
+    assert "default" not in RELAY and "network_mode" not in RELAY
+    top = "\n".join(code_lines(COMPOSE)).split("\nnetworks:\n", 1)[1]
+    assert re.search(r"^  edge:\n    name: thesiuz-edge\n    external: true\s*$", top, re.M), top
+
+
+def test_the_relay_publishes_nothing_and_never_sees_the_gateway():
+    assert not re.search(r"^\s+(ports|expose):", RELAY, re.M)
+    assert "ib-gateway" not in RELAY and "depends_on" not in RELAY
+    assert not re.search(r"\b(4001|4002|4003|4004|7496|7497)\b", RELAY)
+    # the Gateway and the trader are not on thesiuz-edge
+    assert "edge" not in service_block("ib-gateway") and "edge" not in TRADER
+
+
+def test_the_relay_never_starts_with_the_project_and_keeps_its_secrets_in_env():
+    assert re.search(r'^\s+profiles: \["portal"\]\s*$', RELAY, re.M)
+    assert re.search(r"^\s+container_name: trader-relay\s*$", RELAY, re.M)
+    for name in ("RELAY_OIDC_CLIENT_ID", "RELAY_OIDC_CLIENT_SECRET", "RELAY_SESSION_SECRET", "RELAY_DATABASE_URL"):
+        assert "${%s:-}" % name in RELAY, name      # no ":?" - compose checks every service, the Gateway must still start
+        assert re.search(rf"^{name}=\s*$", ENV_EXAMPLE, re.M), f"{name} must be empty in .env.example"
+    assert "UI_BASE_URL: https://trader.thesiuz.com" in RELAY
+
+
+def test_the_relay_runs_unprivileged_read_only_with_code_and_packages_read_only():
+    assert re.search(r'^\s+user: "1000:1000"\s*$', RELAY, re.M)
+    assert re.search(r"^\s+read_only: true\s*$", RELAY, re.M)
+    assert re.search(r"-\s+\$\{RELAY_APP_DIR:-[^}]+\}:/srv:ro\s*$", RELAY, re.M)
+    assert re.search(r"-\s+\$\{RELAY_DEPS_DIR:-[^}]+\}:/deps:ro\s*$", RELAY, re.M)
+    assert "privileged" not in RELAY and "cap_add" not in RELAY and "trade-journal" not in RELAY
+
+
+def test_the_relay_url_stays_empty_in_env_example_until_the_cutover():
+    assert re.search(r"^UI_RELAY_URL=\s*$", ENV_EXAMPLE, re.M)

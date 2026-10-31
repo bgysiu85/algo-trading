@@ -1,0 +1,71 @@
+# The NAS "edge" project (W10-0013 sub 15, decided in sub 14: three NAS projects = trade-journal | trader | edge).
+# Everything that faces the internet lives here and nothing else does:
+#   * tunnel     Cloudflare Tunnel "thesiuz-nas" (moved out of the trade-journal compose, SAME token, so the routes in the
+#                Cloudflare dashboard stay as they are). Outgoing connection only; no router port.
+#   * network    thesiuz-edge, created by THIS project from now on. journal-login (trade-journal project) and the portal
+#                relay (trader project, sub 11) join it as an external network. The trader and the Gateways never do.
+#   * pocket-id  (profile "id", sub 11, started only on purpose) the passkey login at id.thesiuz.com.
+# Rules a later chat must not undo:
+#   * Nothing here publishes a port. The tunnel is the only way in.
+#   * Never run this tunnel and the old trade-journal "tunnel" service at the same time (same token).
+#   * The Gateway and the paper API are never attached to thesiuz-edge (an edge container must not reach order entry).
+# Setup guide: deploy/nas_edge/NAS-EDGE-SETUP.md
+name: edge
+
+services:
+  tunnel:
+    # Same image pin as the trade-journal project had. Routes (journal.thesiuz.com -> http://journal-login:4180,
+    # trader.thesiuz.com -> http://trader-relay:8080, id.thesiuz.com -> http://pocket-id:1411) are set in the Cloudflare
+    # dashboard; .env holds only the token.
+    image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:2026.10.3}
+    container_name: edge-tunnel
+    platform: linux/amd64
+    restart: always
+    security_opt:
+      - seccomp:unconfined                      # Synology's kernel has no seccomp
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env (copy it from /volume1/docker/trade-journal/.env)}
+    networks:
+      - edge
+    read_only: true
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+  pocket-id:
+    # Pocket ID (passkey login). Pinned by digest, the same bytes as on Fly (deploy/pocket-id/fly.toml in the Trading UI
+    # repo): a redeploy must not bring a schema migration nobody chose. The hostname MUST stay id.thesiuz.com: a passkey is
+    # bound to it. NOT started by a plain "up": profile "id", started after the database is copied (NAS-EDGE-SETUP.md part 4).
+    profiles: ["id"]
+    image: ${POCKET_ID_IMAGE:-ghcr.io/pocket-id/pocket-id@sha256:01540977dcf4c7b41b1159f34d68e4632f2658d62790e460ca65a42722b13c4a}
+    container_name: edge-pocket-id
+    platform: linux/amd64
+    restart: always
+    security_opt:
+      - seccomp:unconfined
+    user: "${PUID:-1026}:${PGID:-100}"
+    environment:
+      APP_URL: https://id.thesiuz.com
+      PORT: "1411"
+      TRUST_PROXY: "true"
+      ENCRYPTION_KEY: ${POCKET_ID_ENCRYPTION_KEY:-}   # the key the copied database was written with (no ":?": compose checks every service, and the tunnel must still start)
+      TZ: UTC
+    volumes:
+      - ${POCKET_ID_DATA_DIR:-/volume1/docker/edge/pocket-id/data}:/app/data
+    networks:
+      - edge
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+networks:
+  edge:
+    # Created here from now on. journal-login's TRUSTED_PROXY_IPS is TJ_EDGE_SUBNET, so this subnet must equal the one the
+    # trade-journal project used: copy TJ_EDGE_SUBNET from /volume1/docker/trade-journal/.env into this project's .env.
+    name: thesiuz-edge
+    ipam:
+      config:
+        - subnet: ${TJ_EDGE_SUBNET:-172.30.250.0/24}

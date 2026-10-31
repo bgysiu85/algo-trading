@@ -45,3 +45,11 @@ def test_report_names_the_open_port():
     res = cne.check("tailnet", "100.79.212.23", probe_open({("100.79.212.23", 5432)}))
     text = cne.report(res)
     assert "FAIL  tailnet 100.79.212.23:5432" in text and "1 failed" in text
+
+
+def test_the_edge_and_relay_containers_must_be_closed_on_the_home_address():
+    """Sub 11/15: the relay (8080) and Pocket ID (1411) are reached only through the tunnel, never on a NAS port."""
+    ports = {p for p, _ in cne.MUST_BE_CLOSED}
+    assert {8080, 1411, 4180} <= ports
+    res = cne.check("home", "192.168.1.109", probe_open({("192.168.1.109", 8080)}))
+    assert any(not r.ok and ":8080" in r.name for r in res)

@@ -113,4 +113,66 @@ services:
       driver: json-file
       options: {max-size: "10m", max-file: "5"}
 
-  # relay:    (sub 11)  portal relay, joins the external network thesiuz-edge (project "edge", sub 15).
+  relay:
+    # The portal relay (W10-0013 sub 11): the FastAPI app from the Trading UI repo (D:\Trading UI), served at
+    # https://trader.thesiuz.com through the tunnel in the "edge" project (sub 15). Same pattern as the trader: plain python
+    # image + folders mounted in (Synology cannot run a RUN step in a build): /srv = app/ contract/ history/, /deps = the
+    # pinned packages. Steps: NAS-TRADER-SETUP.md part 5.
+    #   * ONLY on the external network thesiuz-edge (created by the edge project): reachable by the tunnel, and by
+    #     journal-login, but NOT on this project's default network and not in the Gateway's network. It cannot reach the
+    #     paper API, and the trader (which shares the Gateway's network) pushes to the public https address instead.
+    #   * Publishes no port. Exactly one instance: it keeps the last pushed state in memory (a second copy breaks the portal).
+    #   * Never starts with the project (profile "portal"); started on purpose:
+    #       docker compose --profile portal up -d --no-deps relay      (--no-deps: the Gateway and trader are not touched)
+    #   * Browser login is Pocket ID (OIDC). With the OIDC settings empty the relay refuses everything but localhost, so a
+    #     half-configured relay is closed, not open. The trader pushes with the agent token (UI_AGENT_TOKEN, same value).
+    profiles: ["portal"]
+    image: ${RELAY_IMAGE:-python:3.12-slim}
+    container_name: trader-relay
+    platform: linux/amd64
+    restart: always
+    user: "1000:1000"
+    init: true
+    security_opt:
+      - seccomp:unconfined                      # Synology's kernel has no seccomp
+    working_dir: /srv
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080",
+              "--proxy-headers", "--forwarded-allow-ips", "*"]
+    environment:
+      PYTHONPATH: /deps
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      LANG: C.UTF-8
+      TRADER_UI_STALE_AFTER: "30"
+      TRADER_UI_AGENT_TOKEN: ${UI_AGENT_TOKEN:-}                    # the trader's token (one value, two names)
+      UI_BASE_URL: https://trader.thesiuz.com                       # the OIDC callback is built from it; https = secure cookies
+      OIDC_ISSUER: ${RELAY_OIDC_ISSUER:-https://id.thesiuz.com}
+      OIDC_CLIENT_ID: ${RELAY_OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${RELAY_OIDC_CLIENT_SECRET:-}
+      TRADER_UI_SESSION_SECRET: ${RELAY_SESSION_SECRET:-}
+      ALLOWED_SUBJECTS: ${RELAY_ALLOWED_SUBJECTS:-}
+      DATABASE_URL: ${RELAY_DATABASE_URL:-}                         # Neon until sub 13 moves the history to the NAS Postgres
+    volumes:
+      - ${RELAY_APP_DIR:-/volume1/docker/trader/relay/srv}:/srv:ro
+      - ${RELAY_DEPS_DIR:-/volume1/docker/trader/relay/deps}:/deps:ro
+    networks:
+      - edge
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/api/health', timeout=5)"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "3"}
+
+networks:
+  edge:
+    # Created by the edge project (deploy/nas_edge). External here, so this project never creates or removes it.
+    name: thesiuz-edge
+    external: true

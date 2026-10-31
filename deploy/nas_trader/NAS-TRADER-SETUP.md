@@ -282,3 +282,103 @@ Full write-up: `claude/w10_0013_sub7_security_review_RESULT_20261031.md`. What a
 - **The ProArt reaches the share as `\\SiuDiskstation`, as `pc-reader`.** The name used to resolve through Tailscale; it now
   needs a hosts-file line `192.168.1.109 SiuDiskstation`. Do not switch the settings to `\\192.168.1.109`: that address
   carries Ben's `sysadmin` credential, which can write to the share.
+
+
+# Part 5 - the portal relay (W10-0013 sub 11, 2026-10-31)
+
+What this adds: the portal relay (the FastAPI app of `D:\Trading UI`) as the container `trader-relay` in the trader project,
+served at `https://trader.thesiuz.com` through the tunnel of the `edge` project (`deploy/nas_edge/NAS-EDGE-SETUP.md`). Neon
+stays the history database until sub 13. The portal's Reporting tab is unchanged.
+
+## Limits and risks
+- **Needs the edge project first** (its part 3): the relay joins the external network `thesiuz-edge`, which edge creates.
+- **The relay never touches the trader or the Gateway.** It is started alone (`--no-deps`), sits on `thesiuz-edge` only, and has
+  no route to the paper API. The trader (which shares the Gateway's network) reaches it by the public address
+  `https://trader.thesiuz.com`, not over Docker. The portal's commands cannot place or cancel orders (sub 7 review, item 5).
+- **Nothing on the trader changes until the cutover step** (6): `UI_RELAY_URL` stays empty, so the trader keeps publishing nothing.
+  Do steps 1-5 any time (also during the shadow run); do step 6 with sub 9's cutover.
+- **Exactly one relay.** It keeps the last state in memory; the Fly relay and this one must not both receive the trader's pushes,
+  so step 7 (the DNS switch) is what moves the portal, and only then does the Fly app stop.
+- The relay's secrets live in `/volume1/docker/trader/.env` (mode 600), copied by `make_relay_env.py` and never printed.
+- Claude has no root on the NAS; the `sudo docker` lines are for Ben's NAS session.
+
+## Steps
+1. **Build and copy the relay's files.** `/volume1/docker/trader` belongs to `sysadmin`, so the `claude` login cannot write there;
+   the files go to a staging folder and Ben's NAS session moves them. Code is the `app`, `contract` and `history` folders of
+   `D:\Trading UI`, plus its `requirements.txt`. PowerShell on the ProArt:
+```
+Set-Location "D:\Trading UI"
+$k = "D:\Trading\Claude outputs\.ssh
+as_claude_ed25519"
+tar --exclude=__pycache__ -cf "D:\Trading\Claude outputselay_srv.tar" app contract history requirements.txt
+ssh -i $k claude@192.168.1.109 "mkdir -p /volume1/docker/edge/staging"
+scp -O -i $k "D:\Trading\Claude outputselay_srv.tar" "D:\Trading\deploy
+as_trader\compose.yaml" "D:\Trading\deploy
+as_trader\.env.example" claude@192.168.1.109:/volume1/docker/edge/staging/
+```
+   Then in the NAS session. This replaces the trader project's `compose.yaml` (the trader and Gateway sections are unchanged; the
+   new text is the `relay` service and the external network) and touches no running container until a `docker compose up`
+   names one. The last line closes `.env` again, as after every unpack:
+```
+sudo mkdir -p /volume1/docker/trader/relay/srv /volume1/docker/trader/relay/deps
+sudo cp /volume1/docker/trader/compose.yaml /volume1/docker/trader/compose.yaml.before-relay
+sudo cp /volume1/docker/edge/staging/compose.yaml /volume1/docker/edge/staging/.env.example /volume1/docker/trader/
+sudo tar --overwrite -xf /volume1/docker/edge/staging/relay_srv.tar -C /volume1/docker/trader/relay/srv
+sudo chmod -R a+rX /volume1/docker/trader/relay
+sudo chmod 600 /volume1/docker/trader/.env
+```
+2. **Install the packages once (NAS session).** Synology cannot run a build step, so a plain container installs them:
+```
+sudo docker run --rm --security-opt seccomp=unconfined -v /volume1/docker/trader/relay:/r python:3.12-slim pip install --no-cache-dir --target /r/deps -r /r/srv/requirements.txt
+sudo chmod -R a+rX /volume1/docker/trader/relay
+```
+3. **Put the relay's settings in `.env` (PowerShell on the ProArt).** First look at what would be copied (names and short
+   fingerprints only), then copy it. `RELAY_ALLOWED_SUBJECTS` is empty today, as on Fly (fine while Pocket ID has one account):
+```
+Set-Location D:\Trading
+.\.venv\Scripts\python.exe deploy\nas_trader\make_relay_env.py --check
+.\.venv\Scripts\python.exe deploy\nas_trader\make_relay_env.py | ssh -i "D:\Trading\Claude outputs\.ssh\nas_claude_ed25519" claude@192.168.1.109 "tr -d '\r' > /volume1/docker/edge/staging/relay.env.part && chmod 600 /volume1/docker/edge/staging/relay.env.part"
+```
+   (`.env` belongs to `sysadmin` and is mode 600, so the lines are staged in a file only the `claude` login can read, then appended by
+   the NAS session.) They include `UI_AGENT_TOKEN` (the trader's own token; the same value the Fly relay accepts), which keeps the
+   trader's portal link off because `UI_RELAY_URL` is still empty. Then in the NAS session, **once**:
+```
+sudo sh -c "cat /volume1/docker/edge/staging/relay.env.part >> /volume1/docker/trader/.env"
+sudo rm /volume1/docker/edge/staging/relay.env.part
+sudo chmod 600 /volume1/docker/trader/.env
+sudo grep -c -E '^(RELAY_|UI_AGENT_TOKEN)' /volume1/docker/trader/.env
+cd /volume1/docker/trader && sudo docker compose --profile portal config --quiet && echo CONFIG-OK
+```
+   The count should be 6 or 7. If `.env` gained duplicate lines (the command was run twice), remove the older ones with nano.
+4. **Start the relay alone (NAS session).**
+```
+cd /volume1/docker/trader
+sudo docker compose --profile portal up -d --no-deps relay
+sudo docker ps --format '{{.Names}}  {{.Status}}' | grep -E 'trader|relay'
+sudo docker logs --tail 15 trader-relay
+sudo docker exec trader-relay python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8080/api/health', timeout=5).read())"
+```
+   `trader-trader` and `trader-ib-gateway` must show the same uptime as before. The health call should print a small JSON body.
+5. **Add the route (Cloudflare dashboard).** Zero Trust > Networks > Tunnels > `thesiuz-nas` > Published application routes >
+   add `trader.thesiuz.com` -> `http://trader-relay:8080`. The DNS record `trader` currently points at the Fly app; the route can
+   only be added after that record is edited to the tunnel's `<tunnel-id>.cfargotunnel.com` (this IS the switch, so do it last, and
+   see step 7). The portal keeps working on the Fly address until then. Sign-in at `trader.thesiuz.com` needs Pocket ID to answer at
+   `id.thesiuz.com` (edge part 5, or still on Fly: both work).
+6. **Cutover of the trader's link (with sub 9).** In `.env` set `UI_RELAY_URL=https://trader.thesiuz.com` (nano), `chmod 600`
+   again, and restart the trader only at a time sub 9 chooses (never 04:00-09:30 New York). A dry session publishes only when
+   `UI_PUBLISH_DRY` is set, so the shadow run is unaffected.
+7. **Check, then retire Fly.** Open https://trader.thesiuz.com, sign in with the passkey, confirm the state shows. When it does,
+   `fly machine stop` the relay app `thesiuz-trader-relay` (keep it stopped, not destroyed, until sub 13 has moved the history).
+   On the ProArt run the exposure check (`deploy\nas_trader\check_nas_exposure.py`); port 8080 must be closed on the home address.
+
+## Undo
+```
+cd /volume1/docker/trader
+sudo docker compose --profile portal rm -sf relay
+```
+and point the DNS record `trader` back at the Fly app (`thesiuz-trader-relay.fly.dev`). The relay holds no data of its own.
+
+## Rules a later chat must not undo
+- The relay is on `thesiuz-edge` only. Never add it, or anything else, to the Gateway's network or the Gateway to `thesiuz-edge`.
+- The relay has no `ports:` and starts only by name (`--profile portal ... --no-deps relay`).
+- Its secrets stay in `.env` (mode 600), written by `make_relay_env.py`; never typed on a command line or stored in the repo.
