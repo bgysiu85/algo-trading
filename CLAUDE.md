@@ -24,7 +24,7 @@ Handover and RESULT docs live in `claude/` (named `handover_wXX_nnnn_*` / `wXX_n
 - `TRADER_MODE` defaults to dry in the launcher, compose and `.env.example` (tests enforce all three). Paper is an explicit `.env` edit.
 - The code folder on the NAS is replaced by unpacking a new tar; never edit /app on the NAS. `app/RELEASE.json` says which commit it is.
 - `restart: "no"`; no second automatic session after 09:30 New York.
-- Stale-lock clearing at container start is safe only while var/ is private; sub 6 must replace it before var/ is shared.
+- Since sub 6 (2026-10-31) var/ is /volume1/trader-data/var (TRADER_VAR_DIR), a DSM share the ProArt reads READ-ONLY as `pc-reader`. The session lock has a 20 s heartbeat (dead after 120 s); the PC reads it via SESSION_LOCK_REMOTE, and the task `Algo - pull NAS var` copies fills into var\nas_mirror every 2 h. Stale-lock clearing at container start stays safe only while nothing but the NAS trader writes to var/: never give the PC write access to the share.
 - Trader session window is 04:00–09:30 New York.
 - Current settings: TRADER_STRATEGY=mcl,mc5, TRADER_MAX_POSITIONS=3, TRADER_CAP_SCOPE=strategy (Ben: "3 positions should be to each strategy").
 
