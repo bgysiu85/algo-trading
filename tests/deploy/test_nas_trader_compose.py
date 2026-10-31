@@ -165,3 +165,18 @@ def test_trader_secrets_are_optional_env_references_never_literals():
 
 def test_the_agent_id_is_set_explicitly_so_the_portal_can_tell_the_nas_from_the_proart():
     assert "UI_AGENT_ID: ${UI_AGENT_ID:-nas-trader}" in TRADER
+
+
+# ---------------------------------------------------------------- the setup guide (W10-0013 sub 7)
+SETUP = (DEPLOY / "NAS-TRADER-SETUP.md").read_text(encoding="utf-8")
+
+
+def test_every_upgrade_unpack_closes_env_again():
+    """`chmod -R a+rX /volume1/docker/trader` after an unpack also opened .env (the paper password) to every NAS user:
+    sub 7 found it at 644. Every upgrade unpack (tar --overwrite, .env already there) must end with chmod 600 on it."""
+    blocks = re.findall(r"```\n(.*?)```", SETUP, re.S)
+    upgrades = [b for b in blocks if "tar --overwrite" in b and "a+rX /volume1/docker/trader" in b]
+    assert upgrades
+    for b in upgrades:
+        assert "chmod 600 /volume1/docker/trader/.env" in b, b
+        assert b.index("chmod 600 /volume1/docker/trader/.env") > b.index("a+rX /volume1/docker/trader"), b

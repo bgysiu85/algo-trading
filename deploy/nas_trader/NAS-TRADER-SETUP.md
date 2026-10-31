@@ -165,9 +165,11 @@ T2. **PC: build the tar.** `python deploy\nas_trader\build_release.py` writes `D
 T3. **NAS: unpack.** Upload the tar into `/volume1/docker` (File Station), then:
     ```
     cd /volume1/docker && sudo tar --overwrite -xf w10_0013_sub5_nas.tar && sudo chmod -R a+rX /volume1/docker/trader
-    sudo chown -R "$(id -un)":users /volume1/docker/trader
+    sudo chown -R "$(id -un)":users /volume1/docker/trader && sudo chmod 600 /volume1/docker/trader/.env
     ```
     This refreshes `compose.yaml`, `.env.example`, this guide and `probe_gateway.py`, and creates `app/`. `.env` is never in the tar.
+    The `chmod -R a+rX` also opens `.env` to every NAS user, so the last command closes it again (sub 7 found it at 644).
+    Every later unpack (sub 6 onwards) ends with the same `sudo chmod 600 /volume1/docker/trader/.env`.
 T4. **NAS: the trader's var folder, then the packages.**
     ```
     sudo mkdir -p /volume1/trader/var && sudo chown -R 1000:1000 /volume1/trader/var && sudo chmod -R 775 /volume1/trader/var
@@ -258,3 +260,22 @@ S4. **PC: credentials, the two settings, the scheduled copy.** Exact commands ar
 - Both machines need correct clocks (the heartbeat is compared across them). Step S4 prints both times.
 - Undo: delete the scheduled task `Algo - pull NAS var`, `setx SESSION_LOCK_REMOTE ""`, and point `TRADER_VAR_DIR` back
   to `/volume1/trader/var` (the old folder is left in place by S3, not deleted).
+
+---
+
+# Part 4 - security review of the trader side (W10-0013 sub 7, 2026-10-31)
+
+Full write-up: `claude/w10_0013_sub7_security_review_RESULT_20261031.md`. What a later chat must know:
+
+- **Who can place paper orders.** Only the trader process sends orders. The portal (when sub 11 connects it) can pause,
+  resume, switch a strategy off or on, set the position cap (0-10) and the trail (0.5-20 %), on a paper account only; it
+  cannot place or cancel an order. Telegram is send-only. Below the trader, anything that reaches the Gateway's API can
+  place paper orders: the trader and one-off containers on its network, **and any NAS shell user without root** (the
+  host reaches the Gateway container's address, `172.21.0.2:4004` on 2026-10-31). The `claude` SSH key is one of those.
+  Nothing on the home network or the tailnet reaches the API.
+- **`.env` is mode 600.** It holds the paper password and the VNC password. After every unpack run
+  `sudo chmod 600 /volume1/docker/trader/.env`.
+- **Tailscale userspace mode** exposes every `127.0.0.1` service on the NAS to the tailnet (both VNC screens, DSM's
+  Postgres, DNS control and DSM internals). `python deploy\nas_trader\check_nas_exposure.py` on the ProArt lists what
+  answers on the home and tailnet addresses; it should pass once Tailscale runs with a TUN interface. Until then, reach
+  the VNC screens only through the SSH tunnel in step 8.
