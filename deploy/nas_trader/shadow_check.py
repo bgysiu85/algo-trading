@@ -22,6 +22,7 @@ KEY = Path(r"D:\Trading\Claude outputs\.ssh\nas_claude_ed25519")
 VAR = "/volume1/trader-data/var"
 LOG = Path(r"D:\Trading\Claude outputs\shadow_run_log.jsonl")
 PASS_SESSIONS = 3
+FIRST_DAY = "20261101"  # sessions before release 666a822 ran without the feed (dry skipped it); they do not count
 STALE_S = 120  # the lock counts as dead after 120 s (CLAUDE.md)
 
 REMOTE = (
@@ -96,7 +97,7 @@ def main() -> int:
         f.write(json.dumps(snap) + "\n")
 
     weekday_sessions = [d for d, v in fills.items()
-                        if v["session_open"] and datetime.strptime(d, "%Y%m%d").weekday() < 5]
+                        if v["session_open"] and d >= FIRST_DAY and datetime.strptime(d, "%Y%m%d").weekday() < 5]
     problems = []
     if lock["mode"] != "dry":
         problems.append(f"mode is {lock['mode']}, not dry")
