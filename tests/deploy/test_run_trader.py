@@ -36,6 +36,15 @@ def test_paper_mode_is_only_by_explicit_choice_and_then_passes_yes():
     assert "--yes" not in rt.build_args({"TRADER_MODE": "dry"})
 
 
+def test_dry_asks_main_for_the_feed_so_the_shadow_run_watches_something():
+    """main.py skips the feed in dry unless told (W10-0013 sub 8: the shadow run watched nothing)."""
+    a = rt.build_args({"TRADER_MODE": "dry"})
+    assert "--feed-in-dry" in a and "--no-feed" not in a
+    assert "--feed-in-dry" not in rt.build_args({"TRADER_MODE": "dry", "TRADER_FEED": "off"})
+    assert "--feed-in-dry" not in rt.build_args({"TRADER_MODE": "paper"})
+    assert "--feed-in-dry" not in rt.trader_args(a)
+
+
 @pytest.mark.parametrize("mode", ["live", "PAPERLIVE", "both", "backtest", "scan", "report"])
 def test_other_modes_are_refused(mode):
     with pytest.raises(rt.Refused):

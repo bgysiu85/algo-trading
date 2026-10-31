@@ -82,7 +82,7 @@ def _flag_value(argv: list[str], name: str, default: str) -> str:
 
 
 @contextmanager
-def _feed_beside(mode: str, want_feed: bool, forwarded: list[str]):
+def _feed_beside(mode: str, want_feed: bool, forwarded: list[str], feed_in_dry: bool = False):
     """Run common.tv_feed in a thread for the life of the trader.
 
     WHY A THREAD AND NOT THE EVENT LOOP. tv_feed is a synchronous urllib loop
@@ -104,7 +104,10 @@ def _feed_beside(mode: str, want_feed: bool, forwarded: list[str]):
     sleeping 10 seconds. The feed writes a file and holds no broker state;
     there is nothing it must finish.
     """
-    if mode != "paper" or not want_feed:
+    # Dry runs the feed only when asked (--feed-in-dry, set by the NAS launcher, whose var/ is its own): a dry run
+    # on the PC must not write the watchlist a live PC session then trades.
+    runs_feed = mode == "paper" or (mode == "dry" and feed_in_dry)
+    if not runs_feed or not want_feed:
         if mode == "paper":
             print("main.py: --no-feed, watchlist will not be updated by this "
                   "process. Start run_tv_feed.ps1 separately or the trader "
@@ -203,6 +206,9 @@ def run(argv: list[str] | None = None) -> int:
                         "command starts everything; use this when "
                         "run_tv_feed.ps1 or the IB scanner is already "
                         "writing the watchlist from elsewhere.")
+    p.add_argument("--feed-in-dry", action="store_true",
+                   help="let --mode dry run the watchlist feed too (default: dry never writes the watchlist). "
+                        "For a dry run whose var/ is separate from any live session's, i.e. the NAS shadow run.")
     p.add_argument("--strategy", default="mcl",
                    help="strategy to run, COMMA-separated for more than one "
                         "(default: mcl; e.g. --strategy mcl,mc5). A space "
@@ -281,7 +287,7 @@ def run(argv: list[str] | None = None) -> int:
         with session_lock.held(args.mode, args.strategy,
                                tree=prov.tree, version=prov.described,
                                dirty=prov.dirty, var=prov.var_path):
-            with _feed_beside(args.mode, args.feed, forwarded):
+            with _feed_beside(args.mode, args.feed, forwarded, args.feed_in_dry):
                 return trader.main(forwarded) or 0
 
     if args.mode == "backtest":

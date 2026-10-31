@@ -15,7 +15,7 @@ Everything is set through environment variables (compose.yaml fills them from .e
     TRADER_CAP_SCOPE       account | strategy   default unset = the trader's own default (account)
     TRADER_TELEGRAM_BATCH_MIN  number           default 0 = send immediately
     TRADER_NO_ARCHIVE      1 = keep the watchlist at session end
-    TRADER_FEED            on | off             default on (the TradingView watchlist feed runs inside the process)
+    TRADER_FEED            on | off             default on (the TradingView watchlist feed runs inside the process, in dry too via --feed-in-dry)
     TRADER_PORT            4002                 only the Gateway's PAPER port (4002) or TWS paper (7497) is accepted
 
 What this launcher deliberately does NOT do:
@@ -105,6 +105,8 @@ def build_args(env=None) -> list[str]:
         raise Refused(f"TRADER_FEED={feed!r} must be on or off.")
     if feed == "off":
         args += ["--no-feed"]
+    elif mode == "dry":
+        args += ["--feed-in-dry"]  # main.py skips the feed in dry otherwise; the NAS var/ is its own (shadow run)
 
     if mode == "paper":
         args += ["--yes"]          # no terminal in a container; see the module docstring
@@ -114,7 +116,7 @@ def build_args(env=None) -> list[str]:
 def trader_args(args: list[str]) -> list[str]:
     """What main.run() hands to the trader: its own flags (--mode, --strategy, --no-feed, --yes) are consumed, the
     strategy list is re-issued as separate words (the trader's --strategy takes several), --dry-run is added for dry."""
-    own = {"--mode": 1, "--strategy": 1, "--no-feed": 0, "--yes": 0}
+    own = {"--mode": 1, "--strategy": 1, "--no-feed": 0, "--feed-in-dry": 0, "--yes": 0}
     mode = args[args.index("--mode") + 1]
     wanted = args[args.index("--strategy") + 1].split(",")
     out: list[str] = []

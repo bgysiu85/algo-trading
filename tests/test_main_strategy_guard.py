@@ -206,6 +206,19 @@ def test_dry_mode_never_starts_the_feed(monkeypatch):
     assert not started.is_set()
 
 
+def test_dry_with_feed_in_dry_starts_the_feed_but_no_feed_still_wins(monkeypatch):
+    """The NAS launcher's var/ is its own, so its dry run may feed the watchlist (W10-0013 sub 8)."""
+    import threading
+    started = threading.Event()
+    rc, _ = _paper_feed(monkeypatch, ["--mode", "dry", "--strategy", "mcl", "--feed-in-dry"],
+                        feed=lambda argv=None: started.set() or 0)
+    assert rc == 0 and started.wait(2), "the feed was never started"
+    started2 = threading.Event()
+    _paper_feed(monkeypatch, ["--mode", "dry", "--strategy", "mcl", "--feed-in-dry", "--no-feed"],
+                feed=lambda argv=None: started2.set() or 0)
+    assert not started2.is_set()
+
+
 def test_a_feed_that_raises_does_not_stop_the_trader(monkeypatch, capsys):
     """THE POINT. A stale watchlist is survivable and visible. A killed process
     leaves an open position with no trailing stop, because the stop lives here
