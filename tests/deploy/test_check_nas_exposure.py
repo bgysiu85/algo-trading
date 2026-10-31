@@ -22,8 +22,12 @@ def test_all_closed_except_the_expected_ones_passes():
 
 
 def test_a_loopback_only_port_answering_over_the_tailnet_fails():
-    """The 2026-10-31 state: Tailscale in userspace mode hands the tailnet the NAS's 127.0.0.1."""
-    assert cne.main([], probe=probe_open({("100.79.212.23", 5901)})) == 1
+    """The 2026-10-31 state before Tailscale was removed: userspace mode handed the tailnet the NAS's 127.0.0.1."""
+    assert cne.main(["--tailnet", "100.79.212.23"], probe=probe_open({("100.79.212.23", 5901)})) == 1
+
+
+def test_the_tailnet_is_skipped_by_default_since_tailscale_left_the_nas():
+    assert cne.main([], probe=probe_open({("100.79.212.23", 5901)})) == 0
 
 
 def test_the_paper_api_answering_anywhere_fails():

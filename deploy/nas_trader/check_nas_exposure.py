@@ -5,12 +5,13 @@ NAS's loopback-only services. Run on the ProArt (it is on both networks). It onl
 sends nothing, so it never logs in to anything, IBKR included.
 
     python deploy\\nas_trader\\check_nas_exposure.py
-    python deploy\\nas_trader\\check_nas_exposure.py --lan 192.168.1.109 --tailnet 100.79.212.23 --out "D:\\Trading\\Claude outputs\\nas_exposure.txt"
+    python deploy\\nas_trader\\check_nas_exposure.py --lan 192.168.1.109 --tailnet 100.x.y.z --out "D:\\Trading\\Claude outputs\\nas_exposure.txt"
 
-Why the tailnet matters: Synology's Tailscale runs in "userspace" mode, which hands every tailnet connection to the
-NAS's own 127.0.0.1. So a service bound to 127.0.0.1 only (the Gateway VNC screens, DSM's Postgres, DNS control) is
-still reachable from every tailnet device. Sub 7 measured that on 2026-10-31. Once Tailscale runs with a TUN interface,
-every MUST-BE-CLOSED port below should be closed on both addresses.
+Why a tailnet address may matter: Synology's Tailscale runs in "userspace" mode, which hands every tailnet connection to
+the NAS's own 127.0.0.1. So a service bound to 127.0.0.1 only (the Gateway VNC screens, DSM's Postgres, DNS control) is
+reachable from every tailnet device. Sub 7 measured that on 2026-10-31 (100.79.212.23), and Ben uninstalled Tailscale
+from the NAS the same day. So --tailnet is skipped by default; if Tailscale ever comes back, pass its address and every
+MUST-BE-CLOSED port must be closed there too.
 
 Exit code 0 = every must-be-closed port is closed on every address checked, 1 = at least one is open.
 Standard library only.
@@ -78,7 +79,7 @@ def report(results: list[Result]) -> str:
 def main(argv=None, probe=is_open) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--lan", default="192.168.1.109", help="the NAS's home-network address ('' = skip)")
-    p.add_argument("--tailnet", default="100.79.212.23", help="the NAS's Tailscale address ('' = skip)")
+    p.add_argument("--tailnet", default="", help="the NAS's Tailscale address, if it has one (default: skip)")
     p.add_argument("--out", help="write the report here as well")
     a = p.parse_args(argv)
     results: list[Result] = []

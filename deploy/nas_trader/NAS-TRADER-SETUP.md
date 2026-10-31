@@ -275,7 +275,10 @@ Full write-up: `claude/w10_0013_sub7_security_review_RESULT_20261031.md`. What a
   Nothing on the home network or the tailnet reaches the API.
 - **`.env` is mode 600.** It holds the paper password and the VNC password. After every unpack run
   `sudo chmod 600 /volume1/docker/trader/.env`.
-- **Tailscale userspace mode** exposes every `127.0.0.1` service on the NAS to the tailnet (both VNC screens, DSM's
-  Postgres, DNS control and DSM internals). `python deploy\nas_trader\check_nas_exposure.py` on the ProArt lists what
-  answers on the home and tailnet addresses; it should pass once Tailscale runs with a TUN interface. Until then, reach
-  the VNC screens only through the SSH tunnel in step 8.
+- **Tailscale was removed from the NAS (2026-10-31).** In userspace mode it had exposed every `127.0.0.1` service on the
+  NAS to the tailnet (both VNC screens, DSM's Postgres, DNS control and DSM internals). If it is ever reinstalled, set it
+  up with a TUN interface and run `check_nas_exposure.py --tailnet <its 100.x address>`. Without it, the check covers the
+  home address only and passed 23/23. Reach the VNC screens through the SSH tunnel in step 8.
+- **The ProArt reaches the share as `\\SiuDiskstation`, as `pc-reader`.** The name used to resolve through Tailscale; it now
+  needs a hosts-file line `192.168.1.109 SiuDiskstation`. Do not switch the settings to `\\192.168.1.109`: that address
+  carries Ben's `sysadmin` credential, which can write to the share.

@@ -13,6 +13,19 @@ Two things need fixing, both by Ben with sudo:
 2. Tailscale on the NAS runs in "userspace" mode, so every service the NAS keeps for itself on `127.0.0.1` is open to
    every tailnet device, including both Gateway VNC screens. The fix is Tailscale with a TUN interface (a DSM boot task).
 
+## Update later on 2026-10-31: Tailscale removed from the NAS
+Ben uninstalled Tailscale from the NAS. That resolves finding 1: there is no tailnet path to the NAS, and the
+`check_nas_exposure.py` home-address check passed 23/23 (`Claude outputs\nas_exposure_20261031_no_tailscale.txt`). Step B
+below is no longer needed. Side effect: the ProArt still resolved `SiuDiskstation` through Tailscale's MagicDNS to the
+old 100.79.212.23, so the session-lock read and the 2-hourly pull could not reach the share. Fix (Ben, admin
+PowerShell): a hosts-file line `192.168.1.109 SiuDiskstation`, which keeps the read-only `pc-reader` credential. Pointing
+the settings at `\\192.168.1.109` instead was rejected because that address carries the `sysadmin` credential (write
+access to the share). Verified after Ben added the line: `\\SiuDiskstation\trader-data\var\state` opens;
+`python -m common.session_lock` read the NAS lock through it (dry session mcl,mc5, heartbeat 11 s ago, 0.3 s); the task
+`Algo - pull NAS var` ran once with result 0 (3 fill files, unchanged). Still to do: remove `siudiskstation` in the
+Tailscale admin console. Tailscale on the ProArt keeps its own hosts line `100.79.212.23 siudiskstation` above Ben's,
+so lookups list the dead address first; removing the machine there makes Tailscale drop that line.
+
 ## Findings (most serious first)
 
 | # | Severity | Finding | Status |
