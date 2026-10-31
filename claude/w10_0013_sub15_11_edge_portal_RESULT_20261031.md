@@ -1,6 +1,15 @@
 # W10-0013 sub 15 (edge project) and sub 11 (portal relay) - RESULT, 2026-10-31
 
-Status: **built and tested in the repo; nothing on the NAS was changed.** Everything below waits for Ben's yes and a quiet window.
+Status (updated 2026-11-01): **all deployed and working.** Edge project live (tunnel `edge-tunnel`, network `thesiuz-edge`), journal back, relay
+`trader-relay` serving trader.thesiuz.com, Pocket ID on the NAS (`edge-pocket-id`) serving id.thesiuz.com; passkey login tested in a private
+window on all three sites; exposure check 25/25 after each step. Fly Pocket ID machine stopped (not deleted); Fly relay still running.
+
+What differed from the plan: the old tunnel and journal-login were NOT running (Cloudflare error 1033), so the "swap" was a first start; a
+compose check on the NAS caught a `:?` on the Pocket ID profile that stopped the whole project (fixed, tested); `scp` needs `-O` (SFTP is off
+on the NAS); `/volume1/docker/trader` is owned by sysadmin so files go via `/volume1/docker/edge/staging`; the Fly Pocket ID database has to be
+copied while the machine RUNS (a stopped machine has no sftp), and Git Bash needs MSYS_NO_PATHCONV=1 for `fly ssh sftp`.
+
+Original status line: built and tested in the repo before deployment.
 Model/effort used: Sonnet, Medium (right for this).
 
 ## What exists now
@@ -52,6 +61,11 @@ retire Fly. 5. Relay step 6 (`UI_RELAY_URL`) with sub 9's cutover.
 - The exact tunnel image on the NAS (guide reads it from the running container).
 - Where the ProArt trader pushes today (Fly vs a local relay) was not checked; it is unaffected until the DNS switch, after which a
   trader still using the Fly URL stops reaching the portal.
+
+## Still open
+- UI_RELAY_URL on the NAS trader with sub 9's cutover; then stop the Fly relay `thesiuz-trader-relay`; delete both Fly apps after sub 13.
+- Journal chat: commit the Trade Journal compose change. Pocket ID custom logo/background images were not copied. Delete `/volume1/docker/edge/staging`
+  (holds the Pocket ID database copy) when happy.
 
 ## Next steps (board ids)
 - W10-0013 sub 15 (2891910299): Ben runs edge parts 1-4; Journal chat commits the compose change (W17 side).

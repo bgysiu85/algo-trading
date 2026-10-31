@@ -112,21 +112,26 @@ would change). A copy keeps everything, because the passkeys are bound to the ho
 needs the same `ENCRYPTION_KEY` the database was written with (a Fly secret; `D:\Trading UI\infra\pocket-id\.env` is the local copy).
 
 While Pocket ID is down nobody can sign in to the journal or the portal (existing login cookies keep working until they
-expire or refresh). Keep the window short and do it in the quiet window. On the ProArt, stop Fly's copy and fetch the file:
+expire or refresh). The outage only starts at the DNS switch, so the copy is taken while Fly's Pocket ID is still RUNNING (a stopped
+Fly machine cannot be reached by sftp; the database is quiet, and the file sizes before and after the copy should match).
+On the ProArt, in Git Bash (PowerShell is fine too; Git Bash needs `MSYS_NO_PATHCONV=1` or it rewrites `/app/...`):
 ```
-Set-Location "D:\Trading UI"
-fly machine list --app thesiuz-pocket-id
-fly machine stop <machine-id> --app thesiuz-pocket-id
-New-Item -ItemType Directory -Force "D:\Trading\Claude outputs\pocket-id-from-fly"
-fly ssh sftp shell --app thesiuz-pocket-id
+export MSYS_NO_PATHCONV=1
+cd /d/Trading
+mkdir -p "Claude outputs/pocket-id-from-fly"
+fly ssh sftp get /app/data/pocket-id.db "Claude outputs/pocket-id-from-fly/pocket-id.db" --app thesiuz-pocket-id
+fly ssh sftp get /app/data/pocket-id.db-wal "Claude outputs/pocket-id-from-fly/pocket-id.db-wal" --app thesiuz-pocket-id
+fly ssh sftp get /app/data/pocket-id.db-shm "Claude outputs/pocket-id-from-fly/pocket-id.db-shm" --app thesiuz-pocket-id
 ```
-At `sftp>` run `lcd D:\Trading\Claude outputs\pocket-id-from-fly`, then `get /app/data/pocket-id.db`, plus `pocket-id.db-wal` and
-`pocket-id.db-shm` if they exist, then `quit`. Keep that folder: it is the way back (`fly machine start`). Then to the NAS:
+Check the copy on a scratch copy of the three files (`pragma integrity_check` = ok; counts of users, passkeys, groups, clients). Keep the
+original folder: it is the way back. After the NAS works and the DNS record is switched, `fly machine stop <id> --app thesiuz-pocket-id`
+(stopped, not deleted).
+Then to the NAS:
 ```
 Set-Location D:\Trading
 $k = "D:\Trading\Claude outputs\.ssh\nas_claude_ed25519"
 ssh -i $k claude@192.168.1.109 "mkdir -p /volume1/docker/edge/pocket-id/data"
-scp -O -i $k "D:\Trading\Claude outputs\pocket-id-from-fly\pocket-id.db" claude@192.168.1.109:/volume1/docker/edge/pocket-id/data/
+scp -O -i $k "D:\Trading\Claude outputs\pocket-id-from-fly\pocket-id.db", "D:\Trading\Claude outputs\pocket-id-from-fly\pocket-id.db-wal", "D:\Trading\Claude outputs\pocket-id-from-fly\pocket-id.db-shm" claude@192.168.1.109:/volume1/docker/edge/pocket-id/data/
 ```
 (If the `-wal` and `-shm` files came down too, scp them the same way.) In the NAS session: add the key to the edge `.env`
 (one line `POCKET_ID_ENCRYPTION_KEY=` followed by the `ENCRYPTION_KEY` value, in nano: Ctrl+O, Enter, Ctrl+X), give the folder to the
