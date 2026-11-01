@@ -1,8 +1,13 @@
 # W10-0013 sub 13 (portal history database: Neon -> NAS Postgres) - RESULT, 2026-11-01
 
-Status: **built and tested in the repo; not deployed.** Ben runs `deploy/nas_trader/NAS-TRADER-SETUP.md` part 7 (7 steps, one sitting,
-outside 04:00-09:30 New York). Model/effort used: Sonnet, Medium.
+Status (updated 2026-11-01): **deployed and verified; the relay now reads the NAS database.** Neon is untouched and still holds its copy
+(rollback: `portal_db.sh rollback` + recreate the relay). Open: a week of clean runs, then Ben deletes the Neon project (from 8 Nov 2026) and the
+`NEON_DATABASE_URL` line. Model/effort used: Sonnet, Medium.
 
+What was checked on the NAS: `trader-portal-db` healthy; the SQL loaded in one transaction and matched Neon exactly (285 closed_trades, 91
+order_outcomes, 2-23 Sep, -1413.13 / 1778); the first daily backup wrote `portal-20261101-0159.dump` (19,778 bytes, restore-checked); the relay
+was recreated and is healthy, and its own code path read 285 trades / 14 days / net -1413.13 from `portal-db`; the portal's History tab (signed in)
+shows 285 closed trades over 14 sessions, net -$1,413.13; exposure check 25/25 passed afterwards; Gateway uptime unchanged throughout.
 ## Decision (Ben, 2026-11-01): the portal gets its OWN Postgres, not a database inside `journal-db`
 Why: the relay is internet-facing; sharing `journal-db` would need `journal-db` on a network the relay reaches (an edit of the Trade Journal
 compose, a `journal-db` restart, and a route from the relay to the journal's database server). Cost of the choice: ~150 MB RAM (3.9 GB free)
@@ -23,11 +28,8 @@ and its own backup, built here.
 sum(net_pnl) = -1413.13, sum(n) = 1778.** A dump of it is at `Claude outputs\portal_history.sql` (376 INSERTs, LF); the guide regenerates it at cutover.
 
 ## Not verified
-- The SQL file was **not loaded into a Postgres** (none on the ProArt, no docker/root on the NAS): the guide loads it in one transaction with
-  `ON_ERROR_STOP` and compares counts/totals with the export before anything switches.
-- `docker compose config` and the containers were not run here (guide step 3 runs `config --quiet`). `postgres:18` as `1026:100` on
-  `/volume1/docker/trader/portal-db` follows the journal-db pattern; the folder is created and chowned in step 2.
-- The Reporting tab against the NAS database is checked by eye in step 6 (totals must match step 4).
+- (All three items that were open at build time were checked on the NAS on 2026-11-01, see above.)
+- Not yet seen: a NEW session uploaded into `portal-db` (the first one after the next paper session), and a backup day-two dump (23 h later).
 
 ## Facts
 - Neon's history stops at 23 Sep 2026: no session has been uploaded since (the trader has been dry / shadow), so the export is small and stable.
