@@ -444,3 +444,94 @@ Undo: `cd /volume1/docker/trader && sudo docker compose --profile watch rm -sf w
 
 Rules a later chat must not undo: the watcher has no `ports:`, no `networks:`, no `network_mode`, mounts `var/` read-only, and starts only by
 name (`--profile watch ... --no-deps watch`). The ping URL lives only in `.env` (mode 600).
+
+## Part 7 - the portal's history database moves from Neon to the NAS (W10-0013 sub 13)
+
+What it does: the relay's Reporting tab reads closed trades from a Postgres database. Today that is Neon (the internet). This part adds
+the portal's OWN Postgres on the NAS (`trader-portal-db`, version 18 like Neon), copies the history over (285 closed trades and 91
+order-outcome rows, 2 to 23 Sep, net P&L -1,413.13 at the time of writing), points the relay at it, and adds a daily backup. The
+journal's database (`journal-db`) is not used: the relay faces the internet, so it gets no route to the journal's server.
+
+Limits and risks:
+- **The relay restarts once** (the switch step): the live panel is empty until the trader's next push. Do it outside 04:00-09:30 New York.
+- **Neon stays untouched** and keeps its data. Rollback is one command (below). Delete Neon only after a week of clean runs, and only you can.
+- The copy is a plain SQL file made by `neon_export.py` (read-only on Neon, prints no secret). It loads in one transaction: all or nothing.
+  Load it into an EMPTY database only (run once). Anything the portal uploads to Neon after the export is not in the copy, so export,
+  load and switch in one sitting.
+- About 150 MB of RAM for the database (3.9 GB are free). The database is on a private Docker network with no internet, shared only with the
+  relay and the backup job; no port is published.
+- Claude has no root on the NAS; the `sudo` lines are for your NAS session.
+
+Steps:
+1. **Make the copy and send the files (PowerShell on the ProArt).** The export prints counts and totals: note them.
+```
+Set-Location D:\Trading
+& "C:\Program Files\Python314\python.exe" deploy\nas_trader\neon_export.py --out "D:\Trading\Claude outputs\portal_history.sql"
+$k = "D:\Trading\Claude outputs\.ssh\nas_claude_ed25519"
+$dest = "claude@192.168.1.109:/volume1/docker/edge/staging/"
+foreach ($f in "compose.yaml", ".env.example", "watch.py", "portal_db.sh", "portal_db_backup.sh") { scp -O -i $k "D:\Trading\deploy\nas_trader\$f" $dest }
+scp -O -i $k "D:\Trading\Claude outputs\portal_history.sql" $dest
+ssh -i $k claude@192.168.1.109 "chmod a+r /volume1/docker/edge/staging/*"
+```
+2. **Install the files and make the folders (NAS session).** The last line closes `.env` again, as after every copy:
+```
+S=/volume1/docker/edge/staging
+sudo cp /volume1/docker/trader/compose.yaml /volume1/docker/trader/compose.yaml.before-portal-db
+sudo cp $S/compose.yaml $S/.env.example /volume1/docker/trader/
+sudo cp $S/watch.py $S/portal_db.sh $S/portal_db_backup.sh /volume1/docker/trader/watch/
+sudo chmod -R a+rX /volume1/docker/trader/watch
+sudo mkdir -p /volume1/docker/trader/portal-db /volume1/docker/trader/portal-backups
+sudo chown 1026:100 /volume1/docker/trader/portal-db /volume1/docker/trader/portal-backups
+sudo chmod 700 /volume1/docker/trader/portal-db
+sudo chmod 600 /volume1/docker/trader/.env
+```
+3. **Make the database password (it is never shown) and start the database alone.**
+```
+sudo bash /volume1/docker/trader/watch/portal_db.sh password
+cd /volume1/docker/trader && sudo docker compose --profile portal config --quiet && echo CONFIG-OK
+sudo docker compose --profile portal up -d --no-deps portal-db
+sleep 40; sudo docker ps --format '{{.Names}}  {{.Status}}' | grep -E 'trader|portal'
+```
+   `trader-portal-db` must say `healthy` (wait a minute and repeat if it says `starting`). `trader-relay` and `trader-ib-gateway` keep
+   their uptimes. If `portal-db` stops with a permission error, `sudo docker logs trader-portal-db` and send it to Claude.
+4. **Load the history (all or nothing) and check it against the export.**
+```
+sudo docker exec -i trader-portal-db psql -U portal -d portal -v ON_ERROR_STOP=1 < /volume1/docker/edge/staging/portal_history.sql
+sudo docker exec trader-portal-db psql -U portal -d portal -c "select count(*), min(session_date), max(session_date), sum(net_pnl) from closed_trades" -c "select count(*), min(session_date), max(session_date), sum(n) from order_outcomes"
+```
+   The two result rows must equal the numbers the export printed (rows, dates, totals). If not, stop and tell Claude (nothing has switched).
+5. **Start the daily backup and let the watcher see it.**
+```
+cd /volume1/docker/trader
+sudo docker compose --profile portal up -d --no-deps portal-db-backup
+sleep 15; sudo docker logs --tail 5 trader-portal-db-backup
+sudo docker compose --profile watch up -d --no-deps watch
+```
+   The backup log must say `backup ok: portal-....dump`. The watch container is recreated (it now also watches the backup age); for a
+   minute the healthchecks.io ping pauses, which is fine inside its 5-minute grace.
+6. **Switch the relay (outside 04:00-09:30 New York).**
+```
+sudo bash /volume1/docker/trader/watch/portal_db.sh switch
+sudo chmod 600 /volume1/docker/trader/.env
+cd /volume1/docker/trader && sudo docker compose --profile portal up -d --no-deps relay
+sleep 20; sudo docker ps --format '{{.Names}}  {{.Status}}' | grep -E 'trader|portal'
+sudo docker logs --tail 15 trader-relay
+sudo bash /volume1/docker/trader/watch/portal_db.sh status
+```
+   `status` must say `relay: portal-db (NAS)`. The old Neon line is kept as `NEON_DATABASE_URL`. Then open https://trader.thesiuz.com,
+   sign in, open the Reporting tab: the totals must match step 4 (285 trades, -1,413.13 net, 2 to 23 Sep). On the ProArt run the exposure
+   check (`deploy\nas_trader\check_nas_exposure.py`): ALL CHECKS PASSED.
+7. **A week later:** if the Reporting tab and the nightly backups stayed fine, delete the Neon project in the Neon console (yours to do), then
+   `sudo sed -i '/^NEON_DATABASE_URL=/d' /volume1/docker/trader/.env` and `sudo chmod 600 /volume1/docker/trader/.env`.
+
+Rollback (any time before step 7):
+```
+sudo bash /volume1/docker/trader/watch/portal_db.sh rollback
+cd /volume1/docker/trader && sudo docker compose --profile portal up -d --no-deps relay
+```
+The relay is back on Neon; `portal-db` can stay or go (`sudo docker compose --profile portal rm -sf portal-db portal-db-backup`; its data folder
+stays until you delete it).
+
+Rules a later chat must not undo: `portal-db` and its backup job are on the internal network `portaldb` only (shared with the relay), publish
+no port, and start only by name (`--profile portal ... --no-deps`). The Gateway, the trader, the watcher and `thesiuz-edge` never join
+`portaldb`. The password is made on the NAS by `portal_db.sh` and lives only in `.env` (mode 600). The relay never gets a route to `journal-db`.

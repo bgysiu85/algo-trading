@@ -9,6 +9,7 @@ Runs as the container `trader-watch` (profile "watch") in the trader project, on
   portal  https://trader.thesiuz.com must answer. Any reply under 500 counts (a login redirect is fine, the relay is
           closed to strangers); a Cloudflare error (530 when the tunnel is down, 502 when the relay is), a timeout or
           no connection counts as down. Needs PORTAL_FAIL_AFTER misses in a row (3) before it speaks.
+  backup  if /portal-backups is mounted (sub 13): a portal-*.dump under 26 h old must exist.
   trader  on weekdays between TRADER_WATCH_START and TRADER_WATCH_END New York (04:10-09:25) the session lock
           var/state/session.lock must exist with a heartbeat under 120 s old. Anything else means the trader is not
           running when it should be (or died). Outside the window nothing is checked. US market holidays are not known
@@ -53,6 +54,8 @@ class Cfg:
         self.end = _hhmm(g("TRADER_WATCH_END", "09:25"))
         self.skip_dates = {d.strip() for d in g("WATCH_SKIP_DATES").split(",") if d.strip()}
         self.repeat_s = float(g("WATCH_REPEAT_S", "3600"))
+        self.backup_dir = Path(g("WATCH_BACKUP_DIR", "/portal-backups"))
+        self.backup_max_h = float(g("WATCH_BACKUP_MAX_H", "26"))
         self.name = g("WATCH_NAME", "NAS trader")
         self.token = g("TELEGRAM_BOT_TOKEN")
         self.chat = g("TELEGRAM_CHAT_ID")
@@ -76,6 +79,22 @@ def trader_problem(now: datetime, lock: dict | None, cfg: Cfg, now_epoch: float)
     if age > HEARTBEAT_STALE_S:
         return (f"the trader's heartbeat stopped {age / 60:.0f} min ago ({lock.get('mode', '?')} "
                 f"{lock.get('strategy', '?')}): it crashed or hung. sudo docker logs --tail 40 trader-trader")
+    return None
+
+
+def backup_problem(backup_dir: Path, now_epoch: float, max_h: float) -> str | None:
+    """A message when the portal database has no good dump under max_h hours old. None if the folder is not mounted (feature off)."""
+    if not Path(backup_dir).is_dir():
+        return None
+    try:
+        newest = max((f.stat().st_mtime for f in Path(backup_dir).glob("portal-*.dump")), default=None)
+    except OSError:
+        return "the portal database backup folder cannot be read"
+    if newest is None:
+        return "the portal database has no backup yet (is trader-portal-db-backup running?)"
+    age_h = (now_epoch - newest) / 3600
+    if age_h > max_h:
+        return (f"no portal database backup for {age_h:.0f} h. sudo docker logs --tail 20 trader-portal-db-backup")
     return None
 
 
@@ -135,6 +154,9 @@ class Watcher:
         if self.misses >= self.cfg.portal_fail_after:
             out["portal"] = (f"the portal {self.cfg.portal_url} is not answering ({detail}) for {self.misses} checks. "
                              f"Tunnel or relay? (sudo docker ps | grep -E 'edge-tunnel|trader-relay')")
+        bmsg = backup_problem(self.cfg.backup_dir, now, self.cfg.backup_max_h)
+        if bmsg:
+            out["backup"] = bmsg
         msg = trader_problem(datetime.fromtimestamp(now, tz=ZoneInfo("UTC")), self.lock_reader(), self.cfg, now)
         if msg:
             out["trader"] = msg

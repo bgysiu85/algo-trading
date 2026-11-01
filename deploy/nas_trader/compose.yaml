@@ -157,6 +157,7 @@ services:
       - ${RELAY_DEPS_DIR:-/volume1/docker/trader/relay/deps}:/deps:ro
     networks:
       - edge
+      - portaldb                                # W10-0013 sub 13: the only route to the portal's own Postgres (portal-db)
     read_only: true
     tmpfs:
       - /tmp
@@ -170,6 +171,79 @@ services:
     logging:
       driver: json-file
       options: {max-size: "5m", max-file: "3"}
+
+  portal-db:
+    # The portal's own Postgres (W10-0013 sub 13): the trade history the relay's Reporting tab reads, moved from Neon.
+    # Same major version as Neon (18), so nothing is converted. Rules:
+    #   * Only on the internal network "portaldb", shared with the relay and the backup job and nobody else: no internet, no
+    #     ports, not the Gateway's network, not thesiuz-edge, and no route to journal-db (the journal's server is not used).
+    #   * Never starts with the project (profile "portal"):  docker compose --profile portal up -d --no-deps portal-db portal-db-backup
+    #   * Password PORTAL_DB_PASSWORD in .env (made by portal_db.sh). Empty = the image refuses to create the database.
+    profiles: ["portal"]
+    image: ${PORTAL_DB_IMAGE:-postgres:18}
+    container_name: trader-portal-db
+    platform: linux/amd64
+    restart: always
+    user: "${PUID:-1026}:${PGID:-100}"
+    security_opt:
+      - seccomp:unconfined                      # Synology's kernel has no seccomp
+    environment:
+      POSTGRES_USER: portal
+      POSTGRES_DB: portal
+      POSTGRES_PASSWORD: ${PORTAL_DB_PASSWORD:-}
+      TZ: UTC
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "work_mem=4MB", "-c", "maintenance_work_mem=32MB",
+              "-c", "max_connections=20"]
+    volumes:
+      - ${PORTAL_DB_DIR:-/volume1/docker/trader/portal-db}:/var/lib/postgresql   # PG 18 images mount here, not .../data
+    networks:
+      - portaldb
+    shm_size: 64m
+    mem_limit: 256m
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "portal", "-d", "portal"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+  portal-db-backup:
+    # Daily pg_dump of portal-db into PORTAL_BACKUP_DIR (deploy/nas_trader/portal_db_backup.sh): every hour it looks, and
+    # dumps when the newest good dump is over 23 h old; each dump is checked (pg_restore --list); 14 days kept. The watcher
+    # (trader-watch) messages Telegram when no dump is under 26 h old. Same image as portal-db, so pg_dump matches the server.
+    profiles: ["portal"]
+    image: ${PORTAL_DB_IMAGE:-postgres:18}
+    container_name: trader-portal-db-backup
+    platform: linux/amd64
+    restart: always
+    init: true
+    user: "${PUID:-1026}:${PGID:-100}"
+    security_opt:
+      - seccomp:unconfined                      # Synology's kernel has no seccomp
+    entrypoint: ["bash", "/app/portal_db_backup.sh"]
+    environment:
+      PGHOST: portal-db
+      PGUSER: portal
+      PGDATABASE: portal
+      PGPASSWORD: ${PORTAL_DB_PASSWORD:-}
+      HOME: /tmp
+      TZ: UTC
+    volumes:
+      - ${WATCH_DIR:-/volume1/docker/trader/watch}/portal_db_backup.sh:/app/portal_db_backup.sh:ro
+      - ${PORTAL_BACKUP_DIR:-/volume1/docker/trader/portal-backups}:/backup
+    networks:
+      - portaldb
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
 
   watch:
     # Outside dead-man ping + portal and trader health checks (W10-0013 sub 12), deploy/nas_trader/watch.py. Once a minute:
@@ -197,6 +271,7 @@ services:
     volumes:
       - ${WATCH_DIR:-/volume1/docker/trader/watch}:/watch:ro
       - ${TRADER_VAR_DIR:-/volume1/trader-data/var}:/var-data:ro
+      - ${PORTAL_BACKUP_DIR:-/volume1/docker/trader/portal-backups}:/portal-backups:ro   # sub 13: is the newest dump fresh?
     read_only: true
     tmpfs:
       - /tmp
@@ -210,3 +285,6 @@ networks:
     # Created by the edge project (deploy/nas_edge). External here, so this project never creates or removes it.
     name: thesiuz-edge
     external: true
+  portaldb:
+    # Private to the relay, portal-db and its backup job. internal: no route out to the internet or the home network.
+    internal: true

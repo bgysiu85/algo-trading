@@ -190,7 +190,7 @@ RELAY = service_block("relay")
 
 def test_the_relay_exists_and_is_only_on_the_external_edge_network():
     assert RELAY
-    assert re.search(r"^\s+networks:\n\s+- edge\s*$", RELAY, re.M)
+    assert re.search(r"^\s+networks:\n\s+- edge\n\s+- portaldb\s*$", RELAY, re.M)   # sub 13: plus the private database network
     assert "default" not in RELAY and "network_mode" not in RELAY
     top = "\n".join(code_lines(COMPOSE)).split("\nnetworks:\n", 1)[1]
     assert re.search(r"^  edge:\n    name: thesiuz-edge\n    external: true\s*$", top, re.M), top
