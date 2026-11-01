@@ -171,6 +171,40 @@ services:
       driver: json-file
       options: {max-size: "5m", max-file: "3"}
 
+  watch:
+    # Outside dead-man ping + portal and trader health checks (W10-0013 sub 12), deploy/nas_trader/watch.py. Once a minute:
+    # pings healthchecks.io (HC_PING_URL; silence there = the NAS is down), checks https://trader.thesiuz.com answers, and in
+    # the trader's window (04:10-09:25 New York, weekdays) that the session lock's heartbeat is fresh. Messages Telegram.
+    #   * Own default network only: not in the Gateway's network, not on thesiuz-edge, no ports. Reads var/ READ-ONLY.
+    #   * Never starts with the project (profile "watch"):  docker compose --profile watch up -d --no-deps watch
+    profiles: ["watch"]
+    image: ${WATCH_IMAGE:-python:3.12-slim}
+    container_name: trader-watch
+    platform: linux/amd64
+    restart: always
+    user: "${PUID:-1026}:${PGID:-100}"
+    init: true
+    security_opt:
+      - seccomp:unconfined                      # Synology's kernel has no seccomp
+    command: ["python", "/watch/watch.py"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      HC_PING_URL: ${HC_PING_URL:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      WATCH_SKIP_DATES: ${WATCH_SKIP_DATES:-}
+    volumes:
+      - ${WATCH_DIR:-/volume1/docker/trader/watch}:/watch:ro
+      - ${TRADER_VAR_DIR:-/volume1/trader-data/var}:/var-data:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "3"}
+
 networks:
   edge:
     # Created by the edge project (deploy/nas_edge). External here, so this project never creates or removes it.

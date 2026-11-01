@@ -308,13 +308,10 @@ stays the history database until sub 13. The portal's Reporting tab is unchanged
    `D:\Trading UI`, plus its `requirements.txt`. PowerShell on the ProArt:
 ```
 Set-Location "D:\Trading UI"
-$k = "D:\Trading\Claude outputs\.ssh
-as_claude_ed25519"
-tar --exclude=__pycache__ -cf "D:\Trading\Claude outputselay_srv.tar" app contract history requirements.txt
+$k = "D:\Trading\Claude outputs\.ssh\nas_claude_ed25519"
+tar --exclude=__pycache__ -cf "D:\Trading\Claude outputs\relay_srv.tar" app contract history requirements.txt
 ssh -i $k claude@192.168.1.109 "mkdir -p /volume1/docker/edge/staging"
-scp -O -i $k "D:\Trading\Claude outputselay_srv.tar" "D:\Trading\deploy
-as_trader\compose.yaml" "D:\Trading\deploy
-as_trader\.env.example" claude@192.168.1.109:/volume1/docker/edge/staging/
+scp -O -i $k "D:\Trading\Claude outputs\relay_srv.tar" "D:\Trading\deploy\nas_trader\compose.yaml" "D:\Trading\deploy\nas_trader\.env.example" claude@192.168.1.109:/volume1/docker/edge/staging/
 ```
    Then in the NAS session. This replaces the trader project's `compose.yaml` (the trader and Gateway sections are unchanged; the
    new text is the `relay` service and the external network) and touches no running container until a `docker compose up`
@@ -382,3 +379,68 @@ and point the DNS record `trader` back at the Fly app (`thesiuz-trader-relay.fly
 - The relay is on `thesiuz-edge` only. Never add it, or anything else, to the Gateway's network or the Gateway to `thesiuz-edge`.
 - The relay has no `ports:` and starts only by name (`--profile portal ... --no-deps relay`).
 - Its secrets stay in `.env` (mode 600), written by `make_relay_env.py`; never typed on a command line or stored in the repo.
+
+\\ Part 6 - the watcher: dead-man ping, portal and trader checks (W10-0013 sub 12)
+
+What it does: one small container `trader-watch` (`deploy/nas_trader/watch.py`, standard library only) checks once a minute and
+messages Telegram. (1) It pings healthchecks.io every minute: if the pings STOP, healthchecks.io messages you, which is the only way to
+hear that the NAS itself, its network or Docker is down. (2) It checks `https://trader.thesiuz.com` answers (3 misses in a row). (3) On
+weekdays 04:10-09:25 New York it checks the trader's session lock has a heartbeat under 120 s old. The recorder, backup, push and Flex
+alerts already exist in the journal's `alerts` container (W17-0007) and are not touched.
+
+Limits and risks:
+- It reads `var/` read-only, publishes nothing, is not in the Gateway's network and not on `thesiuz-edge`. It starts alone (`--no-deps`),
+  so the Gateway and the trader are not recreated. It can place no order.
+- US market holidays are not known to it: on a holiday the trader check will say "no session" at 04:10. Put the date in `WATCH_SKIP_DATES`
+  in `.env` (YYYY-MM-DD, comma separated). If the trader is meant to end before 09:25, the window can be changed (`TRADER_WATCH_END`).
+- The healthchecks.io account is yours to create (Claude does not create accounts). The free plan is enough.
+- It uses the trader's Telegram bot (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` in `.env`). Empty there = messages only in the log.
+
+Steps:
+1. **healthchecks.io (your browser).** Sign up, create a check named `NAS trader`: Period 1 minute, Grace 5 minutes. Under Integrations add
+   Telegram and tick it for this check (it gives you a bot to press Start on). Copy the check's ping URL (https://hc-ping.com/...). It is a
+   secret: anyone with it can fake a ping. Send it to nobody; it goes only into `.env` below.
+2. **Copy the files (PowerShell on the ProArt).**
+```
+Set-Location D:\Trading
+$k = "D:\Trading\Claude outputs\.ssh\nas_claude_ed25519"
+ssh -i $k claude@192.168.1.109 "mkdir -p /volume1/docker/edge/staging"
+scp -O -i $k "D:\Trading\deploy\nas_trader\watch.py" "D:\Trading\deploy\nas_trader\compose.yaml" "D:\Trading\deploy\nas_trader\.env.example" claude@192.168.1.109:/volume1/docker/edge/staging/
+```
+   Then in the NAS session (the last line closes `.env` again, as after every copy):
+```
+sudo mkdir -p /volume1/docker/trader/watch
+sudo cp /volume1/docker/trader/compose.yaml /volume1/docker/trader/compose.yaml.before-watch
+sudo cp /volume1/docker/edge/staging/compose.yaml /volume1/docker/edge/staging/.env.example /volume1/docker/trader/
+sudo cp /volume1/docker/edge/staging/watch.py /volume1/docker/trader/watch/watch.py
+sudo chmod -R a+rX /volume1/docker/trader/watch
+sudo chmod 600 /volume1/docker/trader/.env
+```
+3. **Put the ping URL in `.env` (NAS session).** `sudo nano /volume1/docker/trader/.env`, add one line `HC_PING_URL=` followed by the URL (no
+   quotes, no spaces), save (Ctrl+O, Enter, Ctrl+X), then:
+```
+sudo chmod 600 /volume1/docker/trader/.env
+sudo grep -c '^HC_PING_URL=.' /volume1/docker/trader/.env
+cd /volume1/docker/trader && sudo docker compose --profile watch config --quiet && echo CONFIG-OK
+```
+   The count must be 1.
+4. **Try it once without sending anything.** It prints the lock and the problems it sees (outside 04:10-09:25 New York: "no problems"):
+```
+sudo docker run --rm --security-opt seccomp=unconfined -u 1026:100 -v /volume1/docker/trader/watch:/watch:ro -v /volume1/trader-data/var:/var-data:ro python:3.12-slim python /watch/watch.py --once
+```
+5. **Start it alone.**
+```
+cd /volume1/docker/trader
+sudo docker compose --profile watch up -d --no-deps watch
+sudo docker ps --format '{{.Names}}  {{.Status}}' | grep -E 'trader|watch'
+sudo docker logs --tail 10 trader-watch
+```
+   `trader-trader` and `trader-ib-gateway` must show the same uptime as before. Telegram gets one "watcher running" message, and
+   healthchecks.io shows the check green within a minute.
+6. **Prove the dead-man works (once).** `sudo docker stop trader-watch`, wait about 7 minutes (period + grace): healthchecks.io must message
+   Telegram "down". Then `sudo docker start trader-watch`; it goes green again by itself.
+
+Undo: `cd /volume1/docker/trader && sudo docker compose --profile watch rm -sf watch` (and pause or delete the check on healthchecks.io).
+
+Rules a later chat must not undo: the watcher has no `ports:`, no `networks:`, no `network_mode`, mounts `var/` read-only, and starts only by
+name (`--profile watch ... --no-deps watch`). The ping URL lives only in `.env` (mode 600).
