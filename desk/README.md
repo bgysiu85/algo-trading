@@ -21,6 +21,8 @@ Ben's list of Seeking Alpha Alpha Picks goes in; for each stock the desk gives a
 
 Before the agents, `python -m desk.prepare` (no Claude usage) pulls 2 years of daily bars from IBKR, computes the indicators, and pulls SEC EDGAR fundamentals. After the portfolio manager, `python -m desk.decision` checks the JSON (long-only, stop < entry < target, 1 share, horizon <= 180 days, conviction 1-10) and logs it to `var/desk_runs/decisions.csv`. `python -m desk.summary` ranks the day's buys (top 15 = TAKE).
 
+A Hold may carry an optional `watch_plan` (W18-0007): `revisit_on`, `trigger` (`close_above`/`close_below` + level), `entry_zone`, `stop`, `target`, `size_note`. The checker logs it in the `watch` and `plan_*` columns of `decisions.csv`; `actionable` stays False. The summary lists these as "Watching" and, across days, as "Open watches" (DUE once the revisit date is reached) for W18-0003 to re-run. A watch is a reminder, never an order: the IBKR bridge (W18-0002) acts only on a fresh Buy/Overweight.
+
 ## Before the first run
 Since 2026-10-28 the paper IB Gateway runs on the NAS (`trader-ib-gateway`, W10-0013) and its API is reachable only
 from containers that join its Docker network. One IBKR paper username = one session, so do NOT start IB Gateway paper on

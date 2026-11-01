@@ -119,6 +119,114 @@ def test_validation_works_without_a_snapshot():
     assert errors == [] and clean["last_close"] is None
 
 
+# ----------------------------------------------- a Hold's conditional plan (W18-0007)
+
+def plan(**over):
+    p = {"revisit_on": "2026-11-04", "trigger": {"type": "close_above", "level": 101.5},
+         "entry_zone": [102.0, 105.0], "stop": 95.0, "target": 125.0, "size_note": "half size"}
+    p.update(over)
+    return p
+
+
+def hold(**over):
+    return good(rating="Hold", entry=None, stop=None, target=None, size_shares=0, horizon_days=None,
+                watch_plan=plan(), **over)
+
+
+def test_hold_with_a_plan_is_watched_but_never_actionable():
+    errors, warns, c = check(hold())
+    assert errors == [] and warns == []
+    assert c["actionable"] is False and c["watch"] is True
+    assert c["entry"] is None and c["stop"] is None and c["target"] is None and c["horizon_days"] is None
+    assert (c["plan_revisit_on"], c["plan_trigger"]) == ("2026-11-04", "close_above 101.5")
+    assert (c["plan_zone_low"], c["plan_zone_high"], c["plan_stop"], c["plan_target"]) == (102.0, 105.0, 95.0, 125.0)
+    assert c["plan_size_note"] == "half size"
+
+
+@pytest.mark.parametrize("p", [None, "absent"])
+def test_hold_without_a_plan_is_not_watched(p):
+    d = hold()
+    d.pop("watch_plan") if p == "absent" else d.update(watch_plan=None)
+    errors, _, c = check(d)
+    assert errors == [] and c["watch"] is False and "plan_trigger" not in c
+
+
+@pytest.mark.parametrize("over, fragment", [
+    ({"revisit_on": "2026-10-28"}, "revisit_on must be after"),                 # same day as run_date
+    ({"revisit_on": "2027-03-01"}, "within 90 days"),
+    ({"revisit_on": "soon"}, "revisit_on must be a date"),
+    ({"revisit_on": None}, "revisit_on must be a date"),
+    ({"trigger": "close_above 101"}, "trigger must be"),
+    ({"trigger": {"type": "intraday_above", "level": 101}}, "trigger must be"),
+    ({"trigger": {"type": "close_above", "level": -1}}, "trigger must be"),
+    ({"trigger": {"type": "close_above", "level": True}}, "trigger must be"),
+    ({"entry_zone": [105.0, 102.0]}, "entry_zone must be"),
+    ({"entry_zone": [102.0]}, "entry_zone must be"),
+    ({"entry_zone": "102-105"}, "entry_zone must be"),
+    ({"stop": 103.0}, "stop must be below the entry zone"),
+    ({"stop": None}, "watch_plan.stop must be"),
+    ({"target": 104.0}, "target must be above the entry zone"),
+    ({"target": 0}, "watch_plan.target must be"),
+    ({"size_note": 5}, "size_note must be a string"),
+])
+def test_each_bad_plan_field_is_rejected(over, fragment):
+    d = hold()
+    d["watch_plan"] = plan(**over)
+    errors, _, _ = check(d)
+    assert any(fragment in e for e in errors), errors
+
+
+def test_plan_that_is_not_an_object_is_rejected():
+    d = hold()
+    d["watch_plan"] = "buy if it closes above 101"
+    errors, _, _ = check(d)
+    assert any("watch_plan must be an object" in e for e in errors)
+
+
+def test_plan_warns_on_poor_reward_risk_but_still_passes():
+    d = hold()
+    d["watch_plan"] = plan(target=108.0)                       # (108-105)/(105-95) = 0.3
+    errors, warns, c = check(d)
+    assert errors == [] and c["watch"] is True and any("watch_plan reward:risk" in w for w in warns)
+
+
+@pytest.mark.parametrize("rating", ["Underweight", "Sell", "Buy", "Overweight"])
+def test_plan_on_any_rating_but_hold_is_ignored_with_a_warning(rating):
+    d = good(rating=rating, watch_plan=plan())
+    if rating not in decision.ACTIONABLE:
+        d.update(entry=None, stop=None, target=None, size_shares=0, horizon_days=None)
+    errors, warns, c = check(d)
+    assert errors == [] and c["watch"] is False and any("watch_plan given" in w for w in warns)
+
+
+def test_plan_survives_the_csv_and_old_rows_gain_empty_columns(tmp_path):
+    p = tmp_path / "decisions.csv"
+    old = ["run_date", "ticker", "rating", "actionable", "conviction", "warnings", "decided_at_utc"]
+    with p.open("w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=old)
+        w.writeheader()
+        w.writerow({"run_date": "2026-10-27", "ticker": "AMZN", "rating": "Underweight", "actionable": "False",
+                    "conviction": "4", "warnings": "", "decided_at_utc": "2026-10-27T01:00:00Z"})
+    _, _, c = check(hold())
+    decision.log_decision(p, c)
+    rows = list(csv.DictReader(p.open("r", encoding="utf-8", newline="")))
+    assert list(rows[0].keys()) == decision.CSV_COLUMNS
+    amzn, mpc = rows
+    assert amzn["ticker"] == "AMZN" and amzn["watch"] == "" and amzn["plan_trigger"] == ""
+    assert mpc["watch"] == "True" and mpc["actionable"] == "False" and mpc["entry"] == ""
+    assert (mpc["plan_trigger"], mpc["plan_zone_low"], mpc["plan_zone_high"]) == ("close_above 101.5", "102.0", "105.0")
+
+
+def test_process_logs_a_watch_end_to_end_and_cli_says_so(tmp_path, capsys):
+    cfg, rd = setup_run(tmp_path, hold())
+    cfgp = tmp_path / "c.json"
+    cfgp.write_text(json.dumps(cfg), encoding="utf-8")
+    assert decision.main(["--ticker", "MPC", "--date", "2026-10-28", "--config", str(cfgp)]) == 0
+    assert "(no position; watching: close_above 101.5, revisit 2026-11-04)" in capsys.readouterr().out
+    saved = json.loads((rd / pipeline.DECISION_JSON).read_text(encoding="utf-8"))
+    assert saved["watch"] is True and saved["plan_stop"] == 95.0
+
+
 # ---------------------------------------------------------------- the log
 
 def test_log_inserts_replaces_and_sorts(tmp_path):
@@ -260,6 +368,39 @@ def test_render_lists_missing_and_marks_wait():
     assert "NOT DECIDED YET: ZZZ" in text
     assert "| 1 | AAA | Buy | 9 |" in text and "TAKE" in text
     assert "WAIT (over the position cap)" in text and "## No position" in text and "CCC" in text
+
+
+def watch_row(t, date, revisit, rating="Hold"):
+    r = row(t, 4, 0, act=False, rating=rating)
+    r.update(run_date=date, watch="True", plan_trigger="close_above 100", plan_zone_low="101", plan_zone_high="104",
+             plan_stop="95", plan_target="120", plan_revisit_on=revisit, plan_size_note="half size")
+    return r
+
+
+def test_render_lists_watches_apart_from_no_position():
+    rows = [watch_row("AAA", "2026-10-28", "2026-11-04"), row("CCC", 2, 0, act=False, rating="Sell")]
+    text = summary.render("2026-10-28", rows, [], max_open=1)
+    assert "1 watching, 1 no position" in text
+    watching, nopos = text.split("## Watching")[1].split("## No position")
+    assert "AAA" in watching and "close_above 100" in watching and "101-104" in watching and "CCC" not in watching
+    assert "CCC" in nopos and "AAA" not in nopos
+
+
+def test_open_watches_use_the_latest_row_per_ticker_and_flag_due_ones():
+    rows = [watch_row("AAA", "2026-10-20", "2026-10-27"),         # superseded by a later Buy below
+            row("AAA", 8, 2.0) | {"run_date": "2026-10-28"},
+            watch_row("BBB", "2026-10-25", "2026-10-29"),          # revisit date passed -> due
+            watch_row("CCC", "2026-10-26", "2026-11-10"),          # not yet
+            watch_row("DDD", "2026-10-30", "2026-11-06")]          # decided after "today": not known yet
+    got = summary.open_watches(rows, "2026-10-30")
+    assert [(r["ticker"], r["due"]) for r in got] == [("BBB", True), ("DDD", False), ("CCC", False)]
+    text = summary.render("2026-10-30", [], [], 15, got)
+    assert "## Open watches" in text and "DUE" in text
+
+
+def test_old_rows_without_watch_columns_still_summarise():
+    assert summary.open_watches([row("AAA", 5, 1) | {"run_date": "2026-10-28"}], "2026-10-30") == []
+    assert "watching" in summary.render("2026-10-28", [row("AAA", 5, 1)], [], 15)
 
 
 def test_summary_cli_end_to_end(tmp_path, capsys):

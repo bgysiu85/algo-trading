@@ -41,7 +41,7 @@ RUN_DIR = `var/desk_runs/DATE/TICKER`. Resume rule: before spawning ANY agent, s
 
 ## 3. Finish
 Run `python -m desk.summary --date DATE` (ranks the day's buys; writes `DAY_DIR/SUMMARY.md`). Then reply with ONLY:
-- a compact table: ticker · rating · conviction · entry · stop · target · reward:risk (from the OK lines / summary), then any SKIPPED/FAILED tickers with reasons, then any warnings;
+- a compact table: ticker · rating · conviction · entry · stop · target · reward:risk (from the OK lines / summary), then any Holds being watched (the `watching:` part of their OK line: trigger and revisit date) and any DUE open watches from SUMMARY.md, then any SKIPPED/FAILED tickers with reasons, then any warnings;
 - the folder where the full reports are (`DAY_DIR`);
 - one line: "re-run `/desk next N` to continue" if tickers remain.
 

@@ -28,7 +28,14 @@ RATINGS = ("Buy", "Overweight", "Hold", "Underweight", "Sell")
 ACTIONABLE = ("Buy", "Overweight")       # long-only: the only ratings that open a position
 CSV_COLUMNS = ["run_date", "ticker", "rating", "actionable", "conviction", "entry", "stop", "target",
                "horizon_days", "size_shares", "risk_per_share", "reward_risk", "last_close",
-               "atr14", "warnings", "decided_at_utc"]
+               "atr14", "warnings", "decided_at_utc",
+               # W18-0007: a Hold's conditional plan. `actionable` stays False; the bridge (W18-0002) reads only
+               # `actionable` and never acts on these. Older rows have them empty.
+               "watch", "plan_revisit_on", "plan_trigger", "plan_zone_low", "plan_zone_high",
+               "plan_stop", "plan_target", "plan_size_note"]
+
+TRIGGER_TYPES = ("close_above", "close_below")
+MAX_REVISIT_DAYS = 90
 
 _FENCE = re.compile(r"```json\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
@@ -53,6 +60,67 @@ def _num(x):
         return float(x)
     except (TypeError, ValueError):
         return None
+
+
+def _check_plan(p, run_date: str):
+    """A Hold's conditional plan -> (errors, warnings, flat plan_* columns).
+
+    Shape: {"revisit_on": "YYYY-MM-DD", "trigger": {"type": "close_above", "level": 417.81},
+            "entry_zone": [418, 424], "stop": 400, "target": 458, "size_note": "half size"}
+    It is a note for a later re-run, not an order: nothing here is ever placed without a fresh Buy/Overweight.
+    """
+    errors: list[str] = []
+    warns: list[str] = []
+    if not isinstance(p, dict):
+        return ["watch_plan must be an object (or null when there is no plan)"], warns, {}
+
+    revisit = None
+    try:
+        revisit = datetime.strptime(str(p.get("revisit_on")), "%Y-%m-%d").date()
+        today = datetime.strptime(run_date, "%Y-%m-%d").date()
+        if not 0 < (revisit - today).days <= MAX_REVISIT_DAYS:
+            errors.append(f"watch_plan.revisit_on must be after run_date and within {MAX_REVISIT_DAYS} days")
+    except ValueError:
+        errors.append("watch_plan.revisit_on must be a date YYYY-MM-DD")
+
+    trig = p.get("trigger")
+    level = _num(trig.get("level")) if isinstance(trig, dict) else None
+    ttype = trig.get("type") if isinstance(trig, dict) else None
+    if ttype not in TRIGGER_TYPES or level is None or level <= 0:
+        errors.append(f"watch_plan.trigger must be {{type: one of {list(TRIGGER_TYPES)}, level: positive price}}")
+
+    zone = p.get("entry_zone")
+    lo = hi = None
+    if isinstance(zone, list) and len(zone) == 2:
+        lo, hi = _num(zone[0]), _num(zone[1])
+    if lo is None or hi is None or not 0 < lo <= hi:
+        errors.append("watch_plan.entry_zone must be [low, high] positive prices with low <= high")
+        lo = hi = None
+
+    stop, target = _num(p.get("stop")), _num(p.get("target"))
+    if stop is None or stop <= 0:
+        errors.append("watch_plan.stop must be a positive price")
+    if target is None or target <= 0:
+        errors.append("watch_plan.target must be a positive price")
+    if lo is not None and stop and target and target > 0:
+        if not stop < lo:
+            errors.append("watch_plan.stop must be below the entry zone (long-only)")
+        if not target > hi:
+            errors.append("watch_plan.target must be above the entry zone (long-only)")
+        elif stop < lo and (target - hi) / (hi - stop) < 1.5:
+            warns.append(f"watch_plan reward:risk only {(target - hi) / (hi - stop):.2f} at the top of the zone (< 1.5)")
+
+    note = p.get("size_note")
+    if note is not None and not isinstance(note, str):
+        errors.append("watch_plan.size_note must be a string or null")
+
+    if errors:
+        return errors, warns, {}
+    return [], warns, {
+        "watch": True, "plan_revisit_on": revisit.isoformat(), "plan_trigger": f"{ttype} {level:g}",
+        "plan_zone_low": lo, "plan_zone_high": hi, "plan_stop": stop, "plan_target": target,
+        "plan_size_note": (note or "").strip() or None,
+    }
 
 
 def validate(d: dict, ticker: str, run_date: str, snapshot: dict | None, rules: dict):
@@ -132,6 +200,17 @@ def validate(d: dict, ticker: str, run_date: str, snapshot: dict | None, rules: 
             warns.append("entry/stop/target given for a non-buy rating; ignored (long-only, no position)")
         entry = stop = target = None
 
+    # Only a Hold is watched. Underweight / Sell are a "no" and a Buy needs no pending plan.
+    plan = {"watch": False}
+    if d.get("watch_plan") is not None:
+        if rating == "Hold":
+            p_errors, p_warns, flat = _check_plan(d["watch_plan"], run_date)
+            errors += p_errors
+            warns += p_warns
+            plan = flat or plan
+        else:
+            warns.append(f"watch_plan given for a {rating} rating; ignored (only a Hold is watched)")
+
     clean = {
         "ticker": ticker, "run_date": run_date, "rating": rating, "actionable": actionable,
         "conviction": conv if isinstance(conv, int) else None,
@@ -143,6 +222,7 @@ def validate(d: dict, ticker: str, run_date: str, snapshot: dict | None, rules: 
         "last_close": last, "atr14": atr,
         "thesis": d.get("thesis"), "key_risks": risks,
         "warnings": warns,
+        **plan,
     }
     return errors, warns, clean
 
@@ -216,9 +296,13 @@ def main(argv=None) -> int:
         for e in errors:
             print(f"INVALID {ticker}: {e}")
         return 2
-    print(f"OK {ticker} {clean['rating']} conviction {clean['conviction']}"
-          + (f" entry {clean['entry']} stop {clean['stop']} target {clean['target']} "
-             f"(reward:risk {clean['reward_risk']})" if clean["actionable"] else " (no position)"))
+    if clean["actionable"]:
+        tail = f" entry {clean['entry']} stop {clean['stop']} target {clean['target']} (reward:risk {clean['reward_risk']})"
+    elif clean["watch"]:
+        tail = f" (no position; watching: {clean['plan_trigger']}, revisit {clean['plan_revisit_on']})"
+    else:
+        tail = " (no position)"
+    print(f"OK {ticker} {clean['rating']} conviction {clean['conviction']}{tail}")
     return 0
 
 

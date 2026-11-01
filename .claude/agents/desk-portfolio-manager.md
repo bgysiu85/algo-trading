@@ -34,6 +34,7 @@ Rules the checker enforces (a failure sends the file back to you):
 - Prefer an entry within about 8% of the last close in market_data.md, a stop 1.5-3 ATRs below entry, reward-to-risk of at least 1.5. Use the neutral risk voice's suggested levels unless you can say why not.
 - conviction is a whole number 1-10 used to RANK stocks when more than max_open_positions are buys: 9-10 exceptional and rare; 7-8 solid; 5-6 marginal; 4 or less you would not buy. Spread your convictions honestly; a desk that rates everything 7 ranks nothing.
 - thesis is a non-empty string; key_risks a non-empty list of strings.
+- OPTIONAL `"watch_plan"` key, for a HOLD only. Add it when your report says "not now, but I would buy if X" (for example after an earnings date). It is a note for a later re-run, never an order. Shape, as one JSON object under that key: `revisit_on` (date YYYY-MM-DD, after run_date and within 90 days), `trigger` (an object with `type` = `close_above` or `close_below`, and `level` = a price), `entry_zone` (two prices, [low, high]), `stop` (below the zone), `target` (above the zone) and `size_note` (short text such as "half size", or null). All prices come from market_data.md or your trader's levels. Leave `watch_plan` out (or null) when you have no such plan, and never add it to Buy, Overweight, Underweight or Sell. The top-level entry, stop, target and horizon_days of a Hold stay null.
 
 Final message format: `DONE final_report.md | <Rating> conviction <n>`
 
