@@ -259,11 +259,70 @@ def test_summarize_picks_latest_filing_and_computes_ttm_and_yoy():
     q = dict(s["metrics"]["Revenue"]["quarterly"])
     assert q[date(2026, 3, 31)] == 1400
     assert q[date(2025, 3, 31)] == 1010                  # restated value, not the original 1000
-    assert s["derived"]["Revenue TTM"] == 1400 + 1300 + 1200 + 1100
-    assert s["derived"]["Revenue growth, latest quarter vs year ago %"] == pytest.approx((1400 / 1010 - 1) * 100)
-    assert s["derived"]["Net debt (long-term debt - cash)"] == 400
-    assert s["derived"]["Long-term debt / equity"] == pytest.approx(0.5)
+    assert s["derived"]["Revenue TTM (4 quarters to 2026-03-31)"] == 1400 + 1300 + 1200 + 1100
+    assert s["derived"]["Revenue growth, quarter to 2026-03-31 vs a year earlier %"] == pytest.approx((1400 / 1010 - 1) * 100)
+    assert s["derived"]["Net debt (debt - cash) at 2026-03-31"] == 400
+    assert s["derived"]["Debt / equity at 2026-03-31"] == pytest.approx(0.5)
     assert s["shares_outstanding"][1] == 123456789
+
+
+def _p(start, end, val, filed, form="10-Q"):
+    return {"start": start, "end": end, "val": val, "filed": filed, "form": form}
+
+
+def test_summarize_uses_the_concept_with_the_newest_figures_and_drops_stale_ones():
+    # W18-0001, 2026-11-01: MPC's "Revenues" stops in 2019 and "LongTermDebt" in 2012; picking the first
+    # concept that merely existed printed a 2021 revenue as TTM and showed MPC as net CASH.
+    f = fake_facts()
+    g = f["facts"]["us-gaap"]
+    g["Revenues"]["units"]["USD"] = [_p("2019-01-01", "2019-12-31", 9e9, "2020-02-20", "10-K")]
+    g["RevenueFromContractWithCustomerExcludingAssessedTax"] = {"units": {"USD": [
+        _q(e, 2000 + i, "2026-04-30") for i, e in enumerate(["2025-06-30", "2025-09-30", "2025-12-31", "2026-03-31"])]}}
+    g["LongTermDebt"]["units"]["USD"] = [{"end": "2012-03-31", "val": 3.3e9, "filed": "2012-05-01"}]
+    g["DebtAndCapitalLeaseObligations"] = {"units": {"USD": [{"end": "2026-03-31", "val": 900, "filed": "2026-04-30"}]}}
+    g["GrossProfit"] = {"units": {"USD": [_p("2010-01-01", "2010-12-31", 5, "2011-02-01", "10-K")]}}
+    s = fundamentals.summarize(f, date(2026, 10, 28))
+    assert s["sources"]["Revenue"] == "RevenueFromContractWithCustomerExcludingAssessedTax"
+    assert s["metrics"]["Revenue"]["quarterly"][0] == (date(2026, 3, 31), 2003)
+    assert s["sources"]["Debt"] == "DebtAndCapitalLeaseObligations"
+    assert s["derived"]["Net debt (debt - cash) at 2026-03-31"] == 400
+    assert "Gross profit" not in s["metrics"]
+    assert any(n.startswith("Gross profit left out") and "2010-12-31" in n for n in s["notes"])
+    md = fundamentals.render_markdown("T", "Fake", s, date(2026, 10, 28))
+    assert "Debt = DebtAndCapitalLeaseObligations" in md and "Gross profit left out" in md
+
+
+def test_summarize_works_out_missing_quarters_from_year_to_date_and_annual_totals():
+    # 10-Q cash flow is year-to-date only; nobody files a 3-month Q4
+    ocf = [_p("2025-01-01", "2025-03-31", 100, "2025-05-01"), _p("2025-01-01", "2025-06-30", 250, "2025-08-01"),
+           _p("2025-01-01", "2025-09-30", 420, "2025-11-01"), _p("2025-01-01", "2025-12-31", 600, "2026-02-20", "10-K")]
+    eps = [_p("2025-01-01", "2025-09-30", 3.0, "2025-11-01"), _p("2025-01-01", "2025-12-31", 4.1, "2026-02-20", "10-K")]
+    f = {"facts": {"us-gaap": {"NetCashProvidedByUsedInOperatingActivities": {"units": {"USD": ocf}},
+                               "EarningsPerShareDiluted": {"units": {"USD/shares": eps}}}}}
+    s = fundamentals.summarize(f, date(2026, 3, 1))
+    m = s["metrics"]["Operating cash flow"]
+    assert dict(m["quarterly"]) == {date(2025, 3, 31): 100, date(2025, 6, 30): 150,
+                                    date(2025, 9, 30): 170, date(2025, 12, 31): 180}
+    assert m["derived_quarters"] == [date(2025, 6, 30), date(2025, 9, 30), date(2025, 12, 31)]
+    assert s["derived"]["Operating cash flow TTM (4 quarters to 2025-12-31)"] == 600
+    assert s["metrics"]["EPS diluted ($)"]["quarterly"] == []           # per-share figures are never subtracted
+    md = fundamentals.render_markdown("T", "T", s, date(2026, 3, 1))
+    assert "150.0M" not in md and "| 180* | 170* | 150* | 100 |" in md
+
+
+def test_fiscal_year_fallback_is_labelled_and_margins_never_mix_periods():
+    f = {"facts": {"us-gaap": {
+        "Revenues": {"units": {"USD": [_p("2025-01-01", "2025-12-31", 1000, "2026-02-20", "10-K")]}},
+        "NetIncomeLoss": {"units": {"USD": [_q(e, 10, "2026-08-01") for e in
+                                            ["2025-09-30", "2025-12-31", "2026-03-31", "2026-06-30"]]}},
+        "CashAndCashEquivalentsAtCarryingValue": {"units": {"USD": [{"end": "2026-06-30", "val": 50, "filed": "2026-08-01"}]}},
+        "LongTermDebt": {"units": {"USD": [{"end": "2025-12-31", "val": 70, "filed": "2026-02-20"}]}}}}}
+    s = fundamentals.summarize(f, date(2026, 9, 1))
+    d = s["derived"]
+    assert d["Revenue fiscal year to 2025-12-31"] == 1000
+    assert d["Net income TTM (4 quarters to 2026-06-30)"] == 40
+    assert not any(k.startswith("Net margin") for k in d)              # FY revenue vs TTM income: no margin
+    assert not any(k.startswith("Net debt") for k in d)                # cash and debt on different dates
 
 
 def test_summarize_is_point_in_time():

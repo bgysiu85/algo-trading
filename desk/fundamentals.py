@@ -29,7 +29,7 @@ TAX = ("us-gaap", "ifrs-full")
 #   kind: "flow" = a period total (quarterly/annual); "instant" = a balance on a date
 CONCEPTS = [
     ("Revenue", ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax",
-                 "SalesRevenueNet", "Revenue"], "flow", "USD"),
+                 "RevenueFromContractWithCustomerIncludingAssessedTax", "SalesRevenueNet", "Revenue"], "flow", "USD"),
     ("Gross profit", ["GrossProfit"], "flow", "USD"),
     ("Operating income", ["OperatingIncomeLoss", "ProfitLossFromOperatingActivities"], "flow", "USD"),
     ("Net income", ["NetIncomeLoss", "ProfitLoss", "ProfitLossAttributableToOwnersOfParent"], "flow", "USD"),
@@ -42,9 +42,18 @@ CONCEPTS = [
     ("Total assets", ["Assets"], "instant", "USD"),
     ("Total liabilities", ["Liabilities"], "instant", "USD"),
     ("Equity", ["StockholdersEquity", "Equity"], "instant", "USD"),
-    ("Long-term debt", ["LongTermDebt", "LongTermDebtNoncurrent", "NoncurrentPortionOfNoncurrentBondsIssued",
-                         "NoncurrentPortionOfNoncurrentLoansReceived"], "instant", "USD"),
+    # Total debt where the filer reports it (LongTermDebt and DebtAndCapitalLeaseObligations include the current
+    # portion), else the non-current part. The concept actually used is printed under the tables.
+    ("Debt", ["LongTermDebt", "DebtAndCapitalLeaseObligations", "DebtLongtermAndShorttermCombinedAmount",
+              "LongTermDebtAndCapitalLeaseObligations", "LongTermDebtNoncurrent",
+              "NoncurrentPortionOfNoncurrentBondsIssued", "NoncurrentPortionOfNoncurrentLoansReceived"],
+     "instant", "USD"),
 ]
+
+# A concept whose newest figure ends more than this long before the run date is out of date (filers switch
+# concepts: MPC's "Revenues" stops in 2019 and "LongTermDebt" in 2012). 550 days still keeps an annual-only
+# 20-F filer's last fiscal year (up to ~16 months old before the next annual report).
+STALE_DAYS = 550
 
 
 class FundamentalsError(RuntimeError):
@@ -103,7 +112,22 @@ def _d(s: str) -> date:
     return datetime.strptime(s[:10], "%Y-%m-%d").date()
 
 
-def _pick(facts: dict, concepts: list[str], unit_prefix: str):
+def _latest_end(arr: list[dict], asof: date):
+    ends = []
+    for e in arr:
+        try:
+            if _d(e["filed"]) <= asof:
+                ends.append(_d(e["end"]))
+        except (KeyError, ValueError, TypeError):
+            continue
+    return max(ends) if ends else None
+
+
+def _pick(facts: dict, concepts: list[str], unit_prefix: str, asof: date):
+    """The concept with the NEWEST figure filed by `asof` (ties: the earlier one in `concepts`).
+    -> (concept, unit, facts, latest end) or (None, None, [], None).
+    Picking the first concept that merely exists used MPC's 2019 "Revenues" and 2012 "LongTermDebt"."""
+    best = None
     for tax in TAX:
         node_tax = facts.get("facts", {}).get(tax, {})
         for c in concepts:
@@ -112,8 +136,11 @@ def _pick(facts: dict, concepts: list[str], unit_prefix: str):
                 continue
             for unit, arr in node.get("units", {}).items():
                 if unit.startswith(unit_prefix):
-                    return c, unit, arr
-    return None, None, []
+                    le = _latest_end(arr, asof)
+                    if le is not None and (best is None or le > best[3]):
+                        best = (c, unit, arr, le)
+                    break
+    return best if best else (None, None, [], None)
 
 
 def _dedupe(arr: list[dict], asof: date, keyf) -> dict:
@@ -133,22 +160,38 @@ def _dedupe(arr: list[dict], asof: date, keyf) -> dict:
     return best
 
 
-def _flow_periods(arr, asof: date):
-    """-> (quarterly, annual) each a list of (end_date, value) newest first."""
+def _flow_periods(arr, asof: date, derive: bool = True):
+    """-> (quarterly, annual, derived_quarter_ends); the lists are (end_date, value) newest first.
+
+    10-Qs report cash flows only year-to-date (6 and 9 months) and nobody files a 3-month Q4, so with
+    `derive` a missing quarter is the difference of two periods with the SAME start whose ends are one
+    quarter apart (H1 - Q1 = Q2, 9M - H1 = Q3, FY - 9M = Q4). Not for per-share figures (they do not add up)."""
     def key(e):
         if "start" not in e:
             return None
         return (e["start"], e["end"])
     best = _dedupe(arr, asof, key)
+    periods = {(_d(st), _d(en)): e["val"] for (st, en), e in best.items()}
     q, a = {}, {}
-    for (st, en), e in best.items():
-        days = (_d(en) - _d(st)).days
+    for (st, en), v in periods.items():
+        days = (en - st).days
         if 80 <= days <= 100:
-            q[_d(en)] = e["val"]
+            q[en] = v
         elif 340 <= days <= 380:
-            a[_d(en)] = e["val"]
+            a[en] = v
+    derived = set()
+    if derive:
+        by_start: dict = {}
+        for (st, en), v in periods.items():
+            by_start.setdefault(st, []).append((en, v))
+        for lst in by_start.values():
+            lst.sort()
+            for (e1, v1), (e2, v2) in zip(lst, lst[1:]):
+                if 80 <= (e2 - e1).days <= 100 and e2 not in q:
+                    q[e2] = v2 - v1
+                    derived.add(e2)
     srt = lambda m: sorted(m.items(), reverse=True)     # noqa: E731
-    return srt(q), srt(a)
+    return srt(q), srt(a), derived
 
 
 def _instant_periods(arr, asof: date):
@@ -157,16 +200,20 @@ def _instant_periods(arr, asof: date):
 
 
 def summarize(facts: dict, asof: date, n_q: int = 5, n_a: int = 3) -> dict:
-    out = {"entity": facts.get("entityName", ""), "metrics": {}, "derived": {}, "notes": []}
+    out = {"entity": facts.get("entityName", ""), "metrics": {}, "derived": {}, "notes": [], "sources": {}}
     for label, concepts, kind, unit in CONCEPTS:
-        c, u, arr = _pick(facts, concepts, unit)
+        c, u, arr, latest = _pick(facts, concepts, unit, asof)
         if not arr:
             continue
+        if (asof - latest).days > STALE_DAYS:
+            out["notes"].append(f"{label} left out: the newest SEC figure ({c}) ends {latest}, too old to use")
+            continue
+        out["sources"][label] = c
         if kind == "flow":
-            q, a = _flow_periods(arr, asof)
+            q, a, der = _flow_periods(arr, asof, derive=not unit.startswith("USD/"))
             if q or a:
-                out["metrics"][label] = {"concept": c, "unit": u, "kind": kind,
-                                          "quarterly": q[:n_q], "annual": a[:n_a]}
+                out["metrics"][label] = {"concept": c, "unit": u, "kind": kind, "quarterly": q[:n_q],
+                                          "annual": a[:n_a], "derived_quarters": sorted(der)}
         else:
             ip = _instant_periods(arr, asof)
             if ip:
@@ -186,18 +233,19 @@ def summarize(facts: dict, asof: date, n_q: int = 5, n_a: int = 3) -> dict:
     dv = out["derived"]
 
     def ttm(label):
+        """-> (value, basis): four consecutive quarters, else the latest fiscal year, labelled as such."""
         x = m.get(label)
         if not x:
-            return None
+            return None, None
         q = x["quarterly"]
         if len(q) >= 4:
             ends = [e for e, _ in q[:4]]
-            span = (ends[0] - ends[3]).days
-            if 240 <= span <= 300:          # four consecutive quarters
-                return sum(v for _, v in q[:4])
+            if all(80 <= (ends[i] - ends[i + 1]).days <= 100 for i in range(3)):
+                return sum(v for _, v in q[:4]), f"TTM (4 quarters to {ends[0]})"
         if x["annual"]:
-            return x["annual"][0][1]
-        return None
+            e, v = x["annual"][0]
+            return v, f"fiscal year to {e}"
+        return None, None
 
     def yoy(label):
         x = m.get(label)
@@ -206,38 +254,38 @@ def summarize(facts: dict, asof: date, n_q: int = 5, n_a: int = 3) -> dict:
         e0, v0 = x["quarterly"][0]
         for e1, v1 in x["quarterly"][1:]:
             if 350 <= (e0 - e1).days <= 380 and v1:
-                return (v0 / v1 - 1.0) * 100.0
+                return e0, (v0 / v1 - 1.0) * 100.0
         return None
 
-    rev, ni, oi, gp = ttm("Revenue"), ttm("Net income"), ttm("Operating income"), ttm("Gross profit")
-    ocf, capex = ttm("Operating cash flow"), ttm("Capex")
-    if rev:
-        dv["Revenue TTM"] = rev
-        if gp is not None:
-            dv["Gross margin %"] = gp / rev * 100.0
-        if oi is not None:
-            dv["Operating margin %"] = oi / rev * 100.0
-        if ni is not None:
-            dv["Net margin %"] = ni / rev * 100.0
+    (rev, rb), (ni, nb), (oi, ob), (gp, gb) = ttm("Revenue"), ttm("Net income"), ttm("Operating income"), ttm("Gross profit")
+    (ocf, cb), (capex, xb) = ttm("Operating cash flow"), ttm("Capex")
+    if rev is not None:
+        dv[f"Revenue {rb}"] = rev
+        # a margin only when both figures cover the same period
+        for name, val, basis in (("Gross margin %", gp, gb), ("Operating margin %", oi, ob), ("Net margin %", ni, nb)):
+            if val is not None and basis == rb and rev:
+                dv[f"{name}, {rb}"] = val / rev * 100.0
     if ni is not None:
-        dv["Net income TTM"] = ni
+        dv[f"Net income {nb}"] = ni
     if ocf is not None:
-        dv["Operating cash flow TTM"] = ocf
-        if capex is not None:
-            dv["Free cash flow TTM (OCF - capex)"] = ocf - abs(capex)
-    g = yoy("Revenue")
-    if g is not None:
-        dv["Revenue growth, latest quarter vs year ago %"] = g
-    ge = yoy("Net income")
-    if ge is not None:
-        dv["Net income growth, latest quarter vs year ago %"] = ge
-    cash = m.get("Cash", {}).get("instant")
-    debt = m.get("Long-term debt", {}).get("instant")
-    eq = m.get("Equity", {}).get("instant")
-    if cash and debt:
-        dv["Net debt (long-term debt - cash)"] = debt[0][1] - cash[0][1]
-    if debt and eq and eq[0][1]:
-        dv["Long-term debt / equity"] = debt[0][1] / eq[0][1]
+        dv[f"Operating cash flow {cb}"] = ocf
+        if capex is not None and xb == cb:
+            dv[f"Free cash flow (OCF - capex) {cb}"] = ocf - abs(capex)
+    for label, name in (("Revenue", "Revenue growth"), ("Net income", "Net income growth")):
+        g = yoy(label)
+        if g is not None:
+            dv[f"{name}, quarter to {g[0]} vs a year earlier %"] = g[1]
+    cash = dict(m.get("Cash", {}).get("instant", []))
+    debt = dict(m.get("Debt", {}).get("instant", []))
+    eq = dict(m.get("Equity", {}).get("instant", []))
+    both = sorted(set(cash) & set(debt), reverse=True)        # same balance-sheet date only
+    if both:
+        d = both[0]
+        dv[f"Net debt (debt - cash) at {d}"] = debt[d] - cash[d]
+    both = sorted(set(debt) & set(eq), reverse=True)
+    if both and eq[both[0]]:
+        d = both[0]
+        dv[f"Debt / equity at {d}"] = debt[d] / eq[d]
     return out
 
 
@@ -260,7 +308,8 @@ def _money(x, eps=False):
 def render_markdown(ticker: str, title: str, summ: dict, asof: date) -> str:
     L = [f"# {ticker} fundamentals from SEC EDGAR ({title or summ.get('entity', '')})",
          f"Source: SEC company facts, filings made on or before {asof}. USD unless noted; negatives in brackets. "
-         "Computed by script from the filings; quarterly = 3-month periods as filed.", ""]
+         "Computed by script from the filings; quarterly = 3-month periods; * = worked out from year-to-date or "
+         "annual totals (10-Qs give cash flow year-to-date; nobody files a 3-month Q4).", ""]
     m = summ["metrics"]
     if not m:
         L.append("NO USABLE XBRL FACTS FOUND. Use WebSearch/WebFetch (the company's latest 10-K/10-Q or "
@@ -274,8 +323,10 @@ def render_markdown(ticker: str, title: str, summ: dict, asof: date) -> str:
               "|---|" + "---|" * len(qe)]
         for k, v in flows.items():
             qd = dict(v["quarterly"])
+            der = set(v.get("derived_quarters", ()))
             if qd:
-                L.append(f"| {k} | " + " | ".join(_money(qd.get(e), k.startswith("EPS")) for e in qe) + " |")
+                L.append(f"| {k} | " + " | ".join(
+                    _money(qd.get(e), k.startswith("EPS")) + ("*" if e in der and e in qd else "") for e in qe) + " |")
         L.append("")
     ae = sorted({e for v in flows.values() for e, _ in v["annual"]}, reverse=True)[:3]
     if ae:
@@ -296,13 +347,15 @@ def render_markdown(ticker: str, title: str, summ: dict, asof: date) -> str:
     if summ["derived"]:
         L.append("## Derived (script-computed)")
         for k, v in summ["derived"].items():
-            pct = k.endswith("%")
+            pct = "%" in k
             ratio = "/ equity" in k
             L.append(f"- {k}: " + (f"{v:,.1f}%" if pct else (f"{v:,.2f}x" if ratio else _money(v))))
         L.append("")
     if "shares_outstanding" in summ:
         d, v = summ["shares_outstanding"]
         L.append(f"Shares outstanding (cover page, as of {d}): {v:,.0f}")
+    if summ.get("sources"):
+        L.append("SEC concept per row: " + "; ".join(f"{k} = {c}" for k, c in summ["sources"].items()))
     for n in summ["notes"]:
         L.append(f"Note: {n}")
     if not qe:

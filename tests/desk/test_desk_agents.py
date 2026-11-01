@@ -135,6 +135,18 @@ def test_every_helper_command_the_skill_mentions_exists():
             assert f'"{flag}"' in src, f"skill uses {flag} but desk/{m}.py has no such option"
 
 
+def test_skill_skips_prepare_when_the_nas_already_prepared_and_never_sends_ben_to_a_pc_gateway():
+    # W18-0001 (2026-11-01): the paper Gateway's API lives only inside the NAS's Docker network, so prepare runs
+    # there and its files are copied to the PC. One IBKR paper username = one session: a PC Gateway login
+    # would knock the NAS Gateway and the NAS trader off it.
+    _, body = frontmatter(SKILL)
+    prep = body[body.index("**Prepare**"):body.index("**Four analysts")]
+    assert "`RUN_DIR/market_data.md` already exists" in prep and "SKIP this step" in prep
+    assert "W18-0001 sub 4" in prep
+    assert "Never tell Ben to start IB Gateway on the PC" in prep
+    assert "start IB Gateway paper on port 4002" not in body
+
+
 def test_skill_forbids_orders_and_prod_and_report_reading():
     _, body = frontmatter(SKILL)
     assert "Never place" in body and "TradingProd" in body and "Do NOT read the agents' report files" in body
