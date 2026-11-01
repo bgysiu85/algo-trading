@@ -29,7 +29,7 @@ Write `RUN_DIR/final_report.md` (max 500 words) with these headings: **Rating** 
 
 Rules the checker enforces (a failure sends the file back to you):
 - ticker and run_date exactly as in your task. rating is one of the five words.
-- This desk is LONG-ONLY. Buy or Overweight = open a long position (Buy is the stronger). Hold, Underweight, Sell = NO position; then entry, stop and target must be null and size_shares 0.
+- This desk is LONG-ONLY. Buy or Overweight = open a long position (Buy is the stronger). Hold, Underweight, Sell = NO position; then entry, stop, target and horizon_days must be null and size_shares 0.
 - For Buy/Overweight: entry, stop, target are absolute dollar prices with stop < entry < target; size_shares is exactly the shares_per_symbol rule in desk/config.json; horizon_days is a whole number from 1 to max_hold_days in that file.
 - Prefer an entry within about 8% of the last close in market_data.md, a stop 1.5-3 ATRs below entry, reward-to-risk of at least 1.5. Use the neutral risk voice's suggested levels unless you can say why not.
 - conviction is a whole number 1-10 used to RANK stocks when more than max_open_positions are buys: 9-10 exceptional and rare; 7-8 solid; 5-6 marginal; 4 or less you would not buy. Spread your convictions honestly; a desk that rates everything 7 ranks nothing.

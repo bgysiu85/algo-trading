@@ -101,6 +101,14 @@ def test_non_buy_needs_no_prices_and_never_becomes_a_position(rating):
     assert errors == [] and clean["actionable"] is False and clean["entry"] is None
 
 
+@pytest.mark.parametrize("hz", [None, 0, 1, 90, 400, "n/a"])
+@pytest.mark.parametrize("rating", ["Hold", "Underweight", "Sell"])
+def test_non_buy_never_fails_on_horizon_and_logs_it_empty(rating, hz):
+    d = good(rating=rating, entry=None, stop=None, target=None, size_shares=0, horizon_days=hz)
+    errors, warns, clean = check(d)
+    assert errors == [] and clean["horizon_days"] is None and clean["actionable"] is False
+
+
 def test_non_buy_with_prices_warns_and_drops_them():
     errors, w, clean = check(good(rating="Hold"))
     assert errors == [] and clean["entry"] is None and any("ignored" in x for x in w)

@@ -81,10 +81,15 @@ def validate(d: dict, ticker: str, run_date: str, snapshot: dict | None, rules: 
     elif size != want and rating in ACTIONABLE:
         errors.append(f"size_shares must be {want} (Ben's paper rule: {want} share per symbol)")
 
+    # A holding period only means something for a position. For Hold / Underweight / Sell it is ignored and logged
+    # empty (W18-0001, 2026-11-01: the old rule sent INTC and PBF back for a retry and MPC got a made-up "1").
     hz = d.get("horizon_days")
     maxh = rules.get("max_hold_days", 180)
-    if isinstance(hz, bool) or not isinstance(hz, int) or not 1 <= hz <= maxh:
-        errors.append(f"horizon_days must be a whole number 1-{maxh}")
+    if rating in ACTIONABLE:
+        if isinstance(hz, bool) or not isinstance(hz, int) or not 1 <= hz <= maxh:
+            errors.append(f"horizon_days must be a whole number 1-{maxh}")
+    else:
+        hz = None
 
     for k in ("thesis",):
         if not isinstance(d.get(k), str) or not d.get(k, "").strip():
