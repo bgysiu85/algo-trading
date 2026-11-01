@@ -310,6 +310,16 @@ def test_summarize_works_out_missing_quarters_from_year_to_date_and_annual_total
     assert "150.0M" not in md and "| 180* | 170* | 150* | 100 |" in md
 
 
+def test_capex_falls_back_to_productive_assets_when_ppe_payments_stopped():
+    # AMZN: PaymentsToAcquirePropertyPlantAndEquipment ends 2017; it now files PaymentsToAcquireProductiveAssets
+    f = {"facts": {"us-gaap": {
+        "PaymentsToAcquirePropertyPlantAndEquipment": {"units": {"USD": [_p("2016-01-01", "2016-12-31", 7, "2017-02-01", "10-K")]}},
+        "PaymentsToAcquireProductiveAssets": {"units": {"USD": [_p("2025-01-01", "2025-12-31", 120, "2026-02-01", "10-K")]}}}}}
+    s = fundamentals.summarize(f, date(2026, 10, 28))
+    assert s["sources"]["Capex"] == "PaymentsToAcquireProductiveAssets"
+    assert s["metrics"]["Capex"]["annual"][0][1] == 120
+
+
 def test_fiscal_year_fallback_is_labelled_and_margins_never_mix_periods():
     f = {"facts": {"us-gaap": {
         "Revenues": {"units": {"USD": [_p("2025-01-01", "2025-12-31", 1000, "2026-02-20", "10-K")]}},

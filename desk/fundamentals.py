@@ -36,7 +36,7 @@ CONCEPTS = [
     ("EPS diluted ($)", ["EarningsPerShareDiluted", "DilutedEarningsLossPerShare"], "flow", "USD/"),
     ("Operating cash flow", ["NetCashProvidedByUsedInOperatingActivities",
                               "CashFlowsFromUsedInOperatingActivities"], "flow", "USD"),
-    ("Capex", ["PaymentsToAcquirePropertyPlantAndEquipment",
+    ("Capex", ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets",
                "PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"], "flow", "USD"),
     ("Cash", ["CashAndCashEquivalentsAtCarryingValue", "CashAndCashEquivalents"], "instant", "USD"),
     ("Total assets", ["Assets"], "instant", "USD"),
