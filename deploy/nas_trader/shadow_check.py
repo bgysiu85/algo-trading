@@ -4,6 +4,10 @@ Logs in to the NAS over SSH as `claude` (key login), reads the session lock, the
 one snapshot line to Claude outputs/shadow_run_log.jsonl and prints a verdict on the pass rule: PASS_SESSIONS weekday
 sessions with a session_open row, no stale heartbeat in session, no ERROR/REJECT rows. Writes nothing on the NAS.
 
+The scheduled run is at 02:00 Sydney, after the trader has stopped (09:30 New York) and removed its session lock. No
+lock therefore means "no session running": the heartbeat checks are skipped, the fills files are still read and the
+snapshot is still logged. Every session_open row must say dry_run=True, which stands in for the lock's mode.
+
     .venv\\Scripts\\python.exe deploy\\nas_trader\\shadow_check.py
 """
 from __future__ import annotations
@@ -41,6 +45,19 @@ def ssh() -> str:
     return out.stdout
 
 
+def parse_lock(text: str) -> tuple[dict | None, str | None]:
+    """Return (lock, problem). An empty lock is (None, None): the trader is not running. Unreadable text is a problem."""
+    text = text.strip()
+    if not text:
+        return None, None
+    try:
+        lock = json.loads(text)
+        lock["heartbeat_epoch"]
+    except (ValueError, KeyError, TypeError):
+        return None, f"session.lock is not readable: {text[:80]!r}"
+    return lock, None
+
+
 def sections(text: str) -> dict[str, str]:
     parts, cur = {}, None
     for line in text.splitlines(keepends=True):
@@ -50,6 +67,15 @@ def sections(text: str) -> dict[str, str]:
         elif cur:
             parts[cur] += line
     return parts
+
+
+def is_reject(row: dict) -> bool:
+    """A refused order. SKIPPED_* rows are the trader declining a signal by its own rules (for example a re-entry on a
+    bar that opened before the strategy's exit): they carry a reason text but are not rejects."""
+    if row["action"] == "CONFIG":
+        return False
+    status = row["status"].upper()
+    return "REJECT" in status or (bool(row["reject_reason"]) and not status.startswith("SKIPPED_"))
 
 
 def fills_summary(block: str) -> dict[str, dict]:
@@ -68,9 +94,11 @@ def fills_summary(block: str) -> dict[str, dict]:
         summary[day] = {
             "rows": len(rows),
             "session_open": sum(r["action"] == "CONFIG" and r["reason"] == "session_open" for r in rows),
+            "live_open": sum(r["action"] == "CONFIG" and r["reason"] == "session_open"
+                             and "dry_run=True" not in r.get("reject_reason", "") for r in rows),
             "signals": sum(r["action"] in ("BUY", "SELL", "ENTRY", "EXIT") for r in rows),
-            "rejects": sum(r["action"] != "CONFIG" and (bool(r["reject_reason"]) or "REJECT" in r["status"].upper())
-                           for r in rows),
+            "rejects": sum(is_reject(r) for r in rows),
+            "skipped": sum(r["status"].upper().startswith("SKIPPED_") for r in rows),
             "errors": sum("ERROR" in r["status"].upper() for r in rows),
         }
     return summary
@@ -78,8 +106,8 @@ def fills_summary(block: str) -> dict[str, dict]:
 
 def main() -> int:
     s = sections(ssh())
-    lock = json.loads(s["LOCK"])
-    age = time.time() - lock["heartbeat_epoch"]
+    lock, lock_problem = parse_lock(s.get("LOCK", ""))
+    age = time.time() - lock["heartbeat_epoch"] if lock else None
     load = s["LOAD"].split()
     mem = {k.rstrip(":"): int(v) // 1024 for k, v in (l.split()[:2] for l in s["LOAD"].splitlines()[1:])}
     fills = fills_summary(s["FILLS"])
@@ -87,8 +115,9 @@ def main() -> int:
     watch_lines = int(watch[0]) if watch else 0
     snap = {
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "mode": lock["mode"], "strategy": lock["strategy"], "version": lock["version"],
-        "started_at": lock["started_at"], "heartbeat_age_s": round(age, 1),
+        "mode": lock["mode"] if lock else None, "strategy": lock["strategy"] if lock else None,
+        "version": lock["version"] if lock else None, "started_at": lock["started_at"] if lock else None,
+        "heartbeat_age_s": round(age, 1) if lock else None,
         "watchlist_lines": watch_lines, "archive_tail": watch[1:],
         "load1": float(load[0]), "mem_avail_mb": mem.get("MemAvailable"), "fills": fills,
     }
@@ -98,18 +127,24 @@ def main() -> int:
 
     weekday_sessions = [d for d, v in fills.items()
                         if v["session_open"] and d >= FIRST_DAY and datetime.strptime(d, "%Y%m%d").weekday() < 5]
-    problems = []
-    if lock["mode"] != "dry":
-        problems.append(f"mode is {lock['mode']}, not dry")
-    if age > STALE_S:
-        problems.append(f"heartbeat {age:.0f}s old (dead after {STALE_S}s)")
-    if age <= STALE_S and watch_lines == 0:
-        problems.append("in session with an empty watchlist: the feed is not filling it (sessions do not count)")
+    problems = [lock_problem] if lock_problem else []
+    if lock:
+        if lock["mode"] != "dry":
+            problems.append(f"mode is {lock['mode']}, not dry")
+        if age > STALE_S:
+            problems.append(f"heartbeat {age:.0f}s old (dead after {STALE_S}s)")
+        if age <= STALE_S and watch_lines == 0:
+            problems.append("in session with an empty watchlist: the feed is not filling it (sessions do not count)")
     for d, v in fills.items():
         if v["errors"] or v["rejects"]:
             problems.append(f"{d}: {v['errors']} error / {v['rejects']} reject rows")
+        if v["live_open"]:
+            problems.append(f"{d}: {v['live_open']} session_open row(s) without dry_run=True")
 
-    print(f"lock: {lock['mode']} {lock['strategy']} {lock['version']} started {lock['started_at']}, heartbeat {age:.0f}s ago")
+    if lock:
+        print(f"lock: {lock['mode']} {lock['strategy']} {lock['version']} started {lock['started_at']}, heartbeat {age:.0f}s ago")
+    else:
+        print("lock: none (no session running)")
     print(f"watchlist lines now: {watch_lines}; archive tail: {watch[1:]}")
     print(f"load {load[0]}, MemAvailable {mem.get('MemAvailable')} MB")
     for d in sorted(fills):
