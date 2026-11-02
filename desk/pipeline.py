@@ -31,6 +31,7 @@ SEQUENCE = (
 FINAL_REPORT = "final_report.md"
 DECISION_JSON = "decision.json"
 DECISIONS_CSV = "decisions.csv"     # in runs_dir, all days, one row per ticker-day
+ORDERS_CSV = "orders.csv"           # in runs_dir: what the IBKR bridge did with each actionable decision (W18-0002)
 
 # Written by `desk.prepare` before any agent runs.
 PREPARED_FILES = ("bars.csv", "snapshot.json", "market_data.md", "fundamentals_data.md", "status.json")

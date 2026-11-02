@@ -15,6 +15,11 @@
     "duration": "2 Y",
     "timeout_s": 15
   },
+  "bridge": {
+    "client_id": 92,
+    "max_entry_above_close_pct": 2.0,
+    "status_wait_s": 2
+  },
   "runs_dir": "var/desk_runs",
   "sec_user_agent_env": "SEC_CONTACT"
 }

@@ -1,6 +1,6 @@
 # AI research desk (W18) — TradingAgents-style, run inside Claude Code
 
-Ben's list of Seeking Alpha Alpha Picks goes in; for each stock the desk gives a rating, entry, stop and target. Long-only, paper-test only, nothing here places an order. Board: W18-0001 (this build is sub 2).
+Ben's list of Seeking Alpha Alpha Picks goes in; for each stock the desk gives a rating, entry, stop and target. Long-only, paper-test only. The desk itself never places an order; the separate bridge (`desk/bridge.py`, W18-0002) does, and only with `--place`. Board: W18-0001 (this build is sub 2).
 
 ## How it works
 `/desk MPC` (a Claude Code skill, `.claude/skills/desk/SKILL.md`) runs 13 subagents (`.claude/agents/desk-*.md`) in this order:
@@ -42,6 +42,21 @@ the PC: it would knock the NAS Gateway and the NAS trader off. The run is theref
    on the NAS first (repeat step 1 once per ticker, same date).
 5. The US date rolls over at 16:00 Sydney time (15:00 while New York is on daylight time). Run steps 1-3 on the same US
    date, or the PC will look in a different day's folder and try to prepare locally (and fail, which is safe).
+
+## IBKR paper bridge (W18-0002)
+`python -m desk.bridge` turns today's Buy / Overweight decisions into bracket orders on the PAPER account: a day limit buy at `entry`, a GTC take-profit at `target` and a GTC stop-market at `stop` (the two exits cancel each other), 1 share, orderRef `desk:<date>:<TICKER>`. It re-checks every row (stop < entry < target, 1 share, horizon <= 180, entry not more than 2% above the last close, ticker on the list), ignores anything not dated today's US date, never acts on a Hold's watch plan, and respects the 15-position cap using the desk's own ranking (existing stock positions in the list and pending desk entries count). Three modes:
+
+| Command | Connects? | Can place? | Writes |
+|---|---|---|---|
+| `python -m desk.bridge` | no | no | nothing (positions, open orders and funds are NOT checked) |
+| `python -m desk.bridge --check` | yes, read-only | no | nothing |
+| `python -m desk.bridge --place [--ticker MPC]` | yes | yes | `var/desk_runs/orders.csv` |
+
+Guards: ports other than 4002 / 7497 refused, connection dropped unless every managed account starts with `DU`, client id 92. If any leg of a bracket is refused, the whole bracket is cancelled so an entry is never left without its stop. `orders.csv` keeps a PLACED row for the day (a later run skips that ticker); SKIPPED / REJECTED rows say why.
+
+Like `prepare`, `--check` / `--place` must run on the NAS (a one-off container on the Gateway's network), because the PC cannot reach the paper API. Same `docker run` as the data step with `-v /volume1/docker/desk/var:/app/var` and `python -m desk.bridge --check`; `decisions.csv` has to be copied to `/volume1/docker/desk/var/desk_runs/` first, and `orders.csv` is copied back afterwards. Check that the `US date` line the bridge prints is the date of the desk run.
+
+Not done by the bridge: closing a position when its horizon (`hold_until` in orders.csv) passes, tracking fills and exits for the scorecard (W18-0004), and the daily schedule (W18-0003). GTC exits stay working until filled or cancelled; IBKR may cancel GTC orders around corporate actions.
 
 ## Files
 `desk/config.json` — the 20 tickers, paper rules (1 share per symbol, max 15 open, 180-day hold), IBKR port and client id 91 (17 trader, 55 scanner, 77 viewer, 88 params dump are taken). `desk/pipeline.py` — the order and file names (the tests check the prompts against it).
