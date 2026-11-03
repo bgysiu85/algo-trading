@@ -4,6 +4,7 @@
 #   api_precheck.sh check            one check, Telegram on failure only      -> use before the window (alert only)
 #   api_precheck.sh check-restart    check; on failure restart the Gateway ONCE, wait, check again
 #                                    (refused while trader-trader is running)  -> use BEFORE the trader starts
+# Anything after the mode goes to api_precheck.py, e.g. a safe alarm test:  api_precheck.sh check --port 7497 --attempts 1 --label "TEST"
 #
 # The check itself is api_precheck.py (a real read-only API session), run inside the Gateway's network so nothing is
 # published. Output is appended to precheck.log in the trader folder as well as printed.
@@ -11,7 +12,8 @@
 # PRECHECK_WAIT_S (wait after a restart, default 240), PRECHECK_LABEL, TRADER_DIR (tests only).
 set -u
 export PATH="$PATH:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"      # DSM tasks start with a thin PATH; docker lives in /usr/local/bin
-MODE="${1:-check}"
+MODE="${1:-check}"; [ $# -gt 0 ] && shift
+EXTRA=("$@")                       # optional extra api_precheck.py arguments
 DIR="${TRADER_DIR:-/volume1/docker/trader}"      # TRADER_DIR is only for the tests
 LOG="$DIR/precheck.log"
 GATEWAY=trader-ib-gateway
@@ -32,7 +34,7 @@ export TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID
 run_check() {   # $@ = extra api_precheck.py arguments
     docker run --rm --security-opt seccomp=unconfined --network "container:$GATEWAY" \
         -e TELEGRAM_BOT_TOKEN -e TELEGRAM_CHAT_ID -e PRECHECK_LABEL \
-        -v "$DIR/api_precheck.py:/precheck.py:ro" --entrypoint python "$IMAGE" /precheck.py "$@" 2>&1 | tee -a "$LOG"
+        -v "$DIR/api_precheck.py:/precheck.py:ro" --entrypoint python "$IMAGE" /precheck.py "$@" ${EXTRA[@]+"${EXTRA[@]}"} 2>&1 | tee -a "$LOG"
     return "${PIPESTATUS[0]}"
 }
 
