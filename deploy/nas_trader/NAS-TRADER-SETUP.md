@@ -535,3 +535,55 @@ stays until you delete it).
 Rules a later chat must not undo: `portal-db` and its backup job are on the internal network `portaldb` only (shared with the relay), publish
 no port, and start only by name (`--profile portal ... --no-deps`). The Gateway, the trader, the watcher and `thesiuz-edge` never join
 `portaldb`. The password is made on the NAS by `portal_db.sh` and lives only in `.env` (mode 600). The relay never gets a route to `journal-db`.
+
+## Part 8 - pre-session API check (W10-0013 sub 16, 2026-11-03)
+
+Why: on Sun 1 Nov the Gateway refused every API session with IBKR error 10141 ("Paper trading disclaimer must first be accepted for API
+connection") while Docker still showed it healthy, because the health check only tests that port 4002 accepts a TCP connection. This check
+does what the trader does: it opens a real read-only API session (client id 95), asks for the accounts and the server time, and messages
+Telegram if that fails (3 attempts, 20 s apart, before it speaks). Files: `api_precheck.py` (the check) and `api_precheck.sh` (for DSM Task Scheduler).
+
+Two modes:
+- `check` - one check, messages Telegram on failure (and a short "OK" while `PRECHECK_NOTIFY_OK` is `yes`, the default, so a silent task is noticed). Never restarts anything.
+- `check-restart` - if the check fails, restarts the Gateway ONCE (`docker restart trader-ib-gateway`), waits 4 minutes, checks again. It refuses to restart while `trader-trader` is running; it then only messages.
+
+Limits and risks (unverified items are marked):
+- It runs inside the Gateway's network, publishes nothing, passes only the two Telegram values from `.env` (never the whole file), places or previews no order, and refuses live ports.
+- NOT verified: that a restart clears error 10141 every time (it did on 1 Nov, by hand); what the dialog says (IBC's log recorded only its title "IBKR Gateway"; the next time it appears, read it on the Gateway's screen, VNC at 127.0.0.1:5901 on the NAS, and tell Claude); whether the trader reconnects by itself if the Gateway restarts under it, which is why `check-restart` runs only BEFORE the trader starts.
+- A restart takes the Gateway away for a few minutes. The desk (W18) uses the same Gateway: keep the `check-restart` time away from its runs.
+- If the NAS or its network is down, nothing here can say so; that is the watcher's healthchecks.io ping (part 6).
+- Times are NAS clock times (Sydney/Melbourne). They follow New York: with New York on standard time, 04:00 New York is 20:00 here. When either country changes its clocks, move these two tasks together with "Algo - start trader".
+
+Steps:
+1. **Copy the files (PowerShell on the ProArt).**
+```
+Set-Location D:\Trading
+$k = "D:\Trading\Claude outputs\.ssh\nas_claude_ed25519"
+ssh -i $k claude@192.168.1.109 "mkdir -p /volume1/docker/edge/staging"
+scp -O -i $k "D:\Trading\deploy\nas_trader\api_precheck.py" "D:\Trading\deploy\nas_trader\api_precheck.sh" claude@192.168.1.109:/volume1/docker/edge/staging/
+```
+   Then in the NAS session:
+```
+sudo cp /volume1/docker/edge/staging/api_precheck.py /volume1/docker/edge/staging/api_precheck.sh /volume1/docker/trader/
+sudo chmod 755 /volume1/docker/trader/api_precheck.sh
+sudo chmod 644 /volume1/docker/trader/api_precheck.py
+sudo chmod 600 /volume1/docker/trader/.env
+```
+2. **Run it once by hand (NAS session).** It opens one read-only API session and sends one "OK" to Telegram:
+```
+sudo bash /volume1/docker/trader/api_precheck.sh check
+tail -8 /volume1/docker/trader/precheck.log
+```
+   Expect `PRECHECK PASS` and a Telegram message "Gateway API check OK". Report back what it printed.
+3. **Prove the alarm with a safe failure (NAS session).** It asks for the WRONG port (7497, where nothing listens), so it fails without touching the Gateway; Telegram must say FAILED with a "TEST" label:
+```
+sudo bash /volume1/docker/trader/api_precheck.sh check --port 7497 --attempts 1 --label "TEST - ignore"
+```
+4. **Two DSM tasks (DSM by hand).** Control Panel > Task Scheduler > Create > Scheduled Task > User-defined script. User `root`, Mon-Fri, "Send run details by email" off. Task settings > Run command:
+   - Name `Algo - API check before start`, Schedule 16:50, command `bash /volume1/docker/trader/api_precheck.sh check-restart`
+   - Name `Algo - API check before window`, Schedule 19:45, command `bash /volume1/docker/trader/api_precheck.sh check`
+   After the first weekday run, `tail -20 /volume1/docker/trader/precheck.log` shows both.
+
+Undo: delete the two DSM tasks; `sudo rm /volume1/docker/trader/api_precheck.py /volume1/docker/trader/api_precheck.sh`.
+
+Rules a later chat must not undo: the check runs only with `--network container:trader-ib-gateway` and publishes no port; the wrapper never passes `.env` as a whole (`--env-file`); `docker restart` appears once, only in `check-restart`, and never while `trader-trader` runs; the client id 95 is not shared with another tool; live ports stay refused. `tests/deploy/test_api_precheck.py` enforces these.
