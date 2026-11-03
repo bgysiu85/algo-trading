@@ -28,3 +28,15 @@ Ports other than 4002 / 7497 refused (exit 2); connection dropped unless every m
 
 ## Next steps
 Board ids: W18-0003 (schedule, was blocked by this), W18-0004 (scorecard; needs fill tracking), plus two proposed follow-ups: time-exit at `hold_until`, fill/exit tracking. Ben runs NAS Step A (offline dry-run) and reports the US date line; Step B (`--check`) once a Buy exists.
+
+## Update 2026-11-03 — first live paper orders
+The 2026-11-01 buys went stale at the 16:00 Sydney rollover, so the desk was re-run for 2026-11-02 (BTSG Overweight 6, GM Overweight 5, CNC Hold 4). Step B (`--check`) passed: 0 positions, 0 pending, funds $19,423.12.
+
+| Ticker | Entry | Take-profit | Stop | Risk | Order ids (parent, TP, stop) | Broker status |
+|---|---|---|---|---|---|---|
+| GM | 83.40 | 91.85 | 76.45 | $6.95 | 4, 5, 6 | PreSubmitted |
+| BTSG | 62.50 | 73.75 | 57.50 | $5.00 | 10, 11, 12 | PreSubmitted |
+
+Both logged PLACED in `var/desk_runs/orders.csv`. IBKR returned Warning 399 on each parent ("not placed at the exchange until 2026-11-03 09:30 US/Eastern"): informational, the bridge correctly did not cancel. The BTSG run saw the pending GM entry (`1 desk entry orders pending`), so the cap/idempotency logic works against the live account.
+
+Not yet confirmed: Ben checking the six orders in the IBKR paper account, and what happens at the 2026-11-03 open (fills, expiry of unfilled day orders).
