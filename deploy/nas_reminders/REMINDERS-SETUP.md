@@ -11,7 +11,8 @@ one Update on the linked Wxx task. A Telegram message goes out at the time as a 
 - The **monday API token** is Ben's own, so it can do everything Ben can on monday. It lives only in `reminders.env`
   (mode 600) on the NAS. If it leaks, delete it in monday (Developers > My access tokens) and make a new one.
 - Only TCP **38443** is forwarded to the internet. This script never needs DSM (5000/5001) or SSH from outside.
-- It only touches the list **monday reminders**. It never reads or changes Ben's own tasks (My Task).
+- It only touches the list **monday reminders**. It never reads or changes Ben's own tasks (the 'Inbox' list).
+- **Times:** monday writes Remind at as Sydney wall-clock time with no timezone marker, so the script reads such times as Australia/Sydney (override with FEED_TIMEZONE in the env file). `--check` prints the feed's own DTSTART beside the time it will alert at; compare it with monday.
 - A ticked reminder is only noticed on the next 5-minute run, and the iPhone syncs in the background, so allow a few minutes.
 - Python on the NAS may be old (3.8). The code avoids newer features, but `--check` proves it.
 
@@ -43,10 +44,10 @@ one Update on the linked Wxx task. A Telegram message goes out at the time as a 
 7. **Live test (with the chat):** add a Reminders item due about 20 minutes ahead; it should appear in iPhone Reminders after
    the next run and alert on time; tick it and check the item turns Done on monday.
 
-To see what Synology wrote for your own test task: `sudo python3 /volume1/docker/reminders/reminders_sync.py --dump "My Task"`.
+To see what Synology wrote for your own test task: `sudo python3 /volume1/docker/reminders/reminders_sync.py --dump "Inbox"`.
 
 ## Rules not to undo
 - A failed feed or failed task listing must never delete, tick or dismiss anything (tests enforce it).
 - `reminders.env` stays mode 600 and never goes into the repo. The script never touches the trader or Gateway containers
   or `/volume1/docker/trader/.env` (it only reads the two Telegram lines of it, through `make_reminders_env.sh`, once).
-- Never change the Wxx task's own Status from here; only add the one Update.
+- Never change a normal task's own Status from here; only add the one Update. The one exception (Ben, 2026-11-06): when a reminder's Task link points at a STEP (a subitem on one of the four subitems boards), ticking the reminder also sets that step's Status to Done.

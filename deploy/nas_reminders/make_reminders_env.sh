@@ -18,11 +18,16 @@ for v in "$F" "$M" "$P"; do
     ""|*"'"*|*\\*) echo "Empty value, or it contains ' or \\ - not supported here. Nothing written."; exit 1;;
   esac
 done
-case "$F" in https://*) ;; *) echo "The feed link must start with https://. Nothing written."; exit 1;; esac
+case "$F" in
+  webcal://*) F="https://${F#webcal://}";;      # monday gives webcal:// links; it is the same address over https
+  https://*) ;;
+  *) echo "The feed link must start with webcal:// or https://. Nothing written."; exit 1;;
+esac
 TT="$(sudo grep -E '^TELEGRAM_BOT_TOKEN=' "$TRADER_ENV" 2>/dev/null | head -1 | cut -d= -f2- | sed -e "s/^'//" -e "s/'$//")"
 TC="$(sudo grep -E '^TELEGRAM_CHAT_ID=' "$TRADER_ENV" 2>/dev/null | head -1 | cut -d= -f2- | sed -e "s/^'//" -e "s/'$//")"
 [ -n "$TT" ] && [ -n "$TC" ] || echo "NOTE: no Telegram settings found in $TRADER_ENV; the Telegram backup will not be sent."
 umask 077
+TMP="$(mktemp)" || { echo "Could not make a temporary file. Nothing written."; exit 1; }
 {
   echo "# W11-0041 reminders sync. Mode 600. Never copy this file into the repo."
   echo "REMINDERS_FEED_URL='$F'"
@@ -35,9 +40,13 @@ umask 077
   echo "REMINDERS_BOARD_ID='5032297480'"
   echo "TELEGRAM_BOT_TOKEN='$TT'"
   echo "TELEGRAM_CHAT_ID='$TC'"
-} > "$OUT.new" && mv "$OUT.new" "$OUT"
-chmod 600 "$OUT"
+} > "$TMP"
+# The folder is root's (the tar was unpacked with sudo), so the file is placed with sudo and owned by root, mode 600.
+if ! { sudo mv "$TMP" "$OUT" && sudo chown root:root "$OUT" && sudo chmod 600 "$OUT"; }; then
+  rm -f "$TMP"; unset F M P TT TC
+  echo "Could not write $OUT. Nothing written."; exit 1
+fi
 unset F M P TT TC
-echo "Written $OUT (mode 600). Secrets hidden below:"
-sed -E "s/^(REMINDERS_FEED_URL|MONDAY_API_TOKEN|CALDAV_PASSWORD|TELEGRAM_BOT_TOKEN)=.*/\1=<hidden>/" "$OUT"
-ls -l "$OUT"
+echo "Written $OUT (mode 600, owned by root). Secrets hidden below:"
+sudo sed -E "s/^(REMINDERS_FEED_URL|MONDAY_API_TOKEN|CALDAV_PASSWORD|TELEGRAM_BOT_TOKEN)=.*/\1=<hidden>/" "$OUT"
+sudo ls -l "$OUT"

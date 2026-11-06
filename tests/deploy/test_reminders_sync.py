@@ -40,6 +40,7 @@ class FakeCalDav:
         self.has_list, self.allow_mk = has_list, allow_mkcalendar
         self.calls: list[tuple[str, str]] = []
         self.fail = False
+        self.hide_completed = False
 
     def __call__(self, method, url, headers, body):
         self.calls.append((method, url))
@@ -66,9 +67,13 @@ class FakeCalDav:
                 return 403, {}, b""
             self.has_list = True
             return 201, {}, b""
+        if method == "GET":
+            return (200, {}, self.tasks[path].encode()) if path in self.tasks else (404, {}, b"")
         if method == "REPORT":
+            hide = self.hide_completed
             rows = "".join(f'<d:response><d:href>{h}</d:href><d:propstat><d:prop><c:calendar-data>{escape(ical)}</c:calendar-data>'
-                           f'</d:prop></d:propstat></d:response>' for h, ical in self.tasks.items())
+                           f'</d:prop></d:propstat></d:response>' for h, ical in self.tasks.items()
+                           if not (hide and "STATUS:COMPLETED" in ical))
             return 207, {}, ('<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">' + rows +
                              '</d:multistatus>').encode()
         if method == "PUT":
@@ -96,6 +101,7 @@ class FakeMonday:
         self.items = items or []
         self.calls: list[tuple] = []
         self.fail = False
+        self.step_fail = False
 
     def read_board(self):
         self.calls.append(("read",))
@@ -109,12 +115,18 @@ class FakeMonday:
             if i["id"] == item_id:
                 i["done"] = True
 
+    def set_status_done(self, board_id, item_id, column):
+        self.calls.append(("step", board_id, item_id, column))
+        if self.step_fail:
+            raise RuntimeError("column not found")
+
     def post_update(self, item_id, text):
         self.calls.append(("update", item_id, text))
 
 
-def item(name, id_="1", task_item="900", done=False):
-    return {"id": id_, "name": name, "done": done, "task_id": "W11-0041", "task_item_id": task_item}
+def item(name, id_="1", task_item="900", done=False, board="5031413876"):
+    return {"id": id_, "name": name, "done": done, "task_id": "W11-0041", "task_item_id": task_item,
+            "task_board_id": board}
 
 
 class Rig:
@@ -458,7 +470,7 @@ def test_the_env_example_holds_no_real_secrets_and_the_helper_sets_mode_600():
 
 def test_setup_guide_states_the_limits_the_mode_600_and_the_never_touch_rules():
     g = (FILES / "REMINDERS-SETUP.md").read_text(encoding="utf-8")
-    for must in ("never talked to", "mode 600", "38443", "My Task", "--check", "--create-list", "Task Scheduler"):
+    for must in ("never talked to", "mode 600", "38443", "Inbox", "--check", "--create-list", "Task Scheduler"):
         assert must.lower() in g.lower(), must
     assert "nas_trader" not in (FILES / "run_reminders.sh").read_text(encoding="utf-8")
 
@@ -467,3 +479,233 @@ def test_script_is_python38_safe_no_match_statement_or_union_types_evaluated_at_
     src = SCRIPT.read_text(encoding="utf-8")
     assert "from __future__ import annotations" in src
     assert "\nmatch " not in src and " removeprefix(" not in src and " removesuffix(" not in src
+
+
+def test_webcal_feed_links_are_fetched_over_https():
+    assert rs.normalize_feed_url("webcal://ben.monday.com/x.ics?a=1") == "https://ben.monday.com/x.ics?a=1"
+    assert rs.normalize_feed_url("https://a/b.ics") == "https://a/b.ics"
+    seen = []
+
+    class R:
+        def read(self):
+            return b"BEGIN:VCALENDAR"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    rs.fetch_feed("webcal://h/x.ics", urlopen=lambda req, timeout: (seen.append(req.full_url), R())[1])
+    assert seen == ["https://h/x.ics"]
+
+
+def test_env_helper_accepts_webcal_and_converts_it():
+    helper = (FILES / "make_reminders_env.sh").read_text(encoding="utf-8")
+    assert "webcal://*)" in helper and 'F="https://${F#webcal://}"' in helper
+
+
+def test_env_helper_writes_through_sudo_and_never_claims_success_after_a_failed_write():
+    h = (FILES / "make_reminders_env.sh").read_text(encoding="utf-8")
+    assert 'sudo mv "$TMP" "$OUT"' in h and "chown root:root" in h and "Nothing written" in h
+    assert h.index("Could not write") < h.index("Written $OUT")
+    assert "$OUT.new" not in h
+
+
+# ----------------------------------------------------------------------------------------------- monday's floating times
+def feed_with(dtstart_line: str, header: str = "") -> str:
+    return (f"BEGIN:VCALENDAR\r\n{header}BEGIN:VEVENT\r\nUID:a\r\nSUMMARY:Reminders: x (Remind at)\r\n{dtstart_line}\r\n"
+            "END:VEVENT\r\nEND:VCALENDAR\r\n")
+
+
+def test_floating_feed_times_are_sydney_wall_clock_not_utc():
+    """Measured 2026-11-06: the TEST item (12:30 Sydney) and W17-0046 (Sat 09:15 Sydney) both came out 11 h late as UTC."""
+    ev = rs.parse_feed(feed_with("DTSTART:20261105T123000"))[0]
+    assert ev["due"] == datetime(2026, 11, 5, 1, 30, tzinfo=timezone.utc) and rs.sydney_hhmm(ev["due"]) == "12:30"
+    ev = rs.parse_feed(feed_with("DTSTART:20261107T091500"))[0]
+    assert ev["due"] == datetime(2026, 11, 6, 22, 15, tzinfo=timezone.utc) and rs.sydney_stamp(ev["due"]) == "Sat 07 Nov 09:15"
+    assert ev["raw"] == "DTSTART:20261107T091500"
+
+
+def test_z_and_tzid_times_are_unchanged_and_feed_timezone_overrides_the_default():
+    assert rs.parse_feed(feed_with("DTSTART:20261105T013000Z"))[0]["due"] == datetime(2026, 11, 5, 1, 30, tzinfo=timezone.utc)
+    assert rs.parse_feed(feed_with("DTSTART:20261105T123000"), "UTC")[0]["due"] == datetime(2026, 11, 5, 12, 30, tzinfo=timezone.utc)
+    ev = rs.parse_feed(feed_with("DTSTART:20261105T123000", "X-WR-TIMEZONE:UTC\r\n"))[0]
+    assert ev["due"] == datetime(2026, 11, 5, 12, 30, tzinfo=timezone.utc)
+
+
+def test_sydney_wall_clock_conversion_works_without_tz_data_either_side_of_the_change(monkeypatch):
+    monkeypatch.setattr(rs, "ZoneInfo", None)                           # a NAS Python with no zoneinfo
+    assert rs.local_to_utc(datetime(2026, 11, 5, 12, 30), "Australia/Sydney") == datetime(2026, 11, 5, 1, 30, tzinfo=timezone.utc)
+    assert rs.local_to_utc(datetime(2026, 7, 1, 12, 0), "Australia/Sydney") == datetime(2026, 7, 1, 2, 0, tzinfo=timezone.utc)
+    assert rs.local_to_utc(datetime(2026, 11, 5, 12, 30), "Nowhere/Land") is None
+
+
+# ----------------------------------------------------------------------------------------------- reminder linked to a STEP
+def test_ticking_a_reminder_linked_to_a_subitem_marks_that_step_done_after_the_update(tmp_path):
+    r = Rig(tmp_path, [("u1", T1, DUE)], [item(T1, id_="55", task_item="888", board="5031415830")])
+    r.run()
+    r.dav_store.tick(T1, datetime(2026, 11, 6, 6, 30, tzinfo=timezone.utc))
+    r.run(NOW + timedelta(minutes=30))
+    kinds = [c[0] for c in r.monday.calls if c[0] in ("update", "step", "done")]
+    assert kinds == ["update", "step", "done"]                        # note first, then the step, then the reminder
+    assert ("step", "5031415830", "888", "status") in r.monday.calls
+    assert "this step is marked Done" in [c for c in r.monday.calls if c[0] == "update"][0][2]
+    n = len(r.monday.calls)
+    r.run(NOW + timedelta(minutes=35))
+    assert len(r.monday.calls) == n
+
+
+def test_a_link_to_a_normal_task_never_changes_that_tasks_status(tmp_path):
+    r = Rig(tmp_path, [("u1", T1, DUE)], [item(T1, id_="55", task_item="777", board="5031413876")])
+    r.run()
+    r.dav_store.tick(T1, NOW)
+    r.run(NOW + timedelta(minutes=5))
+    assert not any(c[0] == "step" for c in r.monday.calls) and ("done", "55") in r.monday.calls
+
+
+def test_a_step_that_cannot_be_marked_done_is_reported_once_and_not_retried(tmp_path):
+    r = Rig(tmp_path, [("u1", T1, DUE)], [item(T1, id_="55", task_item="888", board="5031415830")])
+    r.run()
+    r.monday.step_fail = True
+    r.dav_store.tick(T1, NOW)
+    r.run(NOW + timedelta(minutes=5))
+    r.run(NOW + timedelta(minutes=10))
+    assert len([c for c in r.monday.calls if c[0] == "step"]) == 1
+    assert len([t for t in r.telegrams if "could not mark" in t]) == 1
+    assert ("done", "55") in r.monday.calls                            # the reminder itself is still closed
+
+
+def test_read_board_extracts_board_and_item_id_from_the_task_link():
+    items = {"boards": [{"items_page": {"items": [{"id": "1", "name": "n", "column_values": [
+        {"id": rs.COL_TASK_LINK, "text": "x", "value": json.dumps({"url": "https://ben-siu.monday.com/boards/5031415830/pulses/2899930378", "text": "s"})},
+        {"id": rs.COL_STATUS, "text": "", "value": None}, {"id": rs.COL_TASK_ID, "text": "W11-0041", "value": None}]}]}}]}
+    m = rs.Monday("tok", 5032297480)
+    m.gql = lambda q, v=None: items
+    got = m.read_board()[0]
+    assert (got["task_board_id"], got["task_item_id"], got["done"]) == ("5031415830", "2899930378", False)
+
+
+def test_dump_raw_prints_every_resource_and_what_report_returns_and_changes_nothing(tmp_path):
+    r = Rig(tmp_path, [("u1", T1, DUE)])
+    r.run()
+    base = r.dav_store.__call__
+    store = r.dav_store
+
+    def with_propfind_list(method, url, headers, body):
+        if method == "PROPFIND" and headers.get("Depth") == "1" and url.endswith("/monday-reminders/"):
+            rows = "".join(f"<d:response><d:href>{h}</d:href></d:response>" for h in store.tasks)
+            return 207, {}, ('<d:multistatus xmlns:d="DAV:">' + rows + "</d:multistatus>").encode()
+        if method == "GET":
+            return 200, {}, store.tasks[url.split("//", 1)[1].split("/", 1)[1].join(["/", ""])].encode()
+        return base(method, url, headers, body)
+
+    cl = rs.Clients(rs.Dav("https://x/caldav/", "u", "p", transport=with_propfind_list), r.monday, r.cl.fetch, r.cl.telegram)
+    out: list[str] = []
+    before = dict(store.tasks)
+    assert rs.do_dump_raw(r.cfg, cl, LIST, out.append) == 0
+    text = "\n".join(out)
+    assert "BEGIN:VTODO" in text and "REPORT returns 1 task" in text and store.tasks == before
+
+
+def test_a_ticked_task_that_the_list_hides_is_still_seen_as_ticked(tmp_path):
+    """2026-11-06 18:35: after the tick the task was no longer in the list and the first version called that 'dismissed'."""
+    r = Rig(tmp_path, [("u1", T1, DUE)], [item(T1, id_="55", task_item="777")])
+    r.run()
+    r.dav_store.hide_completed = True
+    r.dav_store.tick(T1, NOW)
+    r.run(NOW + timedelta(minutes=5))
+    e = next(iter(r.state["entries"].values()))
+    assert e.get("ticked") and not e.get("dismissed") and ("done", "55") in r.monday.calls
+
+
+def test_a_task_really_gone_from_the_server_is_dismissed_and_a_server_error_is_not(tmp_path):
+    r = Rig(tmp_path, [("u1", T1, DUE)])
+    r.run()
+    r.dav_store.tasks.clear()
+    r.run(NOW + timedelta(minutes=5))
+    r.run(NOW + timedelta(minutes=10))
+    assert next(iter(r.state["entries"].values())).get("dismissed")
+    r2 = Rig(tmp_path, [("u1", T1, DUE)])
+    r2.run()
+    href = next(iter(r2.dav_store.tasks))
+    orig = r2.dav_store.__call__
+    r2.dav.transport = lambda m, u, h, b: (503, {}, b"") if m == "GET" else orig(m, u, h, b)
+    r2.dav_store.tasks.pop(href)                                   # missing from the list AND the GET errors
+    r2.run(NOW + timedelta(minutes=5))
+    r2.run(NOW + timedelta(minutes=10))
+    assert not next(iter(r2.state["entries"].values())).get("dismissed")
+
+
+def test_one_missed_look_is_not_a_dismissal_and_a_task_that_comes_back_ticked_still_ticks(tmp_path):
+    """2026-11-06 18:35: the ticked test task was missing for one run, was called dismissed, and the tick was lost."""
+    r = Rig(tmp_path, [("u1", T1, DUE)], [item(T1, id_="55", task_item="777")])
+    r.run()
+    saved = dict(r.dav_store.tasks)
+    r.dav_store.tasks.clear()                                         # one run where the list does not show it
+    r.run(NOW + timedelta(minutes=5))
+    e = next(iter(r.state["entries"].values()))
+    assert not e.get("dismissed") and e.get("missing") == 1
+    r.dav_store.tasks.update(saved)
+    r.dav_store.tick(T1, NOW + timedelta(minutes=6))
+    r.run(NOW + timedelta(minutes=10))
+    assert e.get("ticked") and ("done", "55") in r.monday.calls
+
+
+def test_a_wrongly_dismissed_task_that_is_in_the_list_completed_is_ticked(tmp_path):
+    r = Rig(tmp_path, [("u1", T1, DUE)], [item(T1, id_="55", task_item="777")])
+    r.run()
+    next(iter(r.state["entries"].values()))["dismissed"] = True      # the state the NAS is in right now
+    r.dav_store.tick(T1, NOW)
+    r.run(NOW + timedelta(minutes=5))
+    assert next(iter(r.state["entries"].values())).get("ticked") and ("done", "55") in r.monday.calls
+
+
+def test_an_entry_flagged_dismissed_and_deleted_whose_task_is_completed_on_the_server_still_ticks(tmp_path):
+    r = Rig(tmp_path, [("u1", T1, DUE)], [item(T1, id_="55", task_item="777")])
+    r.run()
+    e = next(iter(r.state["entries"].values()))
+    e["dismissed"] = e["deleted"] = True                              # a reminder that left the feed after the wrong dismissal
+    r.dav_store.tick(T1, NOW)
+    r.run(NOW + timedelta(minutes=5))
+    assert e.get("ticked") and ("done", "55") in r.monday.calls
+    assert not any(c[0] == "DELETE" for c in r.dav_store.calls)       # and the task was not deleted before the tick was read
+
+
+# What the iPhone really wrote back after Ben ticked the LIVE TEST task (from --dump-raw on the NAS, 2026-11-06 19:08).
+IPHONE_TICKED = (
+    "BEGIN:VCALENDAR\r\nCALSCALE:GREGORIAN\r\nPRODID:-//Apple Inc.//iOS 27.2//EN\r\nVERSION:2.0\r\nBEGIN:VTODO\r\n"
+    "COMPLETED:20261106T073028Z\r\nCREATED:20261106T070139Z\r\nDTSTAMP:20261106T073029Z\r\nDTSTART:20261106T073000Z\r\n"
+    "DUE:20261106T073000Z\r\nLAST-MODIFIED:20261106T073028Z\r\nPERCENT-COMPLETE:100\r\nSTATUS:COMPLETED\r\n"
+    "SUMMARY:W11-0041 · LIVE TEST: tick me when the alert shows (18:30 Sydney\r\n )\r\n"
+    "UID:mrem-c3f1cb60c92a1b9a4f4b8fdf\r\nX-APPLE-SORT-ORDER:815641299\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\n"
+    "DESCRIPTION:Reminder\r\nTRIGGER;VALUE=DATE-TIME:20261106T073000Z\r\nUID:50662E46-472E-4779-B28F-6C3CE2263563\r\n"
+    "X-WR-ALARMUID:50662E46-472E-4779-B28F-6C3CE2263563\r\nEND:VALARM\r\nEND:VTODO\r\nEND:VCALENDAR\r\n")
+
+
+def test_the_real_iphone_rewrite_keeps_the_tasks_uid_not_the_alarms():
+    t = rs.parse_vtodos(IPHONE_TICKED)[0]
+    assert t["uid"] == "mrem-c3f1cb60c92a1b9a4f4b8fdf" and t["completed"]
+    assert t["completed_at"] == datetime(2026, 11, 6, 7, 30, 28, tzinfo=timezone.utc)
+    assert t["summary"].endswith("Sydney)")
+
+
+def test_an_alarm_inside_a_feed_event_does_not_replace_the_events_uid_or_title():
+    text = ("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:real\r\nSUMMARY:Reminders: x (Remind at)\r\nDTSTART:20261105T123000\r\n"
+            "BEGIN:VALARM\r\nUID:alarm\r\nDESCRIPTION:other\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR")
+    ev = rs.parse_feed(text)
+    assert [(e["uid"], e["title"]) for e in ev] == [("real", "x")]
+
+
+def test_a_task_rewritten_the_way_the_iphone_does_it_is_ticked_end_to_end(tmp_path):
+    r = Rig(tmp_path, [("u1", T1, DUE)], [item(T1, id_="55", task_item="888", board="5031415830")])
+    r.run()
+    href = next(iter(r.dav_store.tasks))
+    uid = next(iter(r.state["entries"].values()))["task_uid"]
+    r.dav_store.tasks[href] = (IPHONE_TICKED.replace("mrem-c3f1cb60c92a1b9a4f4b8fdf", uid)
+                               .replace("W11-0041 · LIVE TEST: tick me when the alert shows (18:30 Sydney\r\n )", T1))
+    r.run(NOW + timedelta(minutes=5))
+    e = next(iter(r.state["entries"].values()))
+    assert e.get("ticked") and not e.get("dismissed")
+    assert [c[0] for c in r.monday.calls if c[0] in ("update", "step", "done")] == ["update", "step", "done"]
+    assert "at 18:30 Sydney" in [c for c in r.monday.calls if c[0] == "update"][0][2]

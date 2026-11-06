@@ -6,7 +6,8 @@ One run does, in order:
   1. reads the monday Reminders calendar feed (an ICS URL; no monday API call);
   2. lists the tasks in the Synology task list 'monday reminders' (CalDAV REPORT);
   3. TICKS: a task Ben completed on his phone -> sets that item's Status = Done on the Reminders board and posts ONE
-     Update on the linked Wxx task ("Ben ticked reminder '...' at HH:MM Sydney"). Never changes the Wxx task's Status;
+     Update on the item its Task link points at ("Ben ticked reminder '...' at HH:MM Sydney"). If that link is a STEP
+     (a subitem), the step's Status is also set to Done. A link to a normal task never has its Status changed;
   4. SYNC: one VTODO per feed event (DUE = Remind at, one VALARM at DUE). New -> create, time/title changed -> replace,
      left the feed -> delete. A repeat run with nothing changed sends nothing;
   5. TELEGRAM: one message when a reminder falls due (never twice, not if already ticked);
@@ -64,6 +65,12 @@ COL_TASK_ID = "text_mm8t151n"
 COL_TASK_LINK = "link_mm8tgpxg"
 COL_REMIND_AT = "date_mm8thmd3"
 
+# The four monday boards that hold subitems (steps). A reminder whose Task link points at one of their items is
+# a reminder for that STEP: ticking it also sets the step's Status = Done (Ben, 2026-11-06). A link to a normal task
+# item only gets the one Update; the task's own Status is never changed from here.
+SUBITEM_BOARDS = {"5031415830", "5032254265", "5032254259", "5032254131"}
+SUBITEM_STATUS_COL = "status"
+
 LATE_GRACE = timedelta(minutes=15)       # a reminder this late is still created (and sent); older ones are skipped
 TELEGRAM_STALE = timedelta(hours=6)      # never send a "due" message for something longer overdue than this
 BOARD_REFRESH_S = 3600                   # API read of the board at most this often (apart from after a tick)
@@ -87,8 +94,28 @@ def fmt_utc(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def parse_ics_dt(value: str, tzid: str | None = None):
-    """'20261105T013000Z' / floating / TZID=... -> aware UTC datetime. A date-only value returns None."""
+def local_to_utc(naive: datetime, tzname: str):
+    """A wall-clock time in `tzname` -> aware UTC. Australia/Sydney also works with no tz data on the box."""
+    if tzname.upper() in ("UTC", "Z", "GMT"):
+        return naive.replace(tzinfo=timezone.utc)
+    if ZoneInfo is not None:
+        try:
+            return naive.replace(tzinfo=ZoneInfo(tzname)).astimezone(timezone.utc)
+        except Exception:                                             # noqa: BLE001 - unknown name or no tzdata
+            pass
+    if tzname == "Australia/Sydney":
+        for hours in (11, 10):
+            cand = (naive - timedelta(hours=hours)).replace(tzinfo=timezone.utc)
+            if sydney_offset(cand) == timedelta(hours=hours):
+                return cand
+        return (naive - timedelta(hours=10)).replace(tzinfo=timezone.utc)
+    return None
+
+
+def parse_ics_dt(value: str, tzid: str | None = None, floating_tz: str = "Australia/Sydney"):
+    """'20261105T013000Z' -> UTC; 'TZID=X:...' -> that zone; a floating time (no Z, no TZID) -> `floating_tz`.
+    monday writes its Remind at times as floating Sydney wall-clock time (measured 2026-11-06: read as UTC they came out
+    exactly 11 hours late). A date-only value returns None."""
     v = value.strip()
     if re.fullmatch(r"\d{8}", v):
         return None                                                   # all-day: has no time to alert at
@@ -98,14 +125,7 @@ def parse_ics_dt(value: str, tzid: str | None = None):
     naive = datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
     if m.group(3) == "Z":
         return naive.replace(tzinfo=timezone.utc)
-    if tzid and ZoneInfo is not None:
-        try:
-            return naive.replace(tzinfo=ZoneInfo(tzid)).astimezone(timezone.utc)
-        except Exception:                                             # noqa: BLE001 - unknown TZID
-            return None
-    if tzid:
-        return None
-    return naive.replace(tzinfo=timezone.utc)                         # floating: monday writes UTC
+    return local_to_utc(naive, tzid or floating_tz)
 
 
 def _first_sunday(year: int, month: int) -> datetime:
@@ -199,18 +219,33 @@ def clean_title(summary: str) -> str:
     return s.strip()
 
 
-def parse_feed(text: str) -> list[dict]:
+def parse_feed(text: str, floating_tz: str = "") -> list[dict]:
     """Feed events -> [{'uid','title','due'(UTC datetime)}]. Raises ValueError if it is not a calendar at all, so a
     server error page can never look like 'every reminder was deleted'. Cancelled and date-only events are skipped."""
     if "BEGIN:VCALENDAR" not in text:
         raise ValueError("the feed did not return a calendar (no BEGIN:VCALENDAR)")
     events, cur = [], None
+    zone = floating_tz                                        # '' = use X-WR-TIMEZONE if the feed names one, else Sydney
+    alarm = False
     for line in unfold(text):
+        if cur is None and not floating_tz and line.upper().startswith("X-WR-TIMEZONE"):
+            p = parse_prop(line)
+            if p and p[2].strip():
+                zone = p[2].strip()
+        if line == "BEGIN:VALARM":
+            alarm = True
+            continue
+        if line == "END:VALARM":
+            alarm = False
+            continue
+        if alarm:
+            continue                                      # an alarm has its own UID/TRIGGER/DESCRIPTION: not the event's
         if line == "BEGIN:VEVENT":
-            cur = {"uid": None, "summary": "", "dtstart": None, "status": ""}
+            cur = {"uid": None, "summary": "", "dtstart": None, "status": "", "raw": ""}
         elif line == "END:VEVENT" and cur is not None:
             if cur["uid"] and cur["dtstart"] and cur["status"].upper() != "CANCELLED":
-                events.append({"uid": cur["uid"], "title": clean_title(cur["summary"]), "due": cur["dtstart"]})
+                events.append({"uid": cur["uid"], "title": clean_title(cur["summary"]), "due": cur["dtstart"],
+                               "raw": cur["raw"]})
             cur = None
         elif cur is not None:
             p = parse_prop(line)
@@ -224,7 +259,8 @@ def parse_feed(text: str) -> list[dict]:
             elif name == "STATUS":
                 cur["status"] = value.strip()
             elif name == "DTSTART":
-                cur["dtstart"] = parse_ics_dt(value, params.get("TZID"))
+                cur["raw"] = line
+                cur["dtstart"] = parse_ics_dt(value, params.get("TZID"), zone or "Australia/Sydney")
     return events
 
 
@@ -248,7 +284,18 @@ def build_vtodo(uid: str, title: str, due: datetime, now: datetime, completed_at
 def parse_vtodos(ical: str) -> list[dict]:
     """VTODOs in one calendar-data blob -> [{'uid','summary','completed'(bool),'completed_at'(datetime|None),'due'}]"""
     out, cur = [], None
+    alarm = False
     for line in unfold(ical):
+        # The iPhone adds a VALARM to the task it rewrites, and that alarm has its OWN "UID:" line. Read as the task's
+        # UID it made a ticked task look gone (2026-11-06 18:35). Lines inside a VALARM are never the task's.
+        if line == "BEGIN:VALARM":
+            alarm = True
+            continue
+        if line == "END:VALARM":
+            alarm = False
+            continue
+        if alarm:
+            continue
         if line == "BEGIN:VTODO":
             cur = {"uid": "", "summary": "", "status": "", "completed_at": None, "percent": None, "due": None}
         elif line == "END:VTODO" and cur is not None:
@@ -442,8 +489,14 @@ def delete_task(dav: Dav, href: str) -> None:
 
 
 # ======================================================================================= monday, Telegram, feed
+def normalize_feed_url(url: str) -> str:
+    """monday hands out 'webcal://...' links (an iPhone shortcut for https). The same address over https is what we fetch."""
+    u = url.strip()
+    return "https://" + u[len("webcal://"):] if u.lower().startswith("webcal://") else u
+
+
 def fetch_feed(url: str, urlopen=urllib.request.urlopen) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": "monday-reminders/1"})
+    req = urllib.request.Request(normalize_feed_url(url), headers={"User-Agent": "monday-reminders/1"})
     with urlopen(req, timeout=30) as r:
         return r.read().decode("utf-8", "replace")
 
@@ -478,16 +531,21 @@ class Monday:
                 url = json.loads(link.get("value") or "{}").get("url", "")
             except ValueError:
                 pass
-            m = re.search(r"/pulses/(\d+)", url or link.get("text", "") or "")
+            m = re.search(r"/boards/(\d+)/pulses/(\d+)", url or link.get("text", "") or "")
             items.append({"id": it["id"], "name": it["name"].strip(),
                           "done": (cols.get(COL_STATUS, {}).get("text") or "").strip().lower() == "done",
                           "task_id": (cols.get(COL_TASK_ID, {}).get("text") or "").strip(),
-                          "task_item_id": m.group(1) if m else ""})
+                          "task_board_id": m.group(1) if m else "",
+                          "task_item_id": m.group(2) if m else ""})
         return items
 
-    def set_done(self, item_id: str) -> None:
+    def set_status_done(self, board_id: str, item_id: str, column: str) -> None:
         self.gql("mutation($b:ID!,$i:ID!,$v:JSON!){change_multiple_column_values(board_id:$b,item_id:$i,column_values:$v){id}}",
-                 {"b": str(self.board_id), "i": str(item_id), "v": json.dumps({COL_STATUS: {"label": "Done"}})})
+                 {"b": str(board_id), "i": str(item_id), "v": json.dumps({column: {"label": "Done"}})})
+
+    def set_done(self, item_id: str) -> None:
+        """The reminder item itself."""
+        self.set_status_done(self.board_id, item_id, COL_STATUS)
 
     def post_update(self, item_id: str, text: str) -> None:
         self.gql("mutation($i:ID!,$t:String!){create_update(item_id:$i,body:$t){id}}",
@@ -523,7 +581,7 @@ def load_env(path: str, environ=os.environ) -> dict:
                     v = v[1:-1]
                 cfg[k.strip()] = v
     for k in ("REMINDERS_FEED_URL", "MONDAY_API_TOKEN", "CALDAV_URL", "CALDAV_USER", "CALDAV_PASSWORD",
-              "CALDAV_CONNECT_HOST", "CALDAV_TASK_LIST", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "REMINDERS_BOARD_ID"):
+              "CALDAV_CONNECT_HOST", "CALDAV_TASK_LIST", "FEED_TIMEZONE", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "REMINDERS_BOARD_ID"):
         if environ.get(k):
             cfg[k] = environ[k]
     cfg.setdefault("CALDAV_URL", "https://siuds.synology.me:38443/caldav/")
@@ -605,12 +663,36 @@ def board_refresh(cl: Clients, state: dict, now: datetime, log) -> None:
     log(f"board read: {len(items)} reminder items")
 
 
-def process_ticks(cl, state, tasks_by_uid, now, log, dry) -> int:
+def add_missing_tasks(cl, state, tasks_by_uid, log) -> None:
+    """A task absent from the REPORT list may only be hidden (Synology may leave ticked tasks out of the list): ask the
+    server for that one resource. 200 = it exists (and may be completed), 404 = really gone. Mutates tasks_by_uid."""
+    for e in state["entries"].values():
+        if e.get("ticked") or e.get("deleted") or e.get("dismissed") or e.get("monday_done") or not e.get("href"):
+            continue
+        if e["task_uid"] in tasks_by_uid or not e.get("created_ok"):
+            continue
+        try:
+            status, _, body = cl.dav.request("GET", e["href"])
+        except Exception as ex:                                    # noqa: BLE001 - leave it; never infer from an error
+            log(f"  GET {e['href']} failed ({ex}); leaving '{e['title']}' alone this run")
+            tasks_by_uid[e["task_uid"]] = {"uid": e["task_uid"], "completed": False, "completed_at": None, "summary": e["title"]}
+            continue
+        if status == 200:
+            found = [t for t in parse_vtodos(body.decode("utf-8", "replace")) if t["uid"] == e["task_uid"]]
+            if found:
+                log(f"  '{e['title']}' is not in the list but exists on the server (completed={found[0]['completed']})")
+                tasks_by_uid[e["task_uid"]] = found[0]
+        elif status != 404:                                        # 5xx, 401 ...: an error is not "gone"
+            log(f"  GET {e['href']} -> HTTP {status}; leaving '{e['title']}' alone this run")
+            tasks_by_uid[e["task_uid"]] = {"uid": e["task_uid"], "completed": False, "completed_at": None, "summary": e["title"]}
+
+
+def process_ticks(cl, state, tasks_by_uid, now, log, dry, cfg_tg=("", "")) -> int:
     """Completed on the phone -> monday Done + one Update on the Wxx task. Returns how many were ticked."""
     n = 0
     for fuid, e in state["entries"].items():
-        if e.get("ticked") or e.get("deleted"):
-            continue
+        if e.get("ticked") or e.get("monday_done"):
+            continue                          # a 'dismissed' or 'deleted' entry whose task is still on the server and completed counts
         t = tasks_by_uid.get(e["task_uid"])
         if t is None or not t["completed"]:
             continue
@@ -625,14 +707,25 @@ def process_ticks(cl, state, tasks_by_uid, now, log, dry) -> int:
             if item is None:
                 log(f"  tick NOT sent: no item named '{e['title']}' on the Reminders board; will retry next run")
                 continue
-            if not item["done"]:
-                cl.monday.set_done(item["id"])
-            if item["task_item_id"] and not e.get("update_posted"):
-                cl.monday.post_update(item["task_item_id"],
-                                      f"Ben ticked reminder '{e['title']}' at {sydney_hhmm(when)} Sydney")
+            is_step = item.get("task_board_id") in SUBITEM_BOARDS
+            if item["task_item_id"] and not e.get("update_posted"):         # note first, then status (board rule 4)
+                text = f"Ben ticked reminder '{e['title']}' at {sydney_hhmm(when)} Sydney"
+                cl.monday.post_update(item["task_item_id"], text + (" - this step is marked Done." if is_step else ""))
                 e["update_posted"] = True
             elif not item["task_item_id"]:
                 log("  no Task link on the reminder item: Done set, no Update posted")
+            if is_step and not e.get("step_done") and not e.get("step_error"):
+                try:
+                    cl.monday.set_status_done(item["task_board_id"], item["task_item_id"], SUBITEM_STATUS_COL)
+                    e["step_done"] = True
+                    log(f"  step {item['task_item_id']} marked Done")
+                except Exception as ex:                                    # noqa: BLE001 - say so once, never loop on it
+                    e["step_error"] = str(ex)[:200]
+                    log(f"  step NOT marked Done (will not retry): {ex}")
+                    cl.telegram(cfg_tg[0], cfg_tg[1], f"Reminders sync: ticked '{e['title']}' but could not mark its step "
+                                f"Done on monday ({str(ex)[:120]}). Mark it by hand.")
+            if not item["done"]:
+                cl.monday.set_done(item["id"])
             e["ticked"] = True
             e["ticked_at"] = _ts(when)
             n += 1
@@ -661,9 +754,18 @@ def process_sync(cl, state, events, tasks_by_uid, now, log, dry) -> None:
         if e.get("ticked") or e.get("dismissed") or e.get("monday_done"):
             continue                                               # finished: never reopen it
         if e["digest"] == digest and e["href"]:
-            if e["task_uid"] not in tasks_by_uid and e.get("created_ok"):
-                log(f"DISMISSED on the phone (task gone, not ticked): '{e['title']}'")
-                e["dismissed"] = True
+            if e["task_uid"] in tasks_by_uid:
+                e["missing"] = 0
+            elif e.get("created_ok"):
+                # One miss proves nothing: on 2026-11-06 a ticked task was missing from the list for one run (the phone's
+                # change was being written) and was wrongly called dismissed. Two misses in a row, with the direct lookup
+                # also saying 404 both times, is what counts.
+                e["missing"] = e.get("missing", 0) + 1
+                if e["missing"] >= 2:
+                    log(f"DISMISSED on the phone (task gone twice in a row, not ticked): '{e['title']}'")
+                    e["dismissed"] = True
+                else:
+                    log(f"task '{e['title']}' not seen this run (1 of 2 before it counts as dismissed)")
             continue
         log(f"{'CREATE' if not e['href'] else 'UPDATE'} task '{ev['title']}' due {sydney_stamp(ev['due'])} Sydney")
         if dry:
@@ -761,7 +863,7 @@ def run(cfg: dict, state: dict, cl: Clients, now: datetime, log, dry: bool = Fal
     # 1. feed
     events = None
     try:
-        events = parse_feed(cl.fetch(cfg["REMINDERS_FEED_URL"]))
+        events = parse_feed(cl.fetch(cfg["REMINDERS_FEED_URL"]), cfg.get("FEED_TIMEZONE", ""))
     except Exception as ex:                                        # noqa: BLE001
         problems.append(f"feed: {ex}")
         log(f"FEED FAILED (nothing is deleted this run): {ex}")
@@ -787,7 +889,9 @@ def run(cfg: dict, state: dict, cl: Clients, now: datetime, log, dry: bool = Fal
     tasks_by_uid = {t["uid"]: t for t in tasks} if tasks is not None else None
     # 3. ticks
     if tasks_by_uid is not None:
-        process_ticks(cl, state, tasks_by_uid, now, log, dry)
+        add_missing_tasks(cl, state, tasks_by_uid, log)
+        process_ticks(cl, state, tasks_by_uid, now, log, dry,
+                      (cfg.get("TELEGRAM_BOT_TOKEN", ""), cfg.get("TELEGRAM_CHAT_ID", "")))
     # 4. hourly board read
     if not dry and now.timestamp() - state.get("last_board_read", 0) >= BOARD_REFRESH_S and events is not None:
         try:
@@ -809,10 +913,10 @@ def run(cfg: dict, state: dict, cl: Clients, now: datetime, log, dry: bool = Fal
 def do_check(cfg, cl: Clients, out=print) -> int:
     bad = 0
     try:
-        events = parse_feed(cl.fetch(cfg["REMINDERS_FEED_URL"]))
-        out(f"PASS feed: {len(events)} events")
+        events = parse_feed(cl.fetch(cfg["REMINDERS_FEED_URL"]), cfg.get("FEED_TIMEZONE", ""))
+        out(f"PASS feed: {len(events)} events (times below are what the script will alert at; compare with monday's Remind at)")
         for ev in sorted(events, key=lambda e: e["due"])[-5:]:
-            out(f"       {sydney_stamp(ev['due'])} Sydney  {ev['title']}")
+            out(f"       {sydney_stamp(ev['due'])} Sydney  {ev['title']}\n         feed says: {ev.get('raw', '')}")
     except Exception as ex:                                        # noqa: BLE001
         bad += 1
         out(f"FAIL feed: {ex}")
@@ -842,6 +946,36 @@ def do_check(cfg, cl: Clients, out=print) -> int:
     return 1 if bad else 0
 
 
+PROPFIND_ETAGS = (b'<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><d:resourcetype/></d:prop></d:propfind>')
+
+
+def do_dump_raw(cfg, cl: Clients, name: str, out=print) -> int:
+    """Read-only: every resource Synology holds in one list (PROPFIND, not REPORT) with its raw text, plus what REPORT
+    returns, to learn what Synology does with a task once it is ticked."""
+    home = discover_home(cl.dav)
+    for c in list_collections(cl.dav, home):
+        if c["name"] != name:
+            continue
+        status, _, body = cl.dav.request("PROPFIND", c["href"], PROPFIND_ETAGS,
+                                         {"Depth": "1", "Content-Type": "application/xml; charset=utf-8"})
+        out(f"PROPFIND {c['href']} -> HTTP {status}")
+        hrefs = [_text(r, "d:href") for r in _xml(body).findall("d:response", NS)] if status in (200, 207) else []
+        for h in hrefs:
+            if not h.endswith(".ics"):
+                continue
+            st, _, raw = cl.dav.request("GET", h)
+            out(f"--- GET {h} -> HTTP {st}")
+            out(raw.decode("utf-8", "replace").strip())
+        try:
+            rep = report_tasks(cl.dav, c["href"])
+            out(f"REPORT returns {len(rep)} task(s): " + ", ".join(f"{t['summary'][:40]!r} completed={t['completed']}" for t in rep))
+        except Exception as ex:                                    # noqa: BLE001
+            out(f"REPORT failed: {ex}")
+        return 0
+    out(f"no list named '{name}'")
+    return 1
+
+
 def do_dump(cfg, cl: Clients, name: str, out=print) -> int:
     home = discover_home(cl.dav)
     for c in list_collections(cl.dav, home):
@@ -867,6 +1001,7 @@ def main(argv=None, clients=None, now=None, environ=os.environ, out=print) -> in
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--create-list", action="store_true")
     ap.add_argument("--dump", metavar="LIST")
+    ap.add_argument("--dump-raw", metavar="LIST", help="read-only: raw text of every resource in a list, and what REPORT returns")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     log = Log(a.log, echo=out)
@@ -878,6 +1013,8 @@ def main(argv=None, clients=None, now=None, environ=os.environ, out=print) -> in
             return do_check(cfg, cl, out)
         if a.dump:
             return do_dump(cfg, cl, a.dump, out)
+        if a.dump_raw:
+            return do_dump_raw(cfg, cl, a.dump_raw, out)
         if a.create_list:
             if find_task_list(cl.dav, cfg["CALDAV_TASK_LIST"]):
                 out(f"task list '{cfg['CALDAV_TASK_LIST']}' already exists; nothing to do")
