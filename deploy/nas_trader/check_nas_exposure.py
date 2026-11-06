@@ -40,7 +40,11 @@ MUST_BE_CLOSED = [
     (6881, "qbittorrent BitTorrent"), (9865, "qbittorrent web UI"),
 ]
 # Expected to answer; reported for the record, never a failure.
-EXPECTED_OPEN = [(22, "SSH"), (445, "SMB file sharing"), (5000, "DSM http"), (5001, "DSM https")]
+EXPECTED_OPEN = [(22, "SSH"), (445, "SMB file sharing"), (5000, "DSM http"), (5001, "DSM https"),
+                 # W11-0041 sub 8/9: Synology Calendar's own HTTPS port, the ONLY port forwarded to the internet
+                 # (DSM Auto Block + Australia-only firewall rule). This check runs from the home network, so it cannot
+                 # prove the router forwards nothing else; re-check the router's forwarding page if that ever matters.
+                 (38443, "Synology Calendar / CalDAV for the reminders sync")]
 
 
 @dataclass

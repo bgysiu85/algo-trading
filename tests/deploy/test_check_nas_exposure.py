@@ -53,3 +53,9 @@ def test_the_edge_and_relay_containers_must_be_closed_on_the_home_address():
     assert {8080, 1411, 4180} <= ports
     res = cne.check("home", "192.168.1.109", probe_open({("192.168.1.109", 8080)}))
     assert any(not r.ok and ":8080" in r.name for r in res)
+
+
+def test_calendar_port_38443_is_the_expected_open_port_and_not_must_be_closed():
+    """W11-0041 sub 8: the only port forwarded to the internet."""
+    assert 38443 in {p for p, _ in cne.EXPECTED_OPEN}
+    assert 38443 not in {p for p, _ in cne.MUST_BE_CLOSED}
