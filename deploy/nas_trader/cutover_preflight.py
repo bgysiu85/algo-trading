@@ -61,8 +61,15 @@ def run(expect_commit: str | None) -> list[tuple[str, bool, str]]:
     try:
         mode = _ssh("stat -c %a /volume1/docker/trader/.env").strip()
         checks.append((".env mode 600", mode == "600", f"mode {mode}"))
-        lock = json.loads(_ssh("cat /volume1/trader-data/var/state/session.lock"))
-        checks.append(("NAS lock still dry", lock.get("mode") == "dry", f"lock mode {lock.get('mode')}"))
+        try:
+            lock = json.loads(_ssh("cat /volume1/trader-data/var/state/session.lock"))
+        except RuntimeError as e:
+            # No lock file is the normal state outside a session (the trader removes it when it stops).
+            if "No such file" not in str(e):
+                raise
+            checks.append(("NAS lock still dry", True, "no session.lock: the trader is not in session"))
+        else:
+            checks.append(("NAS lock still dry", lock.get("mode") == "dry", f"lock mode {lock.get('mode')}"))
         if expect_commit:
             rel = json.loads(_ssh("cat /volume1/docker/trader/app/RELEASE.json"))
             checks.append(("release commit", rel.get("commit") == expect_commit and rel.get("dirty") is False,

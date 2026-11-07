@@ -24,11 +24,19 @@ WHAT IT WILL NOT DO
   NAS trader can both write mcl_fills_<same day>.csv and silently preferring
   either would corrupt the record of what was traded.
 
+* --promote never copies a fills file written by a DRY session (a session_open
+  CONFIG row saying dry_run=True, or any order row with a DRY status). Those
+  files are shadow-run mechanics checks, not trades, and the journal and
+  db_load read var/fills. They are listed as SKIPPED so nothing disappears
+  silently. A day file that mixes dry and paper rows is skipped too: decide
+  by hand which rows are the record. A file that cannot be read is skipped.
+
 Exit codes: 0 done, 1 conflict(s) found with --promote, 2 source not reachable.
 """
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 import shutil
 import sys
@@ -75,13 +83,42 @@ def sync_dir(src: Path, dst: Path, dry_run: bool = False) -> tuple[int, int, int
     return copied, skipped, nbytes
 
 
-def promote_fills(mirror_fills: Path, local_fills: Path, dry_run: bool = False
-                  ) -> tuple[list[str], list[str]]:
-    """Copy mirror fills that var/fills lacks. Returns (promoted, conflicts)."""
+def dry_session_reason(f: Path) -> str | None:
+    """Why a fills file must not be promoted: "dry", "unreadable", or None to promote.
+
+    A dry session writes a session_open CONFIG row containing dry_run=True and
+    gives its order rows a DRY_* status. Either marker, anywhere in the file,
+    keeps the whole file out of var/fills.
+    """
+    try:
+        with f.open(newline="", encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                if (row.get("status") or "").upper().startswith("DRY"):
+                    return "dry"
+                if row.get("action") == "CONFIG" and "dry_run=True" in " ".join(
+                        v for v in row.values() if isinstance(v, str)):
+                    return "dry"
+    except (OSError, UnicodeDecodeError, csv.Error):
+        return "unreadable"
+    return None
+
+
+def promote_fills(mirror_fills: Path, local_fills: Path, dry_run: bool = False,
+                  skipped: list[str] | None = None) -> tuple[list[str], list[str]]:
+    """Copy mirror fills that var/fills lacks. Returns (promoted, conflicts).
+
+    Dry-session and unreadable files are not copied and are not conflicts; their
+    names go into `skipped` (as "name (dry)") when the caller passes a list.
+    """
     promoted, conflicts = [], []
     if not mirror_fills.is_dir():
         return promoted, conflicts
     for f in sorted(p for p in mirror_fills.iterdir() if p.is_file() and p.suffix == ".csv"):
+        why = dry_session_reason(f)
+        if why:
+            if skipped is not None:
+                skipped.append(f"{f.name} ({why})")
+            continue
         target = local_fills / f.name
         if not target.exists():
             if not dry_run:
@@ -106,9 +143,13 @@ def run(source: Path, dest: Path, dirs=DEFAULT_DIRS, promote: bool = False,
         out(f"  {d:<8} copied {c:>4}  unchanged {s:>4}  {b / 1024:.0f} KiB")
     rc = 0
     if promote:
-        promoted, conflicts = promote_fills(Path(dest) / "fills", Path(local_fills), dry_run)
+        skipped: list[str] = []
+        promoted, conflicts = promote_fills(Path(dest) / "fills", Path(local_fills), dry_run, skipped)
         out(f"  promote  {len(promoted)} new fill file(s) into {local_fills}"
             + (": " + ", ".join(promoted) if promoted else ""))
+        if skipped:
+            out(f"  SKIPPED  {len(skipped)} file(s) not promoted (dry session or unreadable): "
+                + ", ".join(skipped))
         for name in conflicts:
             out(f"  CONFLICT {name}: {local_fills / name} exists and differs from the NAS copy. "
                 f"Left alone. Decide which is the record before merging.")

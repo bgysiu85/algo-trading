@@ -144,3 +144,81 @@ def test_an_unwritable_log_does_not_stop_the_copy(dirs, tmp_path):
     blocker = _w(tmp_path / "afile", "x")
     assert P.main(["--dest", str(dest), "--log", str(blocker / "sub" / "p.log")], {P.SOURCE_ENV: str(src)}) == 0
     assert (dest / "fills" / "a.csv").exists()
+
+
+HEADER = ("ts_et,strategy,symbol,action,reason,ref_close,ref_kind,bid,ask,spread,spread_pct,limit_sent,qty,"
+          "fill_price,filled_qty,status,slippage_vs_ref,seconds_to_fill,entry_price,exit_price,trade_pnl,"
+          "trade_pct,hold_minutes,reject_reason,macd,macd_sig,mfi,rsi,vol,prev_vol,trail_avg,trail_pct,"
+          "ref_drift_pct,exec_id\n")
+
+
+def _config_row(dry: bool) -> str:
+    return (f"2026-11-02 01:00:10,,,CONFIG,session_open,,,,,,,,,,,APPLIED,,,,,,,,"
+            f"max_positions=3 cap_scope=strategy strategies=MCL+MC5 dry_run={dry} bridge=off,,,,,,,,,,\n")
+
+
+def _buy_row(status: str) -> str:
+    return (f"2026-11-02 04:06:00,MC5,CLRO,BUY,entry_signal,5.85,signal_close,5.74,5.78,0.04,0.69,5.8,100,"
+            f"5.8,100,{status},0.05,,,,,,,,0.009,-0.009,,68.2,774865,,,5.0,-1.5,\n")
+
+
+def test_promote_skips_a_dry_session_file_marked_by_its_config_row(dirs):
+    src, dest, fills = dirs
+    _w(src / "fills" / "mcl_fills_20261102.csv", HEADER + _config_row(True))
+    out = []
+    assert P.run(src, dest, promote=True, local_fills=fills, out=out.append) == 0
+    assert not (fills / "mcl_fills_20261102.csv").exists()
+    assert (dest / "fills" / "mcl_fills_20261102.csv").exists()          # still mirrored
+    assert any("SKIPPED" in l and "mcl_fills_20261102.csv (dry)" in l for l in out)
+    assert any("promote  0 new fill file(s)" in l for l in out)
+
+
+def test_promote_skips_a_file_whose_order_rows_are_dry(dirs):
+    src, dest, fills = dirs
+    _w(src / "fills" / "a.csv", HEADER + _buy_row("DRY_RUN"))
+    P.run(src, dest, promote=True, local_fills=fills, out=lambda s: None)
+    assert not (fills / "a.csv").exists()
+
+
+def test_promote_still_copies_a_paper_session_file(dirs):
+    src, dest, fills = dirs
+    _w(src / "fills" / "mcl_fills_20261109.csv", HEADER + _config_row(False) + _buy_row("FILLED"))
+    out = []
+    assert P.run(src, dest, promote=True, local_fills=fills, out=out.append) == 0
+    assert (fills / "mcl_fills_20261109.csv").exists()
+    assert not any("SKIPPED" in l for l in out)
+
+
+def test_promote_skips_a_file_that_mixes_dry_and_paper_rows(dirs):
+    src, dest, fills = dirs
+    _w(src / "fills" / "mixed.csv", HEADER + _config_row(True) + _config_row(False) + _buy_row("FILLED"))
+    P.run(src, dest, promote=True, local_fills=fills, out=lambda s: None)
+    assert not (fills / "mixed.csv").exists()
+
+
+def test_a_skipped_dry_file_is_not_reported_as_a_conflict(dirs):
+    """Shadow-run days: the PC copy and the NAS copy differ. Dry files are out of scope, so no CONFLICT."""
+    src, dest, fills = dirs
+    _w(src / "fills" / "d.csv", HEADER + _config_row(True))
+    _w(fills / "d.csv", "pc\n")
+    out = []
+    assert P.run(src, dest, promote=True, local_fills=fills, out=out.append) == 0
+    assert (fills / "d.csv").read_text() == "pc\n"
+    assert not any("CONFLICT" in l for l in out)
+
+
+def test_an_unreadable_file_is_skipped_not_promoted(dirs):
+    src, dest, fills = dirs
+    bad = src / "fills" / "bad.csv"
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    bad.write_bytes(b"\xff\xfe\x00\x80 not utf-8\n")
+    out = []
+    assert P.run(src, dest, promote=True, local_fills=fills, out=out.append) == 0
+    assert not (fills / "bad.csv").exists()
+    assert any("bad.csv (unreadable)" in l for l in out)
+
+
+def test_dry_session_reason_unit(tmp_path):
+    assert P.dry_session_reason(_w(tmp_path / "x.csv", HEADER + _config_row(True))) == "dry"
+    assert P.dry_session_reason(_w(tmp_path / "y.csv", HEADER + _config_row(False))) is None
+    assert P.dry_session_reason(_w(tmp_path / "z.csv", "")) is None

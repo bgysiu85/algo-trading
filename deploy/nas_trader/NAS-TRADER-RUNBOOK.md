@@ -48,9 +48,10 @@ process): check the book is flat in the log first, or stop only after 09:30 once
   ```
   .\.venv\Scripts\python.exe deploy\nas_trader\pull_nas_var.py --promote
   ```
-  Do NOT run it while the NAS is in dry mode, and not before the old dry files are dealt with: on 2026-10-31 a dry run of
-  it would have copied `mcl_fills_20261028/30/31.csv` (CONFIG rows only, no trades) into `var\fills`, where the journal
-  and `db_load` read. Move or exclude those three (a decision for Ben) before the first real `--promote`.
+  It skips every fills file written by a dry session (a `dry_run=True` CONFIG row or a `DRY_*` order status; a file
+  that mixes dry and paper rows, or cannot be read, is skipped too) and lists it as `SKIPPED`. So the old dry-run files
+  (`mcl_fills_20261028` to `20261106`) are never copied into `var\fills`, where the journal and `db_load` read.
+  Skipped files stay in `var\nas_mirror\fills` (W10-0024).
   It copies only files `var\fills` lacks and reports a `CONFLICT` (exit 1) for a name that exists with different content,
   leaving both alone. A conflict means the PC and the NAS both wrote that day: decide which is the record before merging.
 - Log: `sudo docker logs --tail 200 trader-trader` (the trader logs to Docker only).
