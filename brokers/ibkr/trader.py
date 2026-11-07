@@ -2892,6 +2892,59 @@ def now_et_str() -> str:
 # Entry point
 # --------------------------------------------------------------------------
 
+CONNECT_RETRY_S = 15.0
+
+
+async def connect_with_retry(ib, host, port, client_id, wait_s, *, tg=None,
+                             retry_s=CONNECT_RETRY_S, now_fn=None,
+                             sleep=asyncio.sleep):
+    """Connect to the Gateway, retrying a refused/timed-out START for up to wait_s.
+
+    W10-0021: after the NAS rebooted on 2026-11-03 the trader started 2 min
+    before the Gateway had logged in, got ConnectionRefusedError on 4002 and
+    quit; the session stayed down until a manual start. wait_s=0 (the default
+    everywhere except the NAS launcher) is the old behaviour: one attempt.
+
+    Never waits past SESSION_END (09:30 NY). The port check in main_async runs
+    BEFORE this, so a live port is refused before any attempt. Gives up by
+    re-raising the last error (so the exit code is unchanged) after one
+    Telegram message. Start-up only; a drop mid-session is out of scope.
+    """
+    now_fn = now_fn or (lambda: datetime.now(ET))
+    deadline = time.monotonic() + max(0.0, float(wait_s))
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            await ib.connectAsync(host, port, clientId=client_id)
+            if attempt > 1:
+                LOG.info("Gateway connected on attempt %d", attempt)
+            return
+        except (ConnectionRefusedError, TimeoutError, asyncio.TimeoutError,
+                OSError) as e:
+            past_close = now_fn().time() >= S.SESSION_END
+            out_of_time = time.monotonic() + retry_s > deadline
+            if wait_s <= 0 or past_close or out_of_time:
+                why = ("retry disabled" if wait_s <= 0 else
+                       "session end reached" if past_close else
+                       f"gave up after {wait_s:g}s")
+                LOG.error("Gateway %s:%s not reachable after %d attempt(s) "
+                          "(%s: %s) -- %s", host, port, attempt,
+                          type(e).__name__, e, why)
+                if wait_s > 0 and tg is not None:
+                    try:
+                        tg.send(f"⚠️ <b>trader could not reach the "
+                                f"Gateway</b>\n{attempt} attempts, {why}. The "
+                                f"session is not running.", force=True)
+                    except Exception:                       # noqa: BLE001
+                        LOG.debug("could not send the give-up alert",
+                                  exc_info=True)
+                raise
+            LOG.warning("Gateway %s:%s refused (%s); attempt %d, retrying in "
+                        "%gs", host, port, type(e).__name__, attempt, retry_s)
+            await sleep(retry_s)
+
+
 async def main_async(args):
     if args.port in LIVE_PORTS:
         sys.exit(f"REFUSING TO RUN: port {args.port} is {LIVE_PORTS[args.port]}. "
@@ -2914,8 +2967,16 @@ async def main_async(args):
         LOG.warning("watchlist is empty — watching nothing. Add tickers to %s "
                     "(re-read every 5s) or start main.py --mode scan.", wl)
 
+    # Resolved once, here, at startup -- the same discipline as every other
+    # credential in this project. A lazy resolve mid-session can block on a
+    # 1Password prompt with a position open. Before the connection so a
+    # give-up (W10-0021) can still reach Ben's phone.
+    tg = (notify.Notifier() if args.no_telegram
+          else notify.Notifier.from_env(args.telegram_batch_min))
+
     ib = IB()
-    await ib.connectAsync(args.host, args.port, clientId=args.client_id)
+    await connect_with_retry(ib, args.host, args.port, args.client_id,
+                             getattr(args, "connect_wait_s", 0.0), tg=tg)
 
     accounts = ib.managedAccounts()
     LOG.info("connected. accounts: %s", accounts)
@@ -2925,11 +2986,6 @@ async def main_async(args):
                  f"paper accounts (expected ids starting 'DU').")
 
     log = FillLog(Path(args.out))
-    # Resolved once, here, at startup -- the same discipline as every other
-    # credential in this project. A lazy resolve mid-session can block on a
-    # 1Password prompt with a position open.
-    tg = (notify.Notifier() if args.no_telegram
-          else notify.Notifier.from_env(args.telegram_batch_min))
     strategies = SA.build_all(getattr(args, "strategy", ["mcl"]))
     trader = MCLPaperTrader(ib, wl, log, args.dry_run, tg=tg,
                             strategies=strategies,
@@ -3159,6 +3215,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=4002,
                    help="4002 IB Gateway paper (default) or 7497 TWS paper")
     p.add_argument("--client-id", type=int, default=17)
+    p.add_argument("--connect-wait-s", type=float, default=0.0,
+                   help="at START only, keep retrying a refused/timed-out "
+                        "Gateway connection every 15s for up to this many "
+                        "seconds (never past 09:30 NY). 0 = one attempt, as "
+                        "before. The NAS launcher sets 600 (W10-0021).")
     p.add_argument("--out", default=f"var/fills/mcl_fills_{datetime.now(ET):%Y%m%d}.csv")
     p.add_argument("--on-open-positions", choices=["refuse", "adopt"],
                    default="refuse",

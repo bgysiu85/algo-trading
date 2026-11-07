@@ -16,7 +16,9 @@ Everything is set through environment variables (compose.yaml fills them from .e
     TRADER_TELEGRAM_BATCH_MIN  number           default 0 = send immediately
     TRADER_NO_ARCHIVE      1 = keep the watchlist at session end
     TRADER_FEED            on | off             default on (the TradingView watchlist feed runs inside the process, in dry too via --feed-in-dry)
-    TRADER_PORT            4002                 only the Gateway's PAPER port (4002) or TWS paper (7497) is accepted
+    TRADER_CONNECT_WAIT_S  seconds 0-3600       default 600. At start, retry a refused Gateway connection every 15 s for this long
+                                                (never past 09:30 NY), then give up with a Telegram alert. 0 = one attempt.
+    TRADER_PORT            4002               only the Gateway's PAPER port (4002) or TWS paper (7497) is accepted
 
 What this launcher deliberately does NOT do:
   * It never passes --sleep-on-exit (that suspends a Windows PC; there is no PC to sleep here).
@@ -96,6 +98,15 @@ def build_args(env=None) -> list[str]:
         raise Refused(f"TRADER_TELEGRAM_BATCH_MIN={batch!r} is not a number.") from None
     if batch_val > 0:
         args += ["--telegram-batch-min", batch]
+
+    wait = _env(env, "TRADER_CONNECT_WAIT_S", "600")
+    try:
+        wait_val = float(wait)
+    except ValueError:
+        raise Refused(f"TRADER_CONNECT_WAIT_S={wait!r} is not a number.") from None
+    if not 0 <= wait_val <= 3600:
+        raise Refused(f"TRADER_CONNECT_WAIT_S={wait!r} must be between 0 and 3600 seconds.")
+    args += ["--connect-wait-s", wait]
 
     if _env(env, "TRADER_NO_ARCHIVE") in {"1", "true", "yes", "on"}:
         args += ["--no-archive"]

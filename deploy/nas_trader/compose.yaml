@@ -95,6 +95,7 @@ services:
       TRADER_STRATEGY: ${TRADER_STRATEGY:-mcl}
       TRADER_MAX_POSITIONS: ${TRADER_MAX_POSITIONS:-}
       TRADER_CAP_SCOPE: ${TRADER_CAP_SCOPE:-}
+      TRADER_CONNECT_WAIT_S: ${TRADER_CONNECT_WAIT_S:-600}
       TRADER_TELEGRAM_BATCH_MIN: ${TRADER_TELEGRAM_BATCH_MIN:-0}
       TRADER_FEED: ${TRADER_FEED:-on}
       # Optional secrets; empty = that feature is off. Never baked into an image or a file in the repo.
