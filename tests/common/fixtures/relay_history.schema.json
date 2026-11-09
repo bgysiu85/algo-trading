@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/bgysiu85/algo-trading-ui/contract/schema/history.schema.json",
+  "title": "Closed trades for one session",
+  "description": "Every closed round trip for one trading day, uploaded once the session has ended. NOT a delta and NOT a live stream: the live state document (state.schema.json) carries only the most recent fills and no date at all, so a history built from it loses trades across every relay restart. This document is the whole day, is safe to send again, and replaces what the relay holds for that date.",
+  "type": "object",
+  "required": ["schema_version", "sent_at", "agent", "session_date", "complete", "trades"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Contract version. Same major means compatible."
+    },
+    "sent_at": { "type": "string", "format": "date-time", "description": "UTC, ISO 8601." },
+    "agent": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "session_date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "description": "The exchange-local trading day these trades belong to."
+    },
+    "complete": {
+      "const": true,
+      "description": "The sender asserts this is EVERY closed trade for session_date. The relay replaces the day on that basis, so a partial upload would delete real trades. Only true is accepted: a sender that cannot make the assertion must not use this endpoint."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["backfill", "session_upload"],
+      "description": "Where the rows came from. Both read the same fill logs; this distinguishes a one-off reload from the nightly job."
+    },
+    "trades": {
+      "type": "array",
+      "description": "May be empty for a day with no closed trades. An empty array for a day the relay already holds trades for is refused, not obeyed.",
+      "items": {
+        "type": "object",
+        "required": ["trade_key", "session_date", "strategy", "symbol", "exit_ts_et", "qty", "exit_price", "net_pnl"],
+        "additionalProperties": true,
+        "properties": {
+          "trade_key": {
+            "type": "string",
+            "minLength": 8,
+            "description": "Stable identity, recomputed from the fill log rather than taken from it: the log's own id is a row index that restarts each day."
+          },
+          "session_date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+          "strategy": { "type": "string", "minLength": 1, "description": "'unattributed' where the fill log recorded none." },
+          "symbol": { "type": "string", "minLength": 1 },
+          "entry_ts_et": { "type": ["string", "null"] },
+          "exit_ts_et": { "type": "string", "minLength": 1 },
+          "qty": { "type": "number" },
+          "partial": { "type": "boolean" },
+          "entry_price": { "type": ["number", "null"] },
+          "exit_price": { "type": "number" },
+          "gross_pnl": { "type": ["number", "null"], "description": "Null where the fill log recorded no entry price. A total over a null must read unknown, never quietly short." },
+          "commission": { "type": ["number", "null"], "description": "Positive, as a cost. Derived as gross - net so the three figures always reconcile." },
+          "net_pnl": { "type": "number" },
+          "hold_minutes": { "type": ["number", "null"] },
+          "reason": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "order_outcomes": {
+      "type": "array",
+      "description": "Per-strategy counts of what happened to orders that day, filled and not. On 2026-09-16 the log held 950 rows of which 39 filled; a closed-trades-only history would have shown an unremarkable session.",
+      "items": {
+        "type": "object",
+        "required": ["strategy", "status", "n"],
+        "additionalProperties": true,
+        "properties": {
+          "strategy": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "minLength": 1 },
+          "n": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

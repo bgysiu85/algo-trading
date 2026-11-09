@@ -960,6 +960,12 @@ class UIBridge:
 
         for date_digits, file_path in sessions:
             session_date = f"{date_digits[:4]}-{date_digits[4:6]}-{date_digits[6:]}"
+            if _is_dry_session_file(file_path):
+                # A shadow-run day: mechanics checks, not trades. Uploading it
+                # would put dry-run order outcomes into the P&L history.
+                LOG.info("portal: %s was a dry session; not uploaded",
+                         session_date)
+                continue
             try:
                 trades, order_outcomes = _read_session_csv(file_path, session_date)
             except Exception:                               # noqa: BLE001
@@ -1064,6 +1070,28 @@ def _session_files(fills_dir: Path, recent_days: int) -> list[tuple[str, Path]]:
     return found[-recent_days:]
 
 
+def _is_dry_session_file(path: Path) -> bool:
+    """True when a day's fill log was written by a DRY session.
+
+    Same rule as deploy/nas_trader/pull_nas_var.py dry_session_reason: a
+    session_open CONFIG row containing dry_run=True, or any order row with a
+    DRY_* status, anywhere in the file. A file that cannot be read returns
+    False here, so the reader below reports it the way it always has.
+    """
+    try:
+        with path.open(newline="", encoding="utf-8-sig") as fh:
+            for row in csv.DictReader(fh):
+                if (row.get("status") or "").upper().startswith("DRY"):
+                    return True
+                if (row.get("action") or "").upper() == CONFIG_ACTION and \
+                        "dry_run=True" in " ".join(
+                            v for v in row.values() if isinstance(v, str)):
+                    return True
+    except (OSError, UnicodeDecodeError, csv.Error):
+        return False
+    return False
+
+
 def _read_session_csv(path: Path, session_date: str
                       ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """(closed trades, order outcomes) for one day's fill log.
@@ -1141,7 +1169,11 @@ def _read_session_csv(path: Path, session_date: str
                 "source": "trader",
             })
 
-    order_outcomes = [{"strategy": s, "status": st, "count": n}
+    # "n", not "count": the relay's history.schema.json (contract 1.7.0) makes
+    # `n` a required property and history_store writes it to order_outcomes.n.
+    # With "count" every upload since 2026-09-19 was refused whole (HTTP 422),
+    # trades included (W09-0012, found on the first NAS paper session).
+    order_outcomes = [{"strategy": s, "status": st, "n": n}
                       for (s, st), n in sorted(outcome_counts.items())]
     return trades, order_outcomes
 

@@ -1398,7 +1398,7 @@ def test_reading_a_session_pairs_trades_and_counts_outcomes(tmp_path):
         "2026-09-14", "mcl", "WXYZ", "2026-09-14 07:09:48", 100, 6.38)
 
     assert order_outcomes == [
-        {"strategy": "mcl", "status": "SKIPPED_CONCURRENCY_CAP", "count": 1},
+        {"strategy": "mcl", "status": "SKIPPED_CONCURRENCY_CAP", "n": 1},
     ]
 
 
@@ -1499,3 +1499,90 @@ def test_upload_history_never_raises_when_a_session_file_cannot_be_read(tmp_path
     (tmp_path / "mcl_fills_20260915.csv").write_text("ts_et\n", encoding="utf-8")
     b = bridge()
     b.upload_history(trader)                # must not raise despite the bad file
+
+
+# --- W09-0012: the upload must match the relay's own contract -------------
+# tests/common/fixtures/relay_history.schema.json is a copy of the relay's
+# contract/schema/history.schema.json (algo-trading-ui, contract 1.7.0, taken
+# from the NAS relay on 2026-11-10). Until 2026-11-10 the trader sent
+# order_outcomes rows with "count" where the schema requires "n", so the relay
+# refused every day whole (HTTP 422). If the relay's contract changes, refresh
+# the copy; this test is what notices the two drifting apart.
+RELAY_HISTORY_SCHEMA = Path(__file__).parent / "fixtures" / "relay_history.schema.json"
+
+
+def _upload_docs(tmp_path, rows_by_day):
+    """Run upload_history over the given days and return the posted documents."""
+    last = None
+    for day, rows in rows_by_day.items():
+        last = tmp_path / f"mcl_fills_{day}.csv"
+        _write_session_csv(last, rows)
+    trader = build_trader()
+    trader.log = FakeLog(last)
+    b = bridge()
+    posts = []
+    b._post = lambda p, data, timeout=None: (posts.append(data) or True)
+    b.upload_history(trader, recent_days=5)
+    return posts
+
+
+_PAPER_DAY = [
+    {"ts_et": "2026-11-09 01:00:08", "strategy": "", "symbol": "",
+     "action": "CONFIG", "status": "APPLIED", "reason": "session_open",
+     "note": "paused=False max_positions=3 dry_run=False bridge=attached"},
+    {"ts_et": "2026-11-09 04:03:13", "strategy": "MCL", "symbol": "NWGL",
+     "action": "BUY", "qty": "100", "filled_qty": "100", "fill_price": "5.56",
+     "status": "FILLED", "reason": "entry_signal", "trade_pnl": ""},
+    {"ts_et": "2026-11-09 04:04:05", "strategy": "MCL", "symbol": "NWGL",
+     "action": "SELL", "qty": "100", "filled_qty": "100", "fill_price": "6.00",
+     "status": "FILLED", "reason": "trailing_stop", "trade_pnl": "42.63",
+     "entry_price": "5.56", "hold_minutes": "0.9"},
+    {"ts_et": "2026-11-09 04:20:00", "strategy": "MC5", "symbol": "ABCD",
+     "action": "BUY", "qty": "100", "fill_price": "",
+     "status": "NO_FILL_ABANDONED", "reason": "entry_signal", "trade_pnl": ""},
+]
+
+_DRY_DAY = [
+    {"ts_et": "2026-11-06 01:00:08", "strategy": "", "symbol": "",
+     "action": "CONFIG", "status": "APPLIED", "reason": "session_open",
+     "note": "paused=False max_positions=3 dry_run=True bridge=off"},
+    {"ts_et": "2026-11-06 04:10:00", "strategy": "MCL", "symbol": "WXYZ",
+     "action": "BUY", "qty": "100", "fill_price": "",
+     "status": "DRY_RUN", "reason": "entry_signal", "trade_pnl": ""},
+]
+
+
+def test_order_outcome_rows_carry_n_not_count(tmp_path):
+    (doc,) = _upload_docs(tmp_path, {"20261109": _PAPER_DAY})
+    assert doc["order_outcomes"] == [
+        {"strategy": "MC5", "status": "NO_FILL_ABANDONED", "n": 1}]
+    assert all("count" not in r for r in doc["order_outcomes"])
+
+
+def test_every_uploaded_document_passes_the_relays_history_schema(tmp_path):
+    jsonschema = pytest.importorskip("jsonschema")
+    import json
+    schema = json.loads(RELAY_HISTORY_SCHEMA.read_text(encoding="utf-8"))
+    validator = jsonschema.Draft202012Validator(schema)
+    (doc,) = _upload_docs(tmp_path, {"20261109": _PAPER_DAY})
+    assert doc["trades"] and doc["order_outcomes"], "the fixture must exercise both lists"
+    problems = [f"{'/'.join(map(str, e.path))}: {e.message}"
+                for e in validator.iter_errors(doc)]
+    assert problems == []
+
+
+def test_upload_history_skips_a_dry_session_day(tmp_path):
+    docs = _upload_docs(tmp_path, {"20261106": _DRY_DAY, "20261109": _PAPER_DAY})
+    assert [d["session_date"] for d in docs] == ["2026-11-09"]
+
+
+def test_a_dry_status_row_alone_marks_the_day_dry(tmp_path):
+    path = tmp_path / "mcl_fills_20261105.csv"
+    _write_session_csv(path, _DRY_DAY[1:])          # no CONFIG row at all
+    assert ui_bridge._is_dry_session_file(path) is True
+
+
+def test_a_paper_day_is_not_dry(tmp_path):
+    path = tmp_path / "mcl_fills_20261109.csv"
+    _write_session_csv(path, _PAPER_DAY)
+    assert ui_bridge._is_dry_session_file(path) is False
