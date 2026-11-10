@@ -497,3 +497,41 @@ def test_main_refuses_every_narrowing_or_rescoring_flag_and_a_future_as_of():
                  "--draws=10", "--theta=0.03", "--skip-gate", "--skip-regression", "--extend", "--variants", "--reset"):
         assert F.main([flag]) == 2
     assert F.main(["--as-of=2999-01-01"]) == 2
+
+
+# --- W15-0069: US$5/month cap shared with W16-0014; stop-and-ask ---------------------------------------------
+
+def test_a_pull_that_would_pass_the_monthly_cap_is_refused_before_anything_is_bought(env):
+    from common import forward_spend as FS
+    FS.record("W16-0014", 4.95)
+    c = FakeClient(cost=0.05)
+    with pytest.raises(FS.SpendRefused, match="STOP AND ASK BEN"):
+        F.run(env, as_of="2026-10-05", client=c, confirm=True, regression=lambda a: GATE_OK)
+    assert not c.calls("get_range") and not F.LEDGER_PATH.exists()
+    assert FS.last_refusal()["test"] == "W15-0037"
+
+
+def test_main_returns_exit_code_4_on_a_refusal(env, tmp_path):
+    from common import forward_spend as FS
+    FS.record("W16-0014", 4.95)
+    rc = F.main(["--archive", str(env), "--as-of", "2026-10-05", "--confirm", "--out", str(tmp_path / "r")], client=FakeClient(cost=0.05))
+    assert rc == 4
+
+
+def test_a_pull_within_the_cap_is_recorded_against_the_month(env):
+    from common import forward_spend as FS
+    cycle(env, "2026-10-02", client=FakeClient(cost=0.01))
+    ent = FS.read()["entries"]
+    assert len(ent) == 1 and ent[0]["test"] == "W15-0037" and ent[0]["usd"] > 0
+
+
+def test_a_databento_access_refusal_stops_and_asks(env):
+    from common import forward_spend as FS
+    c = FakeClient()
+
+    def refuse(**kw):
+        raise RuntimeError("401 auth_authentication_failed")
+
+    c.metadata.get_cost = refuse
+    with pytest.raises(FS.SpendRefused, match="STOP AND ASK BEN"):
+        F.run(env, as_of="2026-10-05", client=c, confirm=True, regression=lambda a: GATE_OK)

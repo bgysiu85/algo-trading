@@ -231,3 +231,11 @@ def pytest_configure(config):
     """
     config.addinivalue_line(
         "markers", "slow: steps a session through the real trader; seconds")
+
+
+@pytest.fixture(autouse=True)
+def forward_spend_ledger_in_tmp(monkeypatch, tmp_path):
+    """W15-0069: the US$5/month forward-test spend ledger (common.forward_spend) is a real file in Claude outputs. A test that
+    runs a scorer with --confirm must never add fake pulls to it (the first run of the new cap tests did exactly that and read
+    $4.66 already spent). Every test gets its own empty ledger in tmp_path; a test of the ledger itself passes an explicit path."""
+    monkeypatch.setenv("FORWARD_SPEND_PATH", str(tmp_path / "forward_spend_test.json"))

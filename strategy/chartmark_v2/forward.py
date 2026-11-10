@@ -52,6 +52,7 @@ from zlib import crc32
 import numpy as np
 import pandas as pd
 
+from common import forward_spend as FS
 from strategy.chartmark import book as BK
 from strategy.chartmark.data import Frame, Ind, indicators, load_seen_frame, load_training_frame, make_frame
 from strategy.chartmark_v2 import confirm_c as CC
@@ -284,6 +285,7 @@ def plan(client, archive, days: list[str], manifest: dict):
                 if tag not in no_session:
                     no_session.append(tag)
                 continue
+            FS.raise_if_access(BOARD, f"pricing of {tag} {schema}", e)
             raise ForwardRefused(f"pricing failed on {tag} {schema} -- nothing downloaded: {_scrub(e)}")
         jobs.append((tag, schema, out, kw))
         usd += u
@@ -606,11 +608,21 @@ def run(archive, *, as_of: str | None = None, client=None, client_factory=None, 
     if usd > max_cost:
         raise ForwardRefused(f"ABORT: ${usd:.2f} exceeds --max-cost ${max_cost:.2f}. A weekly pull of one symbol's hourly bars should "
                              "cost pennies -- this means the scope moved. Nothing downloaded.")
+    res["month_spend"] = FS.status()
     if not confirm:
         res.update(estimate_only=True, ledger=ledger)
         return res
 
+    if jobs:
+        FS.check(BOARD, usd)          # W15-0069 sub 2: US$5/month cap, both tests; refuses -> stop and ask Ben
+
     done, failed = download(client, jobs) if jobs else ([], [])
+    if jobs:
+        FS.record(BOARD, usd * len(done) / len(jobs), files=len(done), note=f"{len(done)}/{len(jobs)} files, days {days[0]}..{days[-1]}")
+    access = [f for f in failed if FS.is_access_refusal(f[2])]
+    if access:
+        FS.log_refusal(BOARD, f"{FS.REFUSAL_PREFIX}: Databento refused a download: {access[0][2]}")
+        res["access_refused"] = True
     res.update(n_downloaded=len(done), n_failed=len(failed), failed=[f"{t} {s}: {m}" for t, s, m in failed])
     manifest["no_session"] = sorted(set(manifest["no_session"]) | set(no_session))
     manifest["runs"].append(dict(pulled_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), files=[str(p) for _, _, p in done],
@@ -789,9 +801,16 @@ def main(argv=None, client=None) -> int:
     archive = a.archive or default_archive()
     print(f"W15-0037 forward scorer -- frozen engine {FROZEN_COMMIT}\nwindow  {FIRST_SESSION} .. {WINDOW_END}\nas of   {as_of} (UTC)\n"
           f"target  {Path(archive) / _dataset() / ARCHIVE_SUBDIR}\nledger  {LEDGER_PATH}\n")
-    result = run(archive, as_of=as_of, client=client, confirm=a.confirm, max_cost=a.max_cost)
+    try:
+        result = run(archive, as_of=as_of, client=client, confirm=a.confirm, max_cost=a.max_cost)
+    except FS.SpendRefused as e:
+        print(str(e))
+        return FS.EXIT_CODE
     print(txt_report(result))
     write_report(result, a.out or default_out_path(as_of))
+    if result.get("access_refused"):
+        print(f"{FS.REFUSAL_PREFIX}: Databento refused a download (see the failed list above).")
+        return FS.EXIT_CODE
     if result.get("n_failed"):
         print("INCOMPLETE. Re-run: files already on disk are free to skip.")
         return 1

@@ -186,3 +186,17 @@ def test_log_lines_are_timestamped(monkeypatch):
     for line in lines:
         # "YYYY-MM-DDTHH:MM:SS  <message>" -- just check the ISO date prefix
         assert line[:4].isdigit() and line[4] == "-"
+
+
+def test_a_refused_pull_is_logged_as_stop_and_ask_ben(monkeypatch):
+    from common import forward_spend as FS
+    FS.log_refusal("W16-0014", "STOP AND ASK BEN: W16-0014 pull of $0.80 would take 2026-11 to $5.30 ...")
+    monkeypatch.setattr(S.F, "main", lambda argv: 4)
+    fake_git, _ = _fake_git([_proc(stdout="")])
+    monkeypatch.setattr(S, "_git", fake_git)
+
+    rc = S.main()
+
+    assert rc == 4
+    log = S.LOG_PATH.read_text(encoding="utf-8")
+    assert "STOP AND ASK BEN" in log and "exit code: 4" in log

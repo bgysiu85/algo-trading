@@ -356,3 +356,84 @@ def test_txt_report_and_json_report_are_written(tmp_path, monkeypatch):
     assert "DVP-F1" in txt and F.FROZEN_COMMIT in txt
     data = json.loads(out.read_text(encoding="utf-8"))
     assert data["scored_dates"] == ["2026-09-29"]
+
+
+# --- W15-0069: unfinished UTC days are deferred; US$5/month cap; stop-and-ask ----------------------------------
+
+from common import forward_spend as FS  # noqa: E402
+
+
+def test_an_unfinished_utc_day_is_deferred_not_priced(tmp_path):
+    # Friday 2026-10-02: the dataset only reaches 13:00Z that day, so the day is not complete and must not be priced at all.
+    c = FakeClient(dataset_end="2026-10-02T13:00:00Z")
+    rc = F.main(["--archive", str(tmp_path), "--as-of", "2026-10-03", "--out", str(tmp_path / "r")], client=c)
+    assert rc == 0                                           # the old code aborted here (422) and exited 1
+    priced_days = {kw["start"][:10] for _, kw in c.calls("cost")}
+    assert "2026-10-02" not in priced_days and "2026-10-01" in priced_days
+    txt = (tmp_path / "r").with_suffix(".txt").read_text(encoding="utf-8")
+    assert "deferred" in txt and "2026-10-02" in txt
+
+
+def test_a_deferred_day_is_not_scored_and_is_picked_up_next_run(tmp_path, monkeypatch):
+    _pass_gate(monkeypatch)
+    _synthetic_bars(monkeypatch, ["2026-09-29"])
+    c = FakeClient(dataset_end="2026-09-30T00:00:00Z")      # 29 Sep complete, 30 Sep not
+    rc = F.main(["--archive", str(tmp_path), "--as-of", "2026-10-01", "--confirm", "--out", str(tmp_path / "r")], client=c)
+    assert rc == 0
+    assert len(c.calls("get_range")) == 2                    # 29 Sep only, both schemas
+    assert F.read_ledger()["scored_dates"] == ["2026-09-29"]
+    assert "2026-09-30" in F.candidate_dates(F.read_ledger(), as_of="2026-10-01")
+
+
+def test_the_dataset_moving_under_us_defers_the_day_instead_of_buying_it_partial(tmp_path):
+    c = FakeClient(dataset_end="2026-10-10T00:00:00Z")      # looks complete ...
+    orig = c.metadata.get_cost
+
+    def flaky(**kw):                                         # ... but Databento says otherwise for 1 Oct
+        if kw["start"].startswith("2026-10-01"):
+            raise RuntimeError("422 data_end_after_available_end")
+        return orig(**kw)
+
+    c.metadata.get_cost = flaky
+    rc = F.main(["--archive", str(tmp_path), "--as-of", "2026-10-02", "--out", str(tmp_path / "r")], client=c)
+    assert rc == 0
+    assert "2026-10-01" in (tmp_path / "r").with_suffix(".txt").read_text(encoding="utf-8")
+
+
+def test_a_pull_that_would_pass_the_monthly_cap_is_refused_before_anything_is_bought(tmp_path):
+    FS.record("W15-0037", 4.50)
+    c = FakeClient(cost=0.40)                                # 2 files x $0.40 = $0.80 -> $5.30
+    rc = F.main(["--archive", str(tmp_path), "--as-of", "2026-09-30", "--confirm", "--out", str(tmp_path / "r")], client=c)
+    assert rc == FS.EXIT_CODE == 4
+    assert not c.calls("get_range")
+    assert "STOP AND ASK BEN" in FS.last_refusal()["message"]
+    assert not F.LEDGER_PATH.exists()
+
+
+def test_a_pull_within_the_cap_is_recorded_against_the_month(tmp_path, monkeypatch):
+    _pass_gate(monkeypatch)
+    _synthetic_bars(monkeypatch, ["2026-09-29"])
+    c = FakeClient(cost=0.05)
+    rc = F.main(["--archive", str(tmp_path), "--as-of", "2026-09-30", "--confirm", "--out", str(tmp_path / "r")], client=c)
+    assert rc == 0
+    ent = FS.read()["entries"]
+    assert len(ent) == 1 and ent[0]["test"] == "W16-0014" and ent[0]["files"] == 2 and abs(ent[0]["usd"] - 0.10) < 1e-9
+
+
+def test_a_databento_access_refusal_stops_and_asks_instead_of_aborting(tmp_path):
+    c = FakeClient()
+
+    def refuse(**kw):
+        raise RuntimeError("403 forbidden: your subscription for GLBX.MDP3 has ended")
+
+    c.metadata.get_cost = refuse
+    rc = F.main(["--archive", str(tmp_path), "--as-of", "2026-09-30", "--confirm", "--out", str(tmp_path / "r")], client=c)
+    assert rc == 4 and not c.calls("get_range")
+    assert "refused W16-0014" in FS.last_refusal()["message"]
+
+
+def test_the_estimate_report_carries_no_spend_when_nothing_is_confirmed(tmp_path):
+    c = FakeClient(cost=0.40)
+    FS.record("W15-0037", 4.90)
+    rc = F.main(["--archive", str(tmp_path), "--as-of", "2026-09-30", "--out", str(tmp_path / "r")], client=c)
+    assert rc == 0                                           # an estimate never trips the cap, only a confirmed pull does

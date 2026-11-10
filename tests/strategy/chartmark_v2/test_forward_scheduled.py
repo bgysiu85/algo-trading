@@ -73,3 +73,13 @@ def test_a_refusal_or_a_stop_code_from_the_scorer_is_propagated_and_the_ledger_i
     fake, _ = _fake_git([_proc(stdout=" M forward_chartmark_v2.json\n"), _proc(), _proc(), _proc()])
     monkeypatch.setattr(S, "_git", fake)
     assert S.main() == 3
+
+
+def test_a_refused_pull_is_logged_as_stop_and_ask_ben(monkeypatch):
+    from common import forward_spend as FS
+    FS.log_refusal("W15-0037", "STOP AND ASK BEN: W15-0037 pull would pass the cap")
+    monkeypatch.setattr(S.F, "main", lambda argv: 4)
+    monkeypatch.setattr(S, "_git", lambda args: type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})())
+    rc = S.main()
+    assert rc == 4
+    assert "STOP AND ASK BEN" in S.LOG_PATH.read_text(encoding="utf-8")

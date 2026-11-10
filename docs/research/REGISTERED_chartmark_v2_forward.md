@@ -136,3 +136,9 @@ Written before any forward bar was scored. **No rule, threshold, date or pass ba
 6. **C3 "while flat" (sec 5).** Each of the N random entries must not overlap an already accepted random trade (entry bar to exit bar); pool = every forward bar (V-SESSION: bars opening 02:00-12:00 NY); exits are the rule's own backstop + EMA21 walk; 1,000 draws, registered seed.
 7. **Window end.** A position still open at the last scored close (2027-09-30) is closed there and ledgered as WINDOW_END (J11). The F7 extension to 2027-12-31 is not built: if a rule has fewer than 50 trades then, a POST-RUN amendment adds it.
 8. **Provisional F-criteria** are printed at every run for information, labelled PROVISIONAL. They decide nothing; there is no early pass (sec 4).
+
+## Amendment 2 (POST-RUN, 2026-11-10, W15-0069 / W15-0070) -- data source and spend cap
+
+The Databento subscription ended. Ben's decision (W15-0070, 2026-11-03): keep scoring on Databento bars with pay-as-you-go pulls capped at **US$5 per calendar month for this test and W16-0014 combined**; if a pull is refused or would take the month past the cap, **stop and ask Ben**. IBKR bars remain the backup, only as a POST-RUN amendment Ben approves at the time.
+
+**No rule, threshold, date or pass bar changes.** Implementation only: `common/forward_spend.py` holds one shared monthly spend ledger (`Claude outputs\forward_spend.json`); the scorer refuses a confirmed pull that would pass the cap and logs the refusal; a refusal or a Databento access error ends the run with exit code 4 and "STOP AND ASK BEN" in `w15_0037_weekly_log.txt`. The existing per-run `--max-cost` ceiling (US$5) stays. The scorer already deferred unfinished UTC days (Amendment 1, item 2). The weekly task for this scorer was never registered, so no weekly log exists and the only report is 2026-09-30; the weeks since are caught up by one priced pull (W15-0069 sub 4), subject to the contiguity rule in Amendment 1, item 2.

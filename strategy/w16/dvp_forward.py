@@ -85,6 +85,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from common import forward_spend as FS
 from common.tsmom_data_price import DATASET, require_databento
 from common.tsmom_fetch import _is_symbology_miss, _key, _price, _retry, _scrub, default_archive
 from strategy.w16 import drift_vwap as D
@@ -172,20 +173,34 @@ def _is_no_session(e: Exception) -> bool:
 
 
 def plan(client, root_dir: Path, days: list[str]):
-    """Every (day, schema) file that would actually run, its cost, and any
-    day Databento reports as having nothing to sell (skipped, not an
-    abort) -- same shape as strategy.w16.fetch_trades.plan, widened to two
-    schemas per day."""
-    jobs, have, no_session = [], 0, []
+    """Every (day, schema) file that would actually run, its cost, any day
+    Databento reports as having nothing to sell (skipped, not an abort), and
+    any day DEFERRED because its UTC day is not yet complete.
+
+    W15-0069 sub 3: a UTC day D is only bought once the dataset's real end
+    has passed D+1 00:00Z. Before that Databento refuses (422
+    data_end_after_available_end, then data_schema_not_fully_available on
+    the capped ohlcv-1d retry), which aborted every Saturday run in
+    Oct-Nov 2026. A deferred day is never bought partial; it is simply
+    still due next run (candidate_dates returns the gap). Returns
+    (jobs, usd, bytes, have, no_session, deferred)."""
+    jobs, have, no_session, deferred = [], 0, [], []
     usd, nbytes = 0.0, 0
-    cap = None
+    end_dt = None
     for day in days:
-        day_no_session = False
-        for schema in SCHEMAS:
+        missing = [sch for sch in SCHEMAS if not day_path(root_dir, sch, day).exists()]
+        have += len(SCHEMAS) - len(missing)
+        if not missing:
+            continue
+        if end_dt is None:
+            end_dt = _parse_ts(_dataset_end_precise(client))
+        if _parse_ts(request(day, SCHEMAS[0])["end"]) > end_dt:
+            deferred.append(day)
+            continue
+        day_no_session, day_deferred, day_jobs = False, False, []
+        du, dn = 0.0, 0
+        for schema in missing:
             out = day_path(root_dir, schema, day)
-            if out.exists():
-                have += 1
-                continue
             kw = request(day, schema)
             try:
                 u, n = _retry(lambda kw=kw: _price(client, kw))
@@ -193,30 +208,25 @@ def plan(client, root_dir: Path, days: list[str]):
                 if _is_no_session(e):
                     day_no_session = True
                     continue
-                if _is_end_after_available(e):
-                    if cap is None:
-                        cap = _dataset_end_precise(client)
-                    kw = request(day, schema, cap=cap)
-                    if kw["start"] >= kw["end"]:
-                        day_no_session = True
-                        continue
-                    try:
-                        u, n = _retry(lambda kw=kw: _price(client, kw))
-                    except Exception as e2:               # noqa: BLE001
-                        raise SystemExit(
-                            f"pricing failed on {day} {schema} (capped at "
-                            f"the dataset's real end {cap}) -- nothing "
-                            f"downloaded: {_scrub(e2)}")
-                else:
-                    raise SystemExit(
-                        f"pricing failed on {day} {schema} -- nothing "
-                        f"downloaded: {_scrub(e)}")
-            jobs.append((day, schema, out, kw))
-            usd += u
-            nbytes += n
+                if _is_end_after_available(e):           # the dataset moved under us: defer, never buy partial
+                    day_deferred = True
+                    break
+                FS.raise_if_access(BOARD, f"pricing of {day} {schema}", e)
+                raise SystemExit(
+                    f"pricing failed on {day} {schema} -- nothing "
+                    f"downloaded: {_scrub(e)}")
+            day_jobs.append((day, schema, out, kw))
+            du += u
+            dn += n
+        if day_deferred:
+            deferred.append(day)
+            continue
+        jobs.extend(day_jobs)
+        usd += du
+        nbytes += dn
         if day_no_session:
             no_session.append(day)
-    return jobs, usd, nbytes, have, no_session
+    return jobs, usd, nbytes, have, no_session, deferred
 
 
 def download(client, jobs):
@@ -412,9 +422,10 @@ def run(archive: Path, *, as_of: str | None = None, client=None,
         return {"as_of": as_of, "no_new_sessions": True,
                "summary": cumulative_summary(ledger), "ledger": ledger}
 
-    jobs, usd, nbytes, have, no_session = plan(client, archive, days)
+    jobs, usd, nbytes, have, no_session, deferred = plan(client, archive, days)
     result = {"as_of": as_of, "days_due": days, "n_jobs": len(jobs),
-              "n_have": have, "no_session": no_session,
+              "n_have": have, "no_session": no_session, "deferred": deferred,
+              "month_spend": FS.status(),
               "estimated_usd": usd, "estimated_bytes": nbytes}
 
     if usd > max_cost:
@@ -429,7 +440,17 @@ def run(archive: Path, *, as_of: str | None = None, client=None,
         result["summary"] = cumulative_summary(ledger)
         return result
 
+    if jobs:
+        FS.check(BOARD, usd)          # W15-0069 sub 2: US$5/month cap, both tests; refuses -> stop and ask Ben
+
     done, failed = download(client, jobs)
+    if jobs:
+        FS.record(BOARD, usd * len(done) / len(jobs), files=len(done),
+                  note=f"{len(done)}/{len(jobs)} files, days {days[0]}..{days[-1]}")
+    access = [f for f in failed if FS.is_access_refusal(f[2])]
+    if access:
+        FS.log_refusal(BOARD, f"{FS.REFUSAL_PREFIX}: Databento refused a download: {access[0][2]}")
+        result["access_refused"] = True
     result["n_downloaded"] = len(done)
     result["n_failed"] = len(failed)
     result["failed"] = [f"{d} {s}: {m}" for d, s, m in failed]
@@ -506,6 +527,8 @@ def txt_report(r: dict) -> str:
         L.append(f"ESTIMATE ONLY -- {r['n_jobs']} file(s) to price/pull, "
                  f"{r['n_have']} already on disk, {len(r.get('no_session', []))} no-session day(s).")
         L.append(f"days due: {', '.join(r['days_due'])}")
+        if r.get("deferred"):
+            L.append(f"deferred (UTC day not complete yet, still due next run): {', '.join(r['deferred'])}")
         L.append(f"estimate: ${r['estimated_usd']:.2f}  {r['estimated_bytes']:,} bytes")
         L.append("Nothing downloaded, nothing scored. Re-run with --confirm to spend it.")
         L.append("")
@@ -518,6 +541,8 @@ def txt_report(r: dict) -> str:
         if r.get("failed"):
             L.append(f"FAILED pulls (retry next run): {r['failed']}")
         L.append(f"spent this run: ${r.get('estimated_usd', 0.0):.2f}")
+        if r.get("deferred"):
+            L.append(f"deferred (UTC day not complete yet, still due next run): {', '.join(r['deferred'])}")
         L.append("")
 
     s = r.get("summary", {})
@@ -586,7 +611,11 @@ def main(argv=None, client=None) -> int:
          f"as of     {as_of}\ntarget    {Path(archive) / DATASET / ARCHIVE_SUBDIR}/\n"
          f"ledger    {LEDGER_PATH}\n")
 
-    result = run(archive, as_of=as_of, client=client, confirm=a.confirm, max_cost=a.max_cost)
+    try:
+        result = run(archive, as_of=as_of, client=client, confirm=a.confirm, max_cost=a.max_cost)
+    except FS.SpendRefused as e:
+        print(str(e))
+        return FS.EXIT_CODE
     txt = txt_report(result)
     print(txt)
 
@@ -598,6 +627,9 @@ def main(argv=None, client=None) -> int:
         return 3
     if not a.confirm:
         return 0
+    if result.get("access_refused"):
+        print(f"{FS.REFUSAL_PREFIX}: Databento refused a download (see the failed list above).")
+        return FS.EXIT_CODE
     if result.get("n_failed"):
         print("INCOMPLETE. Re-run: pulled days are on disk and free to skip.")
         return 1

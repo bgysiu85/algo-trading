@@ -18,6 +18,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from common import forward_spend as FS
 from strategy.chartmark_v2 import forward as F
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -46,6 +47,9 @@ def main(argv=None) -> int:
             rc = e.code if isinstance(e.code, int) else 1
             _log(fh, f"forward scorer aborted: {e}")
         _log(fh, f"forward scorer exit code: {rc}")
+        if rc == FS.EXIT_CODE:
+            ref = FS.last_refusal()
+            _log(fh, ref["message"] if ref else f"{FS.REFUSAL_PREFIX}: a Databento pull was refused (no detail recorded).")
 
         status = _git(["status", "--porcelain", "--", LEDGER_NAME])
         if status.returncode != 0:
