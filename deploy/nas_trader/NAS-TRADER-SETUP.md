@@ -44,10 +44,12 @@ on **4004** for *other* containers. The trader refuses every port except 4002/74
 2. **NAS: unpack** `w10_0013_sub4_nas.tar` into `/volume1/docker/trader/` and create the settings folder:
    ```
    sudo mkdir -p /volume1/docker/trader /volume1/trader/gateway
-   cd /volume1/docker && sudo tar -xf w10_0013_sub4_nas.tar && sudo chmod -R a+rX /volume1/docker/trader
-   sudo chown -R "$(id -un)":users /volume1/docker/trader
+   cd /volume1/docker && sudo tar -xf w10_0013_sub4_nas.tar
+   sudo chown "$(id -un)":users /volume1/docker/trader
    ```
-   (The last line makes you the owner of the folder so step 3 can write `.env`.)
+   (The last line makes you the owner of the folder itself, not of what is in it, so step 3 can write `.env`. No `-R`:
+   the tar already carries root ownership and 0644/0755 modes, and since sub 13 this folder also holds the portal's
+   Postgres data, which a recursive chown or chmod would break or open up. See T3 and W10-0013 sub 18.)
    (Upload the tar into `/volume1/docker` with File Station first.)
 3. **NAS: fill in `.env`.** Run `bash /volume1/docker/make_trader_env.sh` (also in this folder as `make_trader_env.sh`). It asks
    for the paper username, the paper password and a VNC password, copies the Gateway image pin from the recorder's `.env`
@@ -164,12 +166,18 @@ T2. **PC: build the tar.** `python deploy\nas_trader\build_release.py` writes `D
     and prints `dirty=False` when the shipped files match the commit. If it says `dirty=True`, commit first.
 T3. **NAS: unpack.** Upload the tar into `/volume1/docker` (File Station), then:
     ```
-    cd /volume1/docker && sudo tar --overwrite -xf w10_0013_sub5_nas.tar && sudo chmod -R a+rX /volume1/docker/trader
-    sudo chown -R "$(id -un)":users /volume1/docker/trader && sudo chmod 600 /volume1/docker/trader/.env
+    cd /volume1/docker && sudo tar --overwrite -xf w10_0013_sub5_nas.tar
+    sudo chmod 600 /volume1/docker/trader/.env
     ```
     This refreshes `compose.yaml`, `.env.example`, this guide and `probe_gateway.py`, and creates `app/`. `.env` is never in the tar.
-    The `chmod -R a+rX` also opens `.env` to every NAS user, so the last command closes it again (sub 7 found it at 644).
-    Every later unpack (sub 6 onwards) ends with the same `sudo chmod 600 /volume1/docker/trader/.env`.
+    `build_release.py` writes every entry as root with 0644 files and 0755 folders, so the unpacked code is readable by the
+    container (user 1000) with no recursive chmod or chown afterwards. **Never run `chmod -R` or `chown -R` on
+    `/volume1/docker/trader` itself** (W10-0013 sub 18): since sub 13 it also holds `portal-db` (the portal's Postgres data,
+    owner 1026, mode 700) and `portal-backups`. A `chmod -R a+rX` left `portal-db` at 755 on 2026-11-07; a `chown -R` would
+    hand the database to your user and stop Postgres at its next start. It also opened `.env` to every NAS user (sub 7
+    found it at 644). Recursive commands on a subfolder the guide names (`relay`, `watch`) are fine.
+    Every later unpack ends with the same `sudo chmod 600 /volume1/docker/trader/.env`. A rollback copy first is cheap:
+    `sudo tar -cf /volume1/docker/edge/staging/app-before-<commit>.tar -C /volume1/docker/trader app`.
 T4. **NAS: the trader's var folder, then the packages.**
     ```
     sudo mkdir -p /volume1/trader/var && sudo chown -R 1000:1000 /volume1/trader/var && sudo chmod -R 775 /volume1/trader/var

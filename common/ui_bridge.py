@@ -68,6 +68,11 @@ MAX_EVENTS = 20
 # Two minutes is ample and still finite -- see
 # claude/handover_session_end_upload_20260919.md sec 3, "it is bounded".
 HISTORY_TIMEOUT_S = 120.0
+# Our own name on every request to the relay. Cloudflare's Browser Integrity
+# Check refuses urllib's default "Python-urllib/3.x" with HTTP 403, error 1010,
+# before the request reaches the relay (W10-0013 sub 17: on 2026-11-09 every
+# push from the NAS trader was refused until a Cloudflare rule exempted /api/).
+USER_AGENT = f"thesiuz-trader/{CONTRACT_VERSION} (+ui_bridge)"
 
 # The live trader's own daily fill log -- var/fills/mcl_fills_YYYYMMDD.csv,
 # named for MCL historically but shared by every strategy running in the
@@ -997,7 +1002,8 @@ class UIBridge:
         req = urllib.request.Request(
             f"{self.base_url}{path}", data=body,
             headers={"Authorization": f"Bearer {self.token}",
-                     "Content-Type": "application/json"},
+                     "Content-Type": "application/json",
+                     "User-Agent": USER_AGENT},
             method="POST" if data is not None else "GET")
         with urllib.request.urlopen(
                 req, timeout=self.timeout_s if timeout is None else timeout) as res:

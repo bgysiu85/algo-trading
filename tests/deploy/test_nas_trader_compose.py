@@ -174,14 +174,25 @@ SETUP = (DEPLOY / "NAS-TRADER-SETUP.md").read_text(encoding="utf-8")
 
 
 def test_every_upgrade_unpack_closes_env_again():
-    """`chmod -R a+rX /volume1/docker/trader` after an unpack also opened .env (the paper password) to every NAS user:
-    sub 7 found it at 644. Every upgrade unpack (tar --overwrite, .env already there) must end with chmod 600 on it."""
+    """Every unpack of a trader release over an existing install (tar --overwrite ... nas*.tar) must end with
+    chmod 600 on .env: sub 7 found it at 644 after a recursive chmod, and the guide must never leave it open."""
     blocks = re.findall(r"```\n(.*?)```", SETUP, re.S)
-    upgrades = [b for b in blocks if "tar --overwrite" in b and "a+rX /volume1/docker/trader" in b]
+    upgrades = [b for b in blocks if re.search(r"tar --overwrite -xf \S*nas\S*\.tar", b)]
     assert upgrades
     for b in upgrades:
         assert "chmod 600 /volume1/docker/trader/.env" in b, b
-        assert b.index("chmod 600 /volume1/docker/trader/.env") > b.index("a+rX /volume1/docker/trader"), b
+        assert b.index("chmod 600 /volume1/docker/trader/.env") > b.index("tar --overwrite"), b
+
+
+def test_no_command_recurses_over_the_whole_trader_folder():
+    """W10-0013 sub 18: since sub 13 /volume1/docker/trader also holds portal-db (Postgres data, owner 1026, mode 700).
+    The old unpack's chmod -R a+rX left it at 755 on 2026-11-07, and a chown -R would stop Postgres at its next start.
+    The tar already carries root/0644/0755, so no command block may chmod -R or chown -R the folder itself;
+    a named subfolder (relay, watch) is fine."""
+    blocks = re.findall(r"```\n(.*?)```", SETUP, re.S)
+    bad = re.compile(r"\b(chmod|chown)\s+-R\s+\S+\s+/volume1/docker/trader/?(\s|&|;|$)", re.M)
+    offenders = [b for b in blocks if bad.search(b)]
+    assert offenders == [], offenders
 
 
 # ---------------------------------------------------------------- the portal relay (W10-0013 sub 11)

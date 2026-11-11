@@ -1586,3 +1586,33 @@ def test_a_paper_day_is_not_dry(tmp_path):
     path = tmp_path / "mcl_fills_20261109.csv"
     _write_session_csv(path, _PAPER_DAY)
     assert ui_bridge._is_dry_session_file(path) is False
+
+
+# --- W10-0013 sub 17: our own User-Agent, never urllib's default ----------
+def _captured_request(monkeypatch, call):
+    seen = {}
+
+    class _Answer:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b"{}"
+
+    def fake_urlopen(req, timeout=None):
+        seen["req"] = req
+        return _Answer()
+
+    monkeypatch.setattr(ui_bridge.urllib.request, "urlopen", fake_urlopen)
+    call()
+    return seen["req"]
+
+
+def test_every_relay_request_names_the_trader_not_python_urllib(monkeypatch):
+    b = bridge()
+    for call in (lambda: b._request("/api/state", {"x": 1}),      # POST
+                 lambda: b._request("/api/commands", None)):        # GET
+        req = _captured_request(monkeypatch, call)
+        ua = req.get_header("User-agent")                  # urllib's spelling
+        assert ua == ui_bridge.USER_AGENT
+        assert ua.startswith("thesiuz-trader/") and "urllib" not in ua.lower()
+        assert req.get_header("Authorization", "").startswith("Bearer ")
+
