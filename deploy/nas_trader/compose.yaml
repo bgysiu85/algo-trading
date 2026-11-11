@@ -114,6 +114,45 @@ services:
       driver: json-file
       options: {max-size: "10m", max-file: "5"}
 
+  borrow-probe:
+    # IBKR borrow / shortability probe (W05-0022 part 2, hosted by W10-0022): READ-ONLY (borrow_probe.py opens a readonly
+    # session and has no order call). The pattern for every extra paper-session process (exit manager W15-0053, paper
+    # runners W15-0037 sub 4 / W16-0014 sub 3 get theirs when their code exists):
+    #   * network_mode "container:trader-ib-gateway": joins the Gateway's network, no second login, publishes nothing.
+    #   * its own client id, listed in client_ids.py (this one: 96); two sessions with one id drop each other.
+    #   * own profile, never starts with the project; restart "no"; an order-placing one also defaults to dry.
+    #   * writes ONLY to EXTRAS_OUT_DIR, never to var/ (the trader's folder; the PC reads it and the trader clears a stale
+    #     lock there at start, which is only safe while nothing else writes to var/).
+    #   * never run it during the trader's window (04:00-09:30 New York): it shares the Gateway's API with the trader.
+    #       docker compose --profile borrow run --rm --no-deps borrow-probe --symbols-file /out/gappers.txt
+    profiles: ["borrow"]
+    image: ${TRADER_IMAGE:-python:3.12-slim}
+    container_name: trader-borrow-probe
+    platform: linux/amd64
+    network_mode: "container:trader-ib-gateway"
+    restart: "no"
+    user: "1000:1000"
+    init: true
+    security_opt:
+      - seccomp:unconfined                      # Synology's kernel has no seccomp
+    working_dir: /out
+    entrypoint: ["python", "/extras/borrow_probe.py"]
+    environment:
+      PYTHONPATH: /deps
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      IB_CLIENT_ID: "96"                        # registry: client_ids.py
+      BORROW_OUT_DIR: /out
+    volumes:
+      - ${TRADER_DEPS_DIR:-/volume1/docker/trader/deps}:/deps:ro
+      - ${EXTRAS_DIR:-/volume1/docker/trader/extras}:/extras:ro
+      - ${EXTRAS_OUT_DIR:-/volume1/trader-data/extras}:/out
+    read_only: true
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
   relay:
     # The portal relay (W10-0013 sub 11): the FastAPI app from the Trading UI repo (D:\Trading UI), served at
     # https://trader.thesiuz.com through the tunnel in the "edge" project (sub 15). Same pattern as the trader: plain python

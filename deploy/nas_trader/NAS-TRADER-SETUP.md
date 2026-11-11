@@ -580,7 +580,7 @@ sudo chmod 600 /volume1/docker/trader/.env
 2. **Run it once by hand (NAS session).** It opens one read-only API session and sends one "OK" to Telegram:
 ```
 sudo bash /volume1/docker/trader/api_precheck.sh check
-tail -8 /volume1/docker/trader/precheck.log
+sudo tail -8 /volume1/docker/trader/precheck.log
 ```
    Expect `PRECHECK PASS` and a Telegram message "Gateway API check OK". Report back what it printed.
 3. **Prove the alarm with a safe failure (NAS session).** It asks for the WRONG port (7497, where nothing listens), so it fails without touching the Gateway; Telegram must say FAILED with a "TEST" label:
@@ -590,8 +590,78 @@ sudo bash /volume1/docker/trader/api_precheck.sh check --port 7497 --attempts 1 
 4. **Two DSM tasks (DSM by hand).** Control Panel > Task Scheduler > Create > Scheduled Task > User-defined script. User `root`, Mon-Fri, "Send run details by email" off. Task settings > Run command:
    - Name `Algo - API check before start`, Schedule 16:50, command `bash /volume1/docker/trader/api_precheck.sh check-restart`
    - Name `Algo - API check before window`, Schedule 19:45, command `bash /volume1/docker/trader/api_precheck.sh check`
-   After the first weekday run, `tail -20 /volume1/docker/trader/precheck.log` shows both.
+   After the first weekday run, `sudo tail -20 /volume1/docker/trader/precheck.log` shows both.
 
 Undo: delete the two DSM tasks; `sudo rm /volume1/docker/trader/api_precheck.py /volume1/docker/trader/api_precheck.sh`.
 
 Rules a later chat must not undo: the check runs only with `--network container:trader-ib-gateway` and publishes no port; the wrapper never passes `.env` as a whole (`--env-file`); `docker restart` appears once, only in `check-restart`, and never while `trader-trader` runs; the client id 95 is not shared with another tool; live ports stay refused. `tests/deploy/test_api_precheck.py` enforces these.
+
+### Part 8b - Monday-morning check (W10-0026, 2026-11-10)
+
+Why: on Sun 8 Nov the Gateway's daily restart (16:30 Chicago = Mon 09:30 Sydney) did not come back. IBKR invalidates the saved
+restart login on Sunday at 01:00 New York, so the first restart after it cannot reuse it. IBC's log (saved in
+`/volume1/docker/desk/var/gw_log_20261109.txt`) shows the quick restart start, the login window open, then an unhandled dialog titled
+"Gateway" 0.8 s later and nothing after it. The container stayed "Up" with the API closed until Ben ran `docker restart` at about 16:40;
+a cold start has no saved login to reuse, signs in with the paper username and was healthy in 2 minutes. The same dialog sequence
+appeared on Sun 1 Nov. The 16:50 weekday check would have caught it, but only 10 minutes before the 17:00 start.
+This is IBKR's weekly re-login rule, so it will recur every week and cannot be configured away.
+
+Fix (no code change): one more DSM task, the same script, run once on Monday morning after the Sunday restart has happened.
+Control Panel > Task Scheduler > Create > Scheduled Task > User-defined script, user `root`, **Monday only**, "Send run details by email" off:
+- Name `Algo - API check Monday morning`, Schedule Monday 10:15, command `bash /volume1/docker/trader/api_precheck.sh check-restart`
+
+Why 10:15: the Sunday restart lands at 09:30 Sydney with New York on standard time and Sydney on daylight time (the case now), and earlier
+(07:30-08:30) in the other clock combinations, so 10:15 is always after it. Monday has no desk run (the desk runs Tue-Sat), and
+`check-restart` refuses to restart while `trader-trader` is running, so nothing is disturbed. It leaves about 6.5 h before the start.
+After the first Monday run, `sudo grep "check-restart" /volume1/docker/trader/precheck.log | tail` shows it.
+
+NOT verified: the text of the "Gateway" dialog (IBC logs only the title; read it on the Gateway screen, VNC 127.0.0.1:5901, the next time
+it is stuck); that a restart clears it every week (it did on 1 and 9 Nov, by hand). The 16:50 weekday check stays as the backstop.
+
+## Part 9 - extra paper-session containers (W10-0022, 2026-11-12)
+
+Why: one IBKR paper username allows one session, and Ben decided (W10-0019, 2026-11-05) that everything runs from the NAS. So every other
+process that needs the paper account (the exit manager W15-0053, the paper runners W15-0037 sub 4 and W16-0014 sub 3, the borrow probe
+W05-0022) is a container in this project that joins the Gateway's network like the trader. No second login, nothing from the PC.
+
+The pattern (the `borrow-probe` service in compose.yaml is the first, and the model for the rest):
+- `network_mode: "container:trader-ib-gateway"`, no ports, no `networks:`, `restart: "no"`, its own compose profile (never starts with the project).
+- Its own client id, taken from `client_ids.py` (add the row first; a duplicate id drops the other session). Reserved: 31 exit manager, 32 W15-0037 runner, 33 W16-0014 runner.
+- Writes only to `EXTRAS_OUT_DIR` (`/volume1/trader-data/extras`), never into `var/`. Order-placing ones default to dry, like `TRADER_MODE`.
+- Never run one during the trader's window (04:00-09:30 New York = 20:00-00:30 here with New York on standard time): they share the Gateway's API with the trader.
+- Not built yet: the exit manager and both paper runners (no code exists); each gets its service when its own item delivers the code. W16-0014 sub 3 must be re-scoped from NinjaTrader (expired 2026-10-03) to IBKR. Futures orders may be refused until IBKR restores US futures permission (W03-0017, about 22 Nov).
+
+Limits and risks of the borrow probe (read-only, paper ports only, cannot place or preview an order):
+- NOT verified: that IBKR sends a borrow FEE RATE through the API at all (generic tick 236 gives the shortable level and shares). The probe writes every tick type that arrives, so a fee-like value would show in `ticks`; if none does, the fee part of W05-0022 needs another source.
+- NOT verified: the real ib_async tick fields (`shortable`, `shortableShares`) on this login; the code is tested only against a fake.
+- NOT verified: the new `extras` folder's permissions for the `pc-reader` read-only share user (step 1 sets owner 1000:1000).
+
+Steps:
+1. **Copy the files (PowerShell on the ProArt).**
+```
+Set-Location D:\Trading
+$k = "D:\Trading\Claude outputs\.ssh\nas_claude_ed25519"
+ssh -i $k claude@192.168.1.109 "mkdir -p /volume1/docker/edge/staging"
+scp -O -i $k "D:\Trading\deploy\nas_trader\borrow_probe.py" "D:\Trading\deploy\nas_trader\client_ids.py" "D:\Trading\deploy\nas_trader\compose.yaml" claude@192.168.1.109:/volume1/docker/edge/staging/
+```
+   Then in the NAS session:
+```
+sudo mkdir -p /volume1/docker/trader/extras /volume1/trader-data/extras
+sudo chown 1000:1000 /volume1/trader-data/extras
+sudo cp /volume1/docker/edge/staging/borrow_probe.py /volume1/docker/edge/staging/client_ids.py /volume1/docker/trader/extras/
+sudo cp /volume1/docker/edge/staging/compose.yaml /volume1/docker/trader/compose.yaml
+sudo chmod 644 /volume1/docker/trader/extras/borrow_probe.py /volume1/docker/trader/extras/client_ids.py /volume1/docker/trader/compose.yaml
+printf 'EXTRAS_DIR=/volume1/docker/trader/extras\nEXTRAS_OUT_DIR=/volume1/trader-data/extras\n' | sudo tee -a /volume1/docker/trader/.env >/dev/null
+sudo chmod 600 /volume1/docker/trader/.env
+```
+2. **List a few symbols and run it once, outside the trader's window (NAS session).** It opens one read-only API session on the already logged-in Gateway:
+```
+cd /volume1/docker/trader
+sudo docker compose --profile borrow run --rm --no-deps borrow-probe --symbols AAPL,TSLA,GME
+sudo tail -3 /volume1/trader-data/extras/borrow_probe.jsonl
+```
+   Report back what it printed (the `ticks` list is what shows whether a fee rate exists). For a week of gappers put the symbols one per line in `/volume1/trader-data/extras/gappers.txt` and use `--symbols-file /out/gappers.txt` (50 symbols at most per run).
+
+Undo: `sudo docker rm -f trader-borrow-probe`; remove the two `EXTRAS_*` lines from `.env`; `sudo rm -r /volume1/docker/trader/extras`.
+
+Rules a later chat must not undo: every container that joins the Gateway does it with `container:trader-ib-gateway`, publishes nothing, has a unique id in `client_ids.py`, makes no login of its own and never writes into `var/`. `tests/deploy/test_nas_extra_clients.py` and `tests/deploy/test_borrow_probe.py` enforce these.
