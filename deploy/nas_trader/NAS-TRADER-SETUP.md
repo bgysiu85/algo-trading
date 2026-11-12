@@ -633,7 +633,8 @@ The pattern (the `borrow-probe` service in compose.yaml is the first, and the mo
 
 Limits and risks of the borrow probe (read-only, paper ports only, cannot place or preview an order):
 - NOT verified: that IBKR sends a borrow FEE RATE through the API at all (generic tick 236 gives the shortable level and shares). The probe writes every tick type that arrives, so a fee-like value would show in `ticks`; if none does, the fee part of W05-0022 needs another source.
-- NOT verified: the real ib_async tick fields (`shortable`, `shortableShares`) on this login; the code is tested only against a fake.
+- Verified 2026-11-12 (first run, AAPL / TSLA / GME): the real `shortable` (3.0 = easy) and `shortableShares` fields arrive. The `ticks` list is only the last tick batch, so it is weak evidence about a fee rate: it showed only 46 and 89 (or 8). A fee rate was NOT seen; that does not prove IBKR has none.
+- Found on the first run: `sudo mkdir` made `/volume1/docker/trader/extras` mode 700 and the container (user 1000) got "Permission denied" on the code; the Synology `trader-data/extras` folder showed mode 000 with an ACL. Step 1 now runs `chmod 755` on both.
 - NOT verified: the new `extras` folder's permissions for the `pc-reader` read-only share user (step 1 sets owner 1000:1000).
 
 Steps:
@@ -648,6 +649,7 @@ scp -O -i $k "D:\Trading\deploy\nas_trader\borrow_probe.py" "D:\Trading\deploy\n
 ```
 sudo mkdir -p /volume1/docker/trader/extras /volume1/trader-data/extras
 sudo chown 1000:1000 /volume1/trader-data/extras
+sudo chmod 755 /volume1/trader-data/extras /volume1/docker/trader/extras
 sudo cp /volume1/docker/edge/staging/borrow_probe.py /volume1/docker/edge/staging/client_ids.py /volume1/docker/trader/extras/
 sudo cp /volume1/docker/edge/staging/compose.yaml /volume1/docker/trader/compose.yaml
 sudo chmod 644 /volume1/docker/trader/extras/borrow_probe.py /volume1/docker/trader/extras/client_ids.py /volume1/docker/trader/compose.yaml
