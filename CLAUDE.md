@@ -38,7 +38,14 @@ Handover and RESULT docs live in `claude/` (named `handover_wXX_nnnn_*` / `wXX_n
 - No root: `sudo` asks for a password and the Docker socket is root-only, so no `docker` / `docker compose` commands. Ben decided (2026-10-28) not to add passwordless sudo, not even docker-only: "let's leave it as it is for now". Give Ben docker commands as copy-paste for his own NAS session.
 - Use it to copy and unpack release tars, read log and data files, check deployed files (checksums, RELEASE.json) and run read-only psql queries. Files written are owned by `claude` (uid 1043, group users): set permissions the container can read (an earlier owner-only tar broke journal-app). Ask Ben before editing a `.env` or deleting anything on the NAS.
 
-## Task board (monday.com, board "Algo Trading", id 5031413876)
+## Task board (monday.com, four boards in workspace "Trading Projects")
+- Which board a workstream lives on (items keep their Wxx-nnnn id when they move):
+  - W01–W08, W10 data items, W11–W16 → Algo Trading, board 5031413876, subitems board 5031415830
+  - W09 and the W10 NAS items (W10-0013, 0014, 0016, 0017, 0018, 0022, 0026, 0027, 0028) → Trader Platform, board 5032254261, subitems board 5032254265
+  - W17 → Trade Journal, board 5032254258, subitems board 5032254259
+  - W18 → AI Research Desk, board 5032254122, subitems board 5032254131
+- W10 numbering spans both Algo Trading and Trader Platform: take the highest W10 nnnn across both.
+- A Claude Code session sets Assignee / Claude Session to "Claude Code" on items it works.
 - Every task becomes an item "Wxx-nnnn · name"; subitems for steps. Post an Update first (dated note), then change Status/Assignee.
 - Commands Ben must run go on the board as an Update inside <pre>…</pre>, one command per line.
 - Results are written as a monday Doc on the item plus a short chat summary.
