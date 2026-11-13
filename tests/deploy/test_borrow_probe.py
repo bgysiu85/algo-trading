@@ -122,3 +122,67 @@ def test_a_non_paper_account_stops_the_run_and_writes_nothing(tmp_path):
 def test_nan_ticks_become_unknown_not_numbers():
     assert bp._num(NAN) is None and bp._num(None) is None and bp._num("x") is None and bp._num(2) == 2.0
     assert bp.shortable_label(NAN) == "unknown" and bp.shortable_label(2.0) == "available"
+
+
+# ---- --capture (W05-0022: is a borrow fee rate ever sent?) ----
+
+class _Event:
+    def __init__(self):
+        self.fns = []
+
+    def __iadd__(self, f):
+        self.fns.append(f)
+        return self
+
+    def __isub__(self, f):
+        self.fns.remove(f)
+        return self
+
+
+class CaptureTicker(FakeTicker):
+    def __init__(self):
+        super().__init__(3.0, 250000.0, 5.5, [46])
+        self.updateEvent = _Event()
+
+
+class CaptureIB(FakeIB):
+    """sleep() delivers one new tick batch per call: the 'latest batch' replaces the old one, as ib_async does."""
+    def __init__(self, accounts=("DUM1",)):
+        super().__init__(accounts)
+        self.ticker, self.n = None, 0
+
+    def reqMktData(self, c, genericTickList="", snapshot=False, regulatorySnapshot=False):
+        self.requests.append((c.symbol, genericTickList))
+        self.ticker = CaptureTicker()
+        return self.ticker
+
+    def sleep(self, s):
+        self.n += 1
+        if self.ticker is not None:
+            batch = [types.SimpleNamespace(tickType=46, price=3.0, size=0.0)]
+            if self.n == 3:
+                batch.append(types.SimpleNamespace(tickType=99, price=0.75, size=0.0))   # a rare fee-like tick
+            self.ticker.ticks = batch
+            for f in list(self.ticker.updateEvent.fns):
+                f(self.ticker)
+
+
+def test_capture_keeps_a_rare_tick_that_the_latest_batch_would_hide(tmp_path):
+    rows = bp.run(["AAPL"], "127.0.0.1", 4002, tmp_path, 0.0, ib_factory=CaptureIB, capture_s=2.0)
+    r = rows[0]
+    assert r["capture_s"] == 2.0 and "99" in r["tick_log"] and r["tick_log"]["99"]["count"] == 1
+    assert r["tick_log"]["99"]["last"][0] == 0.75
+    assert 99 in r["ticks"] and 46 in r["ticks"]
+    assert json.loads((tmp_path / "borrow_probe.jsonl").read_text().splitlines()[-1])["tick_log"]["99"]["count"] == 1
+
+
+def test_capture_off_by_default_changes_nothing(tmp_path):
+    rows = bp.run(["AAPL"], "127.0.0.1", 4002, tmp_path, 0.0, ib_factory=FakeIB)
+    assert "tick_log" not in rows[0] and "capture_s" not in rows[0]
+
+
+def test_capture_limits_are_enforced(tmp_path):
+    out = []
+    assert bp.main(["--symbols", "AAPL", "--capture", "500", "--out-dir", str(tmp_path)], ib_factory=FakeIB, out=out.append) == 1
+    assert bp.main(["--symbols", "A B C D E F G H I J", "--capture", "120", "--out-dir", str(tmp_path)], ib_factory=FakeIB, out=out.append) == 1
+    assert all("REFUSED" in o for o in out)

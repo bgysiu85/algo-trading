@@ -77,7 +77,18 @@ def shortable_label(level) -> str:
     return "not shortable"
 
 
-def probe_symbol(ib, symbol: str, wait_s: float, sleep=time.sleep) -> dict:
+def _log_ticks(tick_log: dict, ticks) -> None:
+    """Fold one batch of ticks into {tickType: {count, first, last}} so a rare tick is not lost when the next batch replaces it
+    (ib_async's ticker.ticks holds only the latest batch). first / last are [price, size]."""
+    for t in ticks or []:
+        k = str(int(getattr(t, "tickType", -1)))
+        pair = [_num(getattr(t, "price", None)), _num(getattr(t, "size", None))]
+        e = tick_log.setdefault(k, {"count": 0, "first": pair, "last": pair})
+        e["count"] += 1
+        e["last"] = pair
+
+
+def probe_symbol(ib, symbol: str, wait_s: float, sleep=time.sleep, capture_s: float = 0.0) -> dict:
     from ib_async import Stock
     row = {"symbol": symbol, "shortable": None, "shortable_label": "unknown", "shortable_shares": None,
            "last": None, "ticks": []}
@@ -86,6 +97,12 @@ def probe_symbol(ib, symbol: str, wait_s: float, sleep=time.sleep) -> dict:
         row["error"] = "did not qualify"
         return row
     ticker = ib.reqMktData(contract, genericTickList="236", snapshot=False, regulatorySnapshot=False)
+    tick_log: dict = {}
+    on_update = None
+    if capture_s > 0 and hasattr(ticker, "updateEvent"):
+        def on_update(tk, _log=tick_log):                          # called for every batch while subscribed
+            _log_ticks(_log, getattr(tk, "ticks", None))
+        ticker.updateEvent += on_update
     try:
         deadline = time.monotonic() + wait_s
         while time.monotonic() < deadline:
@@ -97,13 +114,27 @@ def probe_symbol(ib, symbol: str, wait_s: float, sleep=time.sleep) -> dict:
         row["shortable_label"] = shortable_label(level)
         row["shortable_shares"] = _num(getattr(ticker, "shortableShares", None))
         row["last"] = _num(getattr(ticker, "last", None))
-        row["ticks"] = sorted({int(getattr(t, "tickType", -1)) for t in (getattr(ticker, "ticks", None) or [])})
+        if capture_s > 0:                                         # keep listening: the rest of the wait is the capture
+            end = time.monotonic() + capture_s
+            while time.monotonic() < end:
+                ib.sleep(0.25)
+            _log_ticks(tick_log, getattr(ticker, "ticks", None))
+            row["capture_s"] = capture_s
+            row["tick_log"] = dict(sorted(tick_log.items(), key=lambda kv: int(kv[0])))
+        row["ticks"] = sorted({int(getattr(t, "tickType", -1)) for t in (getattr(ticker, "ticks", None) or [])}
+                              | {int(k) for k in tick_log})
     finally:
+        if on_update is not None:
+            try:
+                ticker.updateEvent -= on_update
+            except Exception:                                      # noqa: BLE001
+                pass
         ib.cancelMktData(contract)
     return row
 
 
-def run(symbols: list[str], host: str, port: int, out_dir: Path, wait_s: float, ib_factory=None, now=None) -> list[dict]:
+def run(symbols: list[str], host: str, port: int, out_dir: Path, wait_s: float, ib_factory=None, now=None,
+        capture_s: float = 0.0) -> list[dict]:
     check_port(port)
     if ib_factory is None:                                         # pragma: no cover - environment
         from ib_async import IB
@@ -118,7 +149,7 @@ def run(symbols: list[str], host: str, port: int, out_dir: Path, wait_s: float, 
         rows = []
         for s in symbols:
             try:
-                row = probe_symbol(ib, s, wait_s)
+                row = probe_symbol(ib, s, wait_s, capture_s=capture_s)
             except Exception as e:                                 # noqa: BLE001 - broker errors vary
                 row = {"symbol": s, "error": f"{type(e).__name__}: {e}"}
             row["at"] = stamp
@@ -143,10 +174,17 @@ def main(argv=None, ib_factory=None, out=print) -> int:
     ap.add_argument("--port", type=int, default=4002)
     ap.add_argument("--out-dir", default=os.environ.get("BORROW_OUT_DIR", "/out"))
     ap.add_argument("--wait", type=float, default=6.0, help="seconds to wait for the shortable ticks per symbol")
+    ap.add_argument("--capture", type=float, default=0.0,
+                    help="seconds to keep listening per symbol after the shortable ticks arrive; every tick type seen is "
+                         "counted in tick_log (to find out whether IBKR sends a borrow fee rate). 0 = off. Max 120.")
     a = ap.parse_args(argv)
     try:
+        if not 0 <= a.capture <= 120:
+            raise Refused(f"--capture {a.capture}: use 0-120 seconds per symbol")
         symbols = read_symbols(a.symbols, a.symbols_file)
-        rows = run(symbols, a.host, a.port, Path(a.out_dir), a.wait, ib_factory=ib_factory)
+        if a.capture and len(symbols) * (a.capture + a.wait) > 900:
+            raise Refused(f"{len(symbols)} symbols x ({a.capture:g}+{a.wait:g}) s is over 15 minutes; use fewer symbols or a shorter --capture")
+        rows = run(symbols, a.host, a.port, Path(a.out_dir), a.wait, ib_factory=ib_factory, capture_s=a.capture)
     except Refused as e:
         out(f"REFUSED: {e}")
         return 1

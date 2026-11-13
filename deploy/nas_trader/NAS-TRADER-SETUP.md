@@ -663,6 +663,15 @@ sudo docker compose --profile borrow run --rm --no-deps borrow-probe --symbols A
 sudo tail -3 /volume1/trader-data/extras/borrow_probe.jsonl
 ```
    Report back what it printed (the `ticks` list is what shows whether a fee rate exists). For a week of gappers put the symbols one per line in `/volume1/trader-data/extras/gappers.txt` and use `--symbols-file /out/gappers.txt` (50 symbols at most per run).
+3. **Fee-rate capture (2026-11-13, Ben chose a longer capture).** `--capture 60` keeps each symbol subscribed for 60 s after the shortable ticks arrive and counts every tick type seen in `tick_log` ({type: count, first, last}), so a rare fee-like tick is not lost when the next batch replaces it. Copy the new `borrow_probe.py` (as in step 1, only that file), then, outside 20:00-00:30 Sydney:
+```
+sudo cp /volume1/docker/edge/staging/borrow_probe.py /volume1/docker/trader/extras/borrow_probe.py
+sudo chmod 644 /volume1/docker/trader/extras/borrow_probe.py
+cd /volume1/docker/trader
+sudo docker compose --profile borrow run --rm --no-deps borrow-probe --symbols AAPL,TSLA,GME --capture 60
+sudo tail -3 /volume1/trader-data/extras/borrow_probe.jsonl
+```
+   About 3.5 minutes. Report back the three lines; `tick_log` is what answers the fee question (a tick type other than 46 / 89 / 8 with a price or size that looks like a rate). If only 46 / 89 / 8 appear over 60 s, IBKR does not send a fee rate on this login and the fee half of W05-0022 needs another source.
 
 Undo: `sudo docker rm -f trader-borrow-probe`; remove the two `EXTRAS_*` lines from `.env`; `sudo rm -r /volume1/docker/trader/extras`.
 
