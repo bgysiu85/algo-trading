@@ -153,6 +153,53 @@ services:
       driver: json-file
       options: {max-size: "5m", max-file: "2"}
 
+  exit-manager:
+    # Exit manager (W15-0053 sub 4c, hosted by W10-0022): watches futures fills and places the protective stop / flat exit by
+    # rule. DRY by default (XM_MODE=dry logs every order it would send and sends none); paper needs BOTH XM_MODE=paper and
+    # XM_ACCOUNT=DU... edited into .env by hand. Live ports are refused in the code. Pattern = the borrow-probe above.
+    #   * client id 31 (client_ids.py); XM_IGNORE_CLIENT_IDS=17: the stock trader's own fills are not its business.
+    #   * writes ONLY to /out/exit_manager (EXTRAS_OUT_DIR), never var/. Code from pack_exitmgr.py, mounted read-only.
+    #   * started by hand, restart "no". Stop it with a STOP_MANAGER file in /out/exit_manager/control (resting stops stay at IBKR).
+    #       docker compose --profile exitmgr run --rm --no-deps exit-manager
+    profiles: ["exitmgr"]
+    image: ${TRADER_IMAGE:-python:3.12-slim}
+    container_name: trader-exit-manager
+    platform: linux/amd64
+    network_mode: "container:trader-ib-gateway"
+    restart: "no"
+    user: "1000:1000"
+    init: true
+    security_opt:
+      - seccomp:unconfined                      # Synology's kernel has no seccomp
+    working_dir: /out
+    entrypoint: ["python", "-m", "exitmgr.run_manager"]
+    environment:
+      PYTHONPATH: /deps:/extras
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      IB_CLIENT_ID: "31"                        # registry: client_ids.py
+      XM_MODE: ${XM_MODE:-dry}                  # dry unless .env says paper
+      XM_ACCOUNT: ${XM_ACCOUNT:-}
+      XM_HOST: 127.0.0.1
+      XM_PORT: "4002"
+      XM_CLIENT_ID: "31"
+      XM_CAPS: ${XM_CAPS:-MCL:8,MNQ:2}
+      XM_FLAT_MODE: ${XM_FLAT_MODE:-FLAT}
+      XM_FLAT_TIME: ${XM_FLAT_TIME:-16:55}
+      XM_EMERGENCY_MODE: ${XM_EMERGENCY_MODE:-A}
+      XM_EMERGENCY_FALLBACK: ${XM_EMERGENCY_FALLBACK:-B}
+      XM_IGNORE_CLIENT_IDS: "17"
+      XM_OUT_DIR: /out/exit_manager
+    volumes:
+      - ${TRADER_DEPS_DIR:-/volume1/docker/trader/deps}:/deps:ro
+      - ${EXTRAS_DIR:-/volume1/docker/trader/extras}:/extras:ro
+      - ${EXTRAS_OUT_DIR:-/volume1/trader-data/extras}:/out
+    read_only: true
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "3"}
+
   relay:
     # The portal relay (W10-0013 sub 11): the FastAPI app from the Trading UI repo (D:\Trading UI), served at
     # https://trader.thesiuz.com through the tunnel in the "edge" project (sub 15). Same pattern as the trader: plain python

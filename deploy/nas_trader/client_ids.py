@@ -9,7 +9,7 @@ from __future__ import annotations
 # id -> (owner, state)   state: "in use" | "reserved" (id set aside for a container not yet built)
 CLIENT_IDS: dict[int, tuple[str, str]] = {
     17: ("trader (run_trader.py, W02 / W10-0013)", "in use"),
-    31: ("exit manager (W15-0053)", "reserved"),
+    31: ("exit manager (W15-0053, exitmgr/run_manager.py)", "in use"),
     32: ("paper runner, chartmark v2 forward test (W15-0037 sub 4)", "reserved"),
     33: ("paper runner, DVP forward test (W16-0014 sub 3)", "reserved"),
     55: ("scanner (brokers/ibkr/scanner.py)", "in use"),
@@ -26,4 +26,4 @@ CLIENT_IDS: dict[int, tuple[str, str]] = {
 }
 
 # Containers that must carry their registry id in compose (service name -> id).
-COMPOSE_CLIENTS: dict[str, int] = {"borrow-probe": 96}
+COMPOSE_CLIENTS: dict[str, int] = {"borrow-probe": 96, "exit-manager": 31}

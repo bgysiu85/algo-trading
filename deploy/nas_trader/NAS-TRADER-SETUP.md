@@ -629,7 +629,7 @@ The pattern (the `borrow-probe` service in compose.yaml is the first, and the mo
 - Its own client id, taken from `client_ids.py` (add the row first; a duplicate id drops the other session). Reserved: 31 exit manager, 32 W15-0037 runner, 33 W16-0014 runner.
 - Writes only to `EXTRAS_OUT_DIR` (`/volume1/trader-data/extras`), never into `var/`. Order-placing ones default to dry, like `TRADER_MODE`.
 - Never run one during the trader's window (04:00-09:30 New York = 20:00-00:30 here with New York on standard time): they share the Gateway's API with the trader.
-- Not built yet: the exit manager and both paper runners (no code exists); each gets its service when its own item delivers the code. W16-0014 sub 3 must be re-scoped from NinjaTrader (expired 2026-10-03) to IBKR. Futures orders may be refused until IBKR restores US futures permission (W03-0017, about 22 Nov).
+- Built: the exit manager (part 10). Not built yet: both paper runners (no code exists); each gets its service when its own item delivers the code. W16-0014 sub 3 must be re-scoped from NinjaTrader (expired 2026-10-03) to IBKR. Futures orders may be refused until IBKR restores US futures permission (W03-0017, about 22 Nov).
 
 Limits and risks of the borrow probe (read-only, paper ports only, cannot place or preview an order):
 - NOT verified: that IBKR sends a borrow FEE RATE through the API at all (generic tick 236 gives the shortable level and shares). The probe writes every tick type that arrives, so a fee-like value would show in `ticks`; if none does, the fee part of W05-0022 needs another source.
@@ -667,3 +667,50 @@ sudo tail -3 /volume1/trader-data/extras/borrow_probe.jsonl
 Undo: `sudo docker rm -f trader-borrow-probe`; remove the two `EXTRAS_*` lines from `.env`; `sudo rm -r /volume1/docker/trader/extras`.
 
 Rules a later chat must not undo: every container that joins the Gateway does it with `container:trader-ib-gateway`, publishes nothing, has a unique id in `client_ids.py`, makes no login of its own and never writes into `var/`. `tests/deploy/test_nas_extra_clients.py` and `tests/deploy/test_borrow_probe.py` enforce these.
+
+## Part 10 - the exit manager container (W15-0053 sub 4c, 2026-11-13)
+
+Why: the exit manager (client id 31) watches futures fills and places the protective stop and the flat exit by rule. Per W10-0019 it runs
+on the NAS beside the trader, on the Gateway's network, with no second login. This is the container only; the manager's bars, structural
+stop and shadow exits (sub 4b) are not built, so for now the emergency stop runs on the fixed fallback distance (mode B) while mode A has no ATR.
+
+What is in compose.yaml: service `exit-manager`, profile `exitmgr`, `container:trader-ib-gateway`, no ports, `restart: "no"`, read-only
+root, code read-only from `extras/`, output only to `/volume1/trader-data/extras/exit_manager` (events.jsonl, state.json, control/).
+`XM_MODE` is **dry** unless `.env` says otherwise: dry logs every order it would send and sends none. Paper needs BOTH `XM_MODE=paper` and
+`XM_ACCOUNT=DU...` edited into `.env` by hand. No live mode exists; the code refuses live ports and non-paper accounts.
+
+NOT verified: anything against the real Gateway (the 182 manager tests run on a fake IB); that the manager and the stock trader (id 17)
+coexist on one Gateway API at 04:00-09:30 New York (the manager ignores id 17's fills; the borrow-probe rule "never in the trader's window"
+is applied here too until this is tested, so start the manager outside it); that futures orders are accepted (IBKR removed US futures
+permission on 22 Oct, reapply about 22 Nov: until then even paper mode would have its orders refused; stay in dry).
+
+Steps (dry run; changes nothing at IBKR):
+1. **Pack and copy (PowerShell on the ProArt).** The tar is already in `D:\Trading\Claude outputs\w10_0022_exitmgr_nas.tar`; to rebuild it after a code change run `python D:\Trading\deploy\nas_trader\pack_exitmgr.py` first.
+```
+Set-Location D:\Trading
+$k = "D:\Trading\Claude outputs\.ssh\nas_claude_ed25519"
+ssh -i $k claude@192.168.1.109 "mkdir -p /volume1/docker/edge/staging"
+scp -O -i $k "D:\Trading\Claude outputs\w10_0022_exitmgr_nas.tar" "D:\Trading\deploy\nas_trader\compose.yaml" "D:\Trading\deploy\nas_trader\client_ids.py" claude@192.168.1.109:/volume1/docker/edge/staging/
+```
+2. **Install (your own NAS session, one line at a time).** Do not run step 3 between 20:00 and 00:30 Sydney.
+```
+sudo tar -xf /volume1/docker/edge/staging/w10_0022_exitmgr_nas.tar -C /volume1/docker/trader
+sudo cp /volume1/docker/edge/staging/compose.yaml /volume1/docker/trader/compose.yaml
+sudo cp /volume1/docker/edge/staging/client_ids.py /volume1/docker/trader/extras/client_ids.py
+sudo chmod 644 /volume1/docker/trader/compose.yaml /volume1/docker/trader/extras/client_ids.py
+sudo chmod -R a+rX /volume1/docker/trader/extras
+sudo mkdir -p /volume1/trader-data/extras/exit_manager
+sudo chown -R 1000:1000 /volume1/trader-data/extras
+sudo chmod -R 755 /volume1/trader-data/extras
+sudo chmod 600 /volume1/docker/trader/.env
+```
+3. **Run it dry for a minute (same session).** It opens a read-only API session (dry mode never asks for write access), prints its start line, and keeps running until you stop it:
+```
+cd /volume1/docker/trader
+sudo docker compose --profile exitmgr run --rm --no-deps exit-manager
+```
+   Stop with Ctrl-C. Then: `sudo tail -5 /volume1/trader-data/extras/exit_manager/events.jsonl`. Report back the first printed line (it names the mode, the account and client 31) and the tail.
+
+Undo: `sudo docker rm -f trader-exit-manager`; `sudo rm -r /volume1/docker/trader/extras/exitmgr /volume1/docker/trader/extras/exitmgr_RELEASE.json`.
+
+Rules a later chat must not undo: `XM_MODE` defaults to dry in compose and `.env.example` (a test enforces both); the service never writes into `var/`, carries no TELEGRAM / UI / TradingView secrets, and keeps client id 31 in step with `client_ids.py`.

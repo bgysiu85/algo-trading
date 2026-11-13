@@ -30,9 +30,10 @@ def test_ids_already_in_use_elsewhere_are_still_registered():
 
 
 def test_the_reserved_ids_for_the_named_users_exist():
-    owners = " ".join(o for o, s in client_ids.CLIENT_IDS.values() if s == "reserved")
+    owners = " ".join(o for o, s in client_ids.CLIENT_IDS.values() if s in {"reserved", "in use"})
     for needle in ("W15-0053", "W15-0037", "W16-0014"):
         assert needle in owners, needle
+    assert client_ids.CLIENT_IDS[31][1] == "in use" and client_ids.COMPOSE_CLIENTS["exit-manager"] == 31
 
 
 def test_every_gateway_client_service_follows_the_pattern():
@@ -84,3 +85,49 @@ def test_borrow_probe_is_read_only_and_mounts_code_read_only():
 def test_env_example_declares_the_extras_folders():
     for v in ("EXTRAS_DIR", "EXTRAS_OUT_DIR"):
         assert re.search(rf"^{v}=\S+", ENV_EXAMPLE, re.M), v
+
+
+# ---- exit manager (W15-0053 sub 4c) ----
+
+def test_exit_manager_is_dry_by_default_and_has_no_live_route():
+    block = service_block("exit-manager")
+    assert re.search(r"XM_MODE: \$\{XM_MODE:-dry\}\s*$", block, re.M)             # dry unless .env says paper
+    assert re.search(r"XM_ACCOUNT: \$\{XM_ACCOUNT:-\}\s*$", block, re.M)           # no account baked in
+    assert re.search(r'XM_PORT: "4002"', block) and not re.search(r"\b(4001|4003|7496|7498)\b", block)
+    assert re.search(r"^XM_MODE=dry\s*$", ENV_EXAMPLE, re.M)
+    assert re.search(r"^XM_ACCOUNT=\s*$", ENV_EXAMPLE, re.M)
+    assert not re.search(r"XM_MODE\S*paper", "\n".join(code_lines(COMPOSE)))     # comments may say it; code may not
+
+
+def test_exit_manager_ids_agree_and_ignore_only_the_stock_trader():
+    block = service_block("exit-manager")
+    assert 'IB_CLIENT_ID: "31"' in block and 'XM_CLIENT_ID: "31"' in block
+    assert 'XM_IGNORE_CLIENT_IDS: "17"' in block
+
+
+def test_exit_manager_mounts_and_writes_like_the_other_extras():
+    block = service_block("exit-manager")
+    assert re.search(r"^\s+read_only: true\s*$", block, re.M)
+    assert re.search(r"-\s+\$\{EXTRAS_DIR:-[^}]+\}:/extras:ro\s*$", block, re.M)
+    assert re.search(r"-\s+\$\{EXTRAS_OUT_DIR:-[^}]+\}:/out\s*$", block, re.M)
+    assert "XM_OUT_DIR: /out/exit_manager" in block
+    assert re.search(r'^\s+user: "1000:1000"\s*$', block, re.M)
+    assert not re.search(r"TELEGRAM|UI_AGENT_TOKEN|TV_SESSIONID", block)             # no secrets it does not use
+
+
+def test_pack_exitmgr_packs_the_manager_and_nothing_else(tmp_path):
+    import tarfile
+    import sys
+    sys.path.insert(0, str(DEPLOY))
+    import pack_exitmgr
+    files = pack_exitmgr.plan()
+    assert "exitmgr/run_manager.py" in files and "exitmgr/__init__.py" in files
+    assert all(f.startswith(("exitmgr/", "common/")) for f in files)
+    out = tmp_path / "x.tar"
+    pack_exitmgr.build(out)
+    with tarfile.open(out) as tar:
+        names = tar.getnames()
+        assert "extras/exitmgr_RELEASE.json" in names and "extras/exitmgr/run_manager.py" in names
+        assert not any(n.endswith((".env", "credentials.json")) or "/tests/" in n for n in names)
+        for m in tar.getmembers():
+            assert m.mode & 0o044 == 0o044 and (not m.isdir() or m.mode & 0o111 == 0o111), m.name   # readable by uid 1000
