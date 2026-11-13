@@ -49,4 +49,4 @@ Handover and RESULT docs live in `claude/` (named `handover_wXX_nnnn_*` / `wXX_n
 - Every task becomes an item "Wxx-nnnn · name"; subitems for steps. Post an Update first (dated note), then change Status/Assignee.
 - Commands Ben must run go on the board as an Update inside <pre>…</pre>, one command per line.
 - Results are written as a monday Doc on the item plus a short chat summary.
-- If the monday connector is not available in this session, say so and give Ben the update text to paste. Full rules are in the claude.ai Project doc `claude/handover_monday_board_20260919.md` — ask Ben to paste it if needed.
+- If the monday connector is not available in this session, say so and give Ben the update text to paste. The claude.ai Project instructions are the rules; column ids and examples are in the Project doc `claude/monday_board_rules_20261003.md` (written for one board; the same column ids apply on all four).
