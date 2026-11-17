@@ -1,0 +1,252 @@
+{
+  "board": "W15-0037",
+  "registration": "docs/research/REGISTERED_chartmark_v2_forward.md",
+  "frozen_commit": "f3872ff",
+  "first_bar_et": "2026-09-30 18:00",
+  "first_session": "2026-10-01",
+  "window_end": "2027-09-30",
+  "scored_through_session": "2026-11-15",
+  "complete": false,
+  "paper_orders": "ALLOWED",
+  "rules": {
+    "K1": {
+      "trades": [
+        {
+          "entry_t": "2026-10-04 18:00:00",
+          "exit_t": "2026-10-04 18:00:00",
+          "placed_t": "2026-10-02 16:00:00",
+          "entry_px": 89.18,
+          "exit_px": 88.58,
+          "pts": -0.6,
+          "reason": "BACKSTOP-fillbar",
+          "arm": "A-early",
+          "n_rolls": 0,
+          "gap_fill": true,
+          "clauses": [],
+          "level": 89.03
+        },
+        {
+          "entry_t": "2026-10-07 09:00:00",
+          "exit_t": "2026-10-07 10:00:00",
+          "placed_t": "2026-10-07 08:00:00",
+          "entry_px": 88.01,
+          "exit_px": 87.41,
+          "pts": -0.6,
+          "reason": "BACKSTOP",
+          "arm": "B",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [],
+          "level": 88.01
+        },
+        {
+          "entry_t": "2026-10-12 04:00:00",
+          "exit_t": "2026-10-12 23:00:00",
+          "placed_t": "2026-10-12 03:00:00",
+          "entry_px": 88.93,
+          "exit_px": 89.8,
+          "pts": 0.87,
+          "reason": "EMA21",
+          "arm": "A-early",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [
+            1,
+            2
+          ],
+          "level": 88.93
+        },
+        {
+          "entry_t": "2026-10-15 07:00:00",
+          "exit_t": "2026-10-19 04:00:00",
+          "placed_t": "2026-10-15 06:00:00",
+          "entry_px": 92.8,
+          "exit_px": 96.97,
+          "pts": 4.17,
+          "reason": "EMA21",
+          "arm": "A-fresh",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [
+            1,
+            2
+          ],
+          "level": 92.8
+        }
+      ],
+      "stopped": null
+    },
+    "V-SESSION": {
+      "trades": [
+        {
+          "entry_t": "2026-10-07 09:00:00",
+          "exit_t": "2026-10-07 10:00:00",
+          "placed_t": "2026-10-07 08:00:00",
+          "entry_px": 88.01,
+          "exit_px": 87.41,
+          "pts": -0.6,
+          "reason": "BACKSTOP",
+          "arm": "B",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [],
+          "level": 88.01
+        },
+        {
+          "entry_t": "2026-10-12 04:00:00",
+          "exit_t": "2026-10-12 23:00:00",
+          "placed_t": "2026-10-12 03:00:00",
+          "entry_px": 88.93,
+          "exit_px": 89.8,
+          "pts": 0.87,
+          "reason": "EMA21",
+          "arm": "A-early",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [
+            1,
+            2
+          ],
+          "level": 88.93
+        },
+        {
+          "entry_t": "2026-10-15 07:00:00",
+          "exit_t": "2026-10-19 04:00:00",
+          "placed_t": "2026-10-15 06:00:00",
+          "entry_px": 92.8,
+          "exit_px": 96.97,
+          "pts": 4.17,
+          "reason": "EMA21",
+          "arm": "A-fresh",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [
+            1,
+            2
+          ],
+          "level": 92.8
+        }
+      ],
+      "stopped": null
+    },
+    "V-WICKGATE": {
+      "trades": [
+        {
+          "entry_t": "2026-10-04 18:00:00",
+          "exit_t": "2026-10-04 18:00:00",
+          "placed_t": "2026-10-02 16:00:00",
+          "entry_px": 89.18,
+          "exit_px": 88.58,
+          "pts": -0.6,
+          "reason": "BACKSTOP-fillbar",
+          "arm": "A-early",
+          "n_rolls": 0,
+          "gap_fill": true,
+          "clauses": [],
+          "level": 88.95
+        },
+        {
+          "entry_t": "2026-10-07 09:00:00",
+          "exit_t": "2026-10-07 10:00:00",
+          "placed_t": "2026-10-07 08:00:00",
+          "entry_px": 88.01,
+          "exit_px": 87.41,
+          "pts": -0.6,
+          "reason": "BACKSTOP",
+          "arm": "B",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [],
+          "level": 88.01
+        },
+        {
+          "entry_t": "2026-10-12 04:00:00",
+          "exit_t": "2026-10-12 23:00:00",
+          "placed_t": "2026-10-12 03:00:00",
+          "entry_px": 88.9,
+          "exit_px": 89.8,
+          "pts": 0.9,
+          "reason": "EMA21",
+          "arm": "A-early",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [
+            1,
+            2
+          ],
+          "level": 88.9
+        },
+        {
+          "entry_t": "2026-10-15 07:00:00",
+          "exit_t": "2026-10-19 04:00:00",
+          "placed_t": "2026-10-15 06:00:00",
+          "entry_px": 92.8,
+          "exit_px": 96.97,
+          "pts": 4.17,
+          "reason": "EMA21",
+          "arm": "A-fresh",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [
+            1,
+            2
+          ],
+          "level": 92.8
+        },
+        {
+          "entry_t": "2026-10-27 05:00:00",
+          "exit_t": "2026-10-27 06:00:00",
+          "placed_t": "2026-10-27 04:00:00",
+          "entry_px": 102.39,
+          "exit_px": 101.79,
+          "pts": -0.6,
+          "reason": "BACKSTOP",
+          "arm": "A-fresh",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [],
+          "level": 102.39
+        }
+      ],
+      "stopped": null
+    }
+  },
+  "runs": [
+    {
+      "run_at": "2026-11-10T10:13:49Z",
+      "through_session": "2026-11-09",
+      "days": 41,
+      "usd_spent": 0.0264,
+      "trades": {
+        "K1": 4,
+        "V-SESSION": 3,
+        "V-WICKGATE": 5
+      },
+      "readback_pct": 1.0,
+      "gate": {
+        "passed": true,
+        "step_c_trades": 317,
+        "seen_trades": 69,
+        "seen_pts": 2.29
+      }
+    },
+    {
+      "run_at": "2026-11-17T04:06:58Z",
+      "through_session": "2026-11-15",
+      "days": 47,
+      "usd_spent": 0.001,
+      "trades": {
+        "K1": 4,
+        "V-SESSION": 3,
+        "V-WICKGATE": 5
+      },
+      "readback_pct": 1.0,
+      "gate": {
+        "passed": true,
+        "step_c_trades": 317,
+        "seen_trades": 69,
+        "seen_pts": 2.29
+      }
+    }
+  ]
+}
