@@ -7,6 +7,7 @@ from __future__ import annotations
 
 MACRO_AGENT = "desk-macro-analyst"
 MACRO_FILE = "_macro.md"            # once per day, in the day folder, not per ticker
+MACRO_DATA_FILE = "_macro_data.md"  # W18-0006: closes written by `desk.macro` on the NAS; the macro analyst reads it first
 
 # Step 1: these four run in parallel (one message, four Agent calls).
 ANALYSTS = (

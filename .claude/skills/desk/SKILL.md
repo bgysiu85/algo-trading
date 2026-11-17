@@ -1,7 +1,7 @@
 ---
 name: desk
-description: Run Ben's AI research desk (TradingAgents-style, W18) on one or more stocks and get a rating, entry, stop and target for each. Manual use only.
-argument-hint: "<TICKER ...> | next <N> | all"
+description: Run Ben's AI research desk (TradingAgents-style, W18) on one or more stocks and get a rating, entry, stop and target for each. Manual use, or Ben's scheduled task (`/desk scheduled`).
+argument-hint: "<TICKER ...> | next <N> | all | scheduled"
 disable-model-invocation: true
 ---
 
@@ -21,6 +21,7 @@ Python for every helper below is the repo venv, run from the repo root:
    - explicit tickers (`MPC AMZN`) → those, upper-cased;
    - `next N` → `python -m desk.status --pending --limit N`;
    - `all` → `python -m desk.status --pending`;
+   - `scheduled` (W18-0003, Ben's scheduled task) → first `python -m desk.pull_nas --date DATE` (copies the data the NAS prepared; if it prints `PULL FAILED`, stop, tell Ben that line, and do nothing else). Then `python -m desk.schedule --date DATE --explain` (note the mode: full / active / none) and `python -m desk.schedule --date DATE --tickers` for the list. Tickers = that list; if it is empty, skip to step 3 (Finish) with nothing to run;
    - empty → ask Ben which of those he wants (one short question), do not guess.
 3. Tell Ben in one line what you are about to run (tickers, date). Do not ask for confirmation.
 
@@ -40,7 +41,7 @@ RUN_DIR = `var/desk_runs/DATE/TICKER`. Resume rule: before spawning ANY agent, s
    - `WARNING ...` lines are not failures; carry them into your final report.
 
 ## 3. Finish
-Run `python -m desk.summary --date DATE` (ranks the day's buys; writes `DAY_DIR/SUMMARY.md`). Then reply with ONLY:
+Run `python -m desk.summary --date DATE` (ranks the day's buys; writes `DAY_DIR/SUMMARY.md`). For `scheduled` also run `python -m desk.notify --date DATE --mode MODE --expected "TICKERS"` (MODE and TICKERS as worked out in step 0; it sends the phone summary through the NAS; if it prints a failure, just report that line). Then reply with ONLY:
 - a compact table: ticker · rating · conviction · entry · stop · target · reward:risk (from the OK lines / summary), then any Holds being watched (the `watching:` part of their OK line: trigger and revisit date) and any DUE open watches from SUMMARY.md, then any SKIPPED/FAILED tickers with reasons, then any warnings;
 - the folder where the full reports are (`DAY_DIR`);
 - one line: "re-run `/desk next N` to continue" if tickers remain.

@@ -128,7 +128,7 @@ def test_the_skill_is_manual_only_and_calls_every_agent_in_pipeline_order():
 def test_every_helper_command_the_skill_mentions_exists():
     _, body = frontmatter(SKILL)
     mods = set(re.findall(r"-m desk\.([a-z_]+)", body))
-    assert mods == {"status", "prepare", "decision", "summary"}
+    assert mods == {"status", "prepare", "decision", "summary", "pull_nas", "schedule", "notify"}   # last three: W18-0003
     for m in mods:
         src = (ROOT / "desk" / f"{m}.py").read_text(encoding="utf-8")
         for flag in re.findall(r"desk\.%s [^\n`]*?(--[a-z\-]+)" % m, body):
@@ -150,3 +150,12 @@ def test_skill_skips_prepare_when_the_nas_already_prepared_and_never_sends_ben_t
 def test_skill_forbids_orders_and_prod_and_report_reading():
     _, body = frontmatter(SKILL)
     assert "Never place" in body and "TradingProd" in body and "Do NOT read the agents' report files" in body
+
+
+def test_macro_analyst_reads_the_script_closes_first_and_handles_standins_and_gaps():
+    # W18-0006: the closes are computed by desk.macro on the NAS; the analyst must read them, not search for them.
+    fm, body = frontmatter(AGENTS / "desk-macro-analyst.md")
+    assert "Read" in {t.strip() for t in fm["tools"].split(",")}
+    assert f"DAY_DIR/{pipeline.MACRO_DATA_FILE}" in body
+    assert "STAND-IN" in body and "UNAVAILABLE" in body and "unconfirmed" in body
+    assert pipeline.MACRO_DATA_FILE != pipeline.MACRO_FILE

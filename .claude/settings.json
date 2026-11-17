@@ -1,0 +1,23 @@
+{
+    "permissions":  {
+                        "allow":  [
+                                      "PowerShell(.\\.venv\\Scripts\\python.exe -m desk.status*)",
+                                      "PowerShell(.\\.venv\\Scripts\\python.exe -m desk.pull_nas*)",
+                                      "PowerShell(.\\.venv\\Scripts\\python.exe -m desk.schedule*)",
+                                      "PowerShell(.\\.venv\\Scripts\\python.exe -m desk.prepare*)",
+                                      "PowerShell(.\\.venv\\Scripts\\python.exe -m desk.decision*)",
+                                      "PowerShell(.\\.venv\\Scripts\\python.exe -m desk.summary*)",
+                                      "PowerShell(.\\.venv\\Scripts\\python.exe -m desk.notify*)",
+                                      "Bash(./.venv/Scripts/python.exe -m desk.status*)",
+                                      "Bash(./.venv/Scripts/python.exe -m desk.pull_nas*)",
+                                      "Bash(./.venv/Scripts/python.exe -m desk.schedule*)",
+                                      "Bash(./.venv/Scripts/python.exe -m desk.prepare*)",
+                                      "Bash(./.venv/Scripts/python.exe -m desk.decision*)",
+                                      "Bash(./.venv/Scripts/python.exe -m desk.summary*)",
+                                      "Bash(./.venv/Scripts/python.exe -m desk.notify*)",
+                                      "WebSearch",
+                                      "WebFetch",
+                                      "Edit(var/desk_runs/**)"
+                                  ]
+                    }
+}

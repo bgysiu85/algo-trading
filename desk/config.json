@@ -21,5 +21,14 @@
     "status_wait_s": 2
   },
   "runs_dir": "var/desk_runs",
-  "sec_user_agent_env": "SEC_CONTACT"
+  "sec_user_agent_env": "SEC_CONTACT",
+  "macro": {"client_id": 93, "duration": "10 D"},
+  "schedule": {"full_run_weekday": 0},
+  "nas": {
+    "host": "192.168.1.109",
+    "user": "claude",
+    "key": "D:\\Trading\\Claude outputs\\.ssh\\nas_claude_ed25519",
+    "remote_runs": "/volume1/docker/desk/var/desk_runs",
+    "remote_outbox": "/volume1/docker/desk/var/outbox"
+  }
 }
