@@ -5,7 +5,7 @@
   "first_bar_et": "2026-09-30 18:00",
   "first_session": "2026-10-01",
   "window_end": "2027-09-30",
-  "scored_through_session": "2026-11-15",
+  "scored_through_session": "2026-11-20",
   "complete": false,
   "paper_orders": "ALLOWED",
   "rules": {
@@ -72,6 +72,36 @@
             2
           ],
           "level": 92.8
+        },
+        {
+          "entry_t": "2026-11-12 10:00:00",
+          "exit_t": "2026-11-15 19:00:00",
+          "placed_t": "2026-11-12 09:00:00",
+          "entry_px": 86.8,
+          "exit_px": 88.48,
+          "pts": 1.68,
+          "reason": "EMA21",
+          "arm": "A-early",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [
+            2
+          ],
+          "level": 86.8
+        },
+        {
+          "entry_t": "2026-11-16 01:00:00",
+          "exit_t": "2026-11-16 04:00:00",
+          "placed_t": "2026-11-16 00:00:00",
+          "entry_px": 88.81,
+          "exit_px": 88.21,
+          "pts": -0.6,
+          "reason": "BACKSTOP",
+          "arm": "A-early",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [],
+          "level": 88.81
         }
       ],
       "stopped": null
@@ -125,6 +155,36 @@
             2
           ],
           "level": 92.8
+        },
+        {
+          "entry_t": "2026-11-12 10:00:00",
+          "exit_t": "2026-11-15 19:00:00",
+          "placed_t": "2026-11-12 09:00:00",
+          "entry_px": 86.8,
+          "exit_px": 88.48,
+          "pts": 1.68,
+          "reason": "EMA21",
+          "arm": "A-early",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [
+            2
+          ],
+          "level": 86.8
+        },
+        {
+          "entry_t": "2026-11-16 03:00:00",
+          "exit_t": "2026-11-16 04:00:00",
+          "placed_t": "2026-11-16 02:00:00",
+          "entry_px": 89.18,
+          "exit_px": 88.58,
+          "pts": -0.6,
+          "reason": "BACKSTOP",
+          "arm": "A-fresh",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [],
+          "level": 89.18
         }
       ],
       "stopped": null
@@ -206,6 +266,50 @@
           "gap_fill": false,
           "clauses": [],
           "level": 102.39
+        },
+        {
+          "entry_t": "2026-11-12 10:00:00",
+          "exit_t": "2026-11-15 19:00:00",
+          "placed_t": "2026-11-12 09:00:00",
+          "entry_px": 86.8,
+          "exit_px": 88.48,
+          "pts": 1.68,
+          "reason": "EMA21",
+          "arm": "A-early",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [
+            2
+          ],
+          "level": 86.8
+        },
+        {
+          "entry_t": "2026-11-16 01:00:00",
+          "exit_t": "2026-11-16 04:00:00",
+          "placed_t": "2026-11-16 00:00:00",
+          "entry_px": 88.66,
+          "exit_px": 88.06,
+          "pts": -0.6,
+          "reason": "BACKSTOP",
+          "arm": "A-early",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [],
+          "level": 88.66
+        },
+        {
+          "entry_t": "2026-11-17 10:00:00",
+          "exit_t": "2026-11-17 11:00:00",
+          "placed_t": "2026-11-17 09:00:00",
+          "entry_px": 87.01,
+          "exit_px": 86.41,
+          "pts": -0.6,
+          "reason": "BACKSTOP",
+          "arm": "A-fresh",
+          "n_rolls": 0,
+          "gap_fill": false,
+          "clauses": [],
+          "level": 87.01
         }
       ],
       "stopped": null
@@ -239,6 +343,24 @@
         "K1": 4,
         "V-SESSION": 3,
         "V-WICKGATE": 5
+      },
+      "readback_pct": 1.0,
+      "gate": {
+        "passed": true,
+        "step_c_trades": 317,
+        "seen_trades": 69,
+        "seen_pts": 2.29
+      }
+    },
+    {
+      "run_at": "2026-11-21T23:31:41Z",
+      "through_session": "2026-11-20",
+      "days": 52,
+      "usd_spent": 0.0011,
+      "trades": {
+        "K1": 6,
+        "V-SESSION": 5,
+        "V-WICKGATE": 8
       },
       "readback_pct": 1.0,
       "gate": {
