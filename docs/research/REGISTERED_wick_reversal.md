@@ -26,6 +26,24 @@ training window, so it is **reported only**. Primary tests go from 12 to **10**,
 99.5%. Changed: §2 table, §3.1, §5, §6, G1b, §9, §11, next steps. The first commit (13d9516) holds the
 text before this amendment.
 
+**Amendment B - PRE-RUN, 2026-10-21, before any archive file was read or any P&L computed (Build & test chat,
+sub 3).** Fills the one blank the registration left for the build chat and writes down how the code reads the
+rules where the text could be read two ways. No threshold, window or test count changes.
+- **MNQ fee:** $0.62 per side all-in (the CME micro-equity rate, = the MES row in `strategy.futbt.costs_ibkr`).
+  MNQ tick $0.50. Levels: low $0.62, mid $1.12, high $1.62 per side. MCL: $0.77 / $1.77 / $2.77.
+- **One position at a time** is applied per market / timeframe / **direction** (the two directions are separate tests).
+- **Edge** is on the 3-bar P(rev) at k = 1, against the base rate of the same context; size and colour splits are
+  compared with the base rate of the same size or colour class.
+- **Excess reversals by year** (criterion 3) = reversals - signals x that year's base rate; the share is the largest
+  year's excess over the total excess; no excess at all fails the criterion.
+- **Spearman bootstrap** uses ranks taken once on the full sample, then resamples months.
+- **Stops and targets** are at exactly entry +/- 1 x ATR (not rounded to the tick). Prices in the sample-trade lists are
+  back-adjusted (differences are exact, levels are not quoted prices).
+- **MCL 30m** uses the whole IBKR file as its own window. That window lies inside the holdout / seen dates, so it is
+  labelled reported only, is never scored, and never spends the ledger.
+- **Holdout reading rule:** sec 8 does not say how the holdout result is judged. The runner prints the same tables on the
+  holdout window with **no verdict**; the wording of the verdict is a Research & spec decision before the ledger is spent.
+
 ---
 
 ## 0. What this is
