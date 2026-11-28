@@ -80,3 +80,30 @@ def test_full_and_micro_symbol_maps_are_consistent():
 def test_overnight_margin_reported_not_scored():
     assert C.OVERNIGHT_MARGIN["MES"]["initial"] == pytest.approx(2881.37)
     assert C.OVERNIGHT_MARGIN["MNQ"]["initial"] == pytest.approx(4762.37)
+
+
+# ---------------------------------------------------------------------
+# W16-0040 gate G5: the IBKR table is separate; the NinjaTrader table that
+# SB-v0, DVP and BB-v0 price with does not move
+# ---------------------------------------------------------------------
+
+def test_ibkr_table_matches_the_owa_registration():
+    assert C.IBKR_ALL_IN == {"MNQ": 0.62, "NQ": 2.26}
+    assert [C.ibkr_per_side("MNQ", lvl) for lvl in C.FRICTION_LEVELS] == pytest.approx(
+        [0.0, 0.62, 1.12, 1.62])
+    assert [C.ibkr_round_trip("MNQ", lvl) for lvl in ("L1", "L2", "L3")] == pytest.approx(
+        [1.24, 2.24, 3.24])
+    assert C.ibkr_per_side("NQ", "L2") == pytest.approx(7.26)
+    with pytest.raises(ValueError):
+        C.ibkr_per_side("MES", "L2")
+    with pytest.raises(ValueError):
+        C.ibkr_per_side("MNQ", "L4")
+
+
+def test_adding_ibkr_left_the_ninjatrader_figures_alone():
+    assert C.ALL_IN_L1 == {"MES": 0.94, "MNQ": 0.94, "ES": 2.87, "NQ": 2.87}
+    assert [C.per_side("MNQ", lvl) for lvl in C.FRICTION_LEVELS] == pytest.approx(
+        [0.0, 0.94, 1.44, 1.94])
+    assert [C.per_side("NQ", lvl) for lvl in C.FRICTION_LEVELS] == pytest.approx(
+        [0.0, 2.87, 7.87, 12.87])
+    assert C.trade_cost("MNQ", "L2") == pytest.approx(2.88)

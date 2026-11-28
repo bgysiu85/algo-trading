@@ -123,6 +123,36 @@ def trade_cost(symbol: str, level: str, *, entry_kind: str = "market_or_stop",
             + per_side(symbol, level, fill_kind=exit_kind)) * qty
 
 
+# ---------------------------------------------------------------------
+# IBKR (W15-0033), a SEPARATE table: REGISTERED_w16_open_window.md sec 5,
+# gate G5, board W16-0040. SB-v0, DVP and BB-v0 keep the NinjaTrader table
+# above; nothing above this line reads these figures.
+# ---------------------------------------------------------------------
+
+# All-in per side, 1 contract: IBKR commission + CME exchange fee
+# (non-member) + regulatory (about $0.02). MNQ: 0.25 + 0.353 + 0.02 = 0.62.
+# NQ: 2.26. Read 2026-09-30 (REGISTERED_va80.md Amendment 2).
+IBKR_ALL_IN = {"MNQ": 0.62, "NQ": 2.26}
+
+
+def ibkr_per_side(symbol: str, level: str) -> float:
+    """Dollars for one market or stop fill of one contract at an IBKR level:
+    L0 nothing, L1 the all-in fee, L2 fee + 1 tick (scoring), L3 fee + 2
+    ticks. OWA-v0 has no resting-limit fill, so there is no target case."""
+    if symbol not in IBKR_ALL_IN:
+        raise ValueError(f"no IBKR fee for {symbol!r}; expected one of {sorted(IBKR_ALL_IN)}")
+    if level not in _TICKS_ADDED:
+        raise ValueError(f"unknown friction level {level!r}; expected one of {FRICTION_LEVELS}")
+    if level == "L0":
+        return 0.0
+    return IBKR_ALL_IN[symbol] + _TICKS_ADDED[level] * TICK_VALUE[symbol]
+
+
+def ibkr_round_trip(symbol: str, level: str) -> float:
+    """Entry plus exit, both crossing the market."""
+    return 2 * ibkr_per_side(symbol, level)
+
+
 def pnl_dollars(symbol: str, entry_px: float, exit_px: float, direction: str,
                 qty: int = 1) -> float:
     """Gross P&L in dollars for one trade's raw entry/exit prices. Long
