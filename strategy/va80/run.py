@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""VA80 v1 runner, TRAINING SIDE ONLY. W15-0025.
+"""VA80 v1 runner, TRAINING SIDE ONLY. W15-0025 (pre-flight, sub 4) and W15-0041 (study layer, sub 5).
 
     python -m strategy.va80.run --preflight --out "D:\\Trading\\Claude outputs\\w15_0025_va80_preflight_YYYYMMDD.txt"
-    python -m strategy.va80.run --run        # refuses without a matching, cleared pre-flight
+    python -m strategy.va80.run --run --out "D:\\Trading\\Claude outputs\\w15_0025_va80_run_YYYYMMDD.txt"
 
 --preflight is COUNT-ONLY (sec 5, G2): value-area profiles from the PRIOR session, setups and triggers read only up
 to each entry bar; counts per year, VA width, and trigger counts for the 27 neighbour cells. No outcome, no far-edge
 rate, no P&L. It writes the .txt (the --out path) and a .json beside it with the SHA-256 of every input.
 
---run (outcomes, P&L) is the sub 5 step: refused unless a pre-flight on disk matches the current inputs and did not
-stop, and until the study module (IBKR costs G5, C-RT / C-ND draws, sec 4 criteria) is built it stops there. No
---holdout, --limit, --spend, --seen, --markets, --window, --cells or --variant exists: those are refused.
+--run reads outcomes and P&L: IBKR costs (Amendment 2), the 80% check, C-RT / C-ND (1,000 seeded draws), the 27-cell
+grid, the reported variants, the seven criteria of sec 4. It is refused unless a pre-flight on disk matches the current
+inputs (SHA-256 of the session frames and of the 1-minute files) and did not stop. It writes <stem>.txt, .md (for the
+monday Result doc), .html (the artifact page) and .json beside the --out path. It never touches the holdout: no
+--holdout, --limit, --spend, --seen, --markets, --window, --cells or --variant exists, those are refused.
 """
 from __future__ import annotations
 
@@ -23,7 +25,9 @@ from pathlib import Path
 import pandas as pd
 
 from strategy.va80 import preflight as PF
+from strategy.va80 import report as RP
 from strategy.va80 import spec as S
+from strategy.va80 import study as ST
 from strategy.va80.engine import Store
 from strategy.va80.holdout import H as HOLD
 
@@ -31,6 +35,7 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT_DIR = ROOT / "Claude outputs"
 REFUSED = ("--holdout", "--limit", "--spend", "--seen", "--markets", "--window", "--cells", "--variant")
 STEM = "w15_0025_va80_preflight"
+RUN_STEM = "w15_0025_va80_run"
 ROOTS = ("ES", "NQ")
 
 
@@ -101,6 +106,20 @@ def require_preflight(out_dir: Path, hashes: dict) -> dict:
     return rec
 
 
+def run_study(loader, frames_fn, out_txt: Path, *, draws: int = S.CR_DRAWS, file_hashes: dict | None = None,
+              log=print) -> list[Path]:
+    """The sub 5 run. Builds the training stores once, checks them against the pre-flight on disk BEFORE any outcome is
+    read, then runs the study and writes <stem>.txt / .md / .html / .json. Returns the four paths (txt first)."""
+    out_txt = Path(out_txt)
+    built = {r: build_store(loader(r), frames_fn) for r in ROOTS}
+    hashes = {f"{r}_session_frames": PF.sha256_frames(built[r][1]) for r in ROOTS}
+    hashes.update(file_hashes or {})
+    require_preflight(out_txt.parent, hashes)
+    res = ST.analyse({r: (built[r][0], built[r][2]) for r in ROOTS}, draws=draws, log=log)
+    inputs = dict(hashes, preflight_json=latest_preflight(out_txt.parent).name)
+    return RP.write_all(res, out_txt, inputs)
+
+
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     bad = [a for a in argv if a.split("=")[0] in REFUSED]
@@ -112,26 +131,29 @@ def main(argv=None) -> int:
     g.add_argument("--preflight", action="store_true")
     g.add_argument("--run", action="store_true")
     ap.add_argument("--archive", type=Path, default=None)
-    ap.add_argument("--out", type=Path, default=OUT_DIR / f"{STEM}_{date.today().strftime('%Y%m%d')}.txt")
+    ap.add_argument("--out", type=Path, default=None)
     a = ap.parse_args(argv)
+    stamp = date.today().strftime("%Y%m%d")
 
     from strategy.otf_gate.preflight import sha256
     from strategy.w16.fetch import bar_path
     from strategy.w16.preflight import load_root_bars, session_frames
     arch = a.archive or default_archive()
     loader = lambda r: load_root_bars(arch, r)
+    file_hashes = {f"{r}_1m_file": sha256(bar_path(Path(arch), r, "ohlcv-1m")) for r in ROOTS}
     if a.preflight:
+        out = a.out or OUT_DIR / f"{STEM}_{stamp}.txt"
         reps, hashes = run_preflight(loader, session_frames)
-        hashes.update({f"{r}_1m_file": sha256(bar_path(Path(arch), r, "ohlcv-1m")) for r in ROOTS})
-        text = write_preflight(a.out, reps, hashes)
+        hashes.update(file_hashes)
+        text = write_preflight(out, reps, hashes)
         print(text)
-        print(f"wrote {a.out} / {a.out.with_suffix('.json')}")
+        print(f"wrote {out} / {out.with_suffix('.json')}")
         return 0
-    hashes = input_hashes(loader, session_frames)
-    hashes.update({f"{r}_1m_file": sha256(bar_path(Path(arch), r, "ohlcv-1m")) for r in ROOTS})
-    require_preflight(a.out.parent, hashes)
-    raise SystemExit("--run: the pre-flight is on disk and cleared, but the study module (IBKR costs G5, C-RT / C-ND "
-                     "draws, sec 4 criteria; W15-0025 sub 5, blocked by W15-0033) is not built yet.")
+    out = a.out or OUT_DIR / f"{RUN_STEM}_{stamp}.txt"
+    paths = run_study(loader, session_frames, out, file_hashes=file_hashes)
+    print(paths[0].read_text(encoding="utf-8"))
+    print("wrote " + " / ".join(str(p) for p in paths))
+    return 0
 
 
 if __name__ == "__main__":
