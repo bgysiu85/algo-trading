@@ -151,3 +151,94 @@ def test_live_join(tmp_path):
     assert len(j["unbooked"]) == 1 and len(j["outside"]) == 1
     text = "\n".join(F.live_block(sig, counts, j, last, "2026-09-10"))
     assert "12.50" in text and "OUTSIDE COVERAGE" in text
+
+
+# --- two fill folders: the PC's and the NAS mirror ---------------------------
+
+COLS = ["ts_et", "strategy", "symbol", "action", "reason", "status", "reject_reason"]
+
+
+def _log(folder, day, rows):
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"mcl_fills_{day.replace('-', '')}.csv"
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(COLS)
+        for clock, symbol, action, status in rows:
+            w.writerow([f"{day} {clock}", "MCL", symbol, action, "entry_signal", status, ""])
+
+
+def _two(tmp_path):
+    pc, nas = tmp_path / "fills", tmp_path / "nas_mirror" / "fills"
+    globs = [str(pc / "*_fills_*.csv"), str(nas / "*_fills_*.csv")]
+    return pc, nas, globs
+
+
+def test_both_folders_are_the_default():
+    fills = F.build_parser().parse_args([]).fills
+    assert [f.replace("\\", "/") for f in fills] == [
+        "var/fills/*_fills_*.csv", "var/nas_mirror/fills/*_fills_*.csv"]
+    assert F.build_parser().parse_args(["--fills", "a", "b"]).fills == ["a", "b"]
+
+
+def test_nas_only_days_count_and_a_promoted_copy_counts_once(tmp_path):
+    pc, nas, globs = _two(tmp_path)
+    day = [("05:41:02", "ABC", "BUY", "NO_FILL_CANCELLED"),
+           ("05:55:00", "ABC", "SELL", "NO_FILL_ABANDONED")]
+    _log(pc, "2026-11-09", day)
+    _log(nas, "2026-11-09", day)                                  # identical, promoted copy
+    _log(nas, "2026-11-12", [("06:10:00", "XYZ", "BUY", "SKIPPED_DRIFT")])
+    info: dict = {}
+    sig, counts = F.read_live_signals(globs, "2026-09-10", info=info)
+    assert [(s["date"], s["symbol"]) for s in sig] == [("2026-11-09", "ABC"), ("2026-11-12", "XYZ")]
+    assert counts[("SELL", "NO_FILL_ABANDONED")] == 1
+    assert info["days"] == 2 and info["merged"] == [] and info["left_out"] == []
+    assert list(info["matched"].values()) == [1, 2]
+
+
+def test_dry_sessions_are_left_out_and_the_paper_copy_stays(tmp_path):
+    pc, nas, globs = _two(tmp_path)
+    _log(nas, "2026-11-04", [("06:00:00", "DRY1", "BUY", "SKIPPED_DRIFT"),
+                             ("06:01:00", "DRY1", "BUY", "DRY_RUN")])
+    _log(pc, "2026-10-30", [("06:00:00", "PCX", "BUY", "NO_FILL_CANCELLED")])
+    _log(nas, "2026-10-30", [("06:00:03", "PCX", "BUY", "DRY_RUN"),      # shadow run
+                             ("06:00:05", "PCX", "BUY", "SKIPPED_DRIFT")])
+    info: dict = {}
+    sig, _ = F.read_live_signals(globs, "2026-09-10", info=info)
+    assert [s["symbol"] for s in sig] == ["PCX"] and sig[0]["tag"] == "NO_FILL_CANCELLED"
+    assert len(info["left_out"]) == 2 and all(x.endswith("(dry)") for x in info["left_out"])
+    assert info["days"] == 1 and info["merged"] == []
+    assert any("Left out (2" in line for line in F.source_lines(info))
+
+
+def test_differing_copies_are_merged_once_per_row_and_named(tmp_path):
+    pc, nas, globs = _two(tmp_path)
+    first = ("05:41:02", "ABC", "BUY", "NO_FILL_CANCELLED")
+    later = ("07:00:00", "DEF", "BUY", "SKIPPED_DRIFT")
+    _log(pc, "2026-11-12", [first])                               # copied mid-session
+    _log(nas, "2026-11-12", [first, later, later])                # a repeated row is kept twice
+    info: dict = {}
+    sig, counts = F.read_live_signals(globs, "2026-09-10", info=info)
+    assert [s["symbol"] for s in sig] == ["ABC", "DEF", "DEF"]
+    assert counts[("BUY", "NO_FILL_CANCELLED")] == 1
+    assert info["merged"] == ["mcl_fills_20261112.csv"]
+    assert any("CHECK" in line for line in F.source_lines(info))
+
+
+def test_a_folder_with_no_files_is_said_out_loud(tmp_path):
+    pc, _, globs = _two(tmp_path)
+    _log(pc, "2026-11-09", [("05:41:02", "ABC", "BUY", "NO_FILL_CANCELLED")])
+    info: dict = {}
+    F.read_live_signals(globs, "2026-09-10", info=info)
+    assert any("NO FILES match" in line and "nas_mirror" in line for line in F.source_lines(info))
+
+
+def test_live_only_run_prints_the_sources(tmp_path):
+    pc, nas, globs = _two(tmp_path)
+    _log(pc, "2026-11-09", [("05:41:02", "ABC", "BUY", "NO_FILL_CANCELLED")])
+    _log(nas, "2026-11-12", [("06:10:00", "XYZ", "BUY", "SKIPPED_DRIFT")])
+    out = tmp_path / "r.txt"
+    assert F.main(["--live-only", "--fills", *globs, "--out", str(out),
+                   "--live-sim", str(tmp_path / "none.csv")]) == 0
+    text = out.read_text(encoding="utf-8")
+    assert "Day files used: 2." in text and "total 2" in text

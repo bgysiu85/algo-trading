@@ -58,12 +58,21 @@ COSTS         gross = (exit - entry) x 100; commission = gross - engine net;
 LIVE ARM
 --------
 Every live BUY signal logged NO_FILL_ABANDONED, NO_FILL_CANCELLED or
-SKIPPED_DRIFT since 2026-09-10 (var/fills/*.csv), joined to the SIM trades of
+SKIPPED_DRIFT since 2026-09-10, joined to the SIM trades of
 var/reports/live_vs_sim_trades.csv (same strategy, symbol, session; sim signal
 bar at most one bar-length before the live minute). That file's sessions end
 where `live_vs_sim` last ran: signals after it are counted and reported as
 OUTSIDE COVERAGE, not guessed. Unfilled SELLs are counted apart -- a stop that
 did not fill is a different problem from an entry that did not fill.
+
+TWO FILL FOLDERS (since the NAS trader, W10-0013): var/fills, written on the
+PC, and var/nas_mirror/fills, copied from the NAS. Both are read.
+  * A file from a DRY session (or one mixing dry and paper rows, or unreadable)
+    is left out and named, by the rule deploy/nas_trader/pull_nas_var.py uses to
+    keep it out of var/fills.
+  * The same file name in both folders is one day's log: a row identical in every
+    column counts once. If the copies differ, every distinct row is kept and the
+    name is printed, for a person to check.
 """
 from __future__ import annotations
 
@@ -80,13 +89,16 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
+from deploy.nas_trader.pull_nas_var import dry_session_reason
+
 ET = ZoneInfo("America/New_York")
 
 TRADES_CSV = "var/reports/chase_gate_trades.csv"
 PAIRS = "var/state/screen_pairs_pit_itch_v2.json"
 DATASET = "XNAS.ITCH"
 REGULAR_CLOSE = "var/state/regular_close.json"
-FILLS_GLOB = "var/fills/*_fills_*.csv"
+FILLS_GLOBS = ("var/fills/*_fills_*.csv",                # written on the PC
+               "var/nas_mirror/fills/*_fills_*.csv")     # copied from the NAS trader
 LIVE_SIM = "var/reports/live_vs_sim_trades.csv"
 LIVE_FIRST_DAY = "2026-09-10"
 
@@ -309,28 +321,95 @@ def _hm(s: str) -> int:
     return int(h) * 60 + int(m)
 
 
-def read_live_signals(fills_glob: str, first_day: str) -> tuple[list[dict], Counter]:
-    """(unfilled BUY signals, counts of every tagged row by (action, tag))."""
+def _row_key(r: dict) -> tuple:
+    return tuple(sorted((str(k), str(v)) for k, v in r.items()))
+
+
+def read_fill_rows(fills_globs) -> tuple[list[dict], dict]:
+    """The rows of every fill log matched by `fills_globs` (one glob or several),
+    and what was done: {"matched": {glob: files}, "days": file names used,
+    "left_out": ["path (why)"], "merged": names whose copies differ}. See the
+    module docstring for the dry-session and two-copies rules."""
+    if isinstance(fills_globs, str):
+        fills_globs = [fills_globs]
+    info: dict = {"matched": {}, "days": 0, "left_out": [], "merged": []}
+    by_name: dict[str, list[str]] = defaultdict(list)
+    for pattern in fills_globs:
+        paths = sorted(glob.glob(pattern))
+        info["matched"][pattern] = len(paths)
+        for path in paths:
+            by_name[Path(path).name].append(path)
+
+    rows: list[dict] = []
+    for name in sorted(by_name):
+        copies = []
+        for path in by_name[name]:
+            why = dry_session_reason(Path(path))
+            if why:
+                info["left_out"].append(f"{Path(path)} ({why})")
+                continue
+            with open(path, newline="", encoding="utf-8") as fh:
+                copies.append(list(csv.DictReader(fh)))
+        if not copies:
+            continue
+        info["days"] += 1
+        kept = list(copies[0])
+        have = Counter(_row_key(r) for r in kept)
+        for other in copies[1:]:
+            if Counter(_row_key(r) for r in other) != Counter(_row_key(r) for r in copies[0]):
+                info["merged"].append(name)
+            seen: Counter = Counter()
+            for r in other:
+                key = _row_key(r)
+                seen[key] += 1
+                if seen[key] > have[key]:            # a row this day's log does not have yet
+                    kept.append(r)
+                    have[key] += 1
+        rows.extend(kept)
+    return rows, info
+
+
+def read_live_signals(fills_globs, first_day: str,
+                      info: dict | None = None) -> tuple[list[dict], Counter]:
+    """(unfilled BUY signals, counts of every tagged row by (action, tag)).
+    Pass a dict as `info` to receive read_fill_rows' account of the files."""
+    rows, account = read_fill_rows(fills_globs)
+    if info is not None:
+        info.update(account)
     sig: list[dict] = []
     counts: Counter = Counter()
-    for path in sorted(glob.glob(fills_glob)):
-        with open(path, newline="", encoding="utf-8") as fh:
-            for r in csv.DictReader(fh):
-                ts = r.get("ts_et") or ""
-                if ts[:10] < first_day:
-                    continue
-                tag = next((v for v in r.values() if v in LIVE_TAGS), None)
-                if tag is None:
-                    continue
-                act = r.get("action", "")
-                counts[(act, tag)] += 1
-                if act == "BUY":
-                    sig.append({"ts": ts, "date": ts[:10], "minute": _hm(ts[11:16]),
-                                "strategy": (r.get("strategy") or "").upper(),
-                                "symbol": r.get("symbol", ""), "tag": tag,
-                                "ref_close": r.get("ref_close", ""),
-                                "reject": r.get("reject_reason", "")})
+    for r in rows:
+        ts = r.get("ts_et") or ""
+        if ts[:10] < first_day:
+            continue
+        tag = next((v for v in r.values() if v in LIVE_TAGS), None)
+        if tag is None:
+            continue
+        act = r.get("action", "")
+        counts[(act, tag)] += 1
+        if act == "BUY":
+            sig.append({"ts": ts, "date": ts[:10], "minute": _hm(ts[11:16]),
+                        "strategy": (r.get("strategy") or "").upper(),
+                        "symbol": r.get("symbol", ""), "tag": tag,
+                        "ref_close": r.get("ref_close", ""),
+                        "reject": r.get("reject_reason", "")})
+    sig.sort(key=lambda s: s["ts"])
     return sig, counts
+
+
+def source_lines(info: dict) -> list[str]:
+    """Which fill logs the live arm read, so a missing folder or a skipped day is visible."""
+    L = ["  Fill logs: " + "; ".join(f"{n:,} file(s) match {p}" for p, n in info["matched"].items())
+         + f".  Day files used: {info['days']:,}."]
+    L += [f"  *** NO FILES match {p} -- that folder is not in the figures below ***"
+          for p, n in info["matched"].items() if n == 0]
+    if info["left_out"]:
+        L.append(f"  Left out ({len(info['left_out']):,}, dry session or unreadable):")
+        L += [f"    {x}" for x in info["left_out"]]
+    if info["merged"]:
+        L.append("  *** CHECK: the two folders' copies differ; every distinct row was kept: "
+                 + ", ".join(info["merged"]) + " ***")
+    return L
 
 
 def read_sim(path: str) -> tuple[list[dict], str]:
@@ -465,7 +544,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--archive", default=None)
     p.add_argument("--dataset", default=DATASET)
     p.add_argument("--regular-close", default=REGULAR_CLOSE)
-    p.add_argument("--fills", default=FILLS_GLOB)
+    p.add_argument("--fills", nargs="+", default=list(FILLS_GLOBS),
+                   help="one or more fill-log globs (default: var/fills and var/nas_mirror/fills)")
     p.add_argument("--live-sim", default=LIVE_SIM)
     p.add_argument("--live-first-day", default=LIVE_FIRST_DAY)
     p.add_argument("--limit", type=int, default=None)
@@ -526,13 +606,15 @@ def main(argv=None) -> int:
         if a.csv:
             write_csv(a.csv, measured)
 
-    sig, counts = read_live_signals(a.fills, a.live_first_day)
+    sources: dict = {}
+    sig, counts = read_live_signals(a.fills, a.live_first_day, info=sources)
     if Path(a.live_sim).exists():
         sim, last = read_sim(a.live_sim)
     else:
         sim, last = [], ""
         L.append(f"! {a.live_sim} missing: live arm cannot join to the sim")
     L += live_block(sig, counts, join_live(sig, sim, last), last, a.live_first_day)
+    L += [""] + source_lines(sources)
     emit("\n".join(L), a.out, header=header)
     return 0
 
